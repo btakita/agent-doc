@@ -30,22 +30,31 @@ class SubmitAction : AnAction() {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
+        LOG.warn("[run] actionPerformed: ${file.name}")
+
         if (!routing.compareAndSet(false, true)) {
+            LOG.warn("[run] BLOCKED: route already in progress for ${file.name}")
             TerminalUtil.showHint(project, "Route already in progress")
             return
         }
 
-        val relativePath = TerminalUtil.relativePath(project, file)
-
         if (TypingTracker.isRecentlyTyping(file.path)) {
-            LOG.info("[run] recent typing detected, debouncing")
+            LOG.warn("[run] recent typing detected, debouncing before route: ${file.name}")
             TerminalUtil.showHint(project, "Waiting for typing to settle...")
             Thread({
                 try {
-                    TypingTracker.awaitIdle(file.path)
+                    val idle = TypingTracker.awaitIdle(file.path)
+                    LOG.warn("[run] debounce finished: idle=$idle for ${file.name}")
+                    if (!idle) {
+                        LOG.warn("[run] debounce TIMEOUT — routing anyway: ${file.name}")
+                    }
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                         FileDocumentManager.getInstance().saveAllDocuments()
-                        TerminalUtil.sendToTerminal(project, relativePath, onComplete = { routing.set(false) })
+                        LOG.warn("[run] invoking sendToTerminal after debounce: ${file.name}")
+                        TerminalUtil.sendToTerminal(project, file, onComplete = {
+                            LOG.warn("[run] route complete (onComplete callback): ${file.name}")
+                            routing.set(false)
+                        })
                         PromptPoller.getInstance(project).addFile(file)
                     }
                 } catch (ex: Exception) {
@@ -58,7 +67,11 @@ class SubmitAction : AnAction() {
             }
         } else {
             FileDocumentManager.getInstance().saveAllDocuments()
-            TerminalUtil.sendToTerminal(project, relativePath, onComplete = { routing.set(false) })
+            LOG.warn("[run] no recent typing, invoking sendToTerminal immediately: ${file.name}")
+            TerminalUtil.sendToTerminal(project, file, onComplete = {
+                LOG.warn("[run] route complete (onComplete callback): ${file.name}")
+                routing.set(false)
+            })
             PromptPoller.getInstance(project).addFile(file)
         }
     }

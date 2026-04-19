@@ -7,7 +7,7 @@
 //! - Empty pending files are cleaned up without triggering a write; `run` returns `false`.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
-//! - `response_fingerprint(response)` — extracts the first 3 non-empty, non-marker lines from a response for use as a dedup fingerprint.
+//! - `fingerprint_lines(response)` — extracts the first 3 non-empty, non-marker lines from a response for dedup checking.
 //!
 //! ## Agentic Contracts
 //! - `run(file)` — returns `Ok(false)` when no pending file exists, the pending file is empty, or the response is already present in the document; returns `Ok(true)` after a successful recovery write; returns `Err` on I/O failure or if the write-back itself fails.
@@ -89,22 +89,18 @@ pub fn run(file: &Path) -> Result<bool> {
 
 /// Returns true if the pending response content appears to already be applied to the document.
 ///
-/// Uses a fingerprint of the first few substantial content lines to detect duplicates without
-/// requiring an exact full-document match.
+/// Checks each fingerprint line individually against the document. This handles
+/// blank-line separation (document paragraphs have blank lines between them but
+/// fingerprint skips blanks) and boundary marker suffixes like `(HEAD)`.
 fn is_already_applied(doc: &str, response: &str) -> bool {
-    let fingerprint = response_fingerprint(response);
-    if fingerprint.is_empty() {
+    let lines = fingerprint_lines(response);
+    if lines.is_empty() {
         return false;
     }
-    doc.contains(&fingerprint)
+    lines.iter().all(|line| doc.contains(line.as_str()))
 }
 
-/// Extract a dedup fingerprint: the first 3 non-empty, non-marker lines of the response.
-///
-/// Skips HTML comment markers (`<!-- patch:`, `<!-- /patch:`, `<!-- agent:`, `<!-- /agent:`)
-/// and empty lines so that the fingerprint captures actual content that would appear in the
-/// document after patching.
-pub fn response_fingerprint(response: &str) -> String {
+fn fingerprint_lines(response: &str) -> Vec<String> {
     let mut lines = Vec::new();
     for line in response.lines() {
         let trimmed = line.trim();
@@ -121,7 +117,7 @@ pub fn response_fingerprint(response: &str) -> String {
             break;
         }
     }
-    lines.join("\n")
+    lines
 }
 
 /// Save a response to the pending store before attempting write-back.
@@ -249,5 +245,24 @@ mod tests {
         // Pending file should be cleaned up
         let pending = snapshot::pending_path_for(&doc).unwrap();
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn recover_dedup_with_blank_lines_and_boundary() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        // Response has template patch with content lines
+        let response = "<!-- patch:exchange -->\n### Re: topic — opus-4-6\n\n**Details:**\n- Item one\n<!-- /patch:exchange -->";
+        // Document has the content with blank lines and (HEAD) boundary suffix
+        let content = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n### Re: topic — opus-4-6 (HEAD)\n\n**Details:**\n- Item one\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        save_pending(&doc, response).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert!(!recovered, "should detect content as already applied despite (HEAD) suffix and blank lines");
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, content);
     }
 }

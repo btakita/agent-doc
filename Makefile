@@ -4,11 +4,12 @@
 build:
 	cargo build
 
-# Build release binary and symlink to .bin/
+# Build release binary, cdylib, and symlink to .bin/
 build-release:
 	cargo build --release
 	@mkdir -p .bin
 	@ln -sf ../target/release/agent-doc .bin/agent-doc
+	@cp target/release/libagent_doc.so ~/.cargo/bin/libagent_doc.so 2>/dev/null || true
 	@echo "Installed .bin/agent-doc -> target/release/agent-doc"
 
 # Release via CI: check, tag, push (CI builds + publishes), install locally
@@ -65,9 +66,12 @@ check: clippy test version-sync
 precommit: check plugin-version-check
 	cargo run --quiet -- audit-docs
 
-# Install to ~/.cargo/bin
+# Install binary + cdylib to ~/.cargo/bin
 install:
 	cargo install --path .
+	@cargo build --release --lib
+	@cp target/release/libagent_doc.so ~/.cargo/bin/libagent_doc.so
+	@echo "Installed libagent_doc.so -> ~/.cargo/bin/"
 
 # Install git hooks
 install-hooks:

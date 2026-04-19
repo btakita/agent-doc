@@ -53,6 +53,42 @@ function relativePath(root: string, filePath: string): string {
     return path.relative(root, filePath);
 }
 
+/**
+ * Resolve the agent-doc project root for a file.
+ *
+ * Walks up from the file's parent looking for the nearest ancestor directory
+ * containing `.agent-doc/`. When the file lives inside a submodule that is
+ * itself an agent-doc project (e.g. `src/session-share/`), the submodule root
+ * is returned so route / claim commands run in the correct working directory
+ * and the file path they receive is relative to that root.
+ *
+ * Falls back to the workspace folder root when no ancestor has `.agent-doc/`.
+ *
+ * Returns `{ cwd, relativePath }` — ready to pass to `runCli(args, cwd)` with
+ * the file argument as `relativePath`.
+ */
+function resolveProject(
+    workspaceRoot: string,
+    filePath: string,
+): { cwd: string; relativePath: string } {
+    // Try FFI first (shared canonical implementation).
+    const ffi = native.resolveProjectPath(filePath, workspaceRoot);
+    if (ffi) return { cwd: ffi.projectRoot, relativePath: ffi.relativePath };
+
+    // JS fallback: walk up looking for `.agent-doc/`.
+    let dir = path.dirname(filePath);
+    const fsRoot = path.parse(dir).root;
+    while (dir && dir !== fsRoot) {
+        if (fs.existsSync(path.join(dir, '.agent-doc'))) {
+            return { cwd: dir, relativePath: path.relative(dir, filePath) };
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return { cwd: workspaceRoot, relativePath: path.relative(workspaceRoot, filePath) };
+}
+
 /** Run an agent-doc CLI command. Returns stdout on success. */
 function runCli(args: string[], cwd: string): Promise<string> {
     const bin = resolveAgentDoc();
@@ -225,12 +261,12 @@ async function submitAction(): Promise<void> {
 
     try {
         await editor.document.save();
-        const rel = relativePath(root, editor.document.uri.fsPath);
-        const output = await runCli(['route', rel], root);
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['route', rel], cwd);
         showHint(output || `Routed ${rel}`);
         // Track file for prompt polling
         trackedFiles.add(editor.document.uri.fsPath);
-        ensurePromptPolling(root);
+        ensurePromptPolling(cwd);
     } catch (err: any) {
         showError(`route failed: ${err.message}`);
     } finally {
@@ -259,18 +295,18 @@ async function claimAction(): Promise<void> {
     commandRunning = true;
 
     try {
-        const rel = relativePath(root, editor.document.uri.fsPath);
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const split = detectSplit(editor);
         const args = ['claim', rel];
         if (split.position) {
             args.push('--position', split.position);
         }
 
-        const output = await runCli(args, root);
+        const output = await runCli(args, cwd);
         showHint(output || `Claimed ${rel} (pos=${split.position || 'none'})`);
 
         // Trigger silent layout sync after claiming
-        await syncLayoutInternal(root, false);
+        await syncLayoutInternal(cwd, false);
     } catch (err: any) {
         showError(`claim failed: ${err.message}`);
     } finally {

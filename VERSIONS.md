@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.2
+
+- **`agent_doc_resolve_project_path` FFI export.** Editor plugins can now resolve a file's nearest agent-doc project root (the ancestor containing `.agent-doc/`) and the path relative to that root. Fixes a JetBrains plugin bug where `Run Agent Doc` on a file inside a submodule (e.g. `src/session-share/tasks/foo.md`) passed the full monorepo-relative path to the submodule's Claude session, producing `file not found`. Plugins now pass the submodule-relative path (`tasks/foo.md`) and use the submodule root as CWD.
+
+- **IPC timeout path: CRDT merge instead of atomic_write.** The exit(75) fallback now uses the same CRDT merge as the normal disk write path, preserving all concurrent changes (user edits, pending mutations, structural modifications) — not just the `agent:pending` component. Falls back to `splice_pending_component` only if CRDT merge itself fails.
+
+- **Recovery dedup fix.** `is_already_applied()` now checks each fingerprint line individually instead of joining them into a single substring. Fixes false negatives caused by blank-line separation between paragraphs and `(HEAD)` boundary suffixes on headings, which prevented the joined fingerprint from matching.
+
+- **5 new tests** covering nested-submodule resolution, no-ancestor fallback, file-in-root, and recovery dedup with blank lines/boundary markers.
+
 ## 0.33.1
 
 - **Pending parse fix: bare `[#]` placeholder accumulation.** `parse_item_line` now strips `[#]` markers instead of prepend-on-backfill, preventing placeholder accumulation across cycles.

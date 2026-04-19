@@ -15,18 +15,35 @@ import java.io.File
  */
 interface AgentDocLib : Library {
 
-    /** Result of [agent_doc_apply_patch]. */
+    /**
+     * Result of [agent_doc_apply_patch].
+     *
+     * Rust returns this struct by value (`#[repr(C)]`). The binding therefore
+     * uses [ByValue] so JNA reads the struct's fields directly from the
+     * return registers (SysV ABI) instead of dereferencing them as a pointer.
+     * See editors/jetbrains/docs/jna-by-value.md (or VERSIONS.md 0.2.59).
+     */
     @Structure.FieldOrder("text", "error")
-    class FfiPatchResult : Structure() {
+    open class FfiPatchResult : Structure() {
         @JvmField var text: Pointer? = null
         @JvmField var error: Pointer? = null
+        class ByValue : FfiPatchResult(), Structure.ByValue
     }
 
-    /** Result of [agent_doc_parse_components]. */
+    /** Result of [agent_doc_parse_components]. Returned by value — see [FfiPatchResult]. */
     @Structure.FieldOrder("json", "count")
-    class FfiComponentList : Structure() {
+    open class FfiComponentList : Structure() {
         @JvmField var json: Pointer? = null
         @JvmField var count: Long = 0
+        class ByValue : FfiComponentList(), Structure.ByValue
+    }
+
+    /** Result of [agent_doc_resolve_project_path]. Returned by value — see [FfiPatchResult]. */
+    @Structure.FieldOrder("project_root", "relative_path")
+    open class FfiProjectPath : Structure() {
+        @JvmField var project_root: Pointer? = null
+        @JvmField var relative_path: Pointer? = null
+        class ByValue : FfiProjectPath(), Structure.ByValue
     }
 
     /**
@@ -38,7 +55,7 @@ interface AgentDocLib : Library {
         component_name: String,
         content: String,
         mode: String,
-    ): FfiPatchResult
+    ): FfiPatchResult.ByValue
 
     /**
      * Apply a patch with cursor-aware ordering for append mode.
@@ -51,7 +68,7 @@ interface AgentDocLib : Library {
         content: String,
         mode: String,
         caret_offset: Int,
-    ): FfiPatchResult
+    ): FfiPatchResult.ByValue
 
     /**
      * Apply a patch using a boundary marker for insertion point.
@@ -64,7 +81,7 @@ interface AgentDocLib : Library {
         content: String,
         mode: String,
         boundary_id: String,
-    ): FfiPatchResult
+    ): FfiPatchResult.ByValue
 
     /**
      * Merge YAML key/value pairs into a document's frontmatter.
@@ -72,19 +89,19 @@ interface AgentDocLib : Library {
     fun agent_doc_merge_frontmatter(
         doc: String,
         yaml_fields: String,
-    ): FfiPatchResult
+    ): FfiPatchResult.ByValue
 
     /**
      * Reposition boundary marker to end of exchange component.
      * Removes all stale boundaries and inserts a single fresh 8-char one.
      */
-    fun agent_doc_reposition_boundary_to_end(doc: String): FfiPatchResult
+    fun agent_doc_reposition_boundary_to_end(doc: String): FfiPatchResult.ByValue
 
     /**
      * Parse components from a document.
      * Returns JSON array of component objects.
      */
-    fun agent_doc_parse_components(doc: String): FfiComponentList
+    fun agent_doc_parse_components(doc: String): FfiComponentList.ByValue
 
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)
@@ -170,6 +187,20 @@ interface AgentDocLib : Library {
 
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?
+
+    /**
+     * Resolve a file's agent-doc project root and relative path.
+     *
+     * Walks up from [filePath]'s parent looking for the nearest ancestor directory
+     * that contains `.agent-doc/`. Used by editor plugins to detect when a file
+     * inside a submodule belongs to its own agent-doc project (with its own tmux
+     * session / snapshots) rather than the enclosing workspace.
+     *
+     * Returns a struct whose `project_root` / `relative_path` pointers are null
+     * when no ancestor contains `.agent-doc/`. Non-null pointers must be freed
+     * with [agent_doc_free_string].
+     */
+    fun agent_doc_resolve_project_path(filePath: String): FfiProjectPath.ByValue
 
     /**
      * Commit the document at [filePath] to git.
@@ -353,6 +384,28 @@ object NativePatching {
             return ptr?.getString(0)
         } finally {
             lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * Resolve the nearest agent-doc project root for an absolute file path.
+     *
+     * Returns `(projectRoot, relativePath)` where `projectRoot` is the nearest
+     * ancestor directory containing `.agent-doc/`, and `relativePath` is
+     * [absPath] relative to that root. Returns `null` when no ancestor has
+     * `.agent-doc/` or FFI is unavailable — callers must fall back to the
+     * workspace `basePath`.
+     */
+    fun resolveProjectPath(absPath: String): Pair<String, String>? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_resolve_project_path(absPath)
+        try {
+            val rootPtr = result.project_root ?: return null
+            val relPtr = result.relative_path ?: return null
+            return Pair(rootPtr.getString(0), relPtr.getString(0))
+        } finally {
+            lib.agent_doc_free_string(result.project_root)
+            lib.agent_doc_free_string(result.relative_path)
         }
     }
 

@@ -22,16 +22,16 @@ class ForceClaimAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
-        val basePath = project.basePath ?: return
 
-        val relativePath = TerminalUtil.relativePath(project, file)
+        val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
         val windowId = TerminalUtil.projectWindowId(project)
 
+        val layoutRelPath = TerminalUtil.relativePath(project, file)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val editorLayout = if (managerEx.windows.size > 1)
             LayoutDetector.detectEditorLayout(project) else null
         val position = editorLayout?.let { layout ->
-            val colIdx = layout.columns.indexOfFirst { col -> relativePath in col.files }
+            val colIdx = layout.columns.indexOfFirst { col -> layoutRelPath in col.files }
             when {
                 colIdx < 0 -> null
                 colIdx == 0 -> "left"
@@ -42,7 +42,7 @@ class ForceClaimAction : AnAction() {
 
         Thread {
             try {
-                val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
+                val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val cmd = mutableListOf(agentDoc, "claim", relativePath, "--force")
                 if (windowId != null) {
                     cmd.addAll(listOf("--window", windowId))
@@ -52,7 +52,7 @@ class ForceClaimAction : AnAction() {
                 }
                 LOG.debug("force-claim: ${cmd.joinToString(" ")}")
                 val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(basePath))
+                    .directory(java.io.File(cwd))
                     .redirectErrorStream(true)
                     .start()
                 val output = process.inputStream.bufferedReader().readText().trim()

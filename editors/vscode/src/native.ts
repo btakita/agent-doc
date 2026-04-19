@@ -99,6 +99,7 @@ let _is_idle: any = null;
 let _await_idle: any = null;
 let _document_changed: any = null;
 let _is_tracked: any = null;
+let _resolve_project_path: any = null;
 let _free_string: any = null;
 
 function bindFunctions(): void {
@@ -110,11 +111,17 @@ function bindFunctions(): void {
         error: 'char*',
     });
 
+    const FfiProjectPathType = koffi.struct('FfiProjectPath', {
+        project_root: 'char*',
+        relative_path: 'char*',
+    });
+
     _reposition_boundary_to_end = lib.func('agent_doc_reposition_boundary_to_end', FfiPatchResultType, ['str']);
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
+    _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
 }
 
@@ -180,6 +187,30 @@ export function isTracked(filePath: string, projectRoot?: string): boolean {
     if (!ensureLoaded(projectRoot)) return false;
     bindFunctions();
     return _is_tracked(filePath);
+}
+
+/**
+ * Resolve the agent-doc project root for a file path.
+ * Walks up from the file looking for the nearest `.agent-doc/` ancestor.
+ * Returns { projectRoot, relativePath } or null if FFI unavailable or no ancestor found.
+ */
+export function resolveProjectPath(
+    filePath: string,
+    projectRoot?: string,
+): { projectRoot: string; relativePath: string } | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+
+    const result = _resolve_project_path(filePath);
+    try {
+        if (!result.project_root || !result.relative_path) return null;
+        const root = koffi.decode(result.project_root, 'char', -1);
+        const rel = koffi.decode(result.relative_path, 'char', -1);
+        return { projectRoot: root, relativePath: rel };
+    } finally {
+        if (result.project_root) _free_string(result.project_root);
+        if (result.relative_path) _free_string(result.relative_path);
+    }
 }
 
 /**

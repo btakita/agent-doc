@@ -1,5 +1,5 @@
 ---
-description: Submit a session document to an AI agent and append the response
+description: "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception."
 user-invocable: true
 argument-hint: "<file>"
 agent-doc-version: "0.32.0"
@@ -75,9 +75,9 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 If the document has an `<!-- agent:pending -->` component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
-### 2. Write back
+### 2. Write back (MANDATORY — never skip)
 
-Pipe the response through `agent-doc write --stream` — it handles patch parsing, CRDT merge, atomic write, and snapshot update:
+Pipe the response through `agent-doc write --stream` — it handles patch parsing, CRDT merge, atomic write, and snapshot update. **This step is MANDATORY every cycle, regardless of response length or complexity. Skipping write breaks the document sync.**
 
 ```bash
 cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
@@ -89,9 +89,9 @@ RESPONSE
 
 Document format, frontmatter fields, append vs template mode conventions, and component naming: [runbooks/document-format.md](runbooks/document-format.md).
 
-### 3. Commit
+### 3. Commit (MANDATORY — never skip)
 
-Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes.
+Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
 
 **Never use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`.
 

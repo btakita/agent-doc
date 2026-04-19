@@ -86,6 +86,17 @@ pub struct FfiPatchResult {
     pub error: *mut c_char,
 }
 
+/// Result of [`agent_doc_resolve_project_path`].
+#[repr(C)]
+pub struct FfiProjectPath {
+    /// Absolute path to the project root (nearest ancestor containing `.agent-doc/`),
+    /// or null if no ancestor has `.agent-doc/`. Free with [`agent_doc_free_string`].
+    pub project_root: *mut c_char,
+    /// Path to the input file, relative to `project_root`. Null when `project_root`
+    /// is null. Free with [`agent_doc_free_string`].
+    pub relative_path: *mut c_char,
+}
+
 /// Result of [`agent_doc_crdt_merge`].
 #[repr(C)]
 pub struct FfiMergeResult {
@@ -1021,6 +1032,86 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
 }
 
+/// Walk up from `path` to find the nearest ancestor containing `.agent-doc/`.
+/// Mirrors `snapshot::find_project_root` (binary crate) for the library crate.
+fn find_project_root_ffi(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut current = if path.is_file() {
+        path.parent()?
+    } else {
+        path
+    };
+    loop {
+        if current.join(".agent-doc").is_dir() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
+
+/// Resolve a file's agent-doc project root and the path relative to that root.
+///
+/// Walks up from the file's parent directory looking for the nearest ancestor
+/// containing a `.agent-doc/` directory. Editor plugins use this to detect when
+/// a file inside a submodule belongs to its own agent-doc project (with its own
+/// sessions, snapshots, etc.) rather than the enclosing workspace.
+///
+/// Returns `FfiProjectPath` with:
+/// - `project_root`: absolute path of the nearest `.agent-doc/`-containing
+///   ancestor, or null if none exists.
+/// - `relative_path`: `file_path` made relative to `project_root`, or null when
+///   `project_root` is null or the relative computation fails.
+///
+/// Both strings (when non-null) must be freed with [`agent_doc_free_string`].
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_resolve_project_path(
+    file_path: *const c_char,
+) -> FfiProjectPath {
+    let null_result = FfiProjectPath {
+        project_root: ptr::null_mut(),
+        relative_path: ptr::null_mut(),
+    };
+
+    let path_str = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return null_result,
+    };
+    let path = std::path::Path::new(path_str);
+
+    // Canonicalize when possible so ancestor walks resolve symlinks (submodule
+    // worktrees often live inside symlinked trees). Fall back to the raw path
+    // when canonicalization fails (e.g., file does not yet exist) — the walk
+    // still works on lexical parents.
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    let project_root = match find_project_root_ffi(&resolved) {
+        Some(root) => root,
+        None => return null_result,
+    };
+
+    let rel = match resolved.strip_prefix(&project_root) {
+        Ok(p) => p.to_path_buf(),
+        Err(_) => return null_result,
+    };
+
+    let root_c = match CString::new(project_root.to_string_lossy().as_ref()) {
+        Ok(s) => s,
+        Err(_) => return null_result,
+    };
+    let rel_c = match CString::new(rel.to_string_lossy().as_ref()) {
+        Ok(s) => s,
+        Err(_) => return null_result,
+    };
+
+    FfiProjectPath {
+        project_root: root_c.into_raw(),
+        relative_path: rel_c.into_raw(),
+    }
+}
+
 /// Free a string returned by any `agent_doc_*` function.
 ///
 /// # Safety
@@ -1129,6 +1220,81 @@ mod tests {
         unsafe { agent_doc_document_changed(path.as_ptr()) };
         let result = unsafe { agent_doc_is_idle(path.as_ptr(), 2000) };
         assert!(!result, "file changed <2s ago should not be idle with 2000ms window");
+    }
+
+    #[test]
+    fn resolve_project_path_finds_nested_submodule() {
+        use tempfile::TempDir;
+        let outer = TempDir::new().unwrap();
+        // Outer project root has .agent-doc/
+        std::fs::create_dir_all(outer.path().join(".agent-doc")).unwrap();
+        // Nested submodule with its own .agent-doc/
+        let sub = outer.path().join("src/session-share");
+        std::fs::create_dir_all(sub.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(sub.join("tasks")).unwrap();
+        let doc = sub.join("tasks/claudescore.md");
+        std::fs::write(&doc, "# test\n").unwrap();
+
+        let c_path = CString::new(doc.to_str().unwrap()).unwrap();
+        let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
+        assert!(!result.project_root.is_null(), "project_root should be non-null");
+        assert!(!result.relative_path.is_null(), "relative_path should be non-null");
+
+        let root = unsafe { CStr::from_ptr(result.project_root) }.to_str().unwrap();
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
+        // Nearest .agent-doc/ is the submodule, not the outer project.
+        let expected_root = sub.canonicalize().unwrap();
+        assert_eq!(std::path::Path::new(root), expected_root);
+        assert_eq!(rel, "tasks/claudescore.md");
+
+        unsafe {
+            agent_doc_free_string(result.project_root);
+            agent_doc_free_string(result.relative_path);
+        }
+    }
+
+    #[test]
+    fn resolve_project_path_prefers_nearest_ancestor() {
+        use tempfile::TempDir;
+        let outer = TempDir::new().unwrap();
+        std::fs::create_dir_all(outer.path().join(".agent-doc")).unwrap();
+        let mid = outer.path().join("mid");
+        std::fs::create_dir_all(mid.join(".agent-doc")).unwrap();
+        let deep = mid.join("deep/subdir");
+        std::fs::create_dir_all(&deep).unwrap();
+        let doc = deep.join("doc.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let c_path = CString::new(doc.to_str().unwrap()).unwrap();
+        let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
+        let root = unsafe { CStr::from_ptr(result.project_root) }.to_str().unwrap();
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
+        assert_eq!(std::path::Path::new(root), mid.canonicalize().unwrap(),
+            "should prefer nearest (mid) over outer");
+        assert_eq!(rel, "deep/subdir/doc.md");
+        unsafe {
+            agent_doc_free_string(result.project_root);
+            agent_doc_free_string(result.relative_path);
+        }
+    }
+
+    #[test]
+    fn resolve_project_path_file_directly_in_root() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("plan.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let c_path = CString::new(doc.to_str().unwrap()).unwrap();
+        let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
+        assert!(!result.project_root.is_null());
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
+        assert_eq!(rel, "plan.md");
+        unsafe {
+            agent_doc_free_string(result.project_root);
+            agent_doc_free_string(result.relative_path);
+        }
     }
 
     #[test]

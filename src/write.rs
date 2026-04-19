@@ -164,6 +164,10 @@
 //! - `shrink_guard_allows_normal_write`: exchange shrinks by 50% → guard passes.
 //! - `shrink_guard_skips_small_exchange`: exchange is 50 bytes → guard passes
 //!   regardless of shrink ratio (below `SHRINK_GUARD_MIN_BYTES`).
+//! - `splice_pending_replaces_content_when_both_have_pending`: on IPC timeout,
+//!   pending-done mutations from disk are preserved in the written content.
+//! - `splice_pending_noop_when_source_has_no_pending`: no source pending → target unchanged.
+//! - `splice_pending_warns_when_target_missing_pending`: target has no pending component → target unchanged.
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -1177,20 +1181,37 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             )?;
 
             eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
-            // Bug fix: write content_ours to the working tree before exiting.
-            // The IDE plugin may pick up the patch minutes later (or never if
-            // not running). Without this, the snapshot/HEAD have the response
-            // but the working tree is stuck at pre-write content, so `git diff
-            // HEAD` shows the entire response + prefix restorations as
-            // uncommitted deletions until the plugin applies the patch.
-            //
-            // Snapshot saved BEFORE document write (#wcf5) — same ordering
-            // invariant as the main disk paths.
-            if let Err(e) = snapshot::save(file, &content_ours) {
+            // CRDT merge on IPC timeout: content_ours (baseline + patches) may
+            // diverge from the on-disk file (user edits, pending mutations from
+            // main.rs). Use the same CRDT merge as the normal disk path to
+            // preserve all concurrent changes.
+            let content_current = std::fs::read_to_string(file)
+                .unwrap_or_else(|_| content_at_start.clone());
+            let (final_content, crdt_state) = if content_current == base {
+                let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+                (content_ours.clone(), doc.encode_state())
+            } else {
+                eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
+                let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+                match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
+                    Ok(merged) => merged,
+                    Err(e) => {
+                        eprintln!("[write] WARNING: CRDT merge failed on exit(75), falling back to splice: {}", e);
+                        let spliced = splice_pending_component(&content_ours, &content_current);
+                        let doc = crate::crdt::CrdtDoc::from_text(&spliced);
+                        (spliced, doc.encode_state())
+                    }
+                }
+            };
+            // Snapshot saved BEFORE document write (#wcf5).
+            if let Err(e) = snapshot::save(file, &final_content) {
                 eprintln!("[write] WARNING: snapshot save before exit(75) failed: {}", e);
             }
-            if let Err(e) = atomic_write(file, &content_ours) {
-                eprintln!("[write] WARNING: failed to write content_ours to working tree before exit(75): {}", e);
+            if let Err(e) = snapshot::save_crdt(file, &crdt_state) {
+                eprintln!("[write] WARNING: CRDT state save before exit(75) failed: {}", e);
+            }
+            if let Err(e) = atomic_write(file, &final_content) {
+                eprintln!("[write] WARNING: failed to write to working tree before exit(75): {}", e);
             }
             if crate::git::is_in_git_repo(file)
                 && let Err(e) = crate::git::commit(file) {
@@ -1584,6 +1605,43 @@ fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Optio
     Ok(Some(content))
 }
 
+const IPC_DEGRADED_FILE: &str = ".agent-doc/ipc-degraded";
+const IPC_DEGRADED_TTL_SECS: u64 = 3600; // 1 hour
+
+fn is_ipc_degraded(project_root: &Path) -> bool {
+    let marker = project_root.join(IPC_DEGRADED_FILE);
+    match marker.metadata() {
+        Ok(meta) => {
+            if let Ok(modified) = meta.modified()
+                && let Ok(age) = modified.elapsed()
+                && age.as_secs() > IPC_DEGRADED_TTL_SECS
+            {
+                let _ = std::fs::remove_file(&marker);
+                return false;
+            }
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn mark_ipc_degraded(project_root: &Path) {
+    let marker = project_root.join(IPC_DEGRADED_FILE);
+    if let Err(e) = std::fs::write(&marker, "") {
+        eprintln!("[write] WARNING: failed to write IPC degraded marker: {}", e);
+    } else {
+        eprintln!("[write] IPC degraded — subsequent writes will use disk until marker cleared or expires (1h)");
+    }
+}
+
+fn clear_ipc_degraded(project_root: &Path) {
+    let marker = project_root.join(IPC_DEGRADED_FILE);
+    if marker.exists() {
+        let _ = std::fs::remove_file(&marker);
+        eprintln!("[write] IPC degraded marker cleared — sidecar received successfully");
+    }
+}
+
 /// Poll for the ack-content sidecar with timeout.
 ///
 /// The plugin writes the sidecar asynchronously after applying the patch.
@@ -1650,6 +1708,12 @@ pub fn try_ipc(
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    // Skip IPC entirely if degraded (previous sidecar timeout in this project)
+    if is_ipc_degraded(&project_root) {
+        eprintln!("[write] IPC degraded — skipping socket/file IPC, using disk write");
+        return Ok(IpcResult { success: false, patch_id });
+    }
+
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
         // Clean up any stale patch file from a previous timeout before socket send.
@@ -1711,15 +1775,17 @@ pub fn try_ipc(
                 // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
                 let (snap_source, snap_content) = match poll_ack_content_sidecar(
                     &project_root, &patch_id,
-                    std::time::Duration::from_millis(500),
+                    std::time::Duration::from_millis(1000),
                     std::time::Duration::from_millis(25),
                 )? {
                     Some(content) => {
                         eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
+                        clear_ipc_degraded(&project_root);
                         ("ack_content_sidecar", content)
                     }
                     None => {
-                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 500ms)");
+                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 1000ms)");
+                        mark_ipc_degraded(&project_root);
                         let content = std::fs::read_to_string(file)
                             .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
                         ("file_read_no_sidecar", content)
@@ -2311,6 +2377,55 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     file.lock_exclusive()
         .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
     Ok(file)
+}
+
+/// Transfer the `agent:pending` component content from `source` into `target`.
+///
+/// When the on-disk file has pending mutations applied (e.g. `--pending-done`)
+/// that are not reflected in `content_ours` (which was built from a pre-mutation
+/// baseline), this function preserves those mutations by splicing the pending
+/// component from `source` into `target`.
+///
+/// Behaviour:
+/// - If both `source` and `target` have a `pending` component: replaces the
+///   content between the markers in `target` with the content from `source`.
+/// - If `source` has no `pending` component: returns `target` unchanged.
+/// - If `source` has a `pending` component but `target` does not: logs a warning
+///   and returns `target` unchanged (can't locate insertion point without knowing
+///   document structure).
+fn splice_pending_component(target: &str, source: &str) -> String {
+    let source_comps = match component::parse(source) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[write] WARNING: splice_pending: failed to parse source components: {}", e);
+            return target.to_string();
+        }
+    };
+    let source_pending = source_comps.iter().find(|c| c.name == "pending");
+    let Some(src_comp) = source_pending else {
+        // No pending component in source — nothing to splice.
+        return target.to_string();
+    };
+    let source_content = &source[src_comp.open_end..src_comp.close_start];
+
+    let target_comps = match component::parse(target) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[write] WARNING: splice_pending: failed to parse target components: {}", e);
+            return target.to_string();
+        }
+    };
+    let target_pending = target_comps.iter().find(|c| c.name == "pending");
+    match target_pending {
+        Some(tgt_comp) => tgt_comp.replace_content(target, source_content),
+        None => {
+            eprintln!(
+                "[write] WARNING: splice_pending: source has agent:pending but target does not — \
+                 pending mutations may be lost on IPC timeout"
+            );
+            target.to_string()
+        }
+    }
 }
 
 /// Atomic write: write to temp file then rename. Public for use by compact.
@@ -3430,6 +3545,74 @@ mod tests {
         let no_exchange = "Just text.";
         assert_eq!(extract_exchange_content_len(no_exchange), 0);
     }
+
+    #[test]
+    fn splice_pending_replaces_content_when_both_have_pending() {
+        // target has stale/empty pending (built from pre-mutation baseline)
+        let target = "\
+<!-- agent:exchange -->
+response content
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [ ] [#aaaa] old item
+<!-- /agent:pending -->
+";
+        // source is the current on-disk file with a pending-done mutation applied
+        let source = "\
+<!-- agent:exchange -->
+original content
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [x] [#aaaa] old item
+<!-- /agent:pending -->
+";
+        let result = splice_pending_component(target, source);
+        // exchange content from target is preserved
+        assert!(result.contains("response content"), "exchange content should come from target");
+        // pending content from source (with [x]) is used
+        assert!(result.contains("- [x] [#aaaa] old item"), "pending done state should come from source");
+        // old pending from target is gone
+        assert!(!result.contains("- [ ] [#aaaa] old item"), "stale open pending should be replaced");
+    }
+
+    #[test]
+    fn splice_pending_noop_when_source_has_no_pending() {
+        let target = "\
+<!-- agent:exchange -->
+response
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [ ] [#bbbb] task
+<!-- /agent:pending -->
+";
+        let source = "\
+<!-- agent:exchange -->
+original
+<!-- /agent:exchange -->
+";
+        let result = splice_pending_component(target, source);
+        assert_eq!(result, target, "target should be returned unchanged when source has no pending");
+    }
+
+    #[test]
+    fn splice_pending_warns_when_target_missing_pending() {
+        // target has no pending component; source does — should return target unchanged
+        let target = "\
+<!-- agent:exchange -->
+response
+<!-- /agent:exchange -->
+";
+        let source = "\
+<!-- agent:exchange -->
+original
+<!-- /agent:exchange -->
+<!-- agent:pending -->
+- [x] [#cccc] done item
+<!-- /agent:pending -->
+";
+        let result = splice_pending_component(target, source);
+        assert_eq!(result, target, "target should be returned unchanged when target has no pending");
+    }
 }
 
 #[cfg(test)]
@@ -3726,5 +3909,54 @@ mod submodule_patch_routing_tests {
             result.success,
             "try_ipc should succeed via socket IPC routed to the git toplevel"
         );
+    }
+
+    #[test]
+    fn ipc_degraded_marker_blocks_ipc() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        assert!(!is_ipc_degraded(root), "should not be degraded initially");
+
+        mark_ipc_degraded(root);
+        assert!(is_ipc_degraded(root), "should be degraded after marking");
+
+        clear_ipc_degraded(root);
+        assert!(!is_ipc_degraded(root), "should not be degraded after clearing");
+    }
+
+    #[test]
+    fn ipc_degraded_marker_expires() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let marker = root.join(IPC_DEGRADED_FILE);
+        std::fs::write(&marker, "").unwrap();
+
+        let two_hours_ago = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() - IPC_DEGRADED_TTL_SECS - 1;
+        let times = [
+            libc::timespec { tv_sec: two_hours_ago as i64, tv_nsec: 0 },
+            libc::timespec { tv_sec: two_hours_ago as i64, tv_nsec: 0 },
+        ];
+        let path_cstr = std::ffi::CString::new(marker.to_str().unwrap()).unwrap();
+        unsafe { libc::utimensat(libc::AT_FDCWD, path_cstr.as_ptr(), times.as_ptr(), 0); }
+
+        assert!(!is_ipc_degraded(root), "expired marker should not block IPC");
+        assert!(!marker.exists(), "expired marker should be cleaned up");
+    }
+
+    #[test]
+    fn ipc_degraded_marker_not_expired() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        mark_ipc_degraded(root);
+        assert!(is_ipc_degraded(root), "fresh marker should block IPC");
     }
 }

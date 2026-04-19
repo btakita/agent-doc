@@ -1040,7 +1040,7 @@ Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path wit
 
 **Build status:** clippy clean, 1145 tests passing (6 ignored), both binaries rebuilt.
 release
-### Re: IPC timeout → CRDT merge — opus-4-6
+❯ ### Re: IPC timeout → CRDT merge — opus-4-6 (HEAD)
 
 Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path with full CRDT merge — same approach as the normal disk write path.
 
@@ -1054,7 +1054,11 @@ Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path wit
 **Why this is better:** The splice approach only preserved the `agent:pending` component. CRDT merge preserves everything — user edits to exchange content, status changes, structural modifications. It also keeps CRDT state consistent for the next cycle.
 
 **Build status:** clippy clean, 1145 tests passing (6 ignored), both binaries rebuilt.
-<!-- agent:boundary:116c2db2 -->
+### Re: boundary sync — sonnet-4-6
+
+No user changes — boundary artifact only. Orphaned response from previous cycle recovered and committed (`phhk` reaped).
+<!-- agent:boundary:4d5b3fbe -->
+<!-- agent:boundary:268dbb0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

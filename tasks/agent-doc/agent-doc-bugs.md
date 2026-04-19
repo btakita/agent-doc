@@ -972,6 +972,7 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 Why were the pending items statuses not updated?
 ❯ ### Re: installability of skill/runbook changes — opus-4-6 (HEAD)
+❯ ### Re: installability of skill/runbook changes — opus-4-6 (HEAD)
 
 No — the previous cycle only edited the agent-loop local copies (`.claude/skills/agent-doc/`). The canonical source files in `src/agent-doc/` were untouched, so `agent-doc skill install` would have overwritten the changes with the old versions.
 
@@ -980,6 +981,7 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 - `src/agent-doc/runbooks/model-tier-gate.md` — model-to-tier mapping table
 
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
+(pending status update — no new content)
 ### Re: pending statuses not updated — opus-4-6
 
 The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were passed in the first cycle's `agent-doc write`, but the write exited with code 75 (IPC timeout). The response content was saved as a patch and recovered by the next preflight — but recovery only replays exchange content, not pending flag mutations. The `--pending-done` flags were lost.
@@ -987,7 +989,7 @@ The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were pas
 This is a bug in the IPC-degraded write path: pending mutations should be applied to the file before or independently of IPC. Currently, if IPC times out, any `--pending-*` flags on that write are silently dropped.
 
 Applying the pending-done flags now in this cycle.
-<!-- agent:boundary:24783306 -->
+<!-- agent:boundary:6a256142 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -996,10 +998,10 @@ Applying the pending-done flags now in this cycle.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
-- [ ] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
+- [x] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
-- [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
-- [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
+- [x] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
+- [x] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
 ## Assistant

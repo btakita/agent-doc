@@ -276,8 +276,7 @@ Timeline:
 3. opus-4-6 write → IPC degraded from step 1 → CRDT disk write → **succeeded**
 
 The fix is now in both binaries. This should not recur.
-<!-- agent:boundary:bf505abc -->
-<!-- agent:boundary:64429296 -->
+<!-- agent:boundary:f96d3655 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

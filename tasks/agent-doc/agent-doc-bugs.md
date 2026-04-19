@@ -918,7 +918,7 @@ Yes, and the right shape is **lockfile-tracked GC**, not just a shutdown-hook de
 
 Want me to spec this in `tasks/agent-doc/agent-doc-feat.md` as a single feature ("FFI library hot-reload + versioning + GC") with the option 3 mtime reload bundled in? Or split into two features?
 ❯ Yes...spec in `tasks/agent-doc/agent-doc-feat.md`
-### Re: spec added — opus-4-7
+❯ ### Re: spec added — opus-4-7 (HEAD)
 
 Spec written to `tasks/agent-doc/agent-doc-feat.md` § "Spec: FFI library hot-reload + versioning + GC". Three new pending items added there:
 
@@ -929,7 +929,31 @@ Spec written to `tasks/agent-doc/agent-doc-feat.md` § "Spec: FFI library hot-re
 Bundled as one feature in the spec text (cross-references this bug doc) but split into three pending items so they can be implemented and shipped independently if needed — hot-reload alone fixes the immediate crash, versioning + GC are the structural follow-up.
 
 Open questions noted in the spec: VS Code dlopen vs CLI shell-out, post-reload `agent_doc_version()` health check, and PyPI wheel filename compatibility.
-<!-- agent:boundary:6a9a4863 -->
+❯ agent-doc-feat.md FFI library hot-reload tasks are done. release
+### Re: releasing 0.33.5 — sonnet-4-6
+
+**What's in 0.33.5:**
+1. FFI mtime-based hot-reload (JB + VS Code) — fixes the SIGSEGV crash (PC=0x0) from `cargo install` overwriting the mmap'd `.so`
+2. Versioned cdylib install — `libagent_doc-<version>.so` + `libagent_doc.so` symlink via atomic `rename(2)`
+3. Lockfile-tracked GC — `agent-doc gc-libs` + JVM shutdown hook / VS Code `deactivate()` lock cleanup
+4. Post-reload `agent_doc_version()` sanity check (both editors)
+5. VERSIONS.md updated with the complete feature set
+
+**Pre-release checks:**
+- `make check`: 1158 tests pass, 0 failed
+  - Fixed 2 flaky resync tests (`detect_wrong_session_pane`, `return_stashed_panes_skips_idle_shells`): replaced fixed 500ms sleep with `wait_for_shell` polling loop (5s timeout) — tests were stable in isolation but failed under parallel load
+- `make build-release`: release binary built, `.bin/agent-doc` updated
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` updated to 0.33.5
+- JB plugin 0.2.67 built successfully
+
+**Manual testing gate (required before publish):** Please verify in a live session:
+1. Open IDEA with an agent-doc session running
+2. Run `cargo install --path .` in another pane while a document session is active
+3. Confirm IDEA does not crash and the new lib version is logged (`[native] loaded libagent_doc v0.33.5 from …`)
+
+When confirmed: `cargo publish` → crates.io, then `git tag v0.33.5 && git push origin v0.33.5` for GitHub Release via CI.
+<!-- agent:boundary:90e1e041 -->
+<!-- agent:boundary:25f25cbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -937,10 +961,10 @@ Open questions noted in the spec: VS Code dlopen vs CLI shell-out, post-reload `
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
+- [x] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
-- [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
+- [x] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
+- [x] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
 <!-- /agent:pending -->
 ## Assistant

@@ -55,8 +55,7 @@ A future integration could theoretically use Cursor's extension API to bridge th
 | Models | GPT-4o, Claude (via Cursor proxy) | Claude (direct Anthropic API) |
 
 You'd use Cursor's AI for fast inline work and agent-doc for the deeper session-based workflows. No conflict, no sharing needed.
-<!-- agent:boundary:f2628a53 -->
-<!-- agent:boundary:25d37bea -->
+<!-- agent:boundary:f9823ea8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

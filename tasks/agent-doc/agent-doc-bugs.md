@@ -150,7 +150,35 @@ if change.tag() == ChangeTag::Insert {
 Where `heading_level(s)` returns `Some(n)` if the line starts with 1-6 `#` chars followed by a space, else `None`.
 
 This catches all the table rows from the claudescore bug (they're inside `### Re:` blocks) without any hardcoded heading levels or `Re:` text matching.
-<!-- agent:boundary:e0301262 -->
+❯ do Option 1. Add tests
+### Re: Option 1 implemented — agent-response-block tracking — opus-4-6
+
+**What changed in `normalize_user_prompts_in_exchange`:**
+
+Added a `heading_level` helper and agent-response-block state machine to the diff loop. The logic:
+
+- **Insert heading** (not `❯`-prefixed, not inside code fence): starts agent block — heading and all subsequent Insert lines are excluded from `user_added`
+- **Equal heading**: ends agent block — lines after a heading already in the snapshot are treated as potential user input
+- **`❯` or `<!-- -->` line**: ends agent block
+
+This is heading-level agnostic — works for h1-h6, no hardcoded `###` or `Re:` matching. Headings inside code fences are ignored (gated on `!in_baseline_fence`).
+
+**Tests added (5 new, 1 updated):**
+
+| Test | What it covers |
+|------|---------------|
+| `agent_table_rows_not_prefixed` | Core bug: stale snapshot + table rows inside `### Re:` block |
+| `agent_subheadings_not_prefixed` | `### Re:` + `#### Details` — all agent content |
+| `user_text_after_equal_heading` | Heading in snapshot (Equal), user text after it gets `❯` |
+| `agent_block_ends_at_prompt` | Agent block terminates at `❯` line, user text resumes |
+| `heading_in_fence_not_agent_block` | Heading inside code fence doesn't trigger agent-block tracking |
+| `heading_treated_as_agent_content` | Updated: standalone headings are agent markers, not user input |
+
+**All 1163 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
+
+**Behavioral change:** standalone headings in the exchange (not `❯`-prefixed) are now treated as agent response markers. Users who type raw headings as input won't get the `❯` prefix — but this is the documented convention ("users write inline text, blockquotes, and annotations — not standalone headings").
+<!-- agent:boundary:9f37cc2e -->
+<!-- agent:boundary:ee6db51a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

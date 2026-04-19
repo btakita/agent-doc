@@ -772,7 +772,7 @@ Done. `PluginLifecycleListener.runResyncFix()` now queries `tmux display-message
 
 **Plugin built:** `agent-doc-jetbrains-0.2.66.zip` (unsigned + signed). Ready for install-from-disk.
 ❯ do #wk1t
-### Re: #wk1t verified — config.toml auto-update works — opus-4-6
+❯ ### Re: #wk1t verified — config.toml auto-update works — opus-4-6 (HEAD)
 
 Already verified live. Config.toml was `tmux_session = "claude"` earlier in this session. It's now `tmux_session = "0"` — the auto-update in `resolve_target_session` fired when a route/sync ran after the rebuild. The `"claude"` session didn't exist, so it fell through to `current_tmux_session()` which returned `"0"`, and `update_project_tmux_session("0")` wrote it to config.
 
@@ -780,7 +780,21 @@ Already verified live. Config.toml was `tmux_session = "claude"` earlier in this
 - Before: `tmux_session = "claude"` (stale — no `claude` session exists)
 - After: `tmux_session = "0"` (matches actual tmux session `0`)
 - Tmux sessions: `0`, `1` (no `claude`)
-<!-- agent:boundary:9edf1856 -->
+
+❯ Add tests
+### Re: tests added — opus-4-6
+
+Added 3 tests to `resync.rs` for the agent preservation behavior:
+
+1. **`fix_wrong_session_idle_shell_still_killed`** — Regression test: idle shells in the wrong session are still killed (existing behavior preserved with the new code path).
+
+2. **`fix_wrong_session_deregisters_agent_without_kill_when_expected_session_dead`** — When the expected session doesn't exist, panes are deregistered. Idle shells are killed regardless.
+
+3. **`fix_wrong_session_relocates_agent_when_expected_session_alive`** — The key test: starts a `node` process (which is in `AGENT_PROCESSES`), creates a WrongSession issue, and verifies the pane is relocated via join-pane to the correct session — not killed. Checks pane is alive, registry entry is preserved, and session changed to `"correct"`. Gracefully skips if `node` isn't installed.
+
+**Results:** 1149 tests pass (3 new), 6 ignored. Both binaries rebuilt.
+<!-- agent:boundary:d3c93d8e -->
+<!-- agent:boundary:2733bfa8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

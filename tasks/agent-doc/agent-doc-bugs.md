@@ -150,8 +150,7 @@ if change.tag() == ChangeTag::Insert {
 Where `heading_level(s)` returns `Some(n)` if the line starts with 1-6 `#` chars followed by a space, else `None`.
 
 This catches all the table rows from the claudescore bug (they're inside `### Re:` blocks) without any hardcoded heading levels or `Re:` text matching.
-<!-- agent:boundary:5fd48f69 -->
-<!-- agent:boundary:36574d98 -->
+<!-- agent:boundary:e0301262 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

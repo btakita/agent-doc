@@ -530,7 +530,7 @@ Or the cleaner: `git checkout HEAD -- tasks/monsterrodholders.md`, then re-type 
 - Consider making disk-mode the default when IPC has been degraded for >N seconds, and have the plugin listen for file-change events to refresh its buffer first.
 
 ❯ #mpjv: Do all 3 steps
-### Re: #mpjv — all 3 investigation steps — opus-4-6
+❯ ### Re: #mpjv — all 3 investigation steps — opus-4-6 (HEAD)
 
 #### Step 1: JB plugin write-path audit
 
@@ -622,7 +622,27 @@ Current state: IPC degradation is already tracked (1-hour TTL marker). When degr
 3. **Minimal fix vs full design:** The VFS refresh in `autoSaveTrackedFiles()` (Step 1 fix) is sufficient to prevent the overwrite. The `BulkFileListener` approach is a defense-in-depth improvement for sub-1.5s responsiveness to external writes, worth doing but not blocking.
 
 **Recommendation:** Ship the Step 1 fix first (VFS refresh before auto-save). Add the `BulkFileListener` as a follow-up improvement. The degraded-IPC disk-mode default is already working correctly — it's the plugin's reaction to disk writes that's broken, not the fallback path itself.
-<!-- agent:boundary:c90b92e3 -->
+
+❯ do BulkFileListener. build plugin. build and install agent-doc if changes were made.
+### Re: implement BulkFileListener + build — opus-4-6
+
+Both fixes implemented in `PromptPoller.kt` and plugin built as 0.2.65:
+
+**Fix 1 — `autoSaveTrackedFiles()` VFS refresh (lines 133-155):**
+Before saving, now calls `tracked.file.refresh(false, false)` and compares modstamps. If disk changed externally, runs `mergeOrReload()` synchronously (already on EDT via `invokeAndWait`) before flushing. Re-checks `isDocumentUnsaved` after merge — if merge brought doc in sync with disk, skips the save entirely.
+
+**Fix 2 — `BulkFileListener` (lines 119-131):**
+Registered in `ensurePolling()` via `project.messageBus.connect(this)`. Listens for `VFileContentChangeEvent` on tracked files. On external write, updates `lastKnownModStamp` and schedules `mergeOrReload` via `invokeLater`. This provides sub-1.5s reactive merge instead of waiting for the next poll cycle.
+
+**No infinite loop risk:** `mergeOrReload` calling `doc.setText(merged)` only changes the Document, not the file. Only `saveDocument()` triggers VFS events, and by that point the merge is already done.
+
+**Build output:**
+- `build/distributions/agent-doc-jetbrains-0.2.65.zip` (unsigned)
+- `build/distributions/agent-doc-jetbrains-0.2.65-signed.zip` (signed)
+
+No agent-doc Rust changes needed — the bug is purely in the JB plugin's handling of external disk writes. Ready for install-from-disk testing.
+<!-- agent:boundary:0d13091e -->
+<!-- agent:boundary:1172b94d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -634,6 +654,6 @@ Current state: IPC degradation is already tracked (1-hour TTL marker). When degr
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
-- [ ] [#mpjv] 0.33.4 BLOCKER — ROOT-CAUSED: PromptPoller.autoSaveTrackedFiles() flushes stale in-memory buffer to disk without checking for external writes. Fix: refresh VFS + merge before auto-save. See #mpjv response for full audit and fix plan.
+- [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
 <!-- /agent:pending -->
 ## Assistant

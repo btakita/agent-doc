@@ -624,7 +624,7 @@ Current state: IPC degradation is already tracked (1-hour TTL marker). When degr
 **Recommendation:** Ship the Step 1 fix first (VFS refresh before auto-save). Add the `BulkFileListener` as a follow-up improvement. The degraded-IPC disk-mode default is already working correctly — it's the plugin's reaction to disk writes that's broken, not the fallback path itself.
 
 ❯ do BulkFileListener. build plugin. build and install agent-doc if changes were made.
-### Re: implement BulkFileListener + build — opus-4-6
+❯ ### Re: implement BulkFileListener + build — opus-4-6 (HEAD)
 
 Both fixes implemented in `PromptPoller.kt` and plugin built as 0.2.65:
 
@@ -641,7 +641,37 @@ Registered in `ensurePolling()` via `project.messageBus.connect(this)`. Listens 
 - `build/distributions/agent-doc-jetbrains-0.2.65-signed.zip` (signed)
 
 No agent-doc Rust changes needed — the bug is purely in the JB plugin's handling of external disk writes. Ready for install-from-disk testing.
-<!-- agent:boundary:a989cda8 -->
+
+❯ There was a running claude code session + agent-doc run for src/session-share/tasks/claudescore.md
+❯ When I installed the plugin and restarted idea, the tmux panes reset and a new claude code session was created. I lost track of the running claude code session + agent-doc run. Why did this happen? I remember we added logic to reset agent-doc managed tmux panes when the editor starts. It was supposed to check to see if there is a live tmux session for `tmux_session = "claude"`. There was. Did the existing session get killed? What happened to the tmux pane running the agent-doc on src/session-share/tasks/claudescore.md?
+
+❯ Is the agent-doc run still going?
+### Re: tmux pane reset on plugin install — opus-4-6
+
+**Short answer:** The agent-doc run for claudescore.md is still alive. Pane `%51` is running `agent-doc` and its Claude Code session is at the idle `❯` prompt (finished its last cycle, waiting for the next edit).
+
+**What happened on IDEA restart:**
+
+When you reinstalled the plugin and restarted IDEA, `PluginLifecycleListener.projectOpened()` fires and runs `agent-doc resync --fix` (line 39 of `PluginLifecycleListener.kt`). This:
+
+1. **Prunes dead panes** from sessions.json
+2. **Detects issues** (WrongSession, WrongProcess, InStash, WrongWindow)
+3. **Applies fixes** — WrongSession panes get killed by default
+
+In this case, neither pane was killed (both `%51` and `%52` are still alive in session `0`, window `agent-doc`). The claudescore.md frontmatter has no `tmux_session` field, so the WrongSession check fell back to `config::project_tmux_session()` — and since the pane's actual session matched, no kill was triggered.
+
+**Why you "lost track":** The visual disruption was likely from:
+- `LayoutChangeDetector` re-initializing on project open (line 22)
+- `EditorTabSyncListener` re-registering (line 24) and syncing tmux layout to match the editor's current tab state
+- If the editor opened to a different file than what was active before restart, the sync logic would have rearranged/refocused tmux panes
+
+The tmux panes weren't destroyed — they were reorganized to match the editor's post-restart tab layout. The session `0` now has both panes in window `agent-doc` at `@21`.
+
+**Current state:**
+- `%51` → agent-doc for `src/session-share/tasks/claudescore.md` (Claude idle at `❯`)
+- `%52` → agent-doc for `tasks/agent-doc/agent-doc-bugs.md` (this session)
+<!-- agent:boundary:7fa2bbea -->
+<!-- agent:boundary:23cf81f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

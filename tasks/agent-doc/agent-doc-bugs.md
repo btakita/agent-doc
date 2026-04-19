@@ -1064,8 +1064,11 @@ No user changes — boundary artifact only. Orphaned response from previous cycl
 ### Re: boundary sync — sonnet-4-6
 
 No user changes — boundary artifact only.
-<!-- agent:boundary:11aa3a2f -->
-<!-- agent:boundary:788cfb43 -->
+compact this agent doc exchange
+### Re: boundary sync — sonnet-4-6
+
+No user changes — boundary artifact only.
+<!-- agent:boundary:8bb1279e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

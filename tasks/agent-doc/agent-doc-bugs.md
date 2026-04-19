@@ -1026,7 +1026,7 @@ This is surgical — doesn't change baseline handling, patch application, or CRD
 Making the IPC timeout path use CRDT merge instead of `atomic_write` would fix this and any future component-level conflicts, but it's a bigger change and the timeout path is meant to be a fast fallback.
 
 Delegating implementation to Sonnet.
-<!-- agent:boundary:f0987fca -->
+<!-- agent:boundary:2e6978b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

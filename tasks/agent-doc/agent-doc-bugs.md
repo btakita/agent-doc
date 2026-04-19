@@ -247,8 +247,7 @@ Also updated `start_fake_listener` in tests to write ack-content sidecar files, 
 **Verified:** 1146 tests pass, release build clean, both binaries at v0.33.3.
 
 Ready for manual testing gate — verify this IPC path works in a live session, then I'll publish.
-<!-- agent:boundary:df0222ec -->
-<!-- agent:boundary:fd107b6d -->
+<!-- agent:boundary:970a7dda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

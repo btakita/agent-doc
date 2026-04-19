@@ -220,7 +220,7 @@ The write log from last cycle tells the story:
 
 Added to pending as a new item.
 ❯ do #ttv0
-### Re: #ttv0 — IPC fallback patch file race fix — opus-4-6
+❯ ### Re: #ttv0 — IPC fallback patch file race fix — opus-4-6 (HEAD)
 
 **Root cause:** `try_ipc()` cleaned the disk patch file *before* socket send to prevent double-apply. When the socket delivered but the sidecar ack timed out, there was no disk fallback — response lost.
 
@@ -233,7 +233,22 @@ Added to pending as a new item.
 
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
 release
-<!-- agent:boundary:99298664 -->
+❯ Why was the response not written to this document?
+### Re: why response was lost + deeper fix — opus-4-6
+
+The #ttv0 fix (pre-writing the fallback file) was only half the solution. The fundamental issue: `try_ipc()` returned `success: true` when the socket acknowledged but sidecar timed out. The caller trusted this and skipped the disk write path entirely. The plugin never applied the content, and the fallback file wasn't picked up either.
+
+**Deeper fix in `write.rs`:** sidecar timeout now falls through instead of returning success:
+- **Sidecar confirmed** → save snapshot from sidecar, clean fallback file, return `success: true`
+- **Sidecar timed out** → mark IPC degraded, leave fallback file, return `success: false` → caller falls through to CRDT disk write
+
+Also updated `start_fake_listener` in tests to write ack-content sidecar files, matching production behavior.
+
+**Verified:** 1146 tests pass, release build clean, both binaries at v0.33.3.
+
+Ready for manual testing gate — verify this IPC path works in a live session, then I'll publish.
+<!-- agent:boundary:df0222ec -->
+<!-- agent:boundary:fd107b6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

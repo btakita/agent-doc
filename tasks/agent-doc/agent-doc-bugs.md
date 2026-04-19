@@ -198,8 +198,44 @@ Traced the git history. Here's what happened:
 
 **Secondary concern — structural detection:** Even if the session HAD been active, raw text inline corrections inside an agent response block have no structural markers (`❯`, `>`, heading). The annotated diff would tag them as `[user+]`, but the model might deprioritize them vs. other changes.
 
+How do we prevent the model from deprioritizing inline prompts?
+
 **Recommendation:** Use blockquote `>` syntax for inline corrections inside agent responses. This makes them structurally distinct from agent content and ensures the agent recognizes them as annotations requiring a response, regardless of session state at the time of editing.
-<!-- agent:boundary:c87775b2 -->
+### Re: preventing model deprioritization of inline prompts — opus-4-6
+
+The problem: `[user+]` lines buried among many `[agent]` lines in the annotated diff get lost in the noise. The model sees a wall of agent context with a few user additions mixed in. Three layers of defense:
+
+#### 1. Binary-side: surface annotations in preflight JSON
+
+Add an `inline_annotations` field to the preflight output that extracts user additions appearing between agent lines:
+
+```json
+{
+  "inline_annotations": [
+    "This is wrong. Do not lower expert scores...",
+    "We may need to broaden the gate..."
+  ],
+  "has_inline_annotations": true
+}
+```
+
+This makes annotations impossible to miss — they're in structured JSON, not buried in the diff. The preflight already knows which lines are `[user+]` vs `[agent]`, so the detection is straightforward: any `[user+]` line that appears between two `[agent]` lines (or between an `[agent]` line and the exchange boundary) is an inline annotation.
+
+#### 2. Skill-side: priority instruction
+
+Add to SKILL.md respond step:
+
+> If the preflight output contains `inline_annotations`, address each one before generating new content. These are user corrections or questions inserted inside previous agent responses — they require direct response.
+
+Even without the binary enhancement, the skill could instruct: "After reading the annotated diff, scan for `[user+]` lines between `[agent]` lines. Treat these as high-priority corrections."
+
+#### 3. User convention: blockquote `>` syntax
+
+Blockquotes get `[user+] >` tags in the annotated diff — structurally distinct from agent prose. This is the belt-and-suspenders layer that works regardless of binary/skill changes.
+
+**Recommendation:** implement #1 (binary) + #2 (skill) as a tracked pending item. #3 is already the documented convention.
+<!-- agent:boundary:6bf7ae4f -->
+<!-- agent:boundary:edbe6dc0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -899,7 +899,7 @@ Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #
 ### Re: do #mxj5 — already complete — opus-4-6
 
 #mxj5 ("Consolidate repetitive MEMORY.md rules") is the same work as #0ky2. The consolidation was completed last cycle — 18 entries → 3 compound files. Marking done.
-<!-- agent:boundary:2e70a511 -->
+<!-- agent:boundary:c6b1e5c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -909,7 +909,6 @@ Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
-- [x] [#mxj5] Consolidate repetitive MEMORY.md rules — group ~15 agent-doc 'Never do X' entries into 3-4 compound entries (~1,200 token savings)
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle

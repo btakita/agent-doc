@@ -169,7 +169,7 @@ Compare with the previous successful write:
 
 No code fix needed — the binary did what it was told. The skill workflow needs to ensure the response is captured before piping.
 ❯ Fix the skill/runbook in both agent-doc and agent-loop.
-### Re: fix skill/runbook for empty patchback — opus-4-6
+❯ ### Re: fix skill/runbook for empty patchback — opus-4-6 (HEAD)
 
 **Binary fix** (`write.rs`): added a warning when write proceeds with 0 template patches:
 ```
@@ -185,7 +185,42 @@ Also logs `zero_patches_warning` to ops.log for forensics.
 
 **Both copies synced**: `src/agent-doc/SKILL.md` → `.claude/skills/agent-doc/SKILL.md`. Both binaries rebuilt.
 do #ndsd
-<!-- agent:boundary:fe973012 -->
+❯ please add the response to this document
+❯ Why did the response not patchback to this document?
+### Re: #ndsd verified complete (replay) — opus-4-6
+
+*(This response was generated last cycle but lost due to IPC degradation — replaying.)*
+
+All three components confirmed in place:
+- **Binary warning** (`write.rs:1004`): logs `0 template patches found` + `zero_patches_warning` to ops.log
+- **SKILL.md** (line 90): `patch:exchange` requirement documented with compaction recovery note
+- **Both copies synced**: `src/agent-doc/SKILL.md` and `.claude/skills/agent-doc/SKILL.md` match
+
+#ndsd marked done.
+
+### Re: why patchback failed — opus-4-6
+
+The write log from last cycle tells the story:
+
+```
+[write] cleaning stale patch file before socket send (prevent double-apply)
+[write] socket IPC patch delivered
+[write] snapshot from file read (ack-content sidecar not available after 1000ms)
+[write] IPC degraded — subsequent writes will use disk until marker cleared or expires (1h)
+```
+
+**Root cause:** The disk patch file was deleted *before* the socket send. When the socket delivery wasn't acknowledged within 1000ms, IPC degraded — but there was no disk fallback because the patch file had already been cleaned. The response content was silently lost.
+
+**This is a race condition bug in `write.rs`:** the "prevent double-apply" cleanup is correct in intent but wrong in timing. The patch file should be cleaned *after* confirmed delivery (ack received), not before the socket attempt. Sequence should be:
+
+1. Write patch to disk (for fallback)
+2. Send via socket
+3. If ack received → clean patch file
+4. If ack times out → leave patch file for disk fallback path
+
+Added to pending as a new item.
+<!-- agent:boundary:dd9718c4 -->
+<!-- agent:boundary:7856c087 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -195,5 +230,6 @@ do #ndsd
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#ttv0] IPC patch file cleanup race: disk patch file is cleaned before socket send, so IPC degradation loses response content. Fix: clean patch file after confirmed ack, not before.
 <!-- /agent:pending -->
 ## Assistant

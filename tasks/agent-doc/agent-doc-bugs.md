@@ -358,8 +358,7 @@ This is a skill/runbook issue, not a code issue. The binary already accepts mult
 4. Commit the change inside `src/agent-doc/` and bump patch version if this goes into the next release.
 
 Shall I make the edit now? It's a ~5-line addition to the "What to decide each cycle" list.
-<!-- agent:boundary:8380d4c6 -->
-<!-- agent:boundary:ffbc62b6 -->
+<!-- agent:boundary:155825c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

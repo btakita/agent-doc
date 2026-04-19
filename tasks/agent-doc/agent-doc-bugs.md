@@ -121,14 +121,28 @@ Your "Why did" message appears incomplete — please finish the thought and I'll
 
 Added to pending: model-specific AGENTS.md guardrails.
 ❯ do #j58r. build and install for local testing
-### Re: #j58r — already built and installed — opus-4-6
+❯ ### Re: #j58r — already built and installed — opus-4-6 (HEAD)
 
 The dedup fix was already built and installed in the previous cycle:
 - `~/.cargo/bin/agent-doc` — rebuilt at 21:43 (after source edit at 21:41)
 - `target/release/agent-doc` — rebuilt at 21:44
 
 Both binaries contain `fingerprint_lines` (the per-line dedup check). Ready for live testing — the next orphan recovery with blank-line/boundary content should trigger the dedup guard instead of duplicating.
-<!-- agent:boundary:ae181723 -->
+❯ release
+### Re: release v0.33.2 — opus-4-6
+
+Published agent-doc v0.33.2:
+- **crates.io**: https://crates.io/crates/agent-doc/0.33.2
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.2
+- **PyPI**: skipped — needs manylinux Docker build (local build produces `linux_x86_64` wheel)
+
+Includes: FFI submodule path resolution, IPC timeout CRDT merge, recovery dedup fix, JB/VS Code plugin updates, SKILL.md/runbook updates. 24 files, +1011/-222 lines.
+
+Parent submodule pointer updated.
+
+The dedup fix was confirmed live this cycle: `[recover] Response already present in document — skipping apply, cleaning up pending file`.
+<!-- agent:boundary:006b496d -->
+<!-- agent:boundary:00f73612 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

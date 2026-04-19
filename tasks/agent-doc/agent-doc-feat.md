@@ -87,8 +87,7 @@ Mapping each answered question to pending items:
 **Q2 → new pending item.** `agent_doc_version()` post-reload sanity check in both JNA and koffi paths. Catches ABI mismatch before the first real FFI call.
 
 **Q3 → resolved, no action.** Versioned cdylib and maturin's Python extension module use separate crate-type targets and filenames. Confirmed no collision.
-<!-- agent:boundary:3de10503 -->
-<!-- agent:boundary:d8b93c62 -->
+<!-- agent:boundary:4d8c640a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

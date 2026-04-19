@@ -398,8 +398,7 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 **PyPI bug:** the wheel builds as `agent_doc-0.33.3-py3-none-linux_x86_64.whl`; PyPI rejects with `400 unsupported platform tag 'linux_x86_64'`. Gated pending item `#y2gr` remains open for the skill-install runbooks-sync fix; I'm leaving the PyPI manylinux fix as a separate follow-up since it's pre-existing.
 
 JB plugin 0.2.64 zips are on disk only — install via IDEA → Settings → Plugins → gear → Install from Disk → `agent-doc-jetbrains-0.2.64-signed.zip` when ready.
-<!-- agent:boundary:b60aa206 -->
-<!-- agent:boundary:552ea180 -->
+<!-- agent:boundary:7553804d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

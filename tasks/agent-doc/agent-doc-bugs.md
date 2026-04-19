@@ -943,7 +943,7 @@ Steps 2 (write) and 3 (commit) in SKILL.md now have `(MANDATORY — never skip)`
 
 All changes are in `.claude/skills/agent-doc/SKILL.md` and `.claude/skills/agent-doc/runbooks/model-tier-gate.md`.
 Are these skill/runbook changes implemented in both the agent-doc repo and in the agent-loop repo? Will these changes be installable via `agent-doc install`?
-### Re: do #j57h #4ynf #chcb — all three implemented — opus-4-6
+❯ ### Re: do #j57h #4ynf #chcb — all three implemented — opus-4-6 (HEAD)
 
 **#j57h — Explicit skill triggers for Opus 4.7**
 Updated SKILL.md frontmatter `description` from vague "Submit a session document..." to explicit ALL-OF conditions: `(1) file is a markdown session document, (2) agent-doc binary is installed, (3) write+commit are executed every cycle without exception`. This tells 4.7's effort system that the skill has non-optional steps, reducing the chance of partial execution at lower effort levels.
@@ -961,7 +961,16 @@ Plus a note that template-mode sessions require `high` as a floor — models bel
 Steps 2 (write) and 3 (commit) in SKILL.md now have `(MANDATORY — never skip)` in their headers, with bolded explanations of what breaks if skipped. Write: "Skipping write breaks the document sync." Commit: "Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff."
 
 All changes are in `.claude/skills/agent-doc/SKILL.md` and `.claude/skills/agent-doc/runbooks/model-tier-gate.md`.
-<!-- agent:boundary:facc2776 -->
+### Re: installability of skill/runbook changes — opus-4-6
+
+No — the previous cycle only edited the agent-loop local copies (`.claude/skills/agent-doc/`). The canonical source files in `src/agent-doc/` were untouched, so `agent-doc skill install` would have overwritten the changes with the old versions.
+
+Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-doc source repo:
+- `src/agent-doc/SKILL.md` — explicit ALL-OF trigger description + MANDATORY step headers
+- `src/agent-doc/runbooks/model-tier-gate.md` — model-to-tier mapping table
+
+Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
+<!-- agent:boundary:ba710308 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

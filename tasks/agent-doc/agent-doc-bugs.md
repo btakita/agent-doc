@@ -177,8 +177,7 @@ This is heading-level agnostic — works for h1-h6, no hardcoded `###` or `Re:` 
 **All 1163 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 
 **Behavioral change:** standalone headings in the exchange (not `❯`-prefixed) are now treated as agent response markers. Users who type raw headings as input won't get the `❯` prefix — but this is the documented convention ("users write inline text, blockquotes, and annotations — not standalone headings").
-<!-- agent:boundary:9f37cc2e -->
-<!-- agent:boundary:ee6db51a -->
+<!-- agent:boundary:6dfec617 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

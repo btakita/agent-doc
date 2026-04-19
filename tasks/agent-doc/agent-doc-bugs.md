@@ -340,8 +340,7 @@ Proposed wording for the runbook:
 ```
 
 This is a skill/runbook issue, not a code issue. The binary already accepts multiple `--pending-add` flags per cycle; nothing is missing at the implementation layer.
-<!-- agent:boundary:e07d2e43 -->
-<!-- agent:boundary:fa5db57e -->
+<!-- agent:boundary:234046fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

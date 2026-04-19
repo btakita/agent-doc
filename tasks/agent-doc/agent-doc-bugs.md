@@ -929,8 +929,7 @@ Spec written to `tasks/agent-doc/agent-doc-feat.md` § "Spec: FFI library hot-re
 Bundled as one feature in the spec text (cross-references this bug doc) but split into three pending items so they can be implemented and shipped independently if needed — hot-reload alone fixes the immediate crash, versioning + GC are the structural follow-up.
 
 Open questions noted in the spec: VS Code dlopen vs CLI shell-out, post-reload `agent_doc_version()` health check, and PyPI wheel filename compatibility.
-<!-- agent:boundary:e7b1f556 -->
-<!-- agent:boundary:7df87ab2 -->
+<!-- agent:boundary:6a9a4863 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

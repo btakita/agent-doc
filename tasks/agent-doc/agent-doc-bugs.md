@@ -34,7 +34,7 @@ claude_args: --dangerously-skip-permissions
 - #a002: normalize_user_prompts safety rail — landed, awaiting large-drift telemetry trip
 - #ha3h: Multi-user recipient config (ship with multi-user support)
 - #m1bz: install gate — cargo install + local JB plugin install; pause for user to verify live
-<!-- agent:boundary:16695972 -->
+<!-- agent:boundary:722f9de1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

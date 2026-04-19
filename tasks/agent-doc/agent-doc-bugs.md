@@ -952,8 +952,7 @@ Open questions noted in the spec: VS Code dlopen vs CLI shell-out, post-reload `
 3. Confirm IDEA does not crash and the new lib version is logged (`[native] loaded libagent_doc v0.33.5 from …`)
 
 When confirmed: `cargo publish` → crates.io, then `git tag v0.33.5 && git push origin v0.33.5` for GitHub Release via CI.
-<!-- agent:boundary:90e1e041 -->
-<!-- agent:boundary:25f25cbe -->
+<!-- agent:boundary:80ecc393 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -961,10 +960,7 @@ When confirmed: `cargo publish` → crates.io, then `git tag v0.33.5 && git push
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [x] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
-- [x] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
 <!-- /agent:pending -->
 ## Assistant

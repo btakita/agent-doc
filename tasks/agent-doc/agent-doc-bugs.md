@@ -52,7 +52,7 @@ claude_args: --dangerously-skip-permissions
 - Pre-release checks: 1158 tests pass, release binary built, cargo install done, JB plugin 0.2.67 built
 - **At manual testing gate — NOT yet published to crates.io or GitHub**
 - Required: verify IDEA does not crash when cargo install runs during active session; new lib version logged
-<!-- agent:boundary:e695c0cc -->
+<!-- agent:boundary:9e3ac672 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

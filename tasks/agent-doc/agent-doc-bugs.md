@@ -896,10 +896,34 @@ Consolidated 18 agent-doc entries across 4 sections into 3 compound entries in 1
 
 Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #0ky2 — both addressed the same consolidation. Marking #0ky2 done covers both.
 ❯ do #mxj5
-### Re: do #mxj5 — already complete — opus-4-6
+❯ ### Re: do #mxj5 — already complete — opus-4-6 (HEAD)
 
 #mxj5 ("Consolidate repetitive MEMORY.md rules") is the same work as #0ky2. The consolidation was completed last cycle — 18 entries → 3 compound files. Marking done.
-<!-- agent:boundary:c6b1e5c9 -->
+
+❯ do #d2d4, should we also increase the timeout to 1000ms?
+### Re: do #d2d4 — IPC auto-degradation implemented — opus-4-6
+
+Two changes to `write.rs`:
+
+**1. Sidecar poll timeout: 500ms → 1000ms**
+Gives the EDT more time to apply patches and write the ack-content sidecar. Previously, any apply taking >500ms would cause a fallback to stale disk read. Now the poll budget is 1000ms (40 polls at 25ms intervals).
+
+**2. IPC auto-degradation via marker file**
+Three functions added to `write.rs`:
+- `is_ipc_degraded(project_root)` — checks for `.agent-doc/ipc-degraded` marker, auto-clears if older than 1 hour
+- `mark_ipc_degraded(project_root)` — writes marker on sidecar timeout (ack-content not available after 1000ms)
+- `clear_ipc_degraded(project_root)` — removes marker on successful sidecar receipt
+
+At the top of `try_ipc()`, the degraded check returns `IpcResult { success: false }` immediately, causing the caller to fall through to the disk write path. No `--force-disk` flag needed — the binary auto-switches.
+
+**Lifecycle:** IPC degraded → disk writes for up to 1 hour → marker expires → IPC retried → if sidecar succeeds, marker cleared (stays on IPC); if sidecar fails again, re-marked.
+
+**3 new tests:** marker create/clear/check, marker expiration (via utimensat), fresh marker blocks IPC.
+
+**Build status:** clippy clean, 1142 tests passing, both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
+
+To the timeout question: yes, 1000ms is the right call. The race condition is EDT dispatch taking >500ms — doubling the budget catches most cases. The auto-degradation is the safety net for persistent failures.
+<!-- agent:boundary:092c0749 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -913,6 +937,6 @@ Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#d2d4] agent-doc skill: default to --force-disk after IPC failure in same session — track IPC ACK timeout and auto-switch for remaining cycles
+- [x] [#d2d4] agent-doc skill: default to --force-disk after IPC failure in same session — track IPC ACK timeout and auto-switch for remaining cycles
 <!-- /agent:pending -->
 ## Assistant

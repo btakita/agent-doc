@@ -794,7 +794,7 @@ Added 3 tests to `resync.rs` for the agent preservation behavior:
 
 **Results:** 1149 tests pass (3 new), 6 ignored. Both binaries rebuilt.
 ❯ release
-### Re: release — sonnet-4-6
+❯ ### Re: release — sonnet-4-6 (HEAD)
 
 **Pre-release checks passed:**
 - `make check`: 1149 tests pass, 6 ignored
@@ -807,7 +807,57 @@ When confirmed, I'll proceed with:
 1. `cargo publish` → crates.io
 2. `git tag v0.33.4 && git push origin v0.33.4` → GitHub Release via CI
 3. PyPI build + upload
-<!-- agent:boundary:d1516c92 -->
+
+❯ Idea crashed in the last session. Please look in the logs to find out why.
+### Re: IDEA crash — opus-4-7
+
+**Crash dump:** `~/java_error_in_idea_1688168.log` (15:09:00, PID 1688168, JVM uptime 8m)
+
+**Signature:** `SIGSEGV (0xb) at pc=0x0000000000000000` — JVM jumped to address 0.
+
+**Java stack:**
+```
+com.sun.jna.Native.invokeVoid(...)
+com.sun.jna.Function.invoke(...)
+jdk.proxy12.$Proxy121.agent_doc_document_changed(String)
+com.github.btakita.agentdoc.TypingTracker.documentChanged(DocumentEvent) +67
+```
+
+JNA tried to invoke `agent_doc_document_changed` but the cached `peer` (native function pointer) was 0 → call to NULL → SIGSEGV.
+
+**Smoking gun (timing correlation):**
+
+| Time | Event |
+|------|-------|
+| 15:01:02.582 | JNA loads `~/.cargo/bin/libagent_doc.so` (logged `[native] loaded ...`) |
+| 15:08:59.447 | User pressed Enter in vim mode on agent-doc-bugs.md |
+| **15:08:59.884** | **`~/.cargo/bin/libagent_doc.so` mtime updated** (cargo install replaced it) |
+| 15:09:00.518 | IDE thread enters `agent_doc_document_changed` → SIGSEGV |
+
+The .so file was overwritten ~600ms before the crash. JNA had cached the `Function` object (with `peer` pointing into the old mmap), and when the call dispatched, the function pointer resolved to 0.
+
+**Root cause hypothesis:**
+
+`cargo install --path .` ran while IDEA was holding the .so mmap'd via JNA. Normally on Linux, `cargo install` writes a tempfile then `rename(2)`s — the original inode stays alive for the JVM's mmap, so old code should remain callable. But the symptom (PC=0x0, exactly NULL) suggests the peer was zeroed, which doesn't happen from a benign rename. Possible mechanisms:
+
+1. **cargo install on Arch may use a write strategy that truncates in place** rather than atomic rename — invalidating live pages.
+2. **JBR/JVM page-cache interaction:** if pages got evicted under memory pressure and the kernel reloaded from the new file (different layout), the cached peer is stale.
+3. **Concurrent dlsym during overwrite:** if JNA recomputed the peer mid-rebuild for any reason and got 0, it cached 0.
+
+I can't fully prove which mechanism without ltrace/perf, but **(1) is testable** — `strace -e openat,rename,write,truncate -p $(pgrep -x cargo)` during the next cargo install would show.
+
+**Mitigation options:**
+
+1. **Avoid concurrent cargo install while IDEA is up** — simplest, no code change. Add to release runbook: "close IDEA or accept it may crash before running cargo install."
+2. **JNA call guard with Function pointer health check** — wrap each FFI call in a try/catch that checks `lib.agent_doc_version()` first; if it crashes/returns null, force-reload via `Native.unregister` + `Native.load`. Adds overhead per call.
+3. **Reload library on file mtime change** — `AgentDocLib.get()` could stat the .so and reload if mtime changed since last load. Cheap (one stat per call), reliable.
+4. **Build to a versioned filename** — `libagent_doc-0.33.4.so` so each version has a unique inode and cargo install never overwrites the loaded one. JNA continues using the old version until IDEA restarts.
+
+**Recommendation:** Option 3 (mtime-based reload) is the most robust without process restart. Option 1 is the quick fix for now.
+
+Yesterday's crashes (`java_error_in_idea_2825553.log` etc.) were a different bug — NULL pointer in `Pointer.getString` from `NativePatching.repositionBoundaryToEnd`, suggesting `result.text` was null but not checked before `getString(0)`. That's a separate fix in `NativePatching.kt`.
+<!-- agent:boundary:367621ca -->
+<!-- agent:boundary:317baca2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

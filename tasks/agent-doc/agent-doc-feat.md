@@ -66,7 +66,7 @@ Implemented document-level hooks (session_start/post_write/post_commit) via fron
 ❯ - Versioned filename collides with how `maturin` packages the wheel. Need to verify Python `ctypes`/`cffi` consumers can find `libagent_doc-current.so` (or whether we need a separate naming scheme inside the wheel).
 
 ❯ add ids for each agent:pending item
-### Re: FFI hot-reload spec — open questions answered — sonnet-4-6
+❯ ### Re: FFI hot-reload spec — open questions answered — sonnet-4-6 (HEAD)
 
 Solid spec. Answering the three open questions:
 
@@ -77,7 +77,18 @@ Solid spec. Answering the three open questions:
 **3. No maturin collision.** Versioned `libagent_doc-<version>.so` is for the C ABI cdylib (JNA / koffi). maturin produces a separate Python extension module (`_agent_doc.cpython-*.so`) from a different crate-type target in `Cargo.toml`. These don't share filenames. The wheel ships its own .so with maturin's naming; versioned naming only applies to the cdylib install path outside the wheel.
 
 **IDs:** Preflight backfilled hash IDs for all pending items already — confirmed present.
-<!-- agent:boundary:47facb26 -->
+❯ Add actionable steps from the answers to the 3 open questions.
+### Re: actionable steps from open questions — opus-4-6
+
+Mapping each answered question to pending items:
+
+**Q1 → `#ky3a` (updated).** VS Code koffi hot-reload already tracked. Expanded scope to include lock file write on `koffi.load()` + remove on `deactivate()` — the VS Code side of the GC protocol from `#408p`.
+
+**Q2 → new pending item.** `agent_doc_version()` post-reload sanity check in both JNA and koffi paths. Catches ABI mismatch before the first real FFI call.
+
+**Q3 → resolved, no action.** Versioned cdylib and maturin's Python extension module use separate crate-type targets and filenames. Confirmed no collision.
+<!-- agent:boundary:3de10503 -->
+<!-- agent:boundary:d8b93c62 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -90,5 +101,6 @@ Solid spec. Answering the three open questions:
 - [ ] [#2cyy] FFI library hot-reload: mtime check in `AgentDocLib.get()` → `Native.unregister` + reload (~30 lines Kotlin)
 - [ ] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
 - [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
-- [ ] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload in VS Code native.ts (parallel to #2cyy)
+- [ ] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload + lock file write/remove on deactivate() in VS Code native.ts (parallel to #2cyy)
+- [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 <!-- /agent:pending -->

@@ -418,8 +418,7 @@ agent-doc (0.33.3)
 **Takeaway: stop running local `maturin publish` for agent-doc releases.** The CI pipeline is the canonical path for PyPI. I've updated auto-memory to reflect this — "Publish all targets" now reads *crates.io + GitHub Release* locally; PyPI flows through `release: published` automatically. New [`reference_pypi_publish_via_ci.md`](reference) captures the full context and corrects the earlier `#18985` note.
 
 **Final status for v0.33.3:** all targets live. crates.io ✓, PyPI ✓, GitHub Release ✓, local binaries ✓, JB plugin 0.2.64 zips ✓, parent submodule pushed ✓. Nothing to do on manylinux.
-<!-- agent:boundary:4b5205b1 -->
-<!-- agent:boundary:83f45892 -->
+<!-- agent:boundary:9569dca3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -923,7 +923,7 @@ At the top of `try_ipc()`, the degraded check returns `IpcResult { success: fals
 **Build status:** clippy clean, 1142 tests passing, both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 
 To the timeout question: yes, 1000ms is the right call. The race condition is EDT dispatch taking >500ms — doubling the budget catches most cases. The auto-degradation is the safety net for persistent failures.
-<!-- agent:boundary:092c0749 -->
+<!-- agent:boundary:75395878 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -937,6 +937,5 @@ To the timeout question: yes, 1000ms is the right call. The race condition is ED
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#d2d4] agent-doc skill: default to --force-disk after IPC failure in same session — track IPC ACK timeout and auto-switch for remaining cycles
 <!-- /agent:pending -->
 ## Assistant

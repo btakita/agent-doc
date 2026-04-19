@@ -96,15 +96,31 @@ The concern is valid: Opus 4.7 removed sections like "Self-Improvement Loop", "T
 3. **Restore the removed sections** — simpler: just put them back and accept the token cost for 4.7.
 
 Option 1 is the cleanest for agent-doc sessions (where model tier is already resolved). Option 3 is the fastest.
+do Option 1
+Also: the response from Opus 4.7 got duplicated in the exchange — orphan recovery applied the same content twice. This is cosmetic but inflates the exchange.
+
+Your "Why did" message appears incomplete — please finish the thought and I'll respond.
+
+Added to pending: model-specific AGENTS.md guardrails.
+do
+> Why did the last patchback get put into the document again? This seems like a regression from the last release.
+### Re: model-specific AGENTS.md guardrails — opus-4-6
+
+The concern is valid: Opus 4.7 removed sections like "Self-Improvement Loop", "Task Management", and "Autonomous Bug Fixing" as anti-laziness scaffolding — but those sections may have been serving as useful guardrails for 4.6 (which occasionally needs more explicit process reminders).
+
+**Options:**
+1. **Model-tier-gate runbook** — add a section that injects model-specific AGENTS.md rules. When `effective_tier` is resolved, the agent reads the appropriate set of workflow rules. Low tier models get more scaffolding, high tier models get lean rules.
+2. **Conditional sections in AGENTS.md** — `<!-- agent:model:opus-4-6 -->` gated blocks that only apply when the current model matches. Would need binary support.
+3. **Restore the removed sections** — simpler: just put them back and accept the token cost for 4.7.
+
+Option 1 is the cleanest for agent-doc sessions (where model tier is already resolved). Option 3 is the fastest.
 
 Also: the response from Opus 4.7 got duplicated in the exchange — orphan recovery applied the same content twice. This is cosmetic but inflates the exchange.
 
 Your "Why did" message appears incomplete — please finish the thought and I'll respond.
 
 Added to pending: model-specific AGENTS.md guardrails.
-<!-- agent:boundary:e0ecc4be -->
-<!-- agent:boundary:a464af56 -->
-Why did the last patchback get put into the document again? This seems like a regression from the last release.
+<!-- agent:boundary:3c7fdf37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

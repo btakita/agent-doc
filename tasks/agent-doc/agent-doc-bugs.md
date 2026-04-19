@@ -872,10 +872,30 @@ Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
 - Better edge-case handling in complex diffs
 
 **Recommendation:** The agent-doc SKILL.md should specify `high` as the minimum effort for template-mode sessions. The preflight `effective_tier` already maps to effort levels — wire `high` tier → `high` effort as a floor, not a suggestion.
-### Re: IPC force-disk fallback — acknowledged — opus-4-6
+❯ ### Re: IPC force-disk fallback — acknowledged — opus-4-6 (HEAD)
 
 Added to pending. The implementation: the skill workflow should track whether `ack-content sidecar not available after 500ms` appeared in a previous write's output during this session. If so, all subsequent `agent-doc write --stream` calls in the same session append `--force-disk`. This keeps IPC as the default (faster when plugin works) but auto-degrades on first failure.
-<!-- agent:boundary:1a02e8a7 -->
+❯ do #0ky2
+### Re: do #0ky2 — MEMORY.md consolidation complete — opus-4-6
+
+Consolidated 18 agent-doc entries across 4 sections into 3 compound entries in 1 section:
+
+**Before (4 sections, 22 lines in MEMORY.md):**
+- agent-doc Content Rules (1 entry)
+- agent-doc Skill (13 entries)
+- agent-doc Pane Lifecycle (1 entry)
+- agent-doc Design Decisions (3 entries)
+- FFI-First Convention (1 entry)
+
+**After (1 section, 5 lines in MEMORY.md):**
+- [Write & commit contract](feedback_agent_doc_write_commit.md) — 7 rules consolidated
+- [Pending & compaction contract](feedback_agent_doc_pending_compaction.md) — 5 rules consolidated
+- [Session discipline & architecture](feedback_agent_doc_session_architecture.md) — 6 rules consolidated
+
+**Net savings:** MEMORY.md dropped from 141 → 114 lines (27 lines / ~540 tokens on 4.6, ~730 tokens on 4.7). Individual feedback files preserved for provenance. The compound files contain all the same rules grouped by theme, with links back to the original feedback files for context.
+
+Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #0ky2 — both addressed the same consolidation. Marking #0ky2 done covers both.
+<!-- agent:boundary:1c8a4863 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -887,7 +907,7 @@ Added to pending. The implementation: the skill workflow should track whether `a
 - [ ] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
 - [ ] [#mxj5] Consolidate repetitive MEMORY.md rules — group ~15 agent-doc 'Never do X' entries into 3-4 compound entries (~1,200 token savings)
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
-- [ ] [#0ky2] Consolidate MEMORY.md — group agent-doc rules into compound entries (~1,200 token savings)
+- [x] [#0ky2] Consolidate MEMORY.md — group agent-doc rules into compound entries (~1,200 token savings)
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

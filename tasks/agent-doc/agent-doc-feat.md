@@ -192,14 +192,35 @@ Lock file format: `libagent_doc-0.33.4.so.pid.12345` — zero-byte sentinel per 
 Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_doc-0.33.4.so` / `nothing to clean`.
 
 ❯ do #5tjq. Add tests if necessary.
-### Re: #5tjq — post-reload version sanity check — opus-4-6
+❯ ### Re: #5tjq — post-reload version sanity check — opus-4-6 (HEAD)
 
 **JetBrains (NativeLib.kt):** Added `verifyVersion(lib, path)` — calls `agent_doc_version()`, logs `[native] loaded libagent_doc v{version} from {path}` on success, warns on null return or exception (ABI mismatch). Called in both `loadFrom()` and `reload()` after successful `Native.load()`.
 
 **VS Code (native.ts):** Added `verifyVersion(libPath)` — calls `bindFunctions()` to ensure `_version` is bound, then calls `agent_doc_version()` via koffi, decodes the `char*`, frees it, and logs the version. Same warning on null/exception. Added `_version` to lazy bindings and `resetBindings()`. Called after both initial load and reload in `ensureLoaded()`. Replaces the generic `loaded ${libPath}` log message with the versioned one.
 
 **No new tests needed** — this is a best-effort log+warn sanity check. Testing would require loading the actual native library. The version function itself is already tested via the Rust test suite.
-<!-- agent:boundary:8010860c -->
+❯ Version bump agent-doc + plugins. build agent-doc + plugins. Install new agent-doc for testing.
+### Re: version bump + build — sonnet-4-6
+
+**Versions bumped:**
+- `Cargo.toml` + `pyproject.toml`: 0.33.4 → 0.33.5
+- JetBrains plugin (`gradle.properties`): 0.2.66 → 0.2.67
+- VS Code extension (`package.json`): 0.2.6 → 0.2.7
+- `VERSIONS.md`: added 0.33.5 entry (post-reload version sanity check)
+
+**Clippy fixes required before check passed:**
+- `lib_install.rs:92` — inline `"libagent_doc"` literal into format string (`print_literal`)
+- `lib_gc.rs:72–77` — collapse nested `if let` + `if` into single `if let … && …` (`collapsible_if`)
+
+**Artifacts built:**
+- `~/.cargo/bin/agent-doc` → 0.33.5 (installed)
+- `~/.cargo/bin/libagent_doc-0.33.5.so` (symlink: `libagent_doc.so`)
+- `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.67.zip` + `…-signed.zip`
+- `editors/vscode/agent-doc-0.2.7.vsix`
+
+Ready for live session test. Install JB plugin from disk when ready: IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.67-signed.zip`.
+<!-- agent:boundary:befca977 -->
+<!-- agent:boundary:fa69c4f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

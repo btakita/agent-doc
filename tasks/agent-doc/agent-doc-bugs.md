@@ -870,7 +870,7 @@ Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
 - Better edge-case handling in complex diffs
 
 **Recommendation:** The agent-doc SKILL.md should specify `high` as the minimum effort for template-mode sessions. The preflight `effective_tier` already maps to effort levels — wire `high` tier → `high` effort as a floor, not a suggestion.
-<!-- agent:boundary:97dcdbd3 -->
+<!-- agent:boundary:70ad1647 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -162,14 +162,12 @@ Options: `--source <path>` (default: `target/release/libagent_doc.so`), `--targe
 4. `install_replaces_regular_file_with_symlink` — legacy unversioned file gets replaced by symlink
 
 All pass. Verified end-to-end: `~/.cargo/bin/libagent_doc.so` → `libagent_doc-0.33.4.so`, `agent-doc lib-path` resolves correctly.
-<!-- agent:boundary:09e32ffc -->
-<!-- agent:boundary:a4f51696 -->
+<!-- agent:boundary:aaf5903a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
 - [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
 - [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix

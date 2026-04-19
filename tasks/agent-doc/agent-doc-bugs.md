@@ -468,7 +468,7 @@ Want me to file this under **Not Built** here (skill-side pending-promotion heur
 
 Heuristic applies recursively. Nice.
 ❯ release
-### Re: release 0.33.4 — build ready, awaiting your go — sonnet-4-6
+❯ ### Re: release 0.33.4 — build ready, awaiting your go — sonnet-4-6 (HEAD)
 
 Steps complete through the manual testing gate:
 
@@ -480,7 +480,56 @@ Steps complete through the manual testing gate:
 | `cargo install --path .` | ✅ `~/.cargo/bin/agent-doc` → 0.33.4 |
 
 **Pausing here per memory: manual testing gate.** Please verify the skill update looks correct in a live session, then reply to publish upstream (crates.io + GitHub Release + tag). PyPI will flow through CI automatically on release publish.
-<!-- agent:boundary:d6185eac -->
+
+❯ The agent-doc response patchback did not write to src/boost-client/tasks/monsterrodholders.md
+❯ The prompts are still uncommitted. I see the response in the claude code session. Why?
+### Re: monsterrodholders.md — response DID write, then got overwritten — opus-4-7
+
+**The patchback worked. Something wrote over it 51 seconds later.** Forensic evidence:
+
+| Artifact | Size | mtime | Has agent responses? |
+|----------|------|-------|---------------------|
+| `git HEAD` (`da2bcb2`) | — | 13:32:57 | ✅ `passage entries fixed`, `category cleanup` present |
+| `.agent-doc/snapshots/7b9f2a63...md` | 790 lines | 13:32:57 | ✅ same as HEAD |
+| Working tree `tasks/monsterrodholders.md` | 767 lines | **13:33:48** | ❌ responses gone |
+
+The commit and snapshot agree — `agent-doc write` + `agent-doc commit` both succeeded at 13:32:57. The file mtime is **51 seconds later** (13:33:48), and the post-commit write is **23 lines shorter** and is missing exactly the two agent response blocks.
+
+**Diagnosis: stale IDE buffer write-back.** The JB (or VS Code) plugin had an old in-memory buffer from before the CRDT merge. After the commit, *something* triggered the plugin to flush that stale buffer to disk, blowing away the merged content. This is the exact class of bug that 0.33.3 / JB plugin 0.2.64 fixed — **but only for the `repositionBoundaryViaDocument` path via `reloadFromDisk(document)`**. There's another plugin write path that hasn't been plugged.
+
+**Corroborating evidence from the current session:** when I ran `agent-doc write` on `agent-doc-bugs.md` earlier this cycle, the log said:
+
+```
+[write] IPC degraded — skipping socket/file IPC, using disk write
+[write] IPC timeout (2s) — falling back to direct write
+[write] IPC timeout — response saved as patch, awaiting plugin
+```
+
+IPC is degraded right now. The plugin is not ACKing socket writes within 2s. That exact degraded-IPC state is what drives stale-buffer writes to disk — the plugin thinks it's the source of truth, disk write happened via fallback, now buffer and disk diverge.
+
+**Why you saw the response in the Claude console but not the file:** the streaming write went through the CRDT disk-fallback path (which you see in the console), committed correctly, *then* the plugin flushed its stale pre-merge buffer to disk.
+
+**Immediate recovery (doesn't lose your new prompt):**
+
+```
+cd src/boost-client
+git show HEAD:tasks/monsterrodholders.md > /tmp/mrh-head.md
+# diff /tmp/mrh-head.md tasks/monsterrodholders.md to see what's missing
+# then manually re-add your "Remove product category links from the sidebar to..." prompt
+# below the restored responses
+```
+
+Or the cleaner: `git checkout HEAD -- tasks/monsterrodholders.md`, then re-type the new prompt. Your new prompt is only 3 lines so re-typing is easier than merging.
+
+**0.33.4 release status — HOLDING.** This bug is a direct counter-example to the JB 0.2.64 fix claimed complete in 0.33.3. Shipping 0.33.4 right now would compound a known-broken state. Adding a blocker pending item so we don't forget. The SKILL.md heuristic tweak that was the original point of 0.33.4 is safe to hold — it's a text-only change, not urgent.
+
+**Next investigation steps** (not doing these yet — want your call first):
+
+- Grep the JB plugin source for all document-write paths, check which call `reloadFromDisk`.
+- Add an end-to-end integration test that simulates degraded IPC + mid-cycle buffer flush.
+- Consider making disk-mode the default when IPC has been degraded for >N seconds, and have the plugin listen for file-change events to refresh its buffer first.
+<!-- agent:boundary:f7096a44 -->
+<!-- agent:boundary:f5a4084f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -492,5 +541,6 @@ Steps complete through the manual testing gate:
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
+- [ ] [#mpjv] 0.33.4 BLOCKER: stale IDE buffer overwrote CRDT-merged working tree 51s post-commit on src/boost-client/tasks/monsterrodholders.md. Commit da2bcb2 (13:32:57) + snapshot = 790 lines with agent responses; working tree (mtime 13:33:48) = 767 lines missing 'passage entries fixed' + 'category cleanup'. IPC is degraded in current sessions (forcing disk-fallback). The 0.33.3/JB-0.2.64 reload-from-disk fix only covers repositionBoundaryViaDocument path — another write path is still flushing stale buffers post-CRDT-merge. Do NOT publish 0.33.4 until this is root-caused.
 <!-- /agent:pending -->
 ## Assistant

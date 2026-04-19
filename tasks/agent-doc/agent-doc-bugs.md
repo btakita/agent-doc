@@ -970,7 +970,17 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 - `src/agent-doc/runbooks/model-tier-gate.md` — model-to-tier mapping table
 
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
-<!-- agent:boundary:ba710308 -->
+Why were the pending items statuses not updated?
+### Re: installability of skill/runbook changes — opus-4-6
+
+No — the previous cycle only edited the agent-loop local copies (`.claude/skills/agent-doc/`). The canonical source files in `src/agent-doc/` were untouched, so `agent-doc skill install` would have overwritten the changes with the old versions.
+
+Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-doc source repo:
+- `src/agent-doc/SKILL.md` — explicit ALL-OF trigger description + MANDATORY step headers
+- `src/agent-doc/runbooks/model-tier-gate.md` — model-to-tier mapping table
+
+Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
+<!-- agent:boundary:dde0f8a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

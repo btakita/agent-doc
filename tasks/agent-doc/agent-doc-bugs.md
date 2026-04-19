@@ -141,8 +141,7 @@ Includes: FFI submodule path resolution, IPC timeout CRDT merge, recovery dedup 
 Parent submodule pointer updated.
 
 The dedup fix was confirmed live this cycle: `[recover] Response already present in document — skipping apply, cleaning up pending file`.
-<!-- agent:boundary:006b496d -->
-<!-- agent:boundary:00f73612 -->
+<!-- agent:boundary:d9cb13d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

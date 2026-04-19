@@ -78,7 +78,7 @@ Solid spec. Answering the three open questions:
 
 **IDs:** Preflight backfilled hash IDs for all pending items already — confirmed present.
 ❯ Add actionable steps from the answers to the 3 open questions.
-### Re: actionable steps from open questions — opus-4-6
+❯ ### Re: actionable steps from open questions — opus-4-6 (HEAD)
 
 Mapping each answered question to pending items:
 
@@ -87,7 +87,33 @@ Mapping each answered question to pending items:
 **Q2 → new pending item.** `agent_doc_version()` post-reload sanity check in both JNA and koffi paths. Catches ABI mismatch before the first real FFI call.
 
 **Q3 → resolved, no action.** Versioned cdylib and maturin's Python extension module use separate crate-type targets and filenames. Confirmed no collision.
-<!-- agent:boundary:4d8c640a -->
+❯ do #2cyy add tests
+### Re: #2cyy — JNA mtime hot-reload implemented + tests — opus-4-6
+
+**What changed in `NativeLib.kt`:**
+
+- Added `libMtimeChanged(path, storedMtime)` top-level function — pure mtime comparison, extracted for testability without IntelliJ runtime
+- Companion object now tracks `loadedPath` and `loadedMtime` (both `@Volatile`)
+- `get()` calls `libMtimeChanged()` on every invocation; if mtime differs, calls `reload()` which does `Native.load()` from the same path (resolves through symlink to new inode)
+- `reload()` is `@Synchronized` with double-check to prevent concurrent reloads
+- On reload failure, keeps previous instance (graceful degradation — old library may still be valid if the overwrite completed)
+
+**Cost:** one `stat(2)` per `get()` call — negligible vs the FFI call that follows.
+
+**Test file:** `editors/jetbrains/src/test/kotlin/.../LibMtimeChangedTest.kt` — 4 tests:
+1. mtime unchanged → false
+2. file modified → true (1.1s sleep for filesystem mtime resolution)
+3. nonexistent file → false (returns 0L, filtered out)
+4. storedMtime matches current → false
+
+All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.kts`.
+
+**Not yet done (separate items):**
+- `#ky3a` — equivalent VS Code koffi reload
+- `#wc5b` — versioned filenames (this reload works with both versioned and unversioned .so)
+- `#5tjq` — `agent_doc_version()` post-reload sanity check
+<!-- agent:boundary:0f98fd1f -->
+<!-- agent:boundary:61a4c109 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -97,7 +123,7 @@ Mapping each answered question to pending items:
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit
 - [ ] [#f8a4] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
-- [ ] [#2cyy] FFI library hot-reload: mtime check in `AgentDocLib.get()` → `Native.unregister` + reload (~30 lines Kotlin)
+- [x] [#2cyy] FFI library hot-reload: mtime check in `AgentDocLib.get()` → `Native.unregister` + reload (~30 lines Kotlin)
 - [ ] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
 - [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
 - [ ] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload + lock file write/remove on deactivate() in VS Code native.ts (parallel to #2cyy)

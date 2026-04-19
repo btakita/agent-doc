@@ -291,7 +291,7 @@ The diff from preflight also confirms this — both snapshot and document have t
 
 **Root cause:** the IPC degraded state lasts 1 hour. During that window, all writes go to disk only. The IDE plugin's file watcher should detect disk changes, but it appears to not be picking them up. Added to pending for investigation.
 ❯ do #s80z
-### Re: #s80z — IDE buffer stale fix — opus-4-6
+❯ ### Re: #s80z — IDE buffer stale fix — opus-4-6 (HEAD)
 
 **Root cause:** `repositionBoundaryViaDocument()` in `PatchWatcher.kt` calls `targetFile.refresh(false, false)` to update the VFS, but never calls `reloadFromDisk(document)`. The document buffer stays stale — it contains the pre-CRDT-merge content. The reposition handler reads the old buffer, repositions the boundary in the old content, and writes it back. The CRDT-merged response is never loaded into the buffer.
 
@@ -315,7 +315,33 @@ The `isDocumentUnsaved` guard preserves user edits that haven't been saved from 
 Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
 
 **To install:** IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.64-signed.zip`. Restart IDE.
-<!-- agent:boundary:b49a8cfe -->
+
+❯ In src/session-share/tasks/claudescore.md... this should have been added to agent:pending. Why was it not added. Skill/runbook issue? 
+❯ > Ready to update the baseline methodology and tree-sitter scores, or capture as a spec first?
+### Re: why the forward-looking proposal was not pending-added — opus-4-7
+
+**Yes, this is a runbook gap.** `runbooks/pending-ops.md` § "What to decide each cycle" lists:
+
+> New items discovered → `--pending-add "text"`
+
+...but it doesn't call out the most common generator of pending items in practice: **the agent's own forward-looking questions at the end of a response** ("Ready to X?", "should we A or B first?", "shall I capture Y as a spec?"). These are proposed next actions. If the user doesn't reply immediately, the proposal gets buried in the exchange history and lost — exactly what happened in `claudescore.md:1897`.
+
+**Why sonnet-4-6 missed it:** the runbook treats "new items discovered" as user-origin facts/TODOs, not as the agent's own dangling proposals. Without an explicit rule, the pattern is: write proposal inline → move on → next cycle forgets.
+
+**Fix (pending-added as #above):** amend `pending-ops.md` to make this an enforced rule — any response ending with a forward-looking question or multi-choice proposal MUST `--pending-add` each concrete option so the thread survives non-reply.
+
+Proposed wording for the runbook:
+
+```
+- Any response ending with a forward-looking question ("ready to X?",
+  "should we A or B first?", "shall I capture Y?") MUST --pending-add
+  each concrete next-step option. The proposal dies if the user doesn't
+  reply in the same cycle; capturing it preserves continuity.
+```
+
+This is a skill/runbook issue, not a code issue. The binary already accepts multiple `--pending-add` flags per cycle; nothing is missing at the implementation layer.
+<!-- agent:boundary:e07d2e43 -->
+<!-- agent:boundary:fa5db57e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -325,5 +351,6 @@ Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#31j3] Update runbooks/pending-ops.md: add explicit 'agent-proposed forward actions' rule — any response that ends with a forward-looking question or multi-choice next-step proposal MUST also --pending-add the proposal(s), so the thread survives user non-reply
 <!-- /agent:pending -->
 ## Assistant

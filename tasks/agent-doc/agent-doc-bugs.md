@@ -290,8 +290,7 @@ The diff from preflight also confirms this — both snapshot and document have t
 **Workaround:** reload the file in your IDE (Cmd/Ctrl+Shift+A → "Reload from Disk" in IntelliJ, or close and reopen the tab).
 
 **Root cause:** the IPC degraded state lasts 1 hour. During that window, all writes go to disk only. The IDE plugin's file watcher should detect disk changes, but it appears to not be picking them up. Added to pending for investigation.
-<!-- agent:boundary:47bf5bba -->
-<!-- agent:boundary:38bfcdc9 -->
+<!-- agent:boundary:a8a327e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

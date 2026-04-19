@@ -142,7 +142,7 @@ Parent submodule pointer updated.
 
 The dedup fix was confirmed live this cycle: `[recover] Response already present in document — skipping apply, cleaning up pending file`.
 ❯ Why did the last agent-doc turn for src/session-share/tasks/claudescore.md not patchback the response to the document?
-### Re: claudescore.md patchback failure — opus-4-6
+❯ ### Re: claudescore.md patchback failure — opus-4-6 (HEAD)
 
 The ops log shows the write command ran but received no response content:
 
@@ -168,7 +168,24 @@ Compare with the previous successful write:
 3. The session hit a token/output limit and truncated before the write command
 
 No code fix needed — the binary did what it was told. The skill workflow needs to ensure the response is captured before piping.
-<!-- agent:boundary:70e0a35f -->
+❯ Fix the skill/runbook in both agent-doc and agent-loop.
+### Re: fix skill/runbook for empty patchback — opus-4-6
+
+**Binary fix** (`write.rs`): added a warning when write proceeds with 0 template patches:
+```
+[write] WARNING: 0 template patches found — response may be missing or malformed.
+Only normalization/boundary changes will be applied.
+```
+Also logs `zero_patches_warning` to ops.log for forensics.
+
+**SKILL.md fix**: added explicit note under Step 2 (Write back):
+> The response content MUST include `<!-- patch:exchange -->` blocks for template-mode documents. If the heredoc is empty or contains only raw text without patch markers, the binary will warn and only apply normalization — the response will be silently lost.
+
+**Root cause clarification**: the claudescore failure wasn't a missing guard — the binary has guards for empty input and empty patches. The issue was: normalization (adding `❯ ` prefixes to user lines) changed the content enough to pass the dedup guard, so the write proceeded with 0 patches and only normalization changes. The response was lost before reaching the heredoc (context compaction or truncation).
+
+**Both copies synced**: `src/agent-doc/SKILL.md` → `.claude/skills/agent-doc/SKILL.md`. Both binaries rebuilt.
+<!-- agent:boundary:e0e22263 -->
+<!-- agent:boundary:1fdd22d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -178,5 +195,6 @@ No code fix needed — the binary did what it was told. The skill workflow needs
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#ndsd] Empty-heredoc patchback guard — binary warns on 0 template patches + ops log entry. SKILL.md updated with patch:exchange requirement. Both copies synced.
 <!-- /agent:pending -->
 ## Assistant

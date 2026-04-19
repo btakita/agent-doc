@@ -1039,8 +1039,22 @@ Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path wit
 **Why this is better:** The splice approach only preserved the `agent:pending` component. CRDT merge preserves everything — user edits to exchange content, status changes, structural modifications. It also keeps CRDT state consistent for the next cycle.
 
 **Build status:** clippy clean, 1145 tests passing (6 ignored), both binaries rebuilt.
-<!-- agent:boundary:2cfc0b34 -->
-<!-- agent:boundary:36b11a08 -->
+release
+### Re: IPC timeout → CRDT merge — opus-4-6
+
+Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path with full CRDT merge — same approach as the normal disk write path.
+
+**What changed** (`write.rs` ~line 1183):
+- Re-reads current file from disk (captures user edits + pending mutations)
+- If file unchanged from baseline: builds fresh CRDT state from `content_ours`
+- If file modified: runs `merge_contents_crdt(base_state, content_ours, content_current)` — preserves ALL concurrent changes (pending, user edits, any component)
+- Falls back to `splice_pending_component` only if CRDT merge itself fails
+- Saves CRDT state alongside snapshot (previously only snapshot was saved on exit(75))
+
+**Why this is better:** The splice approach only preserved the `agent:pending` component. CRDT merge preserves everything — user edits to exchange content, status changes, structural modifications. It also keeps CRDT state consistent for the next cycle.
+
+**Build status:** clippy clean, 1145 tests passing (6 ignored), both binaries rebuilt.
+<!-- agent:boundary:116c2db2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1051,6 +1065,5 @@ Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path wit
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#phhk] Fix IPC timeout pending mutation loss — splice_pending_component() implemented, clippy clean, 1148 tests pass, both binaries rebuilt. Awaiting user verification.
 <!-- /agent:pending -->
 ## Assistant

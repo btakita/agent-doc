@@ -296,7 +296,46 @@ Two exclusion rules would eliminate both false positives:
 2. **Exclude component/structural markers from the "agent lines after" check** — lines like `<!-- /agent:... -->`, `<!-- agent:... -->`, and `## ` section headers outside the exchange shouldn't count as "agent content" for the inline annotation heuristic. Only `[agent]` lines that are response prose should qualify.
 
 Alternatively: gate the check more conservatively — require at least one `[agent]` line after that is NOT a component marker or section boundary.
-<!-- agent:boundary:0cc6d5ca -->
+
+❯ The fix did not seem to work. See claudescore.md
+
+❯ > do
+❯ > > This is wrong. Do not lower expert scores. We will recalibrate later. The scorer seems wrong. Remember that superpowers is a library that is installed into a harness. Please explain the rationele of 5 or 3. I'm inclined to think the score should be 8-9.
+
+❯ > do
+❯ > > We may need to broaden the gate to update the definition of the rubric.
+### Re: false positive fix + claudescore.md context — sonnet-4-6
+
+#### Why claudescore.md still shows the ignored corrections
+
+The Run 23 cycle ran **before** 0.33.6 was installed. The 18:32:41 commit to claudescore.md was the user reformatting the inline annotations to blockquote form — no new agent response ran. No agent cycle on claudescore.md has run yet with 0.33.6.
+
+Running `/agent-doc src/session-share/tasks/claudescore.md` now would surface those corrections via `inline_annotations`:
+```json
+{
+  "inline_annotations": [
+    "This is wrong. Do not lower expert scores...",
+    "We may need to broaden the gate..."
+  ]
+}
+```
+
+#### False positive fix (now in 0.33.6)
+
+Two exclusion rules added to `extract_inline_annotations`:
+
+**1. Component/structural marker exclusion** — `is_substantive_agent_line()` now rejects:
+- `<!-- ... -->` component tags
+- `# ...` section headers
+- blank lines
+
+End-of-exchange user input followed only by `&lt;!-- /agent:exchange --&gt;` + `## Pending / Not Built` + `&lt;!-- agent:pending --&gt;` is now correctly classified as regular input, not inline annotations.
+
+**2. `(HEAD)` boundary artifact exclusion** — `is_head_boundary_artifact()` skips `[user~]` lines where the only change is appending ` (HEAD)` to a heading. These are reposition artifacts from `agent-doc commit`.
+
+**13 tests pass** (4 new for false positive cases), 1175 total. Both binaries rebuilt.
+<!-- agent:boundary:62746487 -->
+<!-- agent:boundary:1dea0e27 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

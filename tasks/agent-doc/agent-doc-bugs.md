@@ -60,8 +60,33 @@ claude_args: --dangerously-skip-permissions
 Kept as genuine rules (not scaffolding): "No confident hallucination", security handling, submodule git discipline, runbook list, and the workflow bullets that have real content rather than pep-talk framing.
 
 CLAUDE.md symlink → AGENTS.md still valid (unchanged).
-<!-- agent:boundary:91b5873d -->
-<!-- agent:boundary:4377b020 -->
+Add branches to support both opus 4.7 and opus 4.6 usage in runbooks. opus 4.7 just deleted the the 4.6 support.
+### Re: #vprd — AGENTS.md audited — opus-4-7
+
+**Removed (anti-laziness scaffolding):**
+- "Self-Improvement Loop" section — auto-memory handles this orthogonally, no need to duplicate
+- "Autonomous Bug Fixing" section — "just fix it", "Zero context switching" was pure progress-forcing
+- "Demand Elegance (Balanced)" section — "ruthlessly iterate until mistake rate drops" is scaffolding
+- "Task Management" numbered list — 6-step process forcing that wasn't adding rules, just pushing pace
+- "No Laziness" and "Minimal Impact" core principles — scaffolding + duplicate of "Simplicity"
+
+**Removed (progress-forcing):**
+- "ruthlessly iterate on these lessons until mistake rate drops"
+- "Go fix failing CI tests without being told how"
+- "Zero context switching required from the user"
+- "Senior developer standards"
+
+**Added (explicit scope):**
+- "Applies to all work in this repo" header on Workflow section
+- "**Rust projects only**" qualifier on `make check` / `make precommit` rule (was stated generically)
+- Kept the real content: plan-first, subagent scope, verify-before-done, runbook discipline, secret handling, git submodule rules
+
+**Token count:** 802 → 445 words (~450 token reduction). Exceeds #vprd target.
+
+Kept as genuine rules (not scaffolding): "No confident hallucination", security handling, submodule git discipline, runbook list, and the workflow bullets that have real content rather than pep-talk framing.
+
+CLAUDE.md symlink → AGENTS.md still valid (unchanged).
+<!-- agent:boundary:6f85158c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -70,7 +95,6 @@ CLAUDE.md symlink → AGENTS.md still valid (unchanged).
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
-- [x] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
 ## Assistant

@@ -185,7 +185,7 @@ Also logs `zero_patches_warning` to ops.log for forensics.
 
 **Both copies synced**: `src/agent-doc/SKILL.md` → `.claude/skills/agent-doc/SKILL.md`. Both binaries rebuilt.
 do #ndsd
-<!-- agent:boundary:e69b4412 -->
+<!-- agent:boundary:fe973012 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -195,6 +195,5 @@ do #ndsd
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#ndsd] Empty-heredoc patchback guard — binary warns on 0 template patches + ops log entry. SKILL.md updated with patch:exchange requirement. Both copies synced.
 <!-- /agent:pending -->
 ## Assistant

@@ -809,7 +809,7 @@ When confirmed, I'll proceed with:
 3. PyPI build + upload
 
 ❯ Idea crashed in the last session. Please look in the logs to find out why.
-### Re: IDEA crash — opus-4-7
+❯ ### Re: IDEA crash — opus-4-7 (HEAD)
 
 **Crash dump:** `~/java_error_in_idea_1688168.log` (15:09:00, PID 1688168, JVM uptime 8m)
 
@@ -856,7 +856,29 @@ I can't fully prove which mechanism without ltrace/perf, but **(1) is testable**
 **Recommendation:** Option 3 (mtime-based reload) is the most robust without process restart. Option 1 is the quick fix for now.
 
 Yesterday's crashes (`java_error_in_idea_2825553.log` etc.) were a different bug — NULL pointer in `Pointer.getString` from `NativePatching.repositionBoundaryToEnd`, suggesting `result.text` was null but not checked before `getString(0)`. That's a separate fix in `NativePatching.kt`.
-<!-- agent:boundary:a5f0a476 -->
+
+❯ Option 3 is better than option 1. Why not option 4?
+### Re: why not option 4 — opus-4-7
+
+Option 4 (versioned filename) is structurally cleaner — the kernel guarantees the old inode stays alive — but it has install-side friction that option 3 avoids:
+
+**Cargo doesn't write versioned cdylib filenames.** `cargo build` always emits `libagent_doc.so` (cdylib name = crate name). To get `libagent_doc-0.33.4.so` you need a post-build step in the Makefile or `build.rs` that copies/symlinks with the version suffix. Not hard, but it's another moving piece in every install path: `cargo install`, the manylinux Docker wheel build, the GitHub Releases binary tarball, the JB plugin install, the VS Code extension.
+
+**Disk leak.** Every release leaves an old `libagent_doc-X.Y.Z.so` behind. Needs a GC policy (keep last N versions, or sweep on `agent-doc upgrade`). Otherwise `~/.cargo/bin/` accumulates every version forever.
+
+**`agent-doc lib-path` resolution gets ambiguous.** Today it returns one canonical path. With versioned filenames, which version? The latest installed? The one matching the running CLI? If the plugin asks for "latest" and the user just upgraded, the plugin loads the new .so on next call — back to the same hot-reload risk if symbols changed shape. So you still need option 3's mtime check, OR you accept that the plugin only picks up new versions on IDE restart (which is mostly fine, but means new FFI features need a restart to become visible).
+
+**Distribution wrinkle.** PyPI wheel via maturin expects the cdylib at a specific path — versioning the filename means a post-build rename inside the wheel build, and Python's `cffi`/`ctypes` consumers hardcode the unversioned name.
+
+**Option 3 is one file change** (`AgentDocLib.get()` adds `lastLoadedMtime` field, stats on each call, reloads on change) with zero install/build/distribution impact. Cost: one `stat(2)` per FFI dispatch — sub-microsecond.
+
+**The strongest argument for option 4:** option 3 still has a race window. Between the mtime check and the actual JNA call, a concurrent overwrite could happen. Option 4 closes that window completely. But the window in option 3 is narrow enough that it's effectively never hit outside of pathological release storms — and even if hit, the next call recovers.
+
+**Hybrid:** option 3 + the JB plugin-build install path also writes a versioned symlink (`libagent_doc-current.so` → versioned target), so we get the kernel-level guarantee without rewriting cargo's output naming. But that's complexity for a small improvement.
+
+**Verdict:** option 3 unless we're already doing the build-system surgery for some other reason. If you want, I can implement option 3 now — it's ~15 lines in `NativeLib.kt`.
+<!-- agent:boundary:c74e1f25 -->
+<!-- agent:boundary:8b697713 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

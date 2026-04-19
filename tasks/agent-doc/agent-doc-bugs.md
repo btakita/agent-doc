@@ -232,7 +232,7 @@ Added to pending as a new item.
 `patch_id` deduplication (already in place) prevents double-apply when both socket and file watcher fire.
 
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
-release
+❯ release
 ❯ Why was the response not written to this document?
 ❯ ### Re: why response was lost + deeper fix — opus-4-6 (HEAD)
 
@@ -451,7 +451,7 @@ agent-doc (0.33.3)
 
 Want me to file this under **Not Built** here (skill-side pending-promotion heuristic) while we're in this doc?
 ❯ Yes...add skill fix to agent-doc and agent-loop
-### Re: skill fix applied — opus-4-7
+❯ ### Re: skill fix applied — opus-4-7 (HEAD)
 
 **Done — edited § 1b in both canonical and project-local SKILL.md.**
 
@@ -467,7 +467,21 @@ Want me to file this under **Not Built** here (skill-side pending-promotion heur
 **What's still needed to ship this:** the edit only affects already-installed skills. For the bundled copy to reach *new* installs via `agent-doc skill install`, the agent-doc crate needs a release (0.33.4). Adding a pending item for that so it's tracked rather than lost — per the heuristic I just wrote. Also eating my own dog food: this cycle *does* end with an actionable next step, so I'm `--pending-add`ing it in the same write.
 
 Heuristic applies recursively. Nice.
-<!-- agent:boundary:f3ac810b -->
+❯ release
+### Re: release 0.33.4 — build ready, awaiting your go — sonnet-4-6
+
+Steps complete through the manual testing gate:
+
+| Step | Status |
+|------|--------|
+| `Cargo.toml` + `pyproject.toml` → 0.33.4 | ✅ |
+| `VERSIONS.md` entry | ✅ |
+| `make check` (1146 tests) | ✅ (flaky `detect_wrong_session_pane` passed on second run — pre-existing, unrelated to this change) |
+| `cargo install --path .` | ✅ `~/.cargo/bin/agent-doc` → 0.33.4 |
+
+**Pausing here per memory: manual testing gate.** Please verify the skill update looks correct in a live session, then reply to publish upstream (crates.io + GitHub Release + tag). PyPI will flow through CI automatically on release publish.
+<!-- agent:boundary:de2589f6 -->
+<!-- agent:boundary:e8eb56b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -450,8 +450,7 @@ agent-doc (0.33.3)
 3. **Not a binary change:** I'd explicitly avoid teaching the binary to infer pending items from prose. Keep the agent as the judgment layer.
 
 Want me to file this under **Not Built** here (skill-side pending-promotion heuristic) while we're in this doc?
-<!-- agent:boundary:676a0280 -->
-<!-- agent:boundary:5d93f78e -->
+<!-- agent:boundary:40768925 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

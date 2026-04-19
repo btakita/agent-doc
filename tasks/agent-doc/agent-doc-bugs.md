@@ -783,7 +783,7 @@ The migration guide specifically says: remove instructions forcing progress upda
 4. Add mandatory-step language to SKILL.md
 5. Test on 4.7: baseline current behavior before changes, then iterate
 ❯ Add these steps to pending
-### Re: IPC diagnostics, model coexistence, tokenizer cost, effort levels — opus-4-6
+❯ ### Re: IPC diagnostics, model coexistence, tokenizer cost, effort levels — opus-4-6 (HEAD)
 
 #### IPC socket failure — existing diagnostics
 
@@ -803,6 +803,8 @@ Both sender and receiver have extensive logging. Here's what's available:
 **To diagnose next occurrence:** Check `idea.log` for `[socket] IPC listener started` for this project root. If missing, the listener never started for this workspace — likely a multi-root registration gap (Bug B territory). If present, look for `applyPatch` timing — if it takes >500ms, the sidecar poll expires before the apply completes.
 
 **Practical fix:** Using `--force-disk` bypasses the entire IPC path. The agent-doc skill should default to `--force-disk` when the IPC path has failed in the same session. I can add that as a pending item if you want it tracked.
+
+❯ Yes
 
 #### Can we support both models via runbooks?
 
@@ -870,7 +872,10 @@ Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
 - Better edge-case handling in complex diffs
 
 **Recommendation:** The agent-doc SKILL.md should specify `high` as the minimum effort for template-mode sessions. The preflight `effective_tier` already maps to effort levels — wire `high` tier → `high` effort as a floor, not a suggestion.
-<!-- agent:boundary:70ad1647 -->
+### Re: IPC force-disk fallback — acknowledged — opus-4-6
+
+Added to pending. The implementation: the skill workflow should track whether `ack-content sidecar not available after 500ms` appeared in a previous write's output during this session. If so, all subsequent `agent-doc write --stream` calls in the same session append `--force-disk`. This keeps IPC as the default (faster when plugin works) but auto-degrades on first failure.
+<!-- agent:boundary:d46fd5ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -886,5 +891,6 @@ Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#d2d4] agent-doc skill: default to --force-disk after IPC failure in same session — track IPC ACK timeout and auto-switch for remaining cycles
 <!-- /agent:pending -->
 ## Assistant

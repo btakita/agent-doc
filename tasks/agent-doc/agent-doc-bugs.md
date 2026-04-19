@@ -756,7 +756,7 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - `route.rs`: `resolve_target_session` auto-updates `config.toml` when configured session is stale
 - Both binaries rebuilt, 1146 tests pass
 ❯ do #8ndp
-### Re: #8ndp done — PluginLifecycleListener passes --session — opus-4-6
+❯ ### Re: #8ndp done — PluginLifecycleListener passes --session — opus-4-6 (HEAD)
 
 Done. `PluginLifecycleListener.runResyncFix()` now queries `tmux display-message -p "#{session_name}"` before calling resync. If a tmux session is found, it passes `--session <name>` which activates relocation mode (join-pane) instead of kill mode for WrongSession panes.
 
@@ -771,7 +771,17 @@ Done. `PluginLifecycleListener.runResyncFix()` now queries `tmux display-message
 3. **Config auto-update (route.rs):** Stale `tmux_session` in config.toml gets corrected on next route/sync
 
 **Plugin built:** `agent-doc-jetbrains-0.2.66.zip` (unsigned + signed). Ready for install-from-disk.
-<!-- agent:boundary:fddb798e -->
+❯ do #wk1t
+### Re: #wk1t verified — config.toml auto-update works — opus-4-6
+
+Already verified live. Config.toml was `tmux_session = "claude"` earlier in this session. It's now `tmux_session = "0"` — the auto-update in `resolve_target_session` fired when a route/sync ran after the rebuild. The `"claude"` session didn't exist, so it fell through to `current_tmux_session()` which returned `"0"`, and `update_project_tmux_session("0")` wrote it to config.
+
+**Verification:**
+- Before: `tmux_session = "claude"` (stale — no `claude` session exists)
+- After: `tmux_session = "0"` (matches actual tmux session `0`)
+- Tmux sessions: `0`, `1` (no `claude`)
+<!-- agent:boundary:6d409023 -->
+<!-- agent:boundary:b907e381 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -784,6 +794,6 @@ Done. `PluginLifecycleListener.runResyncFix()` now queries `tmux display-message
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 - [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
-- [ ] [#wk1t] Config.toml auto-update for tmux_session when configured session is stale — implemented in resolve_target_session, needs live verification
+- [x] [#wk1t] Config.toml auto-update for tmux_session when configured session is stale — implemented in resolve_target_session, needs live verification
 <!-- /agent:pending -->
 ## Assistant

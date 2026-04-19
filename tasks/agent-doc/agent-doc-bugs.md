@@ -184,7 +184,8 @@ Also logs `zero_patches_warning` to ops.log for forensics.
 **Root cause clarification**: the claudescore failure wasn't a missing guard — the binary has guards for empty input and empty patches. The issue was: normalization (adding `❯ ` prefixes to user lines) changed the content enough to pass the dedup guard, so the write proceeded with 0 patches and only normalization changes. The response was lost before reaching the heredoc (context compaction or truncation).
 
 **Both copies synced**: `src/agent-doc/SKILL.md` → `.claude/skills/agent-doc/SKILL.md`. Both binaries rebuilt.
-<!-- agent:boundary:46238b6e -->
+do #ndsd
+<!-- agent:boundary:e69b4412 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -194,6 +195,6 @@ Also logs `zero_patches_warning` to ops.log for forensics.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#ndsd] Empty-heredoc patchback guard — binary warns on 0 template patches + ops log entry. SKILL.md updated with patch:exchange requirement. Both copies synced.
+- [x] [#ndsd] Empty-heredoc patchback guard — binary warns on 0 template patches + ops log entry. SKILL.md updated with patch:exchange requirement. Both copies synced.
 <!-- /agent:pending -->
 ## Assistant

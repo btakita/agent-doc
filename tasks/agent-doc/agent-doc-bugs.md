@@ -129,7 +129,7 @@ The dedup fix was already built and installed in the previous cycle:
 
 Both binaries contain `fingerprint_lines` (the per-line dedup check). Ready for live testing — the next orphan recovery with blank-line/boundary content should trigger the dedup guard instead of duplicating.
 ❯ release
-### Re: release v0.33.2 — opus-4-6
+❯ ### Re: release v0.33.2 — opus-4-6 (HEAD)
 
 Published agent-doc v0.33.2:
 - **crates.io**: https://crates.io/crates/agent-doc/0.33.2
@@ -141,7 +141,35 @@ Includes: FFI submodule path resolution, IPC timeout CRDT merge, recovery dedup 
 Parent submodule pointer updated.
 
 The dedup fix was confirmed live this cycle: `[recover] Response already present in document — skipping apply, cleaning up pending file`.
-<!-- agent:boundary:d9cb13d4 -->
+❯ Why did the last agent-doc turn for src/session-share/tasks/claudescore.md not patchback the response to the document?
+### Re: claudescore.md patchback failure — opus-4-6
+
+The ops log shows the write command ran but received no response content:
+
+```
+[1776567463] write_origin file=tasks/claudescore.md origin=skill
+[1776567463] normalize_user_prompts applied=3       ← only user line normalization
+[1776567464] ipc_socket_delivered snap_len=139940   ← IPC delivered
+[1776567464] ipc_write_consumed patches=0           ← 0 patches
+```
+
+Compare with the previous successful write:
+```
+[1776563371] write_origin origin=skill
+[1776563371] normalize_user_prompts applied=2
+[1776563371] write_stream_done snap_len=123908      ← actual content written
+```
+
+**Diagnosis:** The `agent-doc write` heredoc received empty or whitespace-only input. The binary processed it correctly (normalized 3 user lines, delivered IPC, committed), but there was no response content to write. The snapshot grew by ~448 bytes (just the 3 `❯ ` normalization prefixes), not by a response block.
+
+**This is a skill-side issue, not a binary bug.** The Claude session for claudescore.md generated a response in the console but the heredoc pipe to `agent-doc write` was empty. Likely causes:
+1. Context compaction between response generation and write command
+2. The heredoc `RESPONSE` delimiter was malformed or missing
+3. The session hit a token/output limit and truncated before the write command
+
+No code fix needed — the binary did what it was told. The skill workflow needs to ensure the response is captured before piping.
+<!-- agent:boundary:7715d22c -->
+<!-- agent:boundary:e92b76c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -971,7 +971,7 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 Why were the pending items statuses not updated?
-### Re: installability of skill/runbook changes — opus-4-6
+❯ ### Re: installability of skill/runbook changes — opus-4-6 (HEAD)
 
 No — the previous cycle only edited the agent-loop local copies (`.claude/skills/agent-doc/`). The canonical source files in `src/agent-doc/` were untouched, so `agent-doc skill install` would have overwritten the changes with the old versions.
 
@@ -980,7 +980,14 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 - `src/agent-doc/runbooks/model-tier-gate.md` — model-to-tier mapping table
 
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
-<!-- agent:boundary:dde0f8a0 -->
+### Re: pending statuses not updated — opus-4-6
+
+The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were passed in the first cycle's `agent-doc write`, but the write exited with code 75 (IPC timeout). The response content was saved as a patch and recovered by the next preflight — but recovery only replays exchange content, not pending flag mutations. The `--pending-done` flags were lost.
+
+This is a bug in the IPC-degraded write path: pending mutations should be applied to the file before or independently of IPC. Currently, if IPC times out, any `--pending-*` flags on that write are silently dropped.
+
+Applying the pending-done flags now in this cycle.
+<!-- agent:boundary:24783306 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

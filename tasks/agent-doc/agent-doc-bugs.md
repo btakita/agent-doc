@@ -234,8 +234,7 @@ Even without the binary enhancement, the skill could instruct: "After reading th
 Blockquotes get `[user+] >` tags in the annotated diff — structurally distinct from agent prose. This is the belt-and-suspenders layer that works regardless of binary/skill changes.
 
 **Recommendation:** implement #1 (binary) + #2 (skill) as a tracked pending item. #3 is already the documented convention.
-<!-- agent:boundary:6bf7ae4f -->
-<!-- agent:boundary:edbe6dc0 -->
+<!-- agent:boundary:e76b8668 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

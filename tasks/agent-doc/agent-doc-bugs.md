@@ -702,7 +702,7 @@ At 19:40:23 (90s earlier), same result for `agent-loop.md`. Both files returned 
 Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.63-signed.zip` → restart IDE.
 
 After restart, `Run Agent Doc` will proceed directly to the `agent-doc route` CLI command with no busy guard.
-<!-- agent:boundary:4c0472a2 -->
+<!-- agent:boundary:bc1e801a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

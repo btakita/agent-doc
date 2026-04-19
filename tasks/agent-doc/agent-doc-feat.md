@@ -190,14 +190,12 @@ Lock file format: `libagent_doc-0.33.4.so.pid.12345` — zero-byte sentinel per 
 - JetBrains: compiles clean (lock logic tested via Rust GC tests)
 
 Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_doc-0.33.4.so` / `nothing to clean`.
-<!-- agent:boundary:a65f6028 -->
-<!-- agent:boundary:295c8feb -->
+<!-- agent:boundary:8e1e19c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
 - [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys

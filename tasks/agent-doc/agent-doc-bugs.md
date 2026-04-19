@@ -746,8 +746,7 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - Config.toml still shows `tmux_session = "claude"` — will auto-update on next route/sync call since no `claude` session exists
 
 **Remaining risk:** The auto-update triggers when a route/sync runs and the configured session is dead. If the user intentionally renamed their session and wants to keep the config pointing to the old name (waiting for it to come back), the auto-update would overwrite that intent. This is an edge case — the current behavior (killing active agents) is worse.
-<!-- agent:boundary:fdc7837e -->
-<!-- agent:boundary:0e29ca73 -->
+<!-- agent:boundary:d4f1c351 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -760,7 +759,6 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 - [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
-- [x] [#2ea0] Patch resync to preserve active agents: in apply_fixes_to_registry, when pane runs a process in AGENT_PROCESSES, use join-pane relocation instead of kill_pane
 - [ ] [#8ndp] Add safety check to PluginLifecycleListener: pass --session <current> to resync --fix for relocation mode instead of kill mode
 - [ ] [#wk1t] Config.toml auto-update for tmux_session when configured session is stale — implemented in resolve_target_session, needs live verification
 <!-- /agent:pending -->

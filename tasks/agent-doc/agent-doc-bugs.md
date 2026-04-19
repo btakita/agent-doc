@@ -274,8 +274,7 @@ Added to the Respond step:
 | `preflight_output_omits_inline_annotations_when_empty` | preflight.rs | JSON omits empty field |
 
 **All 1172 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
-<!-- agent:boundary:6074a913 -->
-<!-- agent:boundary:e952146e -->
+<!-- agent:boundary:437efab8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

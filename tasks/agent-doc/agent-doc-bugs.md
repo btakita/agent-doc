@@ -728,7 +728,7 @@ This brings the runtime state in line with the config.
 Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and you just installed it — that's what triggered this IDEA restart. But the testing gate hasn't passed: we haven't confirmed the VFS refresh + BulkFileListener fixes actually prevent the overwrite bug in a live session. The resync/session issue you hit is a separate bug from #mpjv.
 
 ❯ do #2ea0
-### Re: #2ea0 done + config.toml auto-update implemented — opus-4-6
+❯ ### Re: #2ea0 done + config.toml auto-update implemented — opus-4-6 (HEAD)
 
 **#2ea0 — Resync preserves active agents:** Done. Modified `apply_fixes_to_registry` in `resync.rs`. When `relocate_session` is `None` (the automatic startup path), the WrongSession handler now:
 
@@ -746,7 +746,17 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - Config.toml still shows `tmux_session = "claude"` — will auto-update on next route/sync call since no `claude` session exists
 
 **Remaining risk:** The auto-update triggers when a route/sync runs and the configured session is dead. If the user intentionally renamed their session and wants to keep the config pointing to the old name (waiting for it to come back), the auto-update would overwrite that intent. This is an edge case — the current behavior (killing active agents) is worse.
-<!-- agent:boundary:d4f1c351 -->
+❯ do #2ea0
+### Re: duplicate do #2ea0 — opus-4-6
+
+#2ea0 is already done. It was completed in the previous cycle and preflight confirmed "reaped 1 item(s): 2ea0". The "do #2ea0" text in the working tree is a stale duplicate — the changes (resync agent preservation + config.toml auto-update) are already built and installed.
+
+**Summary of what shipped:**
+- `resync.rs`: WrongSession handler now relocates active agent panes instead of killing them
+- `route.rs`: `resolve_target_session` auto-updates `config.toml` when configured session is stale
+- Both binaries rebuilt, 1146 tests pass
+<!-- agent:boundary:cd0f4ffd -->
+<!-- agent:boundary:c4efa50d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

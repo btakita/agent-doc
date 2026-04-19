@@ -88,7 +88,7 @@ Mapping each answered question to pending items:
 
 **Q3 → resolved, no action.** Versioned cdylib and maturin's Python extension module use separate crate-type targets and filenames. Confirmed no collision.
 ❯ do #2cyy add tests
-### Re: #2cyy — JNA mtime hot-reload implemented + tests — opus-4-6
+❯ ### Re: #2cyy — JNA mtime hot-reload implemented + tests — opus-4-6 (HEAD)
 
 **What changed in `NativeLib.kt`:**
 
@@ -112,7 +112,31 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 - `#ky3a` — equivalent VS Code koffi reload
 - `#wc5b` — versioned filenames (this reload works with both versioned and unversioned .so)
 - `#5tjq` — `agent_doc_version()` post-reload sanity check
-<!-- agent:boundary:334b384c -->
+❯ do #ky3a add tests
+### Re: #ky3a — VS Code koffi mtime hot-reload implemented + tests — opus-4-6
+
+**What changed in `native.ts`:**
+
+- Added `libMtimeChanged(filePath, storedMtime)` exported function — pure `fs.statSync().mtimeMs` comparison, same pattern as the Kotlin version
+- Added `resetBindings()` helper — nulls all lazy function bindings so `bindFunctions()` re-registers them on next call
+- Added `loadedPath` and `loadedMtime` module-level tracking
+- `ensureLoaded()` now checks mtime when already loaded: if changed, resets bindings and calls `koffi.load()` with the same path (resolves through symlink to new inode)
+- On reload failure, keeps previous `lib` instance (graceful degradation)
+- Initial load now stores `loadedPath` and `loadedMtime`
+
+**Cost:** one `statSync()` per `ensureLoaded()` call — negligible vs the FFI call that follows.
+
+**Test file:** `src/native.test.ts` — 4 tests using Node's built-in `node:test` runner:
+1. mtime unchanged → false
+2. file modified → true (1.1s sleep for filesystem mtime resolution)
+3. nonexistent file → false
+4. storedMtime matches current → false
+
+All 4 pass. Added `"test": "tsc -p ./ && node --test out/native.test.js"` to `package.json` scripts.
+
+**Lock file write/remove on `deactivate()`** (mentioned in the expanded `#ky3a` scope) deferred — depends on `#408p` gc-libs subcommand being implemented first to define the lock file format.
+<!-- agent:boundary:713755a0 -->
+<!-- agent:boundary:951747ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -124,6 +148,6 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 - [ ] [#f8a4] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
 - [ ] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
 - [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
-- [ ] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload + lock file write/remove on deactivate() in VS Code native.ts (parallel to #2cyy)
+- [x] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload + lock file write/remove on deactivate() in VS Code native.ts (parallel to #2cyy)
 - [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 <!-- /agent:pending -->

@@ -55,7 +55,7 @@ claude_args: --dangerously-skip-permissions
 
 ❯ In src/session-share/tasks/claudescore.md, I'm getting a prompt prefix for the response patchback. See `❯ |-------------|--------|----------|--------|-------|` and `❯ | tree-sitter | 76.0   | **76.0** | 80.0   | 0     |`
 ❯ Why?
-### Re: normalize_user_prompts prefixing agent response table rows — opus-4-6
+❯ ### Re: normalize_user_prompts prefixing agent response table rows — opus-4-6 (HEAD)
 
 **Root cause: snapshot lag + naive diff heuristic.**
 
@@ -76,14 +76,82 @@ claude_args: --dangerously-skip-permissions
 
 2. **Exclude markdown table rows** (`|...|` pattern) — simple regex filter. Quick fix but users could legitimately type tables.
 
+❯ Can we use a streaming AST instead?
+
 3. **Cross-reference the response patches** — when normalize runs, the agent response content is available (in the patches passed to apply_patches). Subtract those lines from `user_added`. Requires threading the patch content through to normalize.
 
 4. **Boundary history awareness** — instead of one boundary, track all historical boundary positions in the snapshot. Content between consecutive boundaries is agent content from prior cycles, so exclude from `user_added`.
 
 **Recommendation:** Option 1 (agent-response-block tracking) as the primary fix. Low risk: `### Re:` headings are a structural convention already enforced by the SKILL.md. Lines between `### Re:` and the next `### Re:`/prompt-prefix/boundary are agent content by definition.
 
+❯ Option 1 looks good. Please address my prompt about using a streaming AST on Option 2. Is Option 1 still recommended? Make sure we don't hardcode h3 `###`. Are agent-doc responses **always** h3? We should probably not hard-code anyways.
+
 **Immediate mitigation for claudescore.md:** strip the existing prompt prefixes from agent response table rows in the committed content. A sed pass or targeted git filter would clean up the 55 affected lines.
-<!-- agent:boundary:95d30a39 -->
+
+❯ No need
+### Re: streaming AST, heading levels, and final recommendation — opus-4-6
+
+#### Streaming AST for Option 2
+
+A streaming markdown AST (tree-sitter-markdown) would give us proper structural awareness — we'd know whether a `|` line is a table row vs. inside a code block vs. a list item. But it's overkill for this problem:
+
+- **We already track code fence state** as a mini state machine (backtick/tilde open/close). Extending that to "inside agent response block" is ~10 lines, not a new dependency.
+- **tree-sitter-markdown adds a C dependency** (tree-sitter runtime + grammar). agent-doc is pure Rust today. The normalize function runs on every write — adding a parse step that allocates a full AST per call is heavier than a line-by-line state machine.
+- **The AST doesn't solve the root problem.** Even with a perfect AST, we'd still need to distinguish "user-added table row" from "agent-added table row." The AST tells us it's a table — it doesn't tell us who wrote it. The fix is about authorship tracking, not syntax recognition.
+
+If agent-doc ever needs full markdown awareness for other features (section-level diffing, smart compaction, outline extraction beyond the current regex-based approach), tree-sitter-markdown would be worth adding then. For this specific bug, it's not the right tool.
+
+#### Heading levels — no hardcoding
+
+Agent-doc responses are NOT always h3:
+- **Template mode:** `### Re:` by convention, but h4-h6 for sub-sections within responses
+- **Inline mode:** `## Assistant` (h2)
+- **Future/custom:** nothing prevents other levels
+
+The fix should be **heading-level agnostic.** Detect agent response regions by:
+- **Start:** any markdown heading (`#{1,6} `) that is NOT prefixed with `❯` and is inside the exchange
+- **End:** next `❯`-prefixed line, next heading at same or higher level, or boundary marker
+
+This is the same pattern as the existing code-fence state machine — just tracking heading context instead of fence delimiters. No string matching on "Re:" or "###" needed. The structural insight: in the exchange, unprefixed headings are agent response markers. Users write inline text, blockquotes, and annotations — not standalone headings.
+
+#### Final recommendation
+
+**Option 1 remains recommended**, with the heading-level-agnostic approach above. Implementation sketch in `normalize_user_prompts_in_exchange`:
+
+```rust
+// Track whether we're inside an agent response block.
+// Agent responses start at headings (not ❯-prefixed) and end at the next
+// ❯-prefixed line, boundary marker, or heading at same/higher level.
+let mut in_agent_block = false;
+let mut agent_heading_level = 0usize;
+
+// In the diff loop (building user_added):
+if change.tag() == ChangeTag::Insert {
+    let trimmed = line.trim();
+    if let Some(level) = heading_level(trimmed) {
+        if !trimmed.starts_with('❯') {
+            in_agent_block = true;
+            agent_heading_level = level;
+            continue; // heading itself is agent content
+        }
+    }
+    if in_agent_block {
+        if trimmed.starts_with('❯') || trimmed.starts_with("<!--") {
+            in_agent_block = false;
+        } else {
+            continue; // skip — this line is inside an agent response
+        }
+    }
+    // existing filters: blank, fence, already-prefixed...
+    user_added.insert(line.to_string());
+}
+```
+
+Where `heading_level(s)` returns `Some(n)` if the line starts with 1-6 `#` chars followed by a space, else `None`.
+
+This catches all the table rows from the claudescore bug (they're inside `### Re:` blocks) without any hardcoded heading levels or `Re:` text matching.
+<!-- agent:boundary:5fd48f69 -->
+<!-- agent:boundary:36574d98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

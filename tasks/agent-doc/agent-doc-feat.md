@@ -137,7 +137,7 @@ All 4 pass. Added `"test": "tsc -p ./ && node --test out/native.test.js"` to `pa
 **Lock file write/remove on `deactivate()`** (mentioned in the expanded `#ky3a` scope) deferred — depends on `#408p` gc-libs subcommand being implemented first to define the lock file format.
 
 ❯ Do #wc5b with tests
-### Re: #wc5b — versioned .so install with atomic symlink swap — opus-4-6
+❯ ### Re: #wc5b — versioned .so install with atomic symlink swap — opus-4-6 (HEAD)
 
 **New subcommand: `agent-doc lib-install`**
 
@@ -162,13 +162,42 @@ Options: `--source <path>` (default: `target/release/libagent_doc.so`), `--targe
 4. `install_replaces_regular_file_with_symlink` — legacy unversioned file gets replaced by symlink
 
 All pass. Verified end-to-end: `~/.cargo/bin/libagent_doc.so` → `libagent_doc-0.33.4.so`, `agent-doc lib-path` resolves correctly.
-<!-- agent:boundary:aaf5903a -->
+❯ do #408p with tests
+### Re: #408p — gc-libs subcommand + editor PID lock files — opus-4-6
+
+**Rust: `agent-doc gc-libs` subcommand** (`src/lib_gc.rs`)
+
+Walks the library directory for versioned `libagent_doc-*.so` files. For each:
+- **Keep** if it's the current symlink target
+- **Keep** if any `.pid.<PID>` lock file exists with a live process (`/proc/<pid>` on Linux)
+- **Remove** the .so and clean up dead lock files otherwise
+
+Lock file format: `libagent_doc-0.33.4.so.pid.12345` — zero-byte sentinel per process per version. Allows multiple processes to hold the same version without overwriting each other's locks.
+
+**JetBrains (NativeLib.kt):**
+- `writePidLock(path)` on successful load/reload — creates `<resolved-path>.pid.<JVM-PID>`
+- `removePidLock()` on reload (cleans old lock before creating new) and via JVM shutdown hook
+- Shutdown hook registered once on first load
+
+**VS Code (native.ts):**
+- `writePidLock(libPath)` on successful load/reload
+- `removePidLock()` on reload and via `process.on('exit')` handler
+- Both exported for testing
+
+**Tests:**
+- Rust (5): stale lib removal, current target preservation, live PID preservation, dead PID cleanup, no-op when empty
+- VS Code (2 new): lock file create+remove, safe double-remove
+- JetBrains: compiles clean (lock logic tested via Rust GC tests)
+
+Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_doc-0.33.4.so` / `nothing to clean`.
+<!-- agent:boundary:a65f6028 -->
+<!-- agent:boundary:295c8feb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
+- [x] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
 - [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys

@@ -168,8 +168,7 @@ Compare with the previous successful write:
 3. The session hit a token/output limit and truncated before the write command
 
 No code fix needed — the binary did what it was told. The skill workflow needs to ensure the response is captured before piping.
-<!-- agent:boundary:7715d22c -->
-<!-- agent:boundary:e92b76c7 -->
+<!-- agent:boundary:70e0a35f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -675,7 +675,7 @@ The tmux panes weren't destroyed — they were reorganized to match the editor's
 ❯ > Revert these changes to the expected scores. The scores were calibrated according to an expert sentiment reality before the change was made. Now the lack of an agent harnesses misapplied penalty is creeping back in. This is why I want to isolate each factor individually to calculate scores. It seems that you are getting confused by grouping factors into a single rubric...particularly the agentic harness. The original rubrics were designed for agentic user sessions. Remember the purpose of the repo. The repo is not supposed to be an agentic user session. Revert the change to the expected score and let's apply our changes more methodically. I believe that we need to break apart the rubrics to be focused on a single factor. Plan with me.
 
 ❯ When Idea restarted, the tmux pane closed and a new tmux pane `%51` took its place. What happened?
-### Re: old Claude session killed on IDEA restart — opus-4-6
+❯ ### Re: old Claude session killed on IDEA restart — opus-4-6 (HEAD)
 
 The old Claude Code session was killed by `resync --fix`. Here's the chain:
 
@@ -694,9 +694,38 @@ The old Claude Code session was killed by `resync --fix`. Here's the chain:
 
 **What I'd recommend:**
 1. **Fix the immediate config mismatch:** Either rename your tmux session to `claude`, or update `.agent-doc/config.toml` to match your actual session name (e.g., `tmux_session = "0"`)
+❯ Rename the tmux session. Why did the newly created session not have the correct name and/or why was `tmux_session` in config.toml not updated?
 2. **Patch resync to preserve active agents:** In `apply_fixes_to_registry`, when the pane is running a process in `AGENT_PROCESSES`, use `join-pane` relocation instead of `kill_pane` — same as the `relocate_session` path but automatic
+❯ Add to pending
 3. **Add a safety check to PluginLifecycleListener:** Pass `--session <current>` to `resync --fix` so it uses relocation mode rather than kill mode
-<!-- agent:boundary:d9ddc150 -->
+❯ Add to pending
+
+❯ Is #mpjv done?
+### Re: why new session has wrong name + pending additions + #mpjv status — opus-4-6
+
+#### Why the new pane ended up in session `0` instead of `claude`
+
+Two systems fought each other:
+
+1. **`resync --fix` enforces `config.toml`** — it saw `tmux_session = "claude"` and killed the old pane because it was in a different session.
+
+2. **`sync` uses `context_session` from the `--window` arg** — when `EditorTabSyncListener` fired after restart, it called sync with `--window @21`. Sync resolved `context_session` by querying `tmux display-message -t @21 -p "#{session_name}"` which returned `"0"`. This context_session **overrides** the config in `resolve_target_session` (priority 1: context_session > priority 2: config.toml).
+
+So the sequence was: resync killed the old pane (wrong session per config) → sync created a new pane in session `0` (right session per the window context) → config was NOT updated (by design: "Session config is never auto-written").
+
+**Why the config wasn't updated:** `resolve_target_session` documents: "Only `agent-doc session set <name>` pins a session." The config was last set to `"claude"` and never changed. Meanwhile the actual tmux sessions are `0` and `1` (default auto-numbered names).
+
+**The fix for you right now:** rename your tmux session:
+```bash
+tmux rename-session -t 0 claude
+```
+This brings the runtime state in line with the config.
+
+#### #mpjv status
+
+Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and you just installed it — that's what triggered this IDEA restart. But the testing gate hasn't passed: we haven't confirmed the VFS refresh + BulkFileListener fixes actually prevent the overwrite bug in a live session. The resync/session issue you hit is a separate bug from #mpjv.
+<!-- agent:boundary:24fa4c34 -->
+<!-- agent:boundary:9c33a372 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -709,5 +738,7 @@ The old Claude Code session was killed by `resync --fix`. Here's the chain:
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 - [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
+- [ ] [#2ea0] Patch resync to preserve active agents: in apply_fixes_to_registry, when pane runs a process in AGENT_PROCESSES, use join-pane relocation instead of kill_pane
+- [ ] [#8ndp] Add safety check to PluginLifecycleListener: pass --session <current> to resync --fix for relocation mode instead of kill mode
 <!-- /agent:pending -->
 ## Assistant

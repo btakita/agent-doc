@@ -747,7 +747,7 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 
 **Remaining risk:** The auto-update triggers when a route/sync runs and the configured session is dead. If the user intentionally renamed their session and wants to keep the config pointing to the old name (waiting for it to come back), the auto-update would overwrite that intent. This is an edge case — the current behavior (killing active agents) is worse.
 ❯ do #2ea0
-### Re: duplicate do #2ea0 — opus-4-6
+❯ ### Re: duplicate do #2ea0 — opus-4-6 (HEAD)
 
 #2ea0 is already done. It was completed in the previous cycle and preflight confirmed "reaped 1 item(s): 2ea0". The "do #2ea0" text in the working tree is a stale duplicate — the changes (resync agent preservation + config.toml auto-update) are already built and installed.
 
@@ -755,7 +755,24 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - `resync.rs`: WrongSession handler now relocates active agent panes instead of killing them
 - `route.rs`: `resolve_target_session` auto-updates `config.toml` when configured session is stale
 - Both binaries rebuilt, 1146 tests pass
-<!-- agent:boundary:360bf33a -->
+❯ do #8ndp
+### Re: #8ndp done — PluginLifecycleListener passes --session — opus-4-6
+
+Done. `PluginLifecycleListener.runResyncFix()` now queries `tmux display-message -p "#{session_name}"` before calling resync. If a tmux session is found, it passes `--session <name>` which activates relocation mode (join-pane) instead of kill mode for WrongSession panes.
+
+**Change in `PluginLifecycleListener.kt`:**
+- Queries current tmux session name via `ProcessBuilder("tmux", "display-message", ...)`
+- If found: calls `agent-doc resync --fix --session <name>` (relocation mode)
+- If tmux not available: falls back to `agent-doc resync --fix` (now safe due to #2ea0's agent preservation)
+
+**Combined defense-in-depth:**
+1. **#2ea0 (resync.rs):** Even without `--session`, active agents are relocated/preserved instead of killed
+2. **#8ndp (PluginLifecycleListener):** Passes `--session` so ALL panes (including idle shells) get relocated instead of killed
+3. **Config auto-update (route.rs):** Stale `tmux_session` in config.toml gets corrected on next route/sync
+
+**Plugin built:** `agent-doc-jetbrains-0.2.66.zip` (unsigned + signed). Ready for install-from-disk.
+<!-- agent:boundary:e2cd37fa -->
+<!-- agent:boundary:b028d6c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -768,7 +785,7 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 - [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
-- [ ] [#8ndp] Add safety check to PluginLifecycleListener: pass --session <current> to resync --fix for relocation mode instead of kill mode
+- [x] [#8ndp] Add safety check to PluginLifecycleListener: pass --session <current> to resync --fix for relocation mode instead of kill mode
 - [ ] [#wk1t] Config.toml auto-update for tmux_session when configured session is stale — implemented in resolve_target_session, needs live verification
 <!-- /agent:pending -->
 ## Assistant

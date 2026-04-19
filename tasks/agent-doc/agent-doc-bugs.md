@@ -879,7 +879,7 @@ Option 4 (versioned filename) is structurally cleaner — the kernel guarantees 
 ❯ The Hybrid sounds good. Can we also cleanup all old versions when the process completes?
 
 **Verdict:** option 3 unless we're already doing the build-system surgery for some other reason. If you want, I can implement option 3 now — it's ~15 lines in `NativeLib.kt`.
-### Re: cleanup old versions on exit — opus-4-7
+❯ ### Re: cleanup old versions on exit — opus-4-7 (HEAD)
 
 Yes, and the right shape is **lockfile-tracked GC**, not just a shutdown-hook delete. Reason: multiple IDEAs / VS Code / standalone CLIs may each be holding different versions concurrently — a naive "I'm shutting down, delete everything but mine" would break sibling processes.
 
@@ -917,7 +917,20 @@ Yes, and the right shape is **lockfile-tracked GC**, not just a shutdown-hook de
 **Edge case worth calling out:** the symlink load path (`libagent_doc-current.so`) means the IDE plugin asks for the symlink, and JNA dlopen's it. When `cargo install` does `ln -sfn libagent_doc-0.34.0.so libagent_doc-current.so` (atomic rename), the OLD JNA mmap is unaffected (it dlopen'd the inode, not the symlink). New IDE startups follow the new symlink. Clean separation.
 
 Want me to spec this in `tasks/agent-doc/agent-doc-feat.md` as a single feature ("FFI library hot-reload + versioning + GC") with the option 3 mtime reload bundled in? Or split into two features?
-<!-- agent:boundary:6187d13e -->
+❯ Yes...spec in `tasks/agent-doc/agent-doc-feat.md`
+### Re: spec added — opus-4-7
+
+Spec written to `tasks/agent-doc/agent-doc-feat.md` § "Spec: FFI library hot-reload + versioning + GC". Three new pending items added there:
+
+1. FFI library hot-reload (mtime + `Native.unregister`/reload, ~30 lines Kotlin)
+2. FFI library versioning (`libagent_doc-<version>.so` + `libagent_doc-current.so` symlink)
+3. `agent-doc gc-libs` subcommand (lockfile-tracked GC via `/proc/<pid>` liveness)
+
+Bundled as one feature in the spec text (cross-references this bug doc) but split into three pending items so they can be implemented and shipped independently if needed — hot-reload alone fixes the immediate crash, versioning + GC are the structural follow-up.
+
+Open questions noted in the spec: VS Code dlopen vs CLI shell-out, post-reload `agent_doc_version()` health check, and PyPI wheel filename compatibility.
+<!-- agent:boundary:e7b1f556 -->
+<!-- agent:boundary:7df87ab2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

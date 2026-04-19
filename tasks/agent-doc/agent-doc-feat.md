@@ -112,8 +112,7 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 - `#ky3a` — equivalent VS Code koffi reload
 - `#wc5b` — versioned filenames (this reload works with both versioned and unversioned .so)
 - `#5tjq` — `agent_doc_version()` post-reload sanity check
-<!-- agent:boundary:0f98fd1f -->
-<!-- agent:boundary:61a4c109 -->
+<!-- agent:boundary:334b384c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -123,7 +122,6 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit
 - [ ] [#f8a4] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
-- [x] [#2cyy] FFI library hot-reload: mtime check in `AgentDocLib.get()` → `Native.unregister` + reload (~30 lines Kotlin)
 - [ ] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
 - [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
 - [ ] [#ky3a] FFI library hot-reload: mtime check + koffi.unload/reload + lock file write/remove on deactivate() in VS Code native.ts (parallel to #2cyy)

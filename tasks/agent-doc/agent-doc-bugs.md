@@ -234,7 +234,7 @@ Added to pending as a new item.
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
 release
 ❯ Why was the response not written to this document?
-### Re: why response was lost + deeper fix — opus-4-6
+❯ ### Re: why response was lost + deeper fix — opus-4-6 (HEAD)
 
 The #ttv0 fix (pre-writing the fallback file) was only half the solution. The fundamental issue: `try_ipc()` returned `success: true` when the socket acknowledged but sidecar timed out. The caller trusted this and skipped the disk write path entirely. The plugin never applied the content, and the fallback file wasn't picked up either.
 
@@ -247,7 +247,37 @@ Also updated `start_fake_listener` in tests to write ack-content sidecar files, 
 **Verified:** 1146 tests pass, release build clean, both binaries at v0.33.3.
 
 Ready for manual testing gate — verify this IPC path works in a live session, then I'll publish.
-<!-- agent:boundary:970a7dda -->
+❯ The last response was not written to this file. Please add. Diagnose the issue.
+### Re: release v0.33.3 (replay) — sonnet-4-6
+
+*(This response was generated earlier but lost due to the IPC sidecar timeout bug — the same bug we just fixed. Replaying.)*
+
+Version bumped to 0.33.3, VERSIONS.md updated, 1146 tests pass, both binaries rebuilt.
+
+**Pending manual testing gate** — please verify the IPC fallback behavior works in a live session, then I'll proceed with:
+1. Branch → PR → squash merge
+2. `git tag v0.33.3`
+3. `cargo publish`
+4. `maturin publish`
+5. `gh release create v0.33.3` with prebuilt binary
+
+### Re: diagnosis — why the release response was lost — opus-4-6
+
+The sonnet-4-6 release response was written BEFORE the deeper fix landed. At that point:
+- `try_ipc()` still returned `success: true` on sidecar timeout (the old behavior)
+- Socket acknowledged, sidecar timed out → `success: true` → caller skipped disk write
+- Plugin never applied the content → response lost
+
+The deeper fix (sidecar timeout → `success: false`) was built in the SAME session but wasn't installed yet when sonnet-4-6 ran the write. The next opus-4-6 response succeeded because IPC was already degraded, forcing the CRDT disk write path.
+
+Timeline:
+1. sonnet-4-6 write → old binary → sidecar timeout → `success: true` → **lost**
+2. opus-4-6 build → deeper fix compiled + installed
+3. opus-4-6 write → IPC degraded from step 1 → CRDT disk write → **succeeded**
+
+The fix is now in both binaries. This should not recur.
+<!-- agent:boundary:bf505abc -->
+<!-- agent:boundary:64429296 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

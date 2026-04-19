@@ -467,8 +467,7 @@ Want me to file this under **Not Built** here (skill-side pending-promotion heur
 **What's still needed to ship this:** the edit only affects already-installed skills. For the bundled copy to reach *new* installs via `agent-doc skill install`, the agent-doc crate needs a release (0.33.4). Adding a pending item for that so it's tracked rather than lost — per the heuristic I just wrote. Also eating my own dog food: this cycle *does* end with an actionable next step, so I'm `--pending-add`ing it in the same write.
 
 Heuristic applies recursively. Nice.
-<!-- agent:boundary:b058fd85 -->
-<!-- agent:boundary:2273296c -->
+<!-- agent:boundary:f3ac810b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

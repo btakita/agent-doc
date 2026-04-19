@@ -274,7 +274,30 @@ Added to the Respond step:
 | `preflight_output_omits_inline_annotations_when_empty` | preflight.rs | JSON omits empty field |
 
 **All 1172 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
-<!-- agent:boundary:437efab8 -->
+❯ bump version and install for testing
+### Re: 0.33.6 bump + inline_annotations false positives — sonnet-4-6
+
+Bumped to **0.33.6**, VERSIONS.md updated, both binaries installed.
+
+#### False positives in inline_annotations this cycle
+
+Two items appeared in `inline_annotations` that weren't real user annotations:
+
+1. **`### Re: ... (HEAD)`** — classified as `[user~]` because `agent-doc commit` adds `(HEAD)` to the heading. Has `[agent]` lines after it → falsely flagged.
+
+2. **`bump version and install for testing`** — the real user prompt, but it was followed by `[agent] &lt;!-- /agent:exchange --&gt;` and `[agent] ## Pending / Not Built` structural markers, so the algorithm counted those as "agent lines after" and included it.
+
+#### Fix needed
+
+Two exclusion rules would eliminate both false positives:
+
+1. **Exclude `(HEAD)` boundary marker modifications** — `[user~]` lines where the only change is appending ` (HEAD)` to a heading should be excluded (these are binary reposition artifacts, not user edits).
+
+2. **Exclude component/structural markers from the "agent lines after" check** — lines like `<!-- /agent:... -->`, `<!-- agent:... -->`, and `## ` section headers outside the exchange shouldn't count as "agent content" for the inline annotation heuristic. Only `[agent]` lines that are response prose should qualify.
+
+Alternatively: gate the check more conservatively — require at least one `[agent]` line after that is NOT a component marker or section boundary.
+<!-- agent:boundary:f177b53e -->
+<!-- agent:boundary:aaf80e57 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -858,7 +858,7 @@ I can't fully prove which mechanism without ltrace/perf, but **(1) is testable**
 Yesterday's crashes (`java_error_in_idea_2825553.log` etc.) were a different bug — NULL pointer in `Pointer.getString` from `NativePatching.repositionBoundaryToEnd`, suggesting `result.text` was null but not checked before `getString(0)`. That's a separate fix in `NativePatching.kt`.
 
 ❯ Option 3 is better than option 1. Why not option 4?
-### Re: why not option 4 — opus-4-7
+❯ ### Re: why not option 4 — opus-4-7 (HEAD)
 
 Option 4 (versioned filename) is structurally cleaner — the kernel guarantees the old inode stays alive — but it has install-side friction that option 3 avoids:
 
@@ -876,8 +876,49 @@ Option 4 (versioned filename) is structurally cleaner — the kernel guarantees 
 
 **Hybrid:** option 3 + the JB plugin-build install path also writes a versioned symlink (`libagent_doc-current.so` → versioned target), so we get the kernel-level guarantee without rewriting cargo's output naming. But that's complexity for a small improvement.
 
+❯ The Hybrid sounds good. Can we also cleanup all old versions when the process completes?
+
 **Verdict:** option 3 unless we're already doing the build-system surgery for some other reason. If you want, I can implement option 3 now — it's ~15 lines in `NativeLib.kt`.
-<!-- agent:boundary:da3b6c18 -->
+### Re: cleanup old versions on exit — opus-4-7
+
+Yes, and the right shape is **lockfile-tracked GC**, not just a shutdown-hook delete. Reason: multiple IDEAs / VS Code / standalone CLIs may each be holding different versions concurrently — a naive "I'm shutting down, delete everything but mine" would break sibling processes.
+
+**Design:**
+
+1. **On load** (`AgentDocLib.get()` after `Native.load()`): write `<so-path>.lock` containing this JVM's PID. One lock per loader, per file.
+2. **Shutdown hook** (`Runtime.getRuntime().addShutdownHook`): remove our own `.lock` file. That's it — don't delete the .so itself, since another process might still be using it.
+3. **GC sweep** runs at three trigger points:
+   - **On load** (after writing our own lock): walk all `libagent_doc-*.so` siblings.
+   - **On `cargo install` / install path** (new `agent-doc gc-libs` subcommand the install hook calls).
+   - **Manual:** `agent-doc gc-libs` exposed for users.
+
+   For each sibling .so:
+   - **Keep** if it's the current symlink target (`libagent_doc-current.so` → this).
+   - **Keep** if its `.lock` file exists AND `/proc/<pid>` exists (alive process).
+   - **Delete** otherwise (stale lock from crashed JVM, or no lock at all). Also delete the orphaned `.lock` file.
+
+**Why not just shutdown-hook delete:**
+
+- JVM shutdown hooks aren't guaranteed to run (SIGKILL, OOM kill, power loss). Stale .so files would accumulate.
+- Even if the hook runs, the unlinked file lives until the LAST mmap reference drops. If another process is concurrently loading the same path, you've created a TOCTOU race.
+- Lock-based GC is idempotent and crash-safe — stale locks are just cleaned up by the next sweep.
+
+**Files added per release:**
+- `libagent_doc-0.33.4.so` (versioned)
+- `libagent_doc-current.so` → symlink to latest (atomic rename on install)
+- `libagent_doc-0.33.4.so.lock` (one per loaded JVM, contains PID; gone on clean exit)
+
+**Implementation cost:**
+- `NativeLib.kt`: ~30 lines (write lock on load, remove on shutdown, call GC).
+- `agent-doc gc-libs`: ~50 lines of Rust (walk dir, parse versions, check `/proc/<pid>`, unlink).
+- `Makefile` / install path: ~5 lines (rename to versioned, update symlink, call GC).
+- Total: ~85 lines + the option 3 mtime check (~15 lines).
+
+**Edge case worth calling out:** the symlink load path (`libagent_doc-current.so`) means the IDE plugin asks for the symlink, and JNA dlopen's it. When `cargo install` does `ln -sfn libagent_doc-0.34.0.so libagent_doc-current.so` (atomic rename), the OLD JNA mmap is unaffected (it dlopen'd the inode, not the symlink). New IDE startups follow the new symlink. Clean separation.
+
+Want me to spec this in `tasks/agent-doc/agent-doc-feat.md` as a single feature ("FFI library hot-reload + versioning + GC") with the option 3 mtime reload bundled in? Or split into two features?
+<!-- agent:boundary:ccf1471d -->
+<!-- agent:boundary:7b6f26a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

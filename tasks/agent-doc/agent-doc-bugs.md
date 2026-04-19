@@ -528,8 +528,7 @@ Or the cleaner: `git checkout HEAD -- tasks/monsterrodholders.md`, then re-type 
 - Grep the JB plugin source for all document-write paths, check which call `reloadFromDisk`.
 - Add an end-to-end integration test that simulates degraded IPC + mid-cycle buffer flush.
 - Consider making disk-mode the default when IPC has been degraded for >N seconds, and have the plugin listen for file-change events to refresh its buffer first.
-<!-- agent:boundary:f7096a44 -->
-<!-- agent:boundary:f5a4084f -->
+<!-- agent:boundary:b998c9a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

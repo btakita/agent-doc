@@ -807,8 +807,7 @@ When confirmed, I'll proceed with:
 1. `cargo publish` → crates.io
 2. `git tag v0.33.4 && git push origin v0.33.4` → GitHub Release via CI
 3. PyPI build + upload
-<!-- agent:boundary:7189c8b9 -->
-<!-- agent:boundary:fe2b4919 -->
+<!-- agent:boundary:d1516c92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -184,8 +184,7 @@ Also logs `zero_patches_warning` to ops.log for forensics.
 **Root cause clarification**: the claudescore failure wasn't a missing guard — the binary has guards for empty input and empty patches. The issue was: normalization (adding `❯ ` prefixes to user lines) changed the content enough to pass the dedup guard, so the write proceeded with 0 patches and only normalization changes. The response was lost before reaching the heredoc (context compaction or truncation).
 
 **Both copies synced**: `src/agent-doc/SKILL.md` → `.claude/skills/agent-doc/SKILL.md`. Both binaries rebuilt.
-<!-- agent:boundary:e0e22263 -->
-<!-- agent:boundary:1fdd22d7 -->
+<!-- agent:boundary:46238b6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

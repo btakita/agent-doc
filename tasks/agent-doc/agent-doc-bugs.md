@@ -670,8 +670,7 @@ The tmux panes weren't destroyed — they were reorganized to match the editor's
 **Current state:**
 - `%51` → agent-doc for `src/session-share/tasks/claudescore.md` (Claude idle at `❯`)
 - `%52` → agent-doc for `tasks/agent-doc/agent-doc-bugs.md` (this session)
-<!-- agent:boundary:7fa2bbea -->
-<!-- agent:boundary:23cf81f8 -->
+<!-- agent:boundary:134936cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

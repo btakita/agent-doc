@@ -877,8 +877,7 @@ Option 4 (versioned filename) is structurally cleaner — the kernel guarantees 
 **Hybrid:** option 3 + the JB plugin-build install path also writes a versioned symlink (`libagent_doc-current.so` → versioned target), so we get the kernel-level guarantee without rewriting cargo's output naming. But that's complexity for a small improvement.
 
 **Verdict:** option 3 unless we're already doing the build-system surgery for some other reason. If you want, I can implement option 3 now — it's ~15 lines in `NativeLib.kt`.
-<!-- agent:boundary:c74e1f25 -->
-<!-- agent:boundary:8b697713 -->
+<!-- agent:boundary:da3b6c18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

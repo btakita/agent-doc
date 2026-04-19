@@ -233,7 +233,7 @@ Added to pending as a new item.
 
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
 release
-<!-- agent:boundary:64acd02d -->
+<!-- agent:boundary:99298664 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

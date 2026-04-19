@@ -982,13 +982,11 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 (pending status update — no new content)
 ❯ ### Re: pending statuses not updated — opus-4-6 (HEAD)
-❯ ### Re: pending statuses not updated — opus-4-6 (HEAD)
 
 The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were passed in the first cycle's `agent-doc write`, but the write exited with code 75 (IPC timeout). The response content was saved as a patch and recovered by the next preflight — but recovery only replays exchange content, not pending flag mutations. The `--pending-done` flags were lost.
 
 This is a bug in the IPC-degraded write path: pending mutations should be applied to the file before or independently of IPC. Currently, if IPC times out, any `--pending-*` flags on that write are silently dropped.
 
-❯ plan to fix the bug with opus. Have sonnet fix the bug.
 ❯ plan to fix the bug with opus. Have sonnet fix the bug.
 plan to fix the bug with opus. Have sonnet fix the bug.[]
 
@@ -1002,7 +1000,7 @@ Also included in Sonnet's changes: the IPC auto-degradation from #d2d4 (`is_ipc_
 Fixed the `test_skill_md_references_valid_commands` failure — the #j57h description contained "agent-doc binary" which the test parsed as a subcommand reference. Changed to "CLI is installed".
 
 **Build status:** clippy clean, 1148 tests passing (1 pre-existing skip), both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
-### Re: plan to fix IPC timeout pending mutation bug — opus-4-6
+❯ ### Re: plan to fix IPC timeout pending mutation bug — opus-4-6 (HEAD)
 
 #### Root cause
 
@@ -1026,7 +1024,23 @@ This is surgical — doesn't change baseline handling, patch application, or CRD
 Making the IPC timeout path use CRDT merge instead of `atomic_write` would fix this and any future component-level conflicts, but it's a bigger change and the timeout path is meant to be a fast fallback.
 
 Delegating implementation to Sonnet.
-<!-- agent:boundary:2e6978b5 -->
+❯ do IPC timeout path use CRDT merge instead of `atomic_write`
+### Re: IPC timeout → CRDT merge — opus-4-6
+
+Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path with full CRDT merge — same approach as the normal disk write path.
+
+**What changed** (`write.rs` ~line 1183):
+- Re-reads current file from disk (captures user edits + pending mutations)
+- If file unchanged from baseline: builds fresh CRDT state from `content_ours`
+- If file modified: runs `merge_contents_crdt(base_state, content_ours, content_current)` — preserves ALL concurrent changes (pending, user edits, any component)
+- Falls back to `splice_pending_component` only if CRDT merge itself fails
+- Saves CRDT state alongside snapshot (previously only snapshot was saved on exit(75))
+
+**Why this is better:** The splice approach only preserved the `agent:pending` component. CRDT merge preserves everything — user edits to exchange content, status changes, structural modifications. It also keeps CRDT state consistent for the next cycle.
+
+**Build status:** clippy clean, 1145 tests passing (6 ignored), both binaries rebuilt.
+<!-- agent:boundary:2cfc0b34 -->
+<!-- agent:boundary:36b11a08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1037,6 +1051,6 @@ Delegating implementation to Sonnet.
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#phhk] Fix IPC timeout pending mutation loss — splice_pending_component() implemented, clippy clean, 1148 tests pass, both binaries rebuilt. Awaiting user verification.
+- [x] [#phhk] Fix IPC timeout pending mutation loss — splice_pending_component() implemented, clippy clean, 1148 tests pass, both binaries rebuilt. Awaiting user verification.
 <!-- /agent:pending -->
 ## Assistant

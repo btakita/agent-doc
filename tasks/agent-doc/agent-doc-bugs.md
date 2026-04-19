@@ -341,7 +341,7 @@ Proposed wording for the runbook:
 
 This is a skill/runbook issue, not a code issue. The binary already accepts multiple `--pending-add` flags per cycle; nothing is missing at the implementation layer.
 ❯ Is this runbook added to both agent-doc and agent-loop?
-### Re: runbook not yet added — three copies exist — opus-4-7
+❯ ### Re: runbook not yet added — three copies exist — opus-4-7 (HEAD)
 
 **No — not yet added anywhere.** I only queued the edit as pending `#31j3`. The runbook text is still unchanged in all three locations.
 
@@ -358,7 +358,26 @@ This is a skill/runbook issue, not a code issue. The binary already accepts mult
 4. Commit the change inside `src/agent-doc/` and bump patch version if this goes into the next release.
 
 Shall I make the edit now? It's a ~5-line addition to the "What to decide each cycle" list.
-<!-- agent:boundary:155825c8 -->
+❯ do #31j3...add to both agent-doc and agent-loop
+### Re: #31j3 done — plus skill-install bug discovered — opus-4-7
+
+**Edit landed in `src/agent-doc/runbooks/pending-ops.md`.** Added a new bullet to "What to decide each cycle":
+
+```
+- **Agent-proposed forward actions** → `--pending-add "text"` for each concrete option.
+  Any response ending with a forward-looking question ("Ready to X?", "Should we A or
+  B first?", "Shall I capture Y as a spec?") MUST `--pending-add` each concrete
+  next-step option in the same cycle. The proposal dies if the user doesn't reply
+  immediately; capturing it preserves continuity across cycles.
+```
+
+**Propagation to all three copies:** confirmed byte-identical (`diff` passes for src → `~/.claude/...` and src → `agent-loop/.claude/...`).
+
+**Bug discovered:** `agent-doc skill install` returned `Skill already up to date (v0.33.3).` and did NOT copy the updated runbook. Only `SKILL.md` propagates via the installer; the `runbooks/*.md` subdirectory is ignored. I synced the two install copies with plain `cp`. Queued as a new pending item — `skill install` should be fixed to walk the `runbooks/` tree.
+
+**Not committed in `src/agent-doc/`:** change is left in the working tree unstaged. Waiting on your call — should I roll it into the next patch release (bump, VERSIONS.md entry, commit) or commit standalone now?
+<!-- agent:boundary:28f0ab97 -->
+<!-- agent:boundary:de9ae5d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -368,6 +387,7 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#31j3] Update runbooks/pending-ops.md: add explicit 'agent-proposed forward actions' rule — any response that ends with a forward-looking question or multi-choice next-step proposal MUST also --pending-add the proposal(s), so the thread survives user non-reply
+- [x] [#31j3] Update runbooks/pending-ops.md: add explicit 'agent-proposed forward actions' rule — any response that ends with a forward-looking question or multi-choice next-step proposal MUST also --pending-add the proposal(s), so the thread survives user non-reply
+- [ ] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 <!-- /agent:pending -->
 ## Assistant

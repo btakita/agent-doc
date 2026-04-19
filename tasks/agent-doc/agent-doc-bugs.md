@@ -917,8 +917,7 @@ Yes, and the right shape is **lockfile-tracked GC**, not just a shutdown-hook de
 **Edge case worth calling out:** the symlink load path (`libagent_doc-current.so`) means the IDE plugin asks for the symlink, and JNA dlopen's it. When `cargo install` does `ln -sfn libagent_doc-0.34.0.so libagent_doc-current.so` (atomic rename), the OLD JNA mmap is unaffected (it dlopen'd the inode, not the symlink). New IDE startups follow the new symlink. Clean separation.
 
 Want me to spec this in `tasks/agent-doc/agent-doc-feat.md` as a single feature ("FFI library hot-reload + versioning + GC") with the option 3 mtime reload bundled in? Or split into two features?
-<!-- agent:boundary:ccf1471d -->
-<!-- agent:boundary:7b6f26a3 -->
+<!-- agent:boundary:6187d13e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -793,8 +793,7 @@ Added 3 tests to `resync.rs` for the agent preservation behavior:
 3. **`fix_wrong_session_relocates_agent_when_expected_session_alive`** — The key test: starts a `node` process (which is in `AGENT_PROCESSES`), creates a WrongSession issue, and verifies the pane is relocated via join-pane to the correct session — not killed. Checks pane is alive, registry entry is preserved, and session changed to `"correct"`. Gracefully skips if `node` isn't installed.
 
 **Results:** 1149 tests pass (3 new), 6 ignored. Both binaries rebuilt.
-<!-- agent:boundary:d3c93d8e -->
-<!-- agent:boundary:2733bfa8 -->
+<!-- agent:boundary:7bb03bf7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

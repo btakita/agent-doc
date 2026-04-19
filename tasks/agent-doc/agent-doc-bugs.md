@@ -641,8 +641,7 @@ Registered in `ensurePolling()` via `project.messageBus.connect(this)`. Listens 
 - `build/distributions/agent-doc-jetbrains-0.2.65-signed.zip` (signed)
 
 No agent-doc Rust changes needed — the bug is purely in the JB plugin's handling of external disk writes. Ready for install-from-disk testing.
-<!-- agent:boundary:0d13091e -->
-<!-- agent:boundary:1172b94d -->
+<!-- agent:boundary:a989cda8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

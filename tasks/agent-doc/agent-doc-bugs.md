@@ -622,8 +622,7 @@ Current state: IPC degradation is already tracked (1-hour TTL marker). When degr
 3. **Minimal fix vs full design:** The VFS refresh in `autoSaveTrackedFiles()` (Step 1 fix) is sufficient to prevent the overwrite. The `BulkFileListener` approach is a defense-in-depth improvement for sub-1.5s responsiveness to external writes, worth doing but not blocking.
 
 **Recommendation:** Ship the Step 1 fix first (VFS refresh before auto-save). Add the `BulkFileListener` as a follow-up improvement. The degraded-IPC disk-mode default is already working correctly — it's the plugin's reaction to disk writes that's broken, not the fallback path itself.
-<!-- agent:boundary:3f606f79 -->
-<!-- agent:boundary:d4000ab6 -->
+<!-- agent:boundary:c90b92e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -724,8 +724,7 @@ This brings the runtime state in line with the config.
 #### #mpjv status
 
 Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and you just installed it — that's what triggered this IDEA restart. But the testing gate hasn't passed: we haven't confirmed the VFS refresh + BulkFileListener fixes actually prevent the overwrite bug in a live session. The resync/session issue you hit is a separate bug from #mpjv.
-<!-- agent:boundary:24fa4c34 -->
-<!-- agent:boundary:9c33a372 -->
+<!-- agent:boundary:47923494 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

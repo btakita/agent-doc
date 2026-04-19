@@ -875,7 +875,7 @@ Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
 ### Re: IPC force-disk fallback — acknowledged — opus-4-6
 
 Added to pending. The implementation: the skill workflow should track whether `ack-content sidecar not available after 500ms` appeared in a previous write's output during this session. If so, all subsequent `agent-doc write --stream` calls in the same session append `--force-disk`. This keeps IPC as the default (faster when plugin works) but auto-degrades on first failure.
-<!-- agent:boundary:d46fd5ca -->
+<!-- agent:boundary:1a02e8a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

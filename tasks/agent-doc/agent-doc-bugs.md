@@ -277,7 +277,7 @@ Timeline:
 
 The fix is now in both binaries. This should not recur.
 ❯ The response was not written to this document. Please add the last 2 responses and diagnose.
-### Re: responses ARE on disk — IDE buffer stale — opus-4-6
+❯ ### Re: responses ARE on disk — IDE buffer stale — opus-4-6 (HEAD)
 
 Both responses are confirmed on disk:
 - **Line 251**: `### Re: release v0.33.3 (replay) — sonnet-4-6`
@@ -290,7 +290,33 @@ The diff from preflight also confirms this — both snapshot and document have t
 **Workaround:** reload the file in your IDE (Cmd/Ctrl+Shift+A → "Reload from Disk" in IntelliJ, or close and reopen the tab).
 
 **Root cause:** the IPC degraded state lasts 1 hour. During that window, all writes go to disk only. The IDE plugin's file watcher should detect disk changes, but it appears to not be picking them up. Added to pending for investigation.
-<!-- agent:boundary:a8a327e7 -->
+❯ do #s80z
+### Re: #s80z — IDE buffer stale fix — opus-4-6
+
+**Root cause:** `repositionBoundaryViaDocument()` in `PatchWatcher.kt` calls `targetFile.refresh(false, false)` to update the VFS, but never calls `reloadFromDisk(document)`. The document buffer stays stale — it contains the pre-CRDT-merge content. The reposition handler reads the old buffer, repositions the boundary in the old content, and writes it back. The CRDT-merged response is never loaded into the buffer.
+
+By contrast, `applyPatch()` correctly calls `fdm.reloadFromDisk(document)` at line 498 before processing. The reposition handler was missing this step.
+
+**Fix in `PatchWatcher.kt`:** Added `reloadFromDisk()` call in the reposition handler:
+```kotlin
+if (!fdm.isDocumentUnsaved(document)) {
+    fdm.reloadFromDisk(document)
+}
+```
+
+The `isDocumentUnsaved` guard preserves user edits that haven't been saved from the IDE — same pattern as `applyPatch()`.
+
+**Timeline after fix:**
+1. CRDT disk write updates file on disk (with response)
+2. Commit sends reposition signal via socket
+3. Plugin's reposition handler: refresh VFS → reloadFromDisk → read updated buffer → reposition boundary
+4. User sees response immediately in IDE
+
+Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
+
+**To install:** IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.64-signed.zip`. Restart IDE.
+<!-- agent:boundary:89383004 -->
+<!-- agent:boundary:27bb15f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -300,6 +326,6 @@ The diff from preflight also confirms this — both snapshot and document have t
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#s80z] IDE buffer stale after CRDT disk write — VCS refresh signal not triggering buffer reload when IPC is degraded. Investigate why commit's reposition boundary signal and VCS refresh don't cause the IDE to reload the file.
+- [x] [#s80z] IDE buffer stale after CRDT disk write — VCS refresh signal not triggering buffer reload when IPC is degraded. Investigate why commit's reposition boundary signal and VCS refresh don't cause the IDE to reload the file.
 <!-- /agent:pending -->
 ## Assistant

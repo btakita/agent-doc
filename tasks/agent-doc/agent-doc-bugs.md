@@ -376,8 +376,7 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 **Bug discovered:** `agent-doc skill install` returned `Skill already up to date (v0.33.3).` and did NOT copy the updated runbook. Only `SKILL.md` propagates via the installer; the `runbooks/*.md` subdirectory is ignored. I synced the two install copies with plain `cp`. Queued as a new pending item — `skill install` should be fixed to walk the `runbooks/` tree.
 
 **Not committed in `src/agent-doc/`:** change is left in the working tree unstaged. Waiting on your call — should I roll it into the next patch release (bump, VERSIONS.md entry, commit) or commit standalone now?
-<!-- agent:boundary:28f0ab97 -->
-<!-- agent:boundary:de9ae5d3 -->
+<!-- agent:boundary:c05ab16b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -387,7 +386,6 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#31j3] Update runbooks/pending-ops.md: add explicit 'agent-proposed forward actions' rule — any response that ends with a forward-looking question or multi-choice next-step proposal MUST also --pending-add the proposal(s), so the thread survives user non-reply
 - [ ] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 <!-- /agent:pending -->
 ## Assistant

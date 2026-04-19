@@ -318,7 +318,7 @@ Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
 
 ❯ In src/session-share/tasks/claudescore.md... this should have been added to agent:pending. Why was it not added. Skill/runbook issue? 
 ❯ > Ready to update the baseline methodology and tree-sitter scores, or capture as a spec first?
-### Re: why the forward-looking proposal was not pending-added — opus-4-7
+❯ ### Re: why the forward-looking proposal was not pending-added — opus-4-7 (HEAD)
 
 **Yes, this is a runbook gap.** `runbooks/pending-ops.md` § "What to decide each cycle" lists:
 
@@ -340,7 +340,26 @@ Proposed wording for the runbook:
 ```
 
 This is a skill/runbook issue, not a code issue. The binary already accepts multiple `--pending-add` flags per cycle; nothing is missing at the implementation layer.
-<!-- agent:boundary:234046fc -->
+❯ Is this runbook added to both agent-doc and agent-loop?
+### Re: runbook not yet added — three copies exist — opus-4-7
+
+**No — not yet added anywhere.** I only queued the edit as pending `#31j3`. The runbook text is still unchanged in all three locations.
+
+**Three copies exist, all byte-identical:**
+
+1. `src/agent-doc/runbooks/pending-ops.md` — **canonical source** (shipped with the crate, packaged into `target/package/agent-doc-*/runbooks/`)
+2. `~/.claude/skills/agent-doc/runbooks/pending-ops.md` — user-global install (what this session loads)
+3. `agent-loop/.claude/skills/agent-doc/runbooks/pending-ops.md` — project-level install
+
+**Correct propagation order:**
+1. Edit `src/agent-doc/runbooks/pending-ops.md` (source of truth).
+2. Run `agent-doc skill install` to re-sync `~/.claude/skills/agent-doc/` and `agent-loop/.claude/skills/agent-doc/` from the source.
+3. Verify with `diff` that all three stay identical.
+4. Commit the change inside `src/agent-doc/` and bump patch version if this goes into the next release.
+
+Shall I make the edit now? It's a ~5-line addition to the "What to decide each cycle" list.
+<!-- agent:boundary:8380d4c6 -->
+<!-- agent:boundary:ffbc62b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

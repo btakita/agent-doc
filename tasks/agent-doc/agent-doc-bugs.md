@@ -52,7 +52,39 @@ claude_args: --dangerously-skip-permissions
 - Pre-release checks: 1158 tests pass, release binary built, cargo install done, JB plugin 0.2.67 built
 - **At manual testing gate — NOT yet published to crates.io or GitHub**
 - Required: verify IDEA does not crash when cargo install runs during active session; new lib version logged
-<!-- agent:boundary:9e3ac672 -->
+
+❯ In src/session-share/tasks/claudescore.md, I'm getting a prompt prefix for the response patchback. See `❯ |-------------|--------|----------|--------|-------|` and `❯ | tree-sitter | 76.0   | **76.0** | 80.0   | 0     |`
+❯ Why?
+### Re: normalize_user_prompts prefixing agent response table rows — opus-4-6
+
+**Root cause: snapshot lag + naive diff heuristic.**
+
+`normalize_user_prompts_in_exchange` (write.rs:351) diffs `snapshot → baseline` and marks `Insert` lines as "user-added." When the snapshot lags behind the file (from any of the IPC bugs we've been fixing: sidecar timeout, stale buffer overwrite, fallback race), previous agent responses appear as "Insert" in the diff. Table rows from those responses then match lines in `content_user_region` and get the prompt prefix.
+
+**Evidence trail:**
+- claudescore.md has had prompt-prefixed table rows since its first commit (14 lines). Count grew progressively: 14 → 39 → 45 → 55 as each cycle accumulated more misclassified rows.
+- Compacts at commits 87df754/dac6658 briefly cleared the damage (0 prefixed table rows), but it re-accumulated in subsequent cycles.
+- The prefixed rows are all inside `### Re:` response blocks — clearly agent content, not user input.
+
+**Why the safety rail didn't catch it:** `MAX_NORMALIZE_USER_LINES = 50` only trips when 50+ lines would be prefixed in a single cycle. Each cycle only adds a few table rows (the delta between stale snapshot and current file), so the threshold is never hit.
+
+**The algorithm's blind spot:** it has exclusions for blank lines, code fences, `<!-- -->` comments, and lines already starting with the prompt prefix, but no concept of "agent response blocks." Lines inside `### Re:` headers are indistinguishable from user content by the current heuristic.
+
+**Fix options:**
+
+1. **Agent-response-block tracking** — in the snapshot-to-baseline diff, skip lines that fall inside a `### Re:` block (from heading to next heading or prompt-prefix line). Most robust; directly targets the semantic gap.
+
+2. **Exclude markdown table rows** (`|...|` pattern) — simple regex filter. Quick fix but users could legitimately type tables.
+
+3. **Cross-reference the response patches** — when normalize runs, the agent response content is available (in the patches passed to apply_patches). Subtract those lines from `user_added`. Requires threading the patch content through to normalize.
+
+4. **Boundary history awareness** — instead of one boundary, track all historical boundary positions in the snapshot. Content between consecutive boundaries is agent content from prior cycles, so exclude from `user_added`.
+
+**Recommendation:** Option 1 (agent-response-block tracking) as the primary fix. Low risk: `### Re:` headings are a structural convention already enforced by the SKILL.md. Lines between `### Re:` and the next `### Re:`/prompt-prefix/boundary are agent content by definition.
+
+**Immediate mitigation for claudescore.md:** strip the existing prompt prefixes from agent response table rows in the committed content. A sed pass or targeted git filter would clean up the 55 affected lines.
+<!-- agent:boundary:f26dc3bf -->
+<!-- agent:boundary:52f362fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

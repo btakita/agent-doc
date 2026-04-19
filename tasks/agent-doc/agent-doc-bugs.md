@@ -480,7 +480,7 @@ Steps complete through the manual testing gate:
 | `cargo install --path .` | ✅ `~/.cargo/bin/agent-doc` → 0.33.4 |
 
 **Pausing here per memory: manual testing gate.** Please verify the skill update looks correct in a live session, then reply to publish upstream (crates.io + GitHub Release + tag). PyPI will flow through CI automatically on release publish.
-<!-- agent:boundary:92f7ebfd -->
+<!-- agent:boundary:d6185eac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

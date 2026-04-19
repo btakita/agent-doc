@@ -120,7 +120,7 @@ Also: the response from Opus 4.7 got duplicated in the exchange — orphan recov
 Your "Why did" message appears incomplete — please finish the thought and I'll respond.
 
 Added to pending: model-specific AGENTS.md guardrails.
-<!-- agent:boundary:318b5192 -->
+<!-- agent:boundary:1537cef8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -130,7 +130,6 @@ Added to pending: model-specific AGENTS.md guardrails.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#x04k] Model-specific AGENTS.md guardrails — add conditional scaffolding sections for models that need explicit process reminders (4.6) vs those that don't (4.7). Either via model-tier-gate runbook or AGENTS.md sections gated by model tier.
 - [ ] [#j58r] Duplicate patchback dedup bug — fixed in recover.rs: fingerprint_lines checks each line individually instead of joining into one string. Handles blank-line separation and boundary (HEAD) suffix. Test added. Both binaries rebuilt.
 <!-- /agent:pending -->
 ## Assistant

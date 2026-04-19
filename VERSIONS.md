@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.3
+
+- **IPC sidecar timeout: fall back to disk write instead of claiming success.** `try_ipc()` previously returned `success: true` when the socket acknowledged but the sidecar ack timed out, causing the caller to skip the disk write path. If the plugin didn't actually apply the content, the response was silently lost. Fixed: sidecar timeout now returns `success: false`, so the caller falls through to the CRDT disk write path — the reliable fallback that always works.
+
+- **IPC fallback patch file pre-write.** The disk patch file is now pre-written before socket send (overwriting any stale content) and cleaned on confirmed sidecar success. On sidecar timeout, the file is left for file watcher recovery as an additional safety net. `patch_id` deduplication prevents double-apply.
+
+- **IDE buffer stale fix (JB plugin 0.2.64).** `repositionBoundaryViaDocument()` in `PatchWatcher.kt` now calls `reloadFromDisk(document)` after VFS refresh so the buffer picks up the CRDT-merged content before the boundary is repositioned. Previously the handler read the pre-merge buffer, repositioned the stale content, and wrote it back — burying the agent's response.
+
+- **Runbook: agent-proposed forward actions must be `--pending-add`ed.** `runbooks/pending-ops.md` now requires any response ending with a forward-looking question ("Ready to X?", "Should we A or B?", "Shall I capture Y?") to add each concrete next-step option to `agent:pending` in the same cycle, so the proposal survives user non-reply.
+
 ## 0.33.2
 
 - **`agent_doc_resolve_project_path` FFI export.** Editor plugins can now resolve a file's nearest agent-doc project root (the ancestor containing `.agent-doc/`) and the path relative to that root. Fixes a JetBrains plugin bug where `Run Agent Doc` on a file inside a submodule (e.g. `src/session-share/tasks/foo.md`) passed the full monorepo-relative path to the submodule's Claude session, producing `file not found`. Plugins now pass the submodule-relative path (`tasks/foo.md`) and use the submodule root as CWD.

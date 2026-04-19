@@ -356,7 +356,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val reposStart = System.nanoTime()
                 val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
                 targetFile.refresh(false, false)
-                val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeLater
+                val fdm = FileDocumentManager.getInstance()
+                val document = fdm.getDocument(targetFile) ?: return@invokeLater
+                // Reload from disk to pick up CRDT disk writes that bypassed the Document API.
+                // Without this, document.text returns the stale in-memory buffer and the
+                // response content written by the CRDT merge is invisible to the user.
+                if (!fdm.isDocumentUnsaved(document)) {
+                    fdm.reloadFromDisk(document)
+                }
 
                 WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
                     val content = document.text

@@ -77,8 +77,7 @@ Solid spec. Answering the three open questions:
 **3. No maturin collision.** Versioned `libagent_doc-<version>.so` is for the C ABI cdylib (JNA / koffi). maturin produces a separate Python extension module (`_agent_doc.cpython-*.so`) from a different crate-type target in `Cargo.toml`. These don't share filenames. The wheel ships its own .so with maturin's naming; versioned naming only applies to the cdylib install path outside the wheel.
 
 **IDs:** Preflight backfilled hash IDs for all pending items already — confirmed present.
-<!-- agent:boundary:a74f4470 -->
-<!-- agent:boundary:f8620005 -->
+<!-- agent:boundary:47facb26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

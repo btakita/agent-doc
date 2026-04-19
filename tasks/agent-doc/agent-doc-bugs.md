@@ -232,8 +232,7 @@ Added to pending as a new item.
 `patch_id` deduplication (already in place) prevents double-apply when both socket and file watcher fire.
 
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
-<!-- agent:boundary:4a338a23 -->
-<!-- agent:boundary:f792186c -->
+<!-- agent:boundary:98ee5127 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -243,6 +242,5 @@ Added to pending as a new item.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#ttv0] IPC patch file cleanup race: disk patch file is cleaned before socket send, so IPC degradation loses response content. Fix: clean patch file after confirmed ack, not before.
 <!-- /agent:pending -->
 ## Assistant

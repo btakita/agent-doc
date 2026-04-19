@@ -772,7 +772,7 @@ The migration guide specifically says: remove instructions forcing progress upda
 3. Update tier gate: add claude-opus-4-7 model ID
 4. Add mandatory-step language to SKILL.md
 5. Test on 4.7: baseline current behavior before changes, then iterate
-<!-- agent:boundary:fe3c011f -->
+<!-- agent:boundary:c24a8a33 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

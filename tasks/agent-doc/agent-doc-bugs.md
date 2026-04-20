@@ -629,14 +629,12 @@ Implemented and pushed. Inserts a structured `&lt;!-- agent:referral --&gt;` blo
 **Test results:** 1209 passed, clippy clean, both binaries installed.
 
 **Future:** Preflight can resolve `&lt;!-- agent:referral --&gt;` tags and inject referenced content as agent context. That's a separate item.
-<!-- agent:boundary:20036b76 -->
-<!-- agent:boundary:3453ec07 -->
+<!-- agent:boundary:0945a5da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#a9q1] [#tf03] transfer --referral: insert a pointer in target doc referencing source exchange instead of copying content. Target session reads source for context on demand. Supports exchange-only transfer (no pending) and referral-only (no content move)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->

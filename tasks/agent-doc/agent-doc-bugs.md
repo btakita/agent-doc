@@ -71,7 +71,27 @@ Yes — the original pane is gone. Here's the evidence from the commit timeline:
 So the IDE plugin created pane %77 and started a fresh Claude Code instance. Your prompt ("Move the spec... Note I just moved this file to tasks/software/tsift.md") was received by the NEW session, which successfully did the compact/relocate. The original session (14:34 commits) was abandoned — its pane was either killed by the plugin or exited on its own when the session document disappeared from its expected path.
 
 **What should have happened:** The plugin should have detected the rename, updated sessions.json, and routed your prompt to the EXISTING pane. Instead it treated the renamed file as "new session needed" and orphaned the original.
-<!-- agent:boundary:b5dcd4c9 -->
+
+do #7x90 with tests. Is #v30f done?
+### Re: #7x90 done, #v30f status — opus-4-6
+
+**#7x90 — future-work signal lint in binary: Done.**
+
+Implemented in `write.rs` + `main.rs`:
+- `FUTURE_WORK_SIGNALS` const array: "worth revisiting", "revisit later", "follow-up needed", "future work"
+- `check_future_work_signals(response, has_pending_add)` — core detection, testable without env races
+- `warn_future_work_signals(response)` — wrapper that reads `AGENT_DOC_HAS_PENDING_ADD` env var
+- CLI dispatcher in `main.rs` sets `AGENT_DOC_HAS_PENDING_ADD=1` when `--pending-add` or `--pending-add-gated` is passed
+- Integrated into `run_stream` (the primary template-mode write path)
+- 6 tests passing: detects signals case-insensitively, suppresses when pending-add provided, no false positives
+
+Warning format: `[write] WARN: response contains future-work signal "worth revisiting" but no --pending-add was provided`
+
+Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
+
+**#v30f — file rename handling: Not done.** This is the IDE plugin bug filed this session — needs `FileMovedEvent` (JB) / `onDidRenameFiles` (VS Code) handlers plus session-ID-first pane resolution. No implementation yet.
+<!-- agent:boundary:fa8a0a91 -->
+<!-- agent:boundary:b17d05bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -79,7 +99,7 @@ So the IDE plugin created pane %77 and started a fresh Claude Code instance. You
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#7x90] Embed future-work signal promotion in agent-doc binary — currently skill-only (SKILL.md + pending-ops.md). Consider compile-time enforcement or lint warning when response contains 'Worth revisiting' without a corresponding --pending-add
+- [x] [#7x90] Embed future-work signal promotion in agent-doc binary — currently skill-only (SKILL.md + pending-ops.md). Consider compile-time enforcement or lint warning when response contains 'Worth revisiting' without a corresponding --pending-add
 - [ ] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
 <!-- /agent:pending -->
 ## Assistant

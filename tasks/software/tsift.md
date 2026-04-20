@@ -519,19 +519,17 @@ CREATE TABLE symbols (
 **Tests (6 new, 70 total):** symbols extracted on index, correct properties (name/kind/language/line), updated on modification, deleted with file, rebuild consistency, empty result for nonexistent file. Clippy clean.
 
 Committed `95177df`, pushed.
-<!-- agent:boundary:b8c7affa -->
-<!-- agent:boundary:03b6335e -->
 add pending items for gap with graphify including:
 - LLM-based entity extraction
 - Community detection/clustering
 - HTML visualization
 - Semantic similarity between concepts
+<!-- agent:boundary:80f6bf4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands

@@ -1,6 +1,8 @@
 ---
 agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
-tmux_session: '1'
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 
@@ -100,9 +102,33 @@ presets/               Convention presets (immutable-tag.toml)
 - **Dynamic loading deferred** — feature flags cover immediate need. Runtime `.so` loading (Helix/Neovim style) for Phase 4.
 - **WASM deferred** — core parser/search compile to WASM cleanly; tree-sitter stays native. Not a priority.
 
-## Assistant
+## Status
 
-**Compacted.** 260 lines → structured summary. Updated Phase 3 to ✅ (v0.5.0), added alias/prose/graph to architecture, bumped crate version to v0.5.0, created Phase 4 for remaining items. Conversation history preserved in git.
+<!-- agent:status patch=replace -->
+#pz75 done — lib.rs added, 80 tests pass, pushed
+<!-- /agent:status -->
 
-## User
+## Exchange
 
+<!-- agent:exchange patch=append -->
+❯ do #pz75. add spec + test. run tests. commit + push
+### Re: #pz75 lib.rs — opus-4-6
+
+Done. Created `src/lib.rs` with all 9 modules as `pub mod`. Updated `main.rs` to import from `tagpath::` instead of local `mod` declarations. Added `tests/lib_api.rs` with 8 integration tests covering:
+
+- `parser::parse`, `detect_convention`, `join_tags`
+- `ALL_CONVENTIONS` accessibility
+- Cross-convention equivalence (all 6 conventions → same canonical tags)
+- `alias::generate_aliases`, `prose::to_prose`, `config::generate_config`
+
+80 tests pass (72 existing + 8 new), clippy clean. Committed and pushed.
+<!-- agent:boundary:72aabedc -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+- [ ] [#pz75] Add lib.rs — expose parser/tokenizer as library API for downstream crates (tsift)
+- [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
+- [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
+<!-- /agent:pending -->

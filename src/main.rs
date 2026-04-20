@@ -625,6 +625,9 @@ enum Commands {
         target: PathBuf,
         /// Component name to transfer
         component: String,
+        /// Bypass pane ownership check on target (for cross-session transfers)
+        #[arg(long)]
+        bypass_claim: bool,
     },
     /// Migrate session state after a document file rename/move
     Rename {
@@ -1347,7 +1350,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Annotate { file, force, history } => annotate::run(&file, force, history),
         Commands::Undo { file } => undo::run(&file),
         Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
-        Commands::Transfer { source, target, component } => extract::transfer(&source, &target, &component),
+        Commands::Transfer { source, target, component, bypass_claim } => extract::transfer(&source, &target, &component, bypass_claim),
         Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
         Commands::Claims => {
             let cwd = std::env::current_dir()?;

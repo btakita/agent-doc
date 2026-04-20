@@ -5,10 +5,12 @@
 //!   component in `source` (defaulting to `exchange`) and appends it to the matching component in
 //!   `target`.  Both files must exist.  Source component must be non-empty and contain at least one
 //!   `### Re:` header; if absent, the entire component content is treated as a single entry.
-//! - `transfer(source, target, component_name)`: moves the entire named component content from
-//!   `source` to `target`, clearing the source component and appending to the target component (or
-//!   end of file if the target has no matching component).  If `target` does not exist, it is
-//!   auto-created matching the source format (template or inline).
+//! - `transfer(source, target, component_name, bypass_claim)`: moves the entire named component
+//!   content from `source` to `target`, clearing the source component and appending to the target
+//!   component (or end of file if the target has no matching component).  If `target` does not exist,
+//!   it is auto-created matching the source format (template or inline).  When `bypass_claim` is
+//!   false and the target is owned by a different tmux pane, transfer is rejected with an error.
+//!   Pass `bypass_claim=true` (CLI: `--bypass-claim`) for cross-pane transfers.
 //! - Both operations write atomically via `write::atomic_write_pub` and persist a snapshot after
 //!   each file mutation.
 //! - `split_last_entry` is private; it splits on the last `### Re:` header position.
@@ -32,6 +34,59 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::{component, frontmatter, snapshot, write};
+
+/// Check pane ownership for the target file. Returns Ok if no conflict or if
+/// the target has no active session. Returns Err suggesting --bypass-claim
+/// when a different pane owns the target.
+fn check_target_ownership(target: &Path) -> Result<()> {
+    let current_pane = std::env::var("TMUX_PANE").unwrap_or_default();
+    if current_pane.is_empty() {
+        return Ok(());
+    }
+
+    let project_root = match snapshot::find_project_root(target) {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+
+    let sessions_path = project_root.join(".agent-doc/sessions.json");
+    if !sessions_path.exists() {
+        return Ok(());
+    }
+
+    let sessions_content = std::fs::read_to_string(&sessions_path).unwrap_or_default();
+    let sessions: serde_json::Value = serde_json::from_str(&sessions_content).unwrap_or_default();
+
+    let target_canonical = std::fs::canonicalize(target)
+        .unwrap_or_else(|_| target.to_path_buf());
+
+    if let Some(obj) = sessions.as_object() {
+        for (_id, entry) in obj {
+            if let (Some(path), Some(pane)) = (
+                entry.get("file").and_then(|v| v.as_str()),
+                entry.get("pane").and_then(|v| v.as_str()),
+            ) {
+                let entry_path = if Path::new(path).is_relative() {
+                    project_root.join(path)
+                } else {
+                    Path::new(path).to_path_buf()
+                };
+                let entry_canonical = std::fs::canonicalize(&entry_path)
+                    .unwrap_or(entry_path);
+
+                if entry_canonical == target_canonical && pane != current_pane {
+                    anyhow::bail!(
+                        "target {} is owned by pane {} (current: {}). \
+                         Use --bypass-claim to transfer across panes.",
+                        target.display(), pane, current_pane
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// Format a source annotation blockquote for transferred/extracted content.
 fn format_source_annotation(source: &Path, action: &str) -> String {
@@ -146,9 +201,16 @@ fn split_last_entry(content: &str) -> (String, String) {
 
 /// Transfer content between documents by component name.
 /// Moves the entire component content from source to target.
-pub fn transfer(source: &Path, target: &Path, component_name: &str) -> Result<()> {
+/// When `bypass_claim` is false, refuses to write to a target owned by a different pane.
+pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool) -> Result<()> {
     if !source.exists() {
         anyhow::bail!("source file not found: {}", source.display());
+    }
+
+    if !bypass_claim {
+        check_target_ownership(target)?;
+    } else {
+        eprintln!("[transfer] --bypass-claim: skipping pane ownership check on target");
     }
     // Auto-init target if it doesn't exist (always template mode)
     if !target.exists() {
@@ -312,5 +374,23 @@ mod tests {
     fn pending_merge_skips_empty_source() {
         let source_pending = "\n";
         assert!(source_pending.trim().is_empty(), "empty source should be skipped");
+    }
+
+    /// When TMUX_PANE is not set, ownership check always passes.
+    #[test]
+    fn check_target_ownership_passes_outside_tmux() {
+        unsafe { std::env::remove_var("TMUX_PANE") };
+        let target = Path::new("/tmp/nonexistent-target.md");
+        assert!(check_target_ownership(target).is_ok());
+    }
+
+    /// When TMUX_PANE is set but no project root exists, check passes.
+    #[test]
+    fn check_target_ownership_passes_no_project_root() {
+        unsafe { std::env::set_var("TMUX_PANE", "%99") };
+        let target = Path::new("/tmp/no-project-root-file.md");
+        let result = check_target_ownership(target);
+        assert!(result.is_ok());
+        unsafe { std::env::remove_var("TMUX_PANE") };
     }
 }

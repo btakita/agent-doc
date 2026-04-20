@@ -425,9 +425,8 @@ Added `--rename` flag to `agent-doc sync`. When FileRenameListener fires:
 **Tests:** 3 new rename debounce tests + updated JB tests. **Spec:** Rename debounce section added (Spec + Contracts + Evals). All 301 lib tests + clippy clean. Both binaries installed.
 
 JB plugin needs rebuild for testing.
-<!-- agent:boundary:04f41684 -->
 build + install
-<!-- agent:boundary:20bab3ae -->
+<!-- agent:boundary:a2996d1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

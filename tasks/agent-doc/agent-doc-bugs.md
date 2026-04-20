@@ -600,14 +600,12 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md pending --b
 ```
 
 **Test results:** 1207 passed, clippy clean, both binaries installed.
-<!-- agent:boundary:e2b3e5cd -->
-<!-- agent:boundary:6e28ecda -->
+<!-- agent:boundary:7cead623 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#35zm] [#tf02] transfer pending --items <ids>: selective pending item migration by ID (move subset, not all-or-nothing)
 - [ ] [#a9q1] [#tf03] transfer --referral: insert a pointer in target doc referencing source exchange instead of copying content. Target session reads source for context on demand. Supports exchange-only transfer (no pending) and referral-only (no content move)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

@@ -734,7 +734,30 @@ Done in commit `c33dc49`, pushed. The config module is now wired into all three 
 - Without any workspace flags, behavior is unchanged (flat `.tsift/index.db`)
 
 **Tests:** 6 new (116 total) — workspace creates per-submodule DBs, single submodule indexing, federated search across submodules, federated search respects isolation, scoped search finds submodule symbols, scoped graph query. Clippy clean.
-<!-- agent:boundary:b3fc38a5 -->
+
+Add the graph module to skill/runbook, in tsift and agent-loop. Can we index tsift to test?
+### Re: graph docs + self-indexing test — opus-4-6
+
+**Bug found and fixed:** `extract_symbols` was using `capture.node.end_position().row` for `end_line` — but that's the *name identifier* node, not the enclosing function. Every symbol had `end_line == line`, so `resolve_edges` could never match call sites to their enclosing function. Fixed in `lang/mod.rs` to use `capture.node.parent().end_position().row`. Result: 0 → 1,884 call edges on tsift's own source. 116 tests pass, clippy clean.
+
+**Self-indexing works:** `tsift index .` on the tsift repo indexes 8 files, 241 symbols, 1,884 call edges.
+
+```
+$ tsift graph main --callees
+  parse, cmd_search, cmd_edit, cmd_index, cmd_rewrite, cmd_route, cmd_graph, cmd_sql, ...
+
+$ tsift graph extract_call_sites --callers
+  rust_direct_call, rust_method_call, ..., apply_changes (index.rs:268)
+
+$ tsift graph cmd_graph --callees
+  canonicalize, load, db_path_for, open, callers_of, callees_of, ...
+```
+
+**Docs updated:** `src/tsift/CLAUDE.md` now documents `index`, `search`, `graph` commands with workspace flags, the graph module architecture, tree-sitter dependency, and updated test count (116).
+
+**Skill missing:** The `/tsift` skill (`.claude/skills/tsift/`) doesn't exist — session doc mentions it was installed previously but it's gone from the repo. Want me to recreate it?
+<!-- agent:boundary:94263370 -->
+<!-- agent:boundary:c83c0a27 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

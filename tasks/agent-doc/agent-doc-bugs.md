@@ -437,8 +437,7 @@ Investigated the CRDT merge pipeline end-to-end. The duplication is most likely 
 1. **Guard the disk write on sidecar timeout:** Before CRDT merging on the IPC timeout path, check if `content_current` already contains the agent response. If `content_ours` content appears in `content_current`, skip the merge — the plugin already applied it.
 
 2. **Lower dedup threshold or add content-aware dedup:** Either lower `dedup_adjacent_blocks` to ≥1 non-empty line (risk: false positives on intentionally repeated single lines like `---`), or add a targeted dedup that compares the ours-side patches against the merged result.
-<!-- agent:boundary:35fdb842 -->
-<!-- agent:boundary:bdcb9a38 -->
+<!-- agent:boundary:acbaa65c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

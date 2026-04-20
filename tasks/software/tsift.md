@@ -605,16 +605,12 @@ All three done in commit `10a9b61`.
 - **Cross-convention:** querying `getUserName` finds `get_user_name` — both decompose to `[get, user, name]`
 
 **Tests (6 new, 76 total):** tags stored correctly, exact name search, cross-convention matching, partial tag matching, no-match returns empty, limit respected. Clippy clean.
-<!-- agent:boundary:21bbebea -->
-<!-- agent:boundary:f27bdbca -->
+<!-- agent:boundary:fccf054b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
-- [x] [#xrfe] tagpath integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
-- [x] [#rbxy] tagpath integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers

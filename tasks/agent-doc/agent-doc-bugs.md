@@ -537,7 +537,34 @@ Looked at both documents. The tsift.md session correctly identified the content 
 1. `transfer --force` or `transfer --bypass-claim` — let transfer ignore pane ownership (it's a deliberate user action, not a concurrent write)
 2. `transfer pending --items <ids>` — selective pending item migration
 3. `split` subcommand — compound operation for project splits (transfer + context synthesis)
-<!-- agent:boundary:77220e8d -->
+
+Add the three suggestions to the top of agent:pending. Make sure we can have exchange content only be transferred.
+A transfer should also have a referral in case we want to leave the exchange content in the source document, so the target document can read the source document for proper context.
+### Re: pending + referral concept — opus-4-6
+
+Added three items to pending: `#tf01` (bypass-claim), `#tf02` (selective pending), `#tf03` (referral).
+
+The referral idea is the right call — it avoids duplicating exchange history while giving the target session enough context to continue. The implementation shape:
+
+```bash
+agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md exchange --referral
+```
+
+This would insert into tagpath.md's exchange:
+
+```markdown
+&lt;!-- agent:referral src="tasks/software/tsift.md" component="exchange" --&gt;
+*Context from [tasks/software/tsift.md](../../tasks/software/tsift.md) — read source exchange for full history.*
+&lt;!-- /agent:referral --&gt;
+```
+
+Then when preflight runs on tagpath.md and sees the referral tag, it can optionally read the referenced exchange to give the responding agent relevant context without bloating the target document.
+
+This also naturally handles the "exchange-only transfer" case — `transfer exchange` without `--referral` copies the content; with `--referral` it leaves a pointer. And `transfer pending --items #ast4,#0m97` can be combined with either mode.
+
+The `split` subcommand from before becomes sugar over: `transfer --bypass-claim --referral exchange` + `transfer --bypass-claim pending --items <ids>`.
+<!-- agent:boundary:32e1d8c4 -->
+<!-- agent:boundary:f4dd51ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -545,5 +572,8 @@ Looked at both documents. The tsift.md session correctly identified the content 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#kvgb] [#tf01] transfer --bypass-claim: ignore pane ownership on explicit transfer operations (primary blocker for cross-session moves)
+- [ ] [#35zm] [#tf02] transfer pending --items <ids>: selective pending item migration by ID (move subset, not all-or-nothing)
+- [ ] [#a9q1] [#tf03] transfer --referral: insert a pointer in target doc referencing source exchange instead of copying content. Target session reads source for context on demand. Supports exchange-only transfer (no pending) and referral-only (no content move)
 <!-- /agent:pending -->
 ## Assistant

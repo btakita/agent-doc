@@ -308,13 +308,46 @@ Implemented and pushed `7de90a0`:
 - `walk_skips_hidden_dirs` — `.hidden/` directory excluded
 
 This is the foundation for #p3fj (incremental indexing). The walk module provides file discovery; #p3fj will wire it into the SQLite `file_state` table for mtime comparison and selective re-parsing.
-<!-- agent:boundary:6bfa041c -->
+
+Add gh actions for CI to run test suite.
+do #p3fj. add spec + test. run tests. commit + push
+### Re: CI + #p3fj done — opus-4-6
+
+**CI**: Already configured in `.github/workflows/ci.yml` — runs `cargo clippy --all-targets -- -D warnings` + `cargo test` on push to main and PRs. The new walk and index tests run automatically.
+
+**#p3fj implemented and pushed** (`639eea0`):
+
+- **`src/index.rs`**: New module with:
+  - `IndexDb` — opens/creates `.tsift/index.db`, manages `file_state` SQLite table (path, mtime_secs, mtime_nanos, language)
+  - `compute_changes(root)` — walks files, diffs against stored mtime → `IndexSummary` with new/modified/deleted/unchanged counts
+  - `apply_changes(root)` — compute + update file_state (incremental)
+  - `rebuild(root)` — drop all state, re-index from scratch
+  - `FileChange` / `ChangeKind` — serializable change descriptors
+- **`tsift index` CLI subcommand**:
+  - `tsift index <path>` — incremental update (default)
+  - `tsift index <path> --rebuild` — full reset
+  - `tsift index <path> --check` — dry run (report only)
+  - `tsift index <path> --json` — machine-readable output
+- **`.gitignore`**: Added `.tsift/` to exclude index DB from version control
+
+**9 new tests** (55 total passing, clippy clean):
+- `first_index_all_new` — initial walk marks everything as new
+- `second_index_all_unchanged` — re-check with no edits shows 0 changes
+- `modified_file_detected` — touch file → shows as modified
+- `new_file_detected` — add file → shows as new
+- `deleted_file_detected` — remove file → shows as deleted
+- `rebuild_resets_state` — clears DB, re-indexes all
+- `unsupported_extensions_ignored` — .txt files not tracked
+- `check_mode_does_not_update_state` — compute_changes is read-only
+- `apply_then_delete_then_apply` — full lifecycle: index, delete, re-index
+<!-- agent:boundary:9fee4c28 -->
+<!-- agent:boundary:9118021d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
+- [x] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback

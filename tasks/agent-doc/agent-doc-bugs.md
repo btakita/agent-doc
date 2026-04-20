@@ -570,7 +570,26 @@ Since both reads and the write run on EDT (JB) or the extension host (VS Code), 
 Fix #3 (snapshot-diff check in the CLI) is redundant with Fix #1. When IPC is available, the CLI doesn't touch the working tree at all. When IPC is unavailable (no IDE plugin), there's no concurrent document API to race with — the user is editing in a plain text editor, and boundary reposition on disk is safe.
 
 Updated pending to combine Fix #1 + Fix #2.
-<!-- agent:boundary:98ee000c -->
+❯ Add Fix #2 to agent:pending
+❯ Do #xbs3. Add tests
+### Re: #xbs3 Fix #1 implemented — opus-4-6
+
+**Fix #1 done.** Working-tree boundary reposition in `git.rs:668-698` now checks for IPC availability before touching the disk.
+
+**What changed:**
+- `git.rs:reposition_boundary_in_snapshot()` — added IPC guard: when `.agent-doc/patches/` exists (IDE plugin installed), skip the working-tree reposition entirely. The IPC reposition signal (sent post-commit) lets the IDE plugin handle the boundary via Document API, avoiding the disk-level TOCTOU race.
+- `write.rs` — added `resolve_ipc_project_root_pub()` public accessor so git.rs can resolve the project root for the IPC check.
+- Snapshot reposition remains unconditional (the CLI owns the snapshot exclusively).
+
+**New tests (2):**
+- `reposition_skips_working_tree_when_ipc_available` — with `.agent-doc/patches/` present, working tree retains old boundary while snapshot is repositioned
+- `reposition_updates_working_tree_when_no_ipc` — without the patches dir, both snapshot and working tree are repositioned
+
+**Test results:** 1187 pass, clippy clean. Both binaries rebuilt.
+
+Fix #2 (CAS guard in IDE reposition handlers) added as separate pending item.
+<!-- agent:boundary:b4014353 -->
+<!-- agent:boundary:edb4862b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -580,6 +599,7 @@ Updated pending to combine Fix #1 + Fix #2.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [ ] [#xbs3] Boundary reposition TOCTOU race — Fix #1 (skip working-tree disk reposition when IPC available, git.rs) + Fix #2 (CAS guard in JB/VS Code reposition handler, PatchWatcher.kt + extension.ts)
+- [x] [#xbs3] Boundary reposition TOCTOU race — Fix #1 (skip working-tree disk reposition when IPC available, git.rs) + Fix #2 (CAS guard in JB/VS Code reposition handler, PatchWatcher.kt + extension.ts)
+- [ ] [#qdb4] Fix #2: CAS guard in JB PatchWatcher.kt + VS Code extension.ts reposition handler — verify document.text unchanged between read and setText (PatchWatcher.kt/extension.ts)
 <!-- /agent:pending -->
 ## Assistant

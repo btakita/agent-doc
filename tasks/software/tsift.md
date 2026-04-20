@@ -48,9 +48,8 @@ tree-sitter grammars are separate crates. For your immediate needs:
 The TypeScript crate handles both `.ts` and `.tsx` via separate grammar entry points (`tree_sitter_typescript::LANGUAGE_TYPESCRIPT` vs `LANGUAGE_TSX`), so React/JSX support comes for free.
 
 I'll update SPEC.md to reflect this. Updated pending items to replace Rust-only with multi-language approach.
-<!-- agent:boundary:f9a5743e -->
 We should support any tree-sitter supported programming language. I have immediate needs for python and typescript with React support.
-<!-- agent:boundary:4f2fd0bb -->
+<!-- agent:boundary:2119603a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

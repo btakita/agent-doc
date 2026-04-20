@@ -121,13 +121,27 @@ Updated `src/tsift/SPEC.md` with a full "Multi-Language Architecture" section. A
 The spec covers: Cargo feature flags (all 8 default-enabled), `Language` enum with `#[cfg(feature)]` gating, per-language symbol extraction tables, SQLite schema with `language` column, module structure (`src/lang/*.rs`), and future dynamic loading path.
 
 Development phases updated: Rust + Python queries first, then remaining languages, then graph + federation.
-<!-- agent:boundary:18a1e9f0 -->
+
+do #ast1 with spec and tests. commit + push
+### Re: #ast1 done — opus-4-6
+
+Implemented and pushed `83bf239`:
+
+- **Cargo.toml**: `tree-sitter` 0.25 core + 8 grammar crates as optional deps behind `lang-*` feature flags (all default-enabled)
+- **Grammar crates**: `tree-sitter-rust`, `tree-sitter-python`, `tree-sitter-typescript`, `tree-sitter-javascript`, `tree-sitter-kotlin-ng` (used `-ng` — original `tree-sitter-kotlin` 0.3.x pulls tree-sitter 0.20, ABI-incompatible), `tree-sitter-zig`, `tree-sitter-bash`, `tree-sitter-md`
+- **`src/lang/mod.rs`**: `Lang` enum with `#[cfg(feature)]` gating, `from_extension()` dispatch (17 extensions), `tree_sitter_language()` grammar loading, `name()`, `all()`
+- **12 new tests**: grammar-creates-parser for all 10 variants, extension dispatch coverage, unknown extension returns None, plus per-language snippet parsing (Rust, Python, TypeScript, TSX, JavaScript, Kotlin, Zig, Bash, Markdown)
+- **SPEC.md**: full multi-language architecture section
+
+All 39 tests pass, clippy clean. Single `tree-sitter-language v0.1.7` ABI — no version splits.
+<!-- agent:boundary:1dc3f24e -->
+<!-- agent:boundary:d56c51ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast1] Add tree-sitter core + 8 grammar crates behind Cargo feature flags (rust, python, typescript, javascript, kotlin, zig, bash, markdown)
+- [x] [#ast1] Add tree-sitter core + 8 grammar crates behind Cargo feature flags (rust, python, typescript, javascript, kotlin, zig, bash, markdown)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback

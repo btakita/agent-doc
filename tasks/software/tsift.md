@@ -93,15 +93,44 @@ tsift lang remove go         # cleanup
 Ship common languages compiled in (Cargo features), dynamic loading for extras. Users get Rust/Python/TS/JS out of the box; `tsift lang install haskell` for niche languages without rebuilding.
 
 **Recommendation**: Start with **Cargo features**. It's one Cargo.toml change, zero runtime infrastructure, and GH Actions builds exactly one binary. The dynamic loading path is a natural evolution if/when the grammar count makes binary size a concern (probably 30+ languages). The feature-flag design is forward-compatible — the `Language` enum and query files work identically regardless of how the grammar is loaded.
-<!-- agent:boundary:288d50d1 -->
+
+❯ Create a spec or plan for this architectural evolution. Support languages that I use right now.
+❯ - Rust
+❯ - Python
+❯ - Typescript
+❯ - Javascript
+❯ - Kotlin
+❯ - Zig
+❯ - Bash/Zsh/Shell
+❯ - Markdown
+### Re: multi-language spec — opus-4-6
+
+Updated `src/tsift/SPEC.md` with a full "Multi-Language Architecture" section. All 8 grammar crates confirmed on crates.io — no git deps needed:
+
+| Language | Crate | Version |
+|----------|-------|---------|
+| Rust | `tree-sitter-rust` | crates.io |
+| Python | `tree-sitter-python` | crates.io |
+| TypeScript/TSX | `tree-sitter-typescript` | crates.io |
+| JavaScript/JSX | `tree-sitter-javascript` | crates.io |
+| Kotlin | `tree-sitter-kotlin` | 0.3.8 (community, MIT) |
+| Zig | `tree-sitter-zig` | 1.1.2 (tree-sitter-grammars org) |
+| Bash/Zsh/Shell | `tree-sitter-bash` | 0.25.1 (official tree-sitter org) |
+| Markdown | `tree-sitter-md` | 0.5.3 (two-grammar split: block + inline) |
+
+The spec covers: Cargo feature flags (all 8 default-enabled), `Language` enum with `#[cfg(feature)]` gating, per-language symbol extraction tables, SQLite schema with `language` column, module structure (`src/lang/*.rs`), and future dynamic loading path.
+
+Development phases updated: Rust + Python queries first, then remaining languages, then graph + federation.
+<!-- agent:boundary:c40e2b47 -->
+<!-- agent:boundary:bdba6e5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast1] Add tree-sitter + language grammars (rust, python, typescript/tsx) to Cargo.toml
-- [ ] [#ast2] Implement tsift index --ast with multi-language extraction (Language enum + per-language query patterns)
-- [ ] [#ast3] SQLite `symbols` table schema — name, kind, signature, file, line, parent_module
+- [ ] [#ast1] Add tree-sitter core + 8 grammar crates behind Cargo feature flags (rust, python, typescript, javascript, kotlin, zig, bash, markdown)
+- [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
+- [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
@@ -115,4 +144,8 @@ Ship common languages compiled in (Cargo features), dynamic loading for extras. 
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
+- [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
+- [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
+- [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
+- [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
 <!-- /agent:pending -->

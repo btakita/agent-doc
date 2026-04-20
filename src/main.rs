@@ -348,6 +348,10 @@ enum Commands {
         /// Focus this file's pane after arranging (defaults to first file)
         #[arg(long)]
         focus: Option<String>,
+        /// Signal that this sync was triggered by a file rename. Creates a debounce marker
+        /// that suppresses auto-start for the focused file across subsequent syncs (5s TTL).
+        #[arg(long)]
+        rename: bool,
     },
     /// Replace content in a named component
     Patch {
@@ -1077,7 +1081,15 @@ fn main() -> anyhow::Result<()> {
             columns,
             window,
             focus,
-        } => sync::run(&columns, window.as_deref(), focus.as_deref()),
+            rename,
+        } => {
+            if rename {
+                if let Some(ref f) = focus {
+                    sync::write_rename_debounce(f);
+                }
+            }
+            sync::run(&columns, window.as_deref(), focus.as_deref())
+        }
         Commands::Patch {
             file,
             component,

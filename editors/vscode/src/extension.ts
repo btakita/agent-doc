@@ -1150,7 +1150,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 if (!root) continue;
                 const newRel = relativePath(root, newUri.fsPath);
                 const visibleMd = collectVisibleMdFiles(root);
-                runCli(['sync', '--col', visibleMd.join(','), '--focus', newRel], root).catch(() => {});
+                runCli(['sync', '--col', visibleMd.join(','), '--focus', newRel, '--rename'], root).catch(() => {});
             }
         })
     );

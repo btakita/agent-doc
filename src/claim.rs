@@ -262,7 +262,7 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
                         "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
                         pane_id, &existing_id[..8], entry.file
                     );
-                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[])?;
+                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[]).map(|_| ())?;
                     return Ok(());
                 }
             }

@@ -26,14 +26,14 @@ class FileRenameListenerTest {
     }
 
     @Test
-    fun `buildSyncCommand constructs correct args`() {
+    fun `buildSyncCommand constructs correct args with rename flag`() {
         val cmd = FileRenameListener.buildSyncCommand(
             "agent-doc",
             listOf("plan.md", "tasks/bugs.md"),
             "tasks/software/renamed.md"
         )
         assertEquals(
-            listOf("agent-doc", "sync", "--col", "plan.md,tasks/bugs.md", "--focus", "tasks/software/renamed.md"),
+            listOf("agent-doc", "sync", "--col", "plan.md,tasks/bugs.md", "--focus", "tasks/software/renamed.md", "--rename"),
             cmd
         )
     }
@@ -46,7 +46,7 @@ class FileRenameListenerTest {
             "only-file.md"
         )
         assertEquals(
-            listOf("/usr/local/bin/agent-doc", "sync", "--col", "only-file.md", "--focus", "only-file.md"),
+            listOf("/usr/local/bin/agent-doc", "sync", "--col", "only-file.md", "--focus", "only-file.md", "--rename"),
             cmd
         )
     }
@@ -59,7 +59,7 @@ class FileRenameListenerTest {
             "renamed.md"
         )
         assertEquals(
-            listOf("agent-doc", "sync", "--col", "", "--focus", "renamed.md"),
+            listOf("agent-doc", "sync", "--col", "", "--focus", "renamed.md", "--rename"),
             cmd
         )
     }

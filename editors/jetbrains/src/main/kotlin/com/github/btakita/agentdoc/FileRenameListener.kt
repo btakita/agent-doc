@@ -24,7 +24,7 @@ class FileRenameListener(private val project: Project) : BulkFileListener {
 
         fun buildSyncCommand(agentDoc: String, visibleMd: List<String>, relativePath: String): List<String> {
             val colArg = visibleMd.joinToString(",")
-            return listOf(agentDoc, "sync", "--col", colArg, "--focus", relativePath)
+            return listOf(agentDoc, "sync", "--col", colArg, "--focus", relativePath, "--rename")
         }
     }
 

@@ -369,7 +369,31 @@ Implemented and pushed `84d7da7`:
 - Per-language extraction: Rust (8 symbol types verified), Python (function + class + method), TypeScript (5 types), JavaScript (2 types), Kotlin (3 types), Zig (2 types), Bash (2 functions), Markdown (headings)
 
 **Note on tree-sitter-kotlin-ng:** the grammar uses `identifier` (not `simple_identifier` or `type_identifier`) for all declaration names. Discovered by AST dump — the `-ng` fork differs from the original `tree-sitter-kotlin` grammar.
-<!-- agent:boundary:80995acd -->
+Would a knowledge graph benefit this epic to find call graphs or even links & shared info between documents?
+### Re: knowledge graph for call graphs + cross-document links — opus-4-6
+
+Yes — but two distinct layers with different ROI timelines.
+
+**Layer 1: Code call graph (tree-sitter, already planned)**
+This is #grp1/#grp2 in pending. Tree-sitter gives you function→function call edges and import relationships from AST parsing alone — no LLM needed, deterministic, fast. Aider's repo-map research showed graph-ranked retrieval (PageRank over call/import references) outperforms pure vector similarity for code. This is the high-ROI first move: it makes `tsift search` return function-level results ranked by centrality, not just BM25 keyword matches.
+
+**Layer 2: Cross-domain knowledge graph (code ↔ docs ↔ specs)**
+This is where `graphify` (#bamc) fits. A knowledge graph connecting:
+- Code symbols → spec sections that define their contracts
+- Session docs → code changes they produced  
+- Markdown headings → related code modules
+- Shared concepts across documents (e.g., "incremental indexing" appears in SPEC.md, this session doc, and the walk module)
+
+This layer needs entity extraction (which graphify already does) and is more useful for multi-repo workspaces like agent-loop where context spans 17+ submodules + session docs + specs.
+
+**Recommended sequencing:**
+1. Tree-sitter call graph (#grp1-2) — deterministic, tested, immediate search improvement
+2. Evaluate graphify integration (#bamc) — cross-domain links, higher complexity but agent-loop-scale payoff
+3. If graphify proves useful, tsift becomes the query interface with graphify as the graph backend
+
+The call graph is a prerequisite regardless — graphify would extend it, not replace it.
+<!-- agent:boundary:06a63e72 -->
+<!-- agent:boundary:116cb3a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

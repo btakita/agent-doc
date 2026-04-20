@@ -474,8 +474,7 @@ Bumped to v0.33.8, VERSIONS.md updated, clippy clean, 301 tests passing, `~/.car
 **Manual testing gate** (required before publish): verify rename debounce works in a live session — rename a session doc in IDEA, confirm no spurious pane creation.
 
 Let me know when confirmed and I'll proceed with: `cargo publish` → tag → GitHub Release.
-<!-- agent:boundary:4d703b6c -->
-<!-- agent:boundary:31e9c094 -->
+<!-- agent:boundary:7c4d325f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

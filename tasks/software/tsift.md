@@ -369,14 +369,12 @@ Implemented and pushed `84d7da7`:
 - Per-language extraction: Rust (8 symbol types verified), Python (function + class + method), TypeScript (5 types), JavaScript (2 types), Kotlin (3 types), Zig (2 types), Bash (2 functions), Markdown (headings)
 
 **Note on tree-sitter-kotlin-ng:** the grammar uses `identifier` (not `simple_identifier` or `type_identifier`) for all declaration names. Discovered by AST dump — the `-ng` fork differs from the original `tree-sitter-kotlin` grammar.
-<!-- agent:boundary:416774b3 -->
-<!-- agent:boundary:78307a91 -->
+<!-- agent:boundary:80995acd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter

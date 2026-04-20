@@ -570,8 +570,7 @@ Since both reads and the write run on EDT (JB) or the extension host (VS Code), 
 Fix #3 (snapshot-diff check in the CLI) is redundant with Fix #1. When IPC is available, the CLI doesn't touch the working tree at all. When IPC is unavailable (no IDE plugin), there's no concurrent document API to race with — the user is editing in a plain text editor, and boundary reposition on disk is safe.
 
 Updated pending to combine Fix #1 + Fix #2.
-<!-- agent:boundary:bcf3e6e3 -->
-<!-- agent:boundary:2e8ae74b -->
+<!-- agent:boundary:98ee000c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

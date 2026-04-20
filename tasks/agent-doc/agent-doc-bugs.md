@@ -616,7 +616,22 @@ Done. All artifacts rebuilt and installed:
 - **VS Code extension**: `tsc` compiled, `npm test` 11/11 pass
 
 Install the JB plugin (Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.68-signed.zip`) to test the CAS guard live.
-<!-- agent:boundary:d3c89916 -->
+release
+### Re: 0.33.7 release prep — sonnet-4-6
+
+Version bumped and checks passing. Ready for manual testing gate.
+
+**Changes:**
+- `Cargo.toml` + `pyproject.toml`: 0.33.6 → 0.33.7
+- `VERSIONS.md`: added 0.33.7 entry (boundary reposition CAS guard + IPC working-tree skip)
+- `write.rs`: fixed clippy `manual_range_contains` lint (`n >= 1 && n <= 6` → `(1..=6).contains(&n)`)
+- `cargo install --path .` done: replaced v0.33.6 with v0.33.7 at `~/.cargo/bin/agent-doc`
+
+**Test results:** 1187 passed, 6 ignored — clippy clean.
+
+**Manual testing gate:** Please confirm Fix #1 + Fix #2 work in a live session (no boundary duplication under concurrent typing). Reply to publish when ready.
+<!-- agent:boundary:0c8f1354 -->
+<!-- agent:boundary:79672d8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

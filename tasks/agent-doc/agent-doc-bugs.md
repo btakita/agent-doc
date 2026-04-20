@@ -485,8 +485,7 @@ Published to crates.io, tagged, GitHub Release created with binary.
 - Parent repo pointer updated
 
 PyPI will publish automatically via CI on the `release: published` event.
-<!-- agent:boundary:952dcf3c -->
-<!-- agent:boundary:9816801b -->
+<!-- agent:boundary:89836b9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -49,7 +49,52 @@ The TypeScript crate handles both `.ts` and `.tsx` via separate grammar entry po
 
 I'll update SPEC.md to reflect this. Updated pending items to replace Rust-only with multi-language approach.
 We should support any tree-sitter supported programming language. I have immediate needs for python and typescript with React support.
-<!-- agent:boundary:2119603a -->
+What would supporting any tree-sitter programming language look like? Would it mean the binary would have all of the languages? Can we have a plugin architecture instead? Would a plugin architecture mean support a separate build via gh actions for each language? What would be the lowest impact + modular way to approach this distribution architecture?
+### Re: distribution architecture for multi-language support — opus-4-6
+
+Three approaches, from simplest to most modular:
+
+#### 1. Cargo features (lowest impact — recommended start)
+
+Each grammar is a compile-time feature flag:
+
+```toml
+[features]
+default = ["lang-rust", "lang-python", "lang-typescript"]
+lang-rust = ["dep:tree-sitter-rust"]
+lang-python = ["dep:tree-sitter-python"]
+lang-typescript = ["dep:tree-sitter-typescript"]
+lang-javascript = ["dep:tree-sitter-javascript"]
+lang-go = ["dep:tree-sitter-go"]
+all-languages = ["lang-rust", "lang-python", "lang-typescript", "lang-javascript", "lang-go"]
+```
+
+- **Binary size**: ~200KB-1MB per grammar. Even 20 languages stays under 20MB.
+- **GH Actions**: single workflow, one "full" binary with `--all-features`. No per-language matrix needed.
+- **User choice**: `cargo install tsift` gets defaults (Rust/Python/TS). `cargo install tsift --all-features` gets everything. `--no-default-features --features lang-python` for minimal.
+- **Adding a language**: grammar crate dep + feature flag + `.scm` query file + `Language` enum variant. No architecture changes.
+
+#### 2. Dynamic grammar loading (true plugin architecture)
+
+tree-sitter supports loading `.so`/`.dylib` grammars at runtime via `Language::from_path()`:
+
+```bash
+tsift lang install python    # downloads prebuilt grammar .so
+tsift lang list              # shows installed grammars
+tsift lang remove go         # cleanup
+```
+
+- **Pro**: tiny core binary (~2MB), add languages without recompiling
+- **Con**: platform-specific shared libs (linux/mac/windows x86/arm), separate grammar build infra, `tsift lang install` needs a grammar registry or GitHub releases per grammar
+- **GH Actions**: needs a matrix build (per-language x per-platform) for grammar .so files
+
+#### 3. Hybrid (pragmatic long-term)
+
+Ship common languages compiled in (Cargo features), dynamic loading for extras. Users get Rust/Python/TS/JS out of the box; `tsift lang install haskell` for niche languages without rebuilding.
+
+**Recommendation**: Start with **Cargo features**. It's one Cargo.toml change, zero runtime infrastructure, and GH Actions builds exactly one binary. The dynamic loading path is a natural evolution if/when the grammar count makes binary size a concern (probably 30+ languages). The feature-flag design is forward-compatible — the `Language` enum and query files work identically regardless of how the grammar is loaded.
+<!-- agent:boundary:1ffe5eaa -->
+<!-- agent:boundary:84110fd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

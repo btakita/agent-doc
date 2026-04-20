@@ -619,9 +619,8 @@ Keep it in tsift. No good reason to extract.
 **What I'd recommend:** add a `src/graph/` module (like `src/lang/`) that owns call-graph extraction and query. The indexing pipeline calls into it during `tsift index`, and `tsift graph` subcommands expose it to the user. Clean separation of concerns via modules, without the overhead of a separate crate.
 
 Updated #grp1 description to reflect "internal module" instead of separate crate.
-<!-- agent:boundary:ca6258ec -->
 re: #grp1. Should this be its own crate or part of tsift. I would prefer to keep it part of tsift. But let me know if there's good reasons to extract a tsift-graph crate.
-<!-- agent:boundary:df77349e -->
+<!-- agent:boundary:f84be6fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

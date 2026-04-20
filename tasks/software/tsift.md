@@ -560,7 +560,28 @@ What stays here in tsift:
 - Once tagpath exposes a library crate, the tsift side is: add `tagpath` as a path dep in `Cargo.toml`, call the parser at index time to populate a `tags` column, and use tag matching in search ranking
 
 I'd suggest adding a pending item in tagpath.md like: "Add `lib.rs` — expose parser/tokenizer as library API for downstream crates (tsift)". Then #ast4 here picks it up once that lands.
-<!-- agent:boundary:b45a2bb7 -->
+
+Please transfer the task + context from this doc into src/software/tagpath.md
+### Re: transfer to tagpath.md — opus-4-6
+
+Can't write to tagpath.md from this pane — it's owned by pane %86 (this is %78). The content to transfer:
+
+**Exchange entry for tagpath.md:**
+
+> *Transferred from tasks/software/tsift.md*
+>
+> tsift (#ast4) needs tagpath's parser as a library dependency for cross-convention symbol matching. The `symbols` table stores name, kind, language, file, line, end_line. For search, querying `user_name` should also find `userName` and `UserName`. Tagpath's canonical tag decomposition normalizes both to `[user, name]`.
+>
+> **Plan:** (1) Add `lib.rs` to tagpath exposing `parser::parse()`, `detect_convention()`, `Tag`/`ParseResult` types — keep CLI as `main.rs` using the library. (2) tsift adds `tagpath` as path dep, stores canonical tags in a `tags TEXT` column at index time. (3) `tsift search` gains tag-based ranking (exact > partial > BM25 fallback).
+
+**Pending items for tagpath.md:**
+1. Add `lib.rs` — expose parser/tokenizer as library API for downstream crates (tsift)
+2. tsift integration: add tagpath as path dep, store canonical tags in symbols table at index time
+3. tsift integration: tag-based search ranking — exact tag match > partial > BM25 fallback
+
+To apply: run `/agent-doc tasks/software/tagpath.md` from pane %86 and paste the content, or reclaim from here with `agent-doc claim tasks/software/tagpath.md`.
+<!-- agent:boundary:ca819565 -->
+<!-- agent:boundary:1f1b306f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

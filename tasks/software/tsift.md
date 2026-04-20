@@ -340,13 +340,43 @@ do #p3fj. add spec + test. run tests. commit + push
 - `unsupported_extensions_ignored` — .txt files not tracked
 - `check_mode_does_not_update_state` — compute_changes is read-only
 - `apply_then_delete_then_apply` — full lifecycle: index, delete, re-index
-<!-- agent:boundary:b3fa5378 -->
+
+do #ast2. add spec + test. commit + push
+### Re: #ast2 done — opus-4-6
+
+Implemented and pushed `84d7da7`:
+
+- **`Lang::symbol_query()`** — returns `.scm` tree-sitter query patterns per language. Uses `@kind.name` capture convention (e.g., `@function.name`, `@struct.name`) so the capture name encodes the symbol kind.
+- **`Lang::extract_symbols(source)`** — parses source with tree-sitter, runs the symbol query, returns `Vec<Symbol>` with name, kind, line, end_line.
+- **`Symbol` struct** — `name: String`, `kind: String`, `line: usize`, `end_line: usize`
+- Uses `StreamingIterator` from tree-sitter 0.25 for query match iteration.
+
+**Query coverage per language:**
+
+| Language | Symbol types captured |
+|----------|---------------------|
+| Rust | function, struct, enum, trait, impl, mod, type_alias, const, static |
+| Python | function, class |
+| TypeScript/TSX | function, class, interface, type_alias, enum |
+| JavaScript/JSX | function, class |
+| Kotlin | function, class, object |
+| Zig | function, variable |
+| Bash | function |
+| Markdown | heading (h1-h6) |
+
+**10 new tests** (64 total):
+- `test_all_symbol_queries_compile` — every language query compiles against its grammar
+- Per-language extraction: Rust (8 symbol types verified), Python (function + class + method), TypeScript (5 types), JavaScript (2 types), Kotlin (3 types), Zig (2 types), Bash (2 functions), Markdown (headings)
+
+**Note on tree-sitter-kotlin-ng:** the grammar uses `identifier` (not `simple_identifier` or `type_identifier`) for all declaration names. Discovered by AST dump — the `-ng` fork differs from the original `tree-sitter-kotlin` grammar.
+<!-- agent:boundary:416774b3 -->
+<!-- agent:boundary:78307a91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
+- [x] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter

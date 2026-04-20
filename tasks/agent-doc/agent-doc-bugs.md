@@ -371,7 +371,24 @@ Changed `route::provision_pane` to return `Result<String>` (the new pane ID). Up
 All 301 lib tests + full `make check` pass. Both binaries rebuilt and installed.
 
 **Pending updated:** Added Tier 1 (logging) and Tier 3 (focus-gated auto-start) items. #qam7 (Tier 2 — rename debounce) remains open — the existing `is_file_rename` only covers files WITH an alive pane; #qam7 addresses the no-alive-pane case (buildside scenario).
-<!-- agent:boundary:c08639d1 -->
+Add tests. Is #sgj3 done? add spec
+do #4avv with tests and spec
+binary build + install for testing
+### Re: #sgj3 tests + spec, #4avv done with tests + spec — opus-4-6
+
+**#sgj3 (Tier 1 logging) — done.** Implementation was already complete. Added:
+- **5 new tests:** `focus_gate_skips_non_focused_file`, `focus_gate_allows_focused_file`, `focus_gate_allows_all_when_no_focus`, `batch_summary_format_multiple_panes`, `batch_summary_not_printed_for_single_pane`
+- **Spec:** Auto-start pane ID logging section in sync.rs module spec (Spec + Contracts + Evals)
+
+**#4avv (focus-gated auto-start) — done.** Implemented in `sync.rs` auto-start loop:
+
+When `--focus` is provided, only the focused file is auto-started. Non-focused files in `--col` are skipped with `[sync] skipping auto-start for <file> (not focused, focus=<focus>)` and get panes on their next focus event. When `--focus` is None, all files remain eligible (backward compatible).
+
+This eliminates the burst-spawning scenario from the buildside incident (5 panes in 58 seconds). Now only the file you're looking at gets a pane. Tradeoff: first focus on a non-auto-started file has a ~3-5s cold-start delay.
+
+**Tests:** 3 focus gate tests + 2 batch summary tests (all passing). **Spec:** Focus-gated auto-start section added to sync.rs (Spec + Contracts + Evals). All 306 tests passing. Both binaries rebuilt and installed.
+<!-- agent:boundary:36392ae8 -->
+<!-- agent:boundary:6ecde37d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -379,7 +396,7 @@ All 301 lib tests + full `make check` pass. Both binaries rebuilt and installed.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#sgj3] Tier 1 logging: auto-start messages now include pane ID (e.g. [sync] auto-started %84 for file.md); batch summary printed when >1 pane auto-starts in a single sync call. Implemented — verify in next multi-file sync event.
-- [ ] [#4avv] Focus-gated auto-start: only auto-start the --focus file, not every file in --col. Other files get panes on first focus. Eliminates burst spawning. Tradeoff: cold-start delay (~3-5s) on first focus of non-auto-started file.
+- [x] [#sgj3] Tier 1 logging: auto-start messages now include pane ID (e.g. [sync] auto-started %84 for file.md); batch summary printed when >1 pane auto-starts in a single sync call. Implemented — verify in next multi-file sync event.
+- [x] [#4avv] Focus-gated auto-start: only auto-start the --focus file, not every file in --col. Other files get panes on first focus. Eliminates burst spawning. Tradeoff: cold-start delay (~3-5s) on first focus of non-auto-started file.
 <!-- /agent:pending -->
 ## Assistant

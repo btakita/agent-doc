@@ -630,8 +630,7 @@ Version bumped and checks passing. Ready for manual testing gate.
 **Test results:** 1187 passed, 6 ignored — clippy clean.
 
 **Manual testing gate:** Please confirm Fix #1 + Fix #2 work in a live session (no boundary duplication under concurrent typing). Reply to publish when ready.
-<!-- agent:boundary:0c8f1354 -->
-<!-- agent:boundary:79672d8a -->
+<!-- agent:boundary:9ecf68bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

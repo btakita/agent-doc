@@ -522,8 +522,7 @@ The committed state had `<!-- agent:boundary:5bb175d8 -->` AND `<!-- agent:bound
 3. **Skip reposition for documents with user edits** — `reposition_boundary_in_snapshot()` already skips when a pending file exists (active run). Extend this: also skip the working-tree reposition when the file has user content beyond the last boundary marker that differs from the snapshot.
 
 Fix #1 is the simplest and eliminates the most common path. Added to pending.
-<!-- agent:boundary:90c57ad9 -->
-<!-- agent:boundary:8bb92935 -->
+<!-- agent:boundary:c87a7ddf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

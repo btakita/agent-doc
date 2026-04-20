@@ -319,8 +319,7 @@ Don't build the full system upfront. Start with:
 1. Index one submodule (agent-doc — it's Rust, tree-sitter has excellent Rust support)
 2. Validate the retrieval quality — does it return the right functions for natural-language queries?
 3. If yes, scale to other submodules with the per-directory layout above
-<!-- agent:boundary:15c93bee -->
-<!-- agent:boundary:d4a4bbb9 -->
+<!-- agent:boundary:17a57a92 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

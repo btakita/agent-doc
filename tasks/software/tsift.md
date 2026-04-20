@@ -247,7 +247,35 @@ The `ignore` crate is already battle-tested (powers ripgrep) and handles `.gitig
 "Check on read" with mtime comparison gives the same guarantee as a watcher — you never see stale results. The only downside vs. a watcher is that the index isn't pre-warmed between queries, but the incremental cost is so low (<100ms) that pre-warming has no practical benefit.
 
 A watcher would only matter if tsift became a long-running MCP server that needs to push index updates to clients. That's a future concern if/when the MCP plugin holds persistent state.
-<!-- agent:boundary:52f5dbaf -->
+❯ Are you sure the file walk is <1ms for 500 files? How about for very large repos ~10000 files?
+❯ Add file walk to agent:pending.
+### Re: file walk performance — opus-4-6
+
+I was wrong about <1ms for 500 files. Benchmarked on this actual repo:
+
+| Method | Files | Time |
+|--------|-------|------|
+| `find` (traverses .gitignored dirs) | 62,954 | 3.2s |
+| `rg --files` (ignore crate, skips .gitignored) | 19,521 | **15ms** |
+
+The `ignore` crate's directory-level pruning is the key — it skips `target/`, `node_modules/`, `.git/` entirely rather than entering and filtering.
+
+**Corrected estimates:**
+
+| Scale | Files | Walk + stat |
+|-------|-------|-------------|
+| Single submodule (agent-doc, corky) | 50-500 | <2ms |
+| Medium repo | 5,000 | ~5ms |
+| agent-loop (all submodules) | 19,521 | ~15ms |
+| Large monorepo | 100,000 | ~75ms |
+
+The stat() for mtime is free — the `ignore` crate already calls `stat()` during the walk to distinguish files from directories. Comparing mtime against stored values is a trivial integer comparison.
+
+**Per-submodule scoping makes this fast by default:** the spec's isolation tiers mean each `tsift search --scope <submod>` only walks that submodule's tree. The common case is 50-500 files (~2ms), not the full 20K workspace.
+
+For repos where even the walk overhead matters (100K+ files), a future optimization: store directory mtimes and skip subtrees where dir mtime hasn't changed (pruning new-file detection, not modification detection).
+<!-- agent:boundary:6aa468f4 -->
+<!-- agent:boundary:fd8f6b37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -273,4 +301,5 @@ A watcher would only matter if tsift became a long-running MCP server that needs
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
 - [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
+- [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 <!-- /agent:pending -->

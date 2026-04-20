@@ -354,7 +354,21 @@ End-of-exchange user input followed only by `&lt;!-- /agent:exchange --&gt;` + `
 ```
 
 **All 1175 tests pass.** Both binaries rebuilt. Ready to test — switch files on the right editor side and confirm the pane stays right.
-<!-- agent:boundary:cb664545 -->
+Add tests
+### Re: tests for pane ordering fix — opus-4-6
+
+Two integration tests added to `route.rs`:
+
+| Test | What it covers |
+|------|---------------|
+| `list_panes_ordered_returns_screen_position_after_rearrange` | Breaks a pane out and re-joins it to the opposite side. Verifies `list_panes_ordered` returns screen position order (by `pane_left`) even when creation order diverges. |
+| `provision_pane_right_col_picks_rightmost_after_rearrange` | Same rearrangement setup, then calls `provision_pane` with a second-column file. Verifies the new pane ends up rightmost — confirms the `list_panes_ordered` fix in the actual provision path. |
+
+The rearrangement technique: `break-pane` + `join-pane -bh` moves a right pane to the left of another, creating the creation-order/screen-order divergence that triggers the original bug.
+
+**1177 tests pass.** Both binaries rebuilt.
+<!-- agent:boundary:493ca430 -->
+<!-- agent:boundary:fb517a32 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

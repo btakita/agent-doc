@@ -198,7 +198,57 @@ On incremental update: hash each changed file, compare against `file_state`. Ski
 For a repo like agent-loop (~500 files across submodules): full index takes seconds, incremental update <100ms for typical 1-5 file changes. The search path adds ~10ms overhead for staleness check (one `git diff` + hash comparison).
 
 The auto-incremental on search means users never query stale data. No hooks, no daemons, no cron — just "check on read."
-<!-- agent:boundary:88f9e179 -->
+
+❯ git checks are good. But uncommitted code won't be discovered.
+
+❯ Can we check the mtime of the source code files and cue a refresh if the cache is out of date? This won't cover new uncommitted code. I would rather avoid a file watcher but would be willing to have one if necessary.
+### Re: mtime-based staleness — opus-4-6
+
+You're right — `git diff` misses untracked new files. A file watcher is overkill. The sweet spot is **mtime-based directory walk on read** — it catches everything (committed, staged, unstaged, untracked) with no daemon.
+
+#### How it works
+
+On every `tsift search` or `tsift index`:
+
+1. **Walk the directory tree** using the `ignore` crate (from ripgrep — respects `.gitignore`, fast). Filter to supported extensions.
+2. **Stat each file** — compare `mtime` against `file_state.indexed_at`. This is ~100ns per file on Linux (cached inodes), so statting 500 files takes <1ms.
+3. **Three buckets**:
+   - **Modified**: mtime newer than indexed_at → re-parse, update symbols
+   - **New**: file exists on disk but not in `file_state` → parse, insert symbols
+   - **Deleted**: file in `file_state` but not on disk → delete symbols
+4. **Update `file_state`** with new mtime for each processed file.
+
+#### Why this beats git-only
+
+| | git diff | mtime walk |
+|---|---|---|
+| Committed changes | yes | yes |
+| Staged changes | yes (--cached) | yes |
+| Unstaged edits | yes | yes |
+| **New untracked files** | **no** | **yes** |
+| Works outside git | no | **yes** |
+| Subprocess cost | ~5ms (git spawn) | 0 (pure Rust) |
+git checks are good. But uncommitted updates won't be discovered.
+
+#### Performance
+
+```
+500 files × stat():     <1ms
+5 changed files × parse: ~50ms (tree-sitter is fast)
+SQLite updates:          <5ms
+────────────────────────────
+Total incremental:       ~56ms (imperceptible before search)
+```
+
+The `ignore` crate is already battle-tested (powers ripgrep) and handles `.gitignore`, `.ignore`, nested ignore files, and symlink resolution. Adding it as a dependency is natural for a search tool.
+
+#### No file watcher needed
+
+"Check on read" with mtime comparison gives the same guarantee as a watcher — you never see stale results. The only downside vs. a watcher is that the index isn't pre-warmed between queries, but the incremental cost is so low (<100ms) that pre-warming has no practical benefit.
+
+A watcher would only matter if tsift became a long-running MCP server that needs to push index updates to clients. That's a future concern if/when the MCP plugin holds persistent state.
+<!-- agent:boundary:fbab5331 -->
+<!-- agent:boundary:a32c3d28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -223,4 +273,5 @@ The auto-incremental on search means users never query stale data. No hooks, no 
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
+- [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
 <!-- /agent:pending -->

@@ -509,7 +509,13 @@ Yes — sessions load marketplace hooks at startup. The claudescore.md session w
 **Fix:** restart the claudescore.md session (close the tmux pane / agent-doc session and start a fresh one). Any session started after the cleanup will be woz-free.
 
 This session (tsift.md) started after the cleanup, so it's already clean.
-<!-- agent:boundary:3ca07243 -->
+
+commit + push. compact exchange.
+### Re: commit + push + compact exchange — sonnet-4-6
+
+On it — pushing, then compacting.
+<!-- agent:boundary:12e9773c -->
+<!-- agent:boundary:3958478b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

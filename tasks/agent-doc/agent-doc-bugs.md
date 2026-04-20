@@ -217,8 +217,7 @@ One more gap: `write.rs` was missing spec coverage for the future-work signal li
 | `shouldHandleFile` / `buildSyncCommand` (JB) | utility helpers | trivial, no separate spec needed |
 
 All implementation from this session is now spec'd. No remaining gaps.
-<!-- agent:boundary:f2aba210 -->
-<!-- agent:boundary:a01515ec -->
+<!-- agent:boundary:8806e9c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

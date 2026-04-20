@@ -286,6 +286,8 @@ The file walk items are there — they're near the bottom of the pending list:
 
 Added large repo optimization to pending — directory mtime pruning to skip unchanged subtrees for 100K+ file repos.
 do #rws4. add spec + test. commit + push
+.
+<!-- agent:boundary:c945500a -->
 ### Re: #rws4 done — opus-4-6
 
 Implemented and pushed `7de90a0`:
@@ -307,14 +309,13 @@ Implemented and pushed `7de90a0`:
 - `walk_skips_hidden_dirs` — `.hidden/` directory excluded
 
 This is the foundation for #p3fj (incremental indexing). The walk module provides file discovery; #p3fj will wire it into the SQLite `file_state` table for mtime comparison and selective re-parsing.
-<!-- agent:boundary:930d2049 -->
-<!-- agent:boundary:75579da9 -->
+<!-- agent:boundary:2dd1b773 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
+- [x] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
 - [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility

@@ -354,8 +354,7 @@ End-of-exchange user input followed only by `&lt;!-- /agent:exchange --&gt;` + `
 ```
 
 **All 1175 tests pass.** Both binaries rebuilt. Ready to test — switch files on the right editor side and confirm the pane stays right.
-<!-- agent:boundary:fa80b711 -->
-<!-- agent:boundary:bfe7dc44 -->
+<!-- agent:boundary:cb664545 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

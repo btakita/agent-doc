@@ -119,9 +119,8 @@ Acknowledged the file move to `tasks/software/tsift.md`.
 <!-- replace:spec -->
 See [SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec.
 <!-- /replace:spec -->
-<!-- agent:boundary:608b3149 -->
 Note I just moved this file to tasks/software/tsift.md
-<!-- agent:boundary:827b8086 -->
+<!-- agent:boundary:c0fce058 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

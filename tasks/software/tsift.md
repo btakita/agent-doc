@@ -549,7 +549,19 @@ Yes. Tagpath solves the cross-convention matching problem that #ast4 needs.
 - Inline the core tokenization logic (it's a case-boundary splitter + underscore splitter)
 
 The second option is cleanest — `tagpath` becomes a library with a CLI binary, tsift depends on `tagpath` as a path dep. The parser is stateless and fast enough for batch indexing.
-<!-- agent:boundary:a391bc48 -->
+
+Make tagpath a library with a CLI binary. Should we do it here or transfer the task(s) to tasks/software/tagpath.md?
+### Re: tagpath lib refactor — where to track — opus-4-6
+
+Transfer to `tasks/software/tagpath.md`. The refactor (add `lib.rs`, expose parser as library API) is a tagpath-internal change — it belongs in that session. You already claimed it for pane %86.
+
+What stays here in tsift:
+- **#ast4** depends on the tagpath library existing, so it becomes blocked-on the tagpath refactor
+- Once tagpath exposes a library crate, the tsift side is: add `tagpath` as a path dep in `Cargo.toml`, call the parser at index time to populate a `tags` column, and use tag matching in search ranking
+
+I'd suggest adding a pending item in tagpath.md like: "Add `lib.rs` — expose parser/tokenizer as library API for downstream crates (tsift)". Then #ast4 here picks it up once that lands.
+<!-- agent:boundary:c78a36a1 -->
+<!-- agent:boundary:6c9fb702 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

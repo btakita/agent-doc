@@ -560,8 +560,7 @@ What stays here in tsift:
 - Once tagpath exposes a library crate, the tsift side is: add `tagpath` as a path dep in `Cargo.toml`, call the parser at index time to populate a `tags` column, and use tag matching in search ranking
 
 I'd suggest adding a pending item in tagpath.md like: "Add `lib.rs` — expose parser/tokenizer as library API for downstream crates (tsift)". Then #ast4 here picks it up once that lands.
-<!-- agent:boundary:c78a36a1 -->
-<!-- agent:boundary:6c9fb702 -->
+<!-- agent:boundary:b45a2bb7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

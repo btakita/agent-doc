@@ -549,8 +549,7 @@ Yes. Tagpath solves the cross-convention matching problem that #ast4 needs.
 - Inline the core tokenization logic (it's a case-boundary splitter + underscore splitter)
 
 The second option is cleanest — `tagpath` becomes a library with a CLI binary, tsift depends on `tagpath` as a path dep. The parser is stateless and fast enough for batch indexing.
-<!-- agent:boundary:4ea77447 -->
-<!-- agent:boundary:0a2fc792 -->
+<!-- agent:boundary:a391bc48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -274,8 +274,7 @@ The stat() for mtime is free — the `ignore` crate already calls `stat()` durin
 **Per-submodule scoping makes this fast by default:** the spec's isolation tiers mean each `tsift search --scope <submod>` only walks that submodule's tree. The common case is 50-500 files (~2ms), not the full 20K workspace.
 
 For repos where even the walk overhead matters (100K+ files), a future optimization: store directory mtimes and skip subtrees where dir mtime hasn't changed (pruning new-file detection, not modification detection).
-<!-- agent:boundary:6aa468f4 -->
-<!-- agent:boundary:fd8f6b37 -->
+<!-- agent:boundary:53eac67f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

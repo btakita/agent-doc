@@ -296,8 +296,7 @@ Correction from the sync log — the previous cycle's event reconstruction was w
 From the user's perspective, a pane appeared after a file move — which feels like the system lost track. But the system never had a pane for buildside.md in the first place. The rename made `tasks/professional/buildside.md` visible in the editor layout, and sync's auto-start treated it as "file with session UUID, no pane → provision one." The registration worked correctly; the bug is the auto-start trigger, not the registration.
 
 The #qam7 debounce fix remains the right solution: suppress auto-start for files that just entered `col_args` via a rename event.
-<!-- agent:boundary:20ca5be6 -->
-<!-- agent:boundary:a3c7775a -->
+<!-- agent:boundary:da1de9de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -454,7 +454,30 @@ Implement fix #1 with tests.
 **Test results:** 1181 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
 
 Two items added to pending. Fix #2 (dedup threshold) is lower priority — fix #1 addresses the root cause; fix #2 is defense-in-depth.
-<!-- agent:boundary:d0cb4221 -->
+
+Is #15mw implemented? Implement #3yc9 with tests.
+### Re: #15mw status + #3yc9 implementation — opus-4-6
+
+**#15mw is implemented.** The `response_already_in_current()` guard was added in the previous cycle — it's live at `write.rs:1219` with 4 tests covering the function at `write.rs:2443`.
+
+**#3yc9 implemented:** Content-aware dedup for single-line CRDT duplicates.
+
+**What changed in `crdt.rs`:**
+- Lowered `dedup_adjacent_blocks` threshold from ≥2 to ≥1 non-empty lines
+- Added `is_structural_block()` exemption for thematic break markers (`---`, `***`, `___`) — these may legitimately repeat and are not deduped
+- All other single-line content duplicates (headings, text, etc.) are now caught
+
+**New tests (6):**
+- `dedup_preserves_structural_thematic_breaks` — `---`, `***`, `___` all exempt
+- `dedup_removes_single_line_content_duplicates` — heading-style duplicates caught
+- `dedup_removes_single_line_text_duplicates` — prose duplicates caught
+- `dedup_preserves_different_single_line_blocks` — non-duplicates untouched
+- `is_structural_block_detects_thematic_breaks` — unit tests for the helper
+- Existing multi-line dedup tests unchanged and passing
+
+**Test results:** 1185 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
+<!-- agent:boundary:dd9cc179 -->
+<!-- agent:boundary:88aef220 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -464,7 +487,7 @@ Two items added to pending. Fix #2 (dedup threshold) is lower priority — fix #
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [ ] [#15mw] IPC sidecar ack timeout guard — skip CRDT merge when plugin already applied response (write.rs)
-- [ ] [#3yc9] Lower dedup threshold or add content-aware dedup for single-line CRDT duplicates (crdt.rs)
+- [x] [#15mw] IPC sidecar ack timeout guard — skip CRDT merge when plugin already applied response (write.rs)
+- [x] [#3yc9] Lower dedup threshold or add content-aware dedup for single-line CRDT duplicates (crdt.rs)
 <!-- /agent:pending -->
 ## Assistant

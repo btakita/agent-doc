@@ -408,6 +408,8 @@ Yes — the deterministic subset is a natural fit for tsift, and it avoids an ex
 | Wikilinks | `inline` content matching `[[...]]` | `[[SPEC.md]]` → edge to file |
 | Bold terms | `strong_emphasis` | `**incremental indexing**` → concept entity |
 
+Can we have tsift mark important concepts? What would happen if the existing document has an important concept that is not annotated with Bold terms, link, or Section heading. Could we plan a lint to suggest updating the document?
+
 **Graph schema (SQLite, extends existing index.db):**
 
 ```sql
@@ -453,7 +455,41 @@ tsift graph --section "Architecture"    # find this heading across all docs
 The built-in graph covers the structural, deterministic connections — links, headings, code references. That's 80% of the value for navigating a workspace like agent-loop. graphify remains the option for the semantic layer (LLM-extracted entities, clustering, visualization) if you later want richer concept mapping beyond what the AST can see.
 
 **Implementation path:** extend the markdown `symbol_query()` to also capture links and code spans, add the graph tables to `index.db`, wire into `tsift graph` subcommands. Reuses existing infrastructure — walk, index, tree-sitter parsing.
-<!-- agent:boundary:40f7d3a5 -->
+### Re: concept lint for unannotated terms — opus-4-6
+
+The graph enables this directly. Once `index.db` has a `nodes` table of known entities (code symbols, bold terms, headings, links), a lint pass becomes a straightforward cross-reference:
+
+**How it works:**
+
+1. Build the entity vocabulary from the graph — all known symbol names, bold terms, heading phrases
+2. Scan each document's plain text (non-annotated `inline` content)
+3. Match plain text against the vocabulary
+4. Flag matches that aren't already annotated
+
+**Example output:**
+
+```
+$ tsift lint SPEC.md
+SPEC.md:42  "walk_files" is a known symbol (src/walk.rs:13) — suggest `walk_files()`
+SPEC.md:15  "incremental indexing" is bold in tasks/software/tsift.md:287 — suggest **incremental indexing**
+SPEC.md:78  "CLAUDE.md" is a file path — suggest [CLAUDE.md](../CLAUDE.md)
+```
+
+**Three detection tiers (no LLM needed):**
+
+| Tier | Detection | Suggestion |
+|------|-----------|------------|
+| Code symbols | Plain text matches a symbol in `file_state` / symbol index | Wrap in backticks: `` `symbol_name` `` |
+| Cross-doc concepts | Plain text matches a bold term or heading from another document | Bold or link to source |
+| File references | Plain text matches a known file path in the index | Convert to markdown link |
+
+**The key insight:** the lint is only as good as the graph. As more documents get annotated (manually or via lint suggestions), the vocabulary grows, and future lint runs catch more. It's a flywheel — each annotation improves detection for the next pass.
+
+**`tsift lint --fix`** could auto-apply suggestions (wrap code symbols in backticks, add links for file references). Bold/heading suggestions would stay advisory since they change the document's emphasis, which is a writing choice.
+
+Added to pending.
+<!-- agent:boundary:73b06249 -->
+<!-- agent:boundary:7a2ea863 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -478,4 +514,5 @@ The built-in graph covers the structural, deterministic connections — links, h
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
+- [ ] [#cs4r] tsift lint: detect unannotated concepts in markdown — cross-reference plain text against known graph entities (symbols, headings, bold terms), suggest backtick/bold/link annotations
 <!-- /agent:pending -->

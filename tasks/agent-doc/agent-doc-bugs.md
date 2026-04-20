@@ -38,7 +38,24 @@ Updated both:
 2. **runbooks/pending-ops.md** (§What to decide each cycle) — added matching bullet under the existing decision list.
 
 The rule is now: if my response contains deferred-action language, I must also `--pending-add` it. This prevents "Worth revisiting" from dying as prose in a compacted exchange.
-<!-- agent:boundary:e9b76325 -->
+
+I moved tasks/tsift.md to tasks/software/tsift.md. An agent-doc turn was processing in Claude Code.
+When I switched from the left editor (with tsift.md open) to the right editor (with claudescore.md open)...then switched back to editor with tsift.md...a new tmux pane was created.
+What should happen when the file path changes, the sessions.json entry needs to update appropriately.
+Also, could you recover the output from the tmux session running `agent-doc tasks/tsift.md` into tasks/software/tsift.md?
+### Re: file rename → duplicate pane bug + tsift recovery — opus-4-6
+
+**Recovery:** Already done. The tmux session on pane %77 successfully compacted `tasks/tsift.md` → `tasks/software/tsift.md` at 3:12 PM (commits `f324f527`, `e6e6af4d`). The sessions.json entry `"tsift-v0.1"` already points to the new path. Content is intact — nothing lost.
+
+**Bug — file rename spawns duplicate pane:** When the file path changes while a session is active, the IDE plugin doesn't recognize that the session ID (`tsift-v0.1`) maps to an existing pane. On next focus, it creates a fresh pane instead of reusing %77. Two fixes needed:
+
+1. **sessions.json path update** — On `FileMovedEvent` (JB) / `onDidRenameFiles` (VS Code), the plugin should update the `file` field in sessions.json to the new path. The session ID (frontmatter `agent_doc_session`) stays stable — it's the lookup key.
+
+2. **Pane reuse on path change** — When the plugin resolves which pane to focus, it should match by session ID first (read from frontmatter), not by file path. If a session ID match exists in sessions.json but the path differs, update the path and reuse the pane.
+
+Added to pending.
+<!-- agent:boundary:f15fe9d0 -->
+<!-- agent:boundary:d70a0d34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -47,5 +64,6 @@ The rule is now: if my response contains deferred-action language, I must also `
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [ ] [#7x90] Embed future-work signal promotion in agent-doc binary — currently skill-only (SKILL.md + pending-ops.md). Consider compile-time enforcement or lint warning when response contains 'Worth revisiting' without a corresponding --pending-add
+- [ ] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
 <!-- /agent:pending -->
 ## Assistant

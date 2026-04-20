@@ -386,7 +386,24 @@ mail = { index = false }  # skip entirely
 4. Wire into `tsift search` — when AST index exists, rank by symbol match first, fall back to BM25
 5. Add `tsift-graph` crate — call graph extraction + traversal
 6. Add per-submodule config + isolation tiers
-<!-- agent:boundary:9f5f9b01 -->
+
+❯ Please create a spec in tasks/tsift.md. Transfer pending items and context to implement the spec from tsift.md
+### Re: spec created & items transferred — opus-4-6
+
+Done. Created the spec in `tasks/tsift.md` with:
+
+- **Spec: AST-Aware Code RAG** section — covers architecture (tsift + tsift-graph crate), per-submodule isolation tiers, storage layout, new subcommands, output contract, and development phases
+- **8 new pending items** added to tsift.md covering the full implementation path:
+  - `#ast1`–`#ast4`: tree-sitter integration + SQLite symbols + search wiring
+  - `#grp1`–`#grp2`: tsift-graph crate + callers/callees subcommands
+  - `#iso1`: per-submodule config + isolation
+  - `#bamc`: graphify evaluation (transferred from here)
+
+The existing tsift pending items (release workflow, audit subcommands) are preserved alongside the new ones.
+
+Marked `#bamc` done here — it now lives in `tasks/tsift.md`.
+<!-- agent:boundary:2eadd923 -->
+<!-- agent:boundary:d7a1870e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -394,5 +411,5 @@ mail = { index = false }  # skip entirely
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 - [ ] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
-- [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
+- [x] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 <!-- /agent:pending -->

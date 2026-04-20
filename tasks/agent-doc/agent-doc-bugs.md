@@ -444,7 +444,30 @@ Ready for live testing. To verify rename debounce end-to-end:
 2. Open a session document, ensure pane is running
 3. Rename/move the file in IDEA
 4. Check `/tmp/agent-doc-sync.log` for `rename-debounce: set marker` + `rename-debounce: skipped auto-start`
-<!-- agent:boundary:806e6479 -->
+
+Does any of the build functionality belong in the ffi plugin or in the agent-doc binary? I want to avoid fan out implementations for each editor plugin if possible.
+### Re: where rename logic lives — opus-4-6
+
+The current split already follows FFI-first correctly — no fan-out problem exists:
+
+**What each plugin does (irreducible minimum):**
+- Subscribe to platform-specific rename event (`BulkFileListener` / `onDidRenameFiles`)
+- Pass `--rename` to the same `agent-doc sync` call they already make
+
+That's 1 extra string (`"--rename"`) per plugin — not duplicated business logic.
+
+**What the binary owns (all business logic):**
+- `write_rename_debounce()` — writes marker file
+- `has_rename_debounce()` — checks marker + TTL expiry + auto-cleanup
+- Auto-start suppression logic in the sync loop
+
+The rename detection EVENT can't move to FFI/binary because it requires hooking into editor-specific lifecycle APIs. But the RESPONSE is already 100% in the binary. The plugins are thin event reporters as per the FFI-first contract.
+
+**Could we go further?** One option: the FFI layer could expose a `agent_doc_notify_rename(old_path, new_path)` function that plugins call instead of constructing the sync CLI command themselves. But that would mean maintaining FFI bindings for something that's already a one-line CLI call. Net complexity increase, not decrease.
+
+The current design is the right one — plugin reports event, binary owns logic.
+<!-- agent:boundary:a833e844 -->
+<!-- agent:boundary:d2472040 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

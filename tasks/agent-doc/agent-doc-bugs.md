@@ -114,8 +114,7 @@ Added `workspace.onDidRenameFiles` subscription in `activate()`. On rename of an
 Created `FileRenameListener` implementing `BulkFileListener`, registered in `PluginLifecycleListener.projectOpened()` on `VFS_CHANGES`. Detects `VFileMoveEvent` and `VFilePropertyChangeEvent(PROP_NAME)`, triggers `agent-doc sync` with the new relative path.
 
 Both binaries rebuilt. JB plugin zip needs rebuild (pending item added).
-<!-- agent:boundary:a2cf3884 -->
-<!-- agent:boundary:31c6464b -->
+<!-- agent:boundary:8b957e78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -123,7 +122,6 @@ Both binaries rebuilt. JB plugin zip needs rebuild (pending item added).
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
 - [ ] [#k0ra] Build JB plugin zip with FileRenameListener and test rename → sync path update end-to-end
 <!-- /agent:pending -->
 ## Assistant

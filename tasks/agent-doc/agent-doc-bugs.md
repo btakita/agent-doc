@@ -537,8 +537,7 @@ Looked at both documents. The tsift.md session correctly identified the content 
 1. `transfer --force` or `transfer --bypass-claim` — let transfer ignore pane ownership (it's a deliberate user action, not a concurrent write)
 2. `transfer pending --items <ids>` — selective pending item migration
 3. `split` subcommand — compound operation for project splits (transfer + context synthesis)
-<!-- agent:boundary:fcf0b5cf -->
-<!-- agent:boundary:477fa82d -->
+<!-- agent:boundary:77220e8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

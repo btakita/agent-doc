@@ -93,7 +93,7 @@ tsift lang remove go         # cleanup
 Ship common languages compiled in (Cargo features), dynamic loading for extras. Users get Rust/Python/TS/JS out of the box; `tsift lang install haskell` for niche languages without rebuilding.
 
 **Recommendation**: Start with **Cargo features**. It's one Cargo.toml change, zero runtime infrastructure, and GH Actions builds exactly one binary. The dynamic loading path is a natural evolution if/when the grammar count makes binary size a concern (probably 30+ languages). The feature-flag design is forward-compatible — the `Language` enum and query files work identically regardless of how the grammar is loaded.
-<!-- agent:boundary:d7e85918 -->
+<!-- agent:boundary:288d50d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

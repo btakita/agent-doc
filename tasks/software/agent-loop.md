@@ -250,7 +250,77 @@ source files
 3. **Bridge to tsift** — if tsift can accept a pre-indexed corpus, feed it the AST-extracted symbols instead of raw files.
 
 Worth revisiting whether graphify could serve as the graph layer directly (extend its extractors with tree-sitter code parsing).
-<!-- agent:boundary:62407f0b -->
+
+❯ I need this tooling to work with git submodules. Some projects need to be isolated from the rest of the repos in agent-loop. For example session-share and monsterrodholders-dev are client projects. session-share in particular needs isolation. There are many codebases as well. Should we have a separate graph db representation for each code base?
+### Re: submodule isolation & per-codebase graphs — opus-4-6
+
+Yes — **separate graph DB per submodule**, with an optional thin federation layer. Three reasons:
+
+**1. Isolation is mandatory for client projects.** session-share and monsterrodholders-dev symbols should never appear in each other's graphs. A single shared graph would leak client function names, internal APIs, and architectural patterns across boundaries. Per-submodule graphs enforce this by default.
+
+**2. Incremental updates stay cheap.** When you edit `src/agent-doc/`, only its graph rebuilds. With 17+ submodules, a monolithic graph means every change triggers a full re-index. Per-submodule: rebuild one graph in seconds, not all of them in minutes.
+
+**3. Query scope matches work scope.** When Claude is working inside `src/agent-doc/`, it needs agent-doc's symbols + maybe shared crates (ctx-core, instruction-files). A per-submodule graph with explicit cross-references is faster and returns more relevant results than searching a monolith.
+
+#### Proposed Layout
+
+```
+.code-graph/
+  agent-doc/          # one directory per submodule
+    symbols.lance     # LanceDB: function signatures + embeddings
+    deps.json         # call graph + import graph
+    meta.json         # last indexed commit, language, file count
+  corky/
+    symbols.lance
+    deps.json
+    meta.json
+  session-share/      # isolated — never queried from other graphs
+    ...
+```
+
+Each graph is keyed by submodule path (not hash — human-readable). `.code-graph/` lives in agent-loop root, gitignored.
+
+#### Federation (cross-submodule queries)
+
+For cases where you need cross-repo results (e.g., "who uses `instruction-files::audit`?"):
+
+- A thin index maps exported symbols → submodule. Query the index first, then drill into the relevant per-submodule graph.
+- Client-isolated submodules (session-share, monsterrodholders-dev) are **excluded from the federation index** by default. You'd need to explicitly opt in.
+- This is a nice-to-have, not a blocker. Start with per-submodule graphs; add federation when the need arises.
+
+#### Isolation Tiers
+
+| Tier | Submodules | Federation | Notes |
+|------|-----------|------------|-------|
+| **Isolated** | session-share, monsterrodholders-dev | Never federated | Client data, strict boundary |
+| **Private** | mail, resume | Never federated | Personal data |
+| **Shared** | agent-doc, corky, ctx-core-dev, etc. | Federated | Open-source or internal tooling |
+
+Configuration could be a simple `.code-graph/config.toml`:
+```toml
+[defaults]
+federation = true
+
+[overrides.session-share]
+federation = false
+isolated = true
+
+[overrides.monsterrodholders-dev]
+federation = false
+isolated = true
+
+[overrides.mail]
+federation = false
+```
+
+#### Practical First Step
+
+Don't build the full system upfront. Start with:
+1. Index one submodule (agent-doc — it's Rust, tree-sitter has excellent Rust support)
+2. Validate the retrieval quality — does it return the right functions for natural-language queries?
+3. If yes, scale to other submodules with the per-directory layout above
+<!-- agent:boundary:15c93bee -->
+<!-- agent:boundary:d4a4bbb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -258,4 +328,5 @@ Worth revisiting whether graphify could serve as the graph layer directly (exten
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 - [ ] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
+- [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 <!-- /agent:pending -->

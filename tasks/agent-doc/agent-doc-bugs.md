@@ -581,14 +581,12 @@ Implemented `transfer --bypass-claim`. Pushed to main.
 **Test results:** 1205 passed, clippy clean, both binaries installed.
 
 **Key design point:** Previously, `transfer` used `atomic_write_pub` (no ownership check) — the binary allowed cross-pane writes but the skill/LLM refused to call it. Now the binary enforces ownership (consistent with `write` command's `verify_pane_ownership`) and provides `--bypass-claim` as the explicit escape hatch.
-<!-- agent:boundary:103f2600 -->
-<!-- agent:boundary:aaca74a4 -->
+<!-- agent:boundary:0acdd537 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#kvgb] [#tf01] transfer --bypass-claim: ignore pane ownership on explicit transfer operations (primary blocker for cross-session moves)
 - [ ] [#35zm] [#tf02] transfer pending --items <ids>: selective pending item migration by ID (move subset, not all-or-nothing)
 - [ ] [#a9q1] [#tf03] transfer --referral: insert a pointer in target doc referencing source exchange instead of copying content. Target session reads source for context on demand. Supports exchange-only transfer (no pending) and referral-only (no content move)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

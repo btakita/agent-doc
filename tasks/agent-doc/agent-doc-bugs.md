@@ -426,7 +426,26 @@ Added `--rename` flag to `agent-doc sync`. When FileRenameListener fires:
 
 JB plugin needs rebuild for testing.
 build + install
-<!-- agent:boundary:a2996d1b -->
+Apply changes to VSCode plugin.
+build + install for testing
+### Re: plugins built — opus-4-6
+
+VS Code extension already had `--rename` applied (extension.ts:1153). Both plugins built:
+
+| Artifact | Version | Path |
+|----------|---------|------|
+| JB plugin (signed) | 0.2.70 | `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.70-signed.zip` |
+| VS Code extension | 0.2.7 | `editors/vscode/agent-doc-0.2.7.vsix` |
+| `~/.cargo/bin/agent-doc` | 0.33.7 | installed |
+| `target/release/agent-doc` | 0.33.7 | built |
+
+Ready for live testing. To verify rename debounce end-to-end:
+1. Install JB plugin from disk (0.2.70-signed.zip)
+2. Open a session document, ensure pane is running
+3. Rename/move the file in IDEA
+4. Check `/tmp/agent-doc-sync.log` for `rename-debounce: set marker` + `rename-debounce: skipped auto-start`
+<!-- agent:boundary:9f36468a -->
+<!-- agent:boundary:36dc72b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

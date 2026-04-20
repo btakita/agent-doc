@@ -158,9 +158,8 @@ Extension packaged as `agent-doc-0.2.7.vsix`.
 | VS Code extension | `agent-doc-0.2.7.vsix` |
 
 Ready for live testing. Install JB plugin from disk to verify rename → sync end-to-end.
-<!-- agent:boundary:9fd16050 -->
 Add tests to agent-doc binary. Add tests to JB plugin. Make sure VSCode plugin has parity. build agent-doc binary, JB plugin, VSCode plugin. Install new version of agent-doc binary for testing.
-<!-- agent:boundary:c9ede4cc -->
+<!-- agent:boundary:3d23af3c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

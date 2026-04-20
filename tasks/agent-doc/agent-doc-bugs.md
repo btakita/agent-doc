@@ -509,8 +509,7 @@ preflight → respond → write → commit → postflight
 ```
 
 Shall I implement the `postflight` subcommand? It's ~50 lines in the binary (reuse diff logic from preflight) plus a skill update to check it after commit.
-<!-- agent:boundary:a3da9635 -->
-<!-- agent:boundary:45230872 -->
+<!-- agent:boundary:6a3b9690 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

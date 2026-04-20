@@ -90,8 +90,7 @@ Warning format: `[write] WARN: response contains future-work signal "worth revis
 Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 
 **#v30f — file rename handling: Not done.** This is the IDE plugin bug filed this session — needs `FileMovedEvent` (JB) / `onDidRenameFiles` (VS Code) handlers plus session-ID-first pane resolution. No implementation yet.
-<!-- agent:boundary:fa8a0a91 -->
-<!-- agent:boundary:b17d05bc -->
+<!-- agent:boundary:1f78086c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -99,7 +98,6 @@ Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#7x90] Embed future-work signal promotion in agent-doc binary — currently skill-only (SKILL.md + pending-ops.md). Consider compile-time enforcement or lint warning when response contains 'Worth revisiting' without a corresponding --pending-add
 - [ ] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
 <!-- /agent:pending -->
 ## Assistant

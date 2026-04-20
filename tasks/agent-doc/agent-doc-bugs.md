@@ -375,8 +375,7 @@ Both binaries freshly built and installed:
 - `.bin/agent-doc` (release symlink) → rebuilt
 
 Ready to test: switch files on the right editor side and confirm the pane stays right.
-<!-- agent:boundary:b02d6181 -->
-<!-- agent:boundary:4063f4e1 -->
+<!-- agent:boundary:79e9ebb5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

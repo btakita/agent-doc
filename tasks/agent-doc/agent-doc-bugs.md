@@ -454,8 +454,7 @@ Implement fix #1 with tests.
 **Test results:** 1181 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
 
 Two items added to pending. Fix #2 (dedup threshold) is lower priority — fix #1 addresses the root cause; fix #2 is defense-in-depth.
-<!-- agent:boundary:4ddcdd70 -->
-<!-- agent:boundary:0aa5a3d1 -->
+<!-- agent:boundary:d0cb4221 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

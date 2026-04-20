@@ -122,7 +122,7 @@ Done. Created `src/lib.rs` with all 9 modules as `pub mod`. Updated `main.rs` to
 - `alias::generate_aliases`, `prose::to_prose`, `config::generate_config`
 
 80 tests pass (72 existing + 8 new), clippy clean. Committed and pushed.
-<!-- agent:boundary:72aabedc -->
+<!-- agent:boundary:6e22fe2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

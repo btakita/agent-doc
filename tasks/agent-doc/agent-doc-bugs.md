@@ -234,8 +234,7 @@ Commit `a41bdd1` on `btakita/agent-doc` main:
 - `editors/jetbrains/gradle.properties` — v0.2.69
 
 Parent repo pointer updated (`f4d91c10`) and pushed.
-<!-- agent:boundary:6718c025 -->
-<!-- agent:boundary:f20cafa2 -->
+<!-- agent:boundary:132312a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

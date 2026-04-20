@@ -580,8 +580,7 @@ Can't write to tagpath.md from this pane — it's owned by pane %86 (this is %78
 3. tsift integration: tag-based search ranking — exact tag match > partial > BM25 fallback
 
 To apply: run `/agent-doc tasks/software/tagpath.md` from pane %86 and paste the content, or reclaim from here with `agent-doc claim tasks/software/tagpath.md`.
-<!-- agent:boundary:ca819565 -->
-<!-- agent:boundary:1f1b306f -->
+<!-- agent:boundary:03da89ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

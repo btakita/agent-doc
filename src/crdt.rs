@@ -20,7 +20,8 @@
 //!   7. Runs `dedup_adjacent_blocks` to remove identical adjacent paragraph-level blocks.
 //!   8. Returns the merged string (always conflict-free).
 //! - `dedup_adjacent_blocks(text)`: removes duplicate adjacent blocks (separated by `\n\n`)
-//!   where a block has ≥2 non-empty lines, to clean up CRDT double-insertion artifacts.
+//!   where a block has ≥1 non-empty line, to clean up CRDT double-insertion artifacts.
+//!   Structural blocks (thematic breaks like `---`) are exempt from dedup.
 //! - `compact(state)`: decode then re-encode a CRDT state to GC tombstones.
 //!
 //! ## Agentic Contracts
@@ -31,8 +32,8 @@
 //!   CRDT operations.
 //! - Stale base detection prevents duplicate insertions across multiple merge cycles.
 //! - Shared common prefix (line-boundary snapped) is never inserted twice.
-//! - `dedup_adjacent_blocks` only removes blocks with ≥2 non-empty lines; single-line
-//!   repeated content (e.g., `---`) is not deduplicated to avoid false positives.
+//! - `dedup_adjacent_blocks` removes blocks with ≥1 non-empty line; structural blocks
+//!   (thematic breaks like `---`, `***`, `___`) are exempt to avoid false positives.
 //! - `encode_state` / `decode_state` are inverse operations: round-trip preserves all text.
 //! - `compact` is idempotent: compacting already-compact state is a no-op in terms of text.
 //!
@@ -51,7 +52,8 @@
 //!   shared content appears exactly once.
 //! - `dedup_adjacent_blocks_removes_duplicate`: two identical adjacent multi-line blocks →
 //!   deduplicated to one.
-//! - `dedup_adjacent_blocks_preserves_short`: single-line repeated blocks left intact.
+//! - `dedup_adjacent_blocks_preserves_structural`: structural (thematic break) repeated blocks left intact.
+//! - `dedup_adjacent_blocks_removes_single_line_content`: single-line content duplicates are removed.
 //! - `compact_preserves_text`: compact state → decoded text unchanged.
 
 use anyhow::{Context, Result};
@@ -287,9 +289,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
 ///
 /// After a CRDT merge, both sides may independently append the same content
 /// (e.g., a `### Re:` section), resulting in duplicate adjacent blocks.
-/// This pass identifies and removes duplicates while preserving intentionally
-/// repeated content (only dedup blocks >= 2 non-empty lines to avoid
-/// false positives on short repeated lines like `---` or blank lines).
+/// This pass deduplicates blocks with ≥1 non-empty line, exempting structural
+/// blocks (thematic breaks like `---`) that may legitimately repeat.
 pub fn dedup_adjacent_blocks(text: &str) -> String {
     let blocks: Vec<&str> = text.split("\n\n").collect();
     if blocks.len() < 2 {
@@ -299,9 +300,9 @@ pub fn dedup_adjacent_blocks(text: &str) -> String {
     let mut result: Vec<&str> = Vec::with_capacity(blocks.len());
     for block in &blocks {
         let trimmed = block.trim();
-        // Only dedup substantial blocks (>= 2 non-empty lines)
         let non_empty_lines = trimmed.lines().filter(|l| !l.trim().is_empty()).count();
-        if non_empty_lines >= 2
+        if non_empty_lines >= 1
+            && !is_structural_block(trimmed)
             && let Some(prev) = result.last()
             && prev.trim() == trimmed
         {
@@ -312,6 +313,20 @@ pub fn dedup_adjacent_blocks(text: &str) -> String {
     }
 
     result.join("\n\n")
+}
+
+/// Returns true for blocks that may legitimately repeat adjacent to themselves.
+/// Currently covers thematic break markers (`---`, `***`, `___`).
+fn is_structural_block(trimmed: &str) -> bool {
+    let mut lines = trimmed.lines();
+    let first = match lines.next() {
+        Some(l) => l.trim(),
+        None => return false,
+    };
+    if lines.next().is_some() {
+        return false;
+    }
+    first.len() >= 3 && first.chars().all(|c| c == '-' || c == '*' || c == '_')
 }
 
 /// Compact a CRDT state by re-encoding (GC tombstones where possible).
@@ -1003,9 +1018,37 @@ commit and push all rappstack packages.
     }
 
     #[test]
-    fn dedup_ignores_short_repeated_lines() {
-        // Single-line blocks like "---" should not be deduped
+    fn dedup_preserves_structural_thematic_breaks() {
         let text = "---\n\n---\n\nContent.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result, text);
+
+        let text2 = "***\n\n***\n\nContent.";
+        assert_eq!(dedup_adjacent_blocks(text2), text2);
+
+        let text3 = "___\n\n___\n\nContent.";
+        assert_eq!(dedup_adjacent_blocks(text3), text3);
+    }
+
+    #[test]
+    fn dedup_removes_single_line_content_duplicates() {
+        let text = "### Re: topic — opus-4-6\n\n### Re: topic — opus-4-6\n\nDifferent.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result.matches("### Re: topic").count(), 1);
+        assert!(result.contains("Different."));
+    }
+
+    #[test]
+    fn dedup_removes_single_line_text_duplicates() {
+        let text = "Some response text.\n\nSome response text.\n\nNext section.";
+        let result = dedup_adjacent_blocks(text);
+        assert_eq!(result.matches("Some response text.").count(), 1);
+        assert!(result.contains("Next section."));
+    }
+
+    #[test]
+    fn dedup_preserves_different_single_line_blocks() {
+        let text = "Line A.\n\nLine B.\n\nLine C.";
         let result = dedup_adjacent_blocks(text);
         assert_eq!(result, text);
     }
@@ -1020,5 +1063,17 @@ commit and push all rappstack packages.
         let text = "Block A\nLine 2.\n\nBlock B\nLine 2.";
         let result = dedup_adjacent_blocks(text);
         assert_eq!(result, text);
+    }
+
+    #[test]
+    fn is_structural_block_detects_thematic_breaks() {
+        assert!(is_structural_block("---"));
+        assert!(is_structural_block("***"));
+        assert!(is_structural_block("___"));
+        assert!(is_structural_block("-----"));
+        assert!(!is_structural_block("--"));
+        assert!(!is_structural_block("### Heading"));
+        assert!(!is_structural_block("some text"));
+        assert!(!is_structural_block("---\nmore"));
     }
 }

@@ -665,11 +665,12 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         }
     }
 
-    // Reposition in the working tree. Previously this was left to the plugin
-    // IPC path, so sweep-committed foreign docs (no active plugin session)
-    // kept stale boundary markers until the next `agent-doc write`. Applying
-    // the same transformation here makes the working-tree state deterministic
-    // in the binary regardless of whether any editor plugin is loaded.
+    // Reposition in the working tree — only when no IDE plugin is installed.
+    // When the plugin is present (.agent-doc/patches/ exists), the IPC
+    // reposition signal (sent post-commit) lets the plugin handle the
+    // working-tree boundary via Document API, coordinated with user edits.
+    // Doing a disk-level read-modify-write here races with the user typing
+    // in the IDE, producing duplicate structural tails (bug #xbs3).
     //
     // Only the `<!-- agent:boundary:... -->` marker is repositioned here;
     // `(HEAD)` suffixes on `### Re:` headings are left alone. The commit
@@ -678,7 +679,14 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     // without any rewrite. Rewriting old headings here would strip `(HEAD)`
     // from sections the user is actively editing and cause phantom diffs
     // on prior-cycle sections (bug #dsng).
-    if let Ok(working) = std::fs::read_to_string(file) {
+    let ipc_available = file
+        .canonicalize()
+        .map(|c| crate::write::resolve_ipc_project_root_pub(&c))
+        .map(|root| root.join(".agent-doc/patches").exists())
+        .unwrap_or(false);
+    if ipc_available {
+        eprintln!("[commit] skipping working-tree boundary reposition — IPC available");
+    } else if let Ok(working) = std::fs::read_to_string(file) {
         let repositioned = crate::template::reposition_boundary_to_end_with_baseline(
             &working,
             None,
@@ -1456,5 +1464,98 @@ mod tests {
             !crate::write::is_stale_baseline(baseline, snapshot),
             "user edits in replace + append components should NOT be stale"
         );
+    }
+
+    #[test]
+    fn reposition_skips_working_tree_when_ipc_available() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: test — opus-4-6\nResponse.\n\
+            <!-- agent:boundary:oldid123 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, doc_content).unwrap();
+
+        // Create snapshot
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+
+        // Initial commit
+        Command::new("git").current_dir(root)
+            .args(["add", "."]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Create .agent-doc/patches/ to simulate IDE plugin installed
+        let patches_dir = root.join(".agent-doc/patches");
+        fs::create_dir_all(&patches_dir).unwrap();
+
+        // Run reposition — should skip working tree because IPC is available
+        let changed = reposition_boundary_in_snapshot(&doc);
+
+        // Snapshot should be repositioned
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snap.contains("oldid123"), "snapshot boundary should be repositioned");
+
+        // Working tree should NOT be modified (IPC available)
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(working.contains("oldid123"),
+            "working tree should keep old boundary when IPC is available");
+
+        assert!(changed, "snapshot change should report changed=true");
+    }
+
+    #[test]
+    fn reposition_updates_working_tree_when_no_ipc() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: test — opus-4-6\nResponse.\n\
+            <!-- agent:boundary:oldid456 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, doc_content).unwrap();
+
+        // Create snapshot
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+
+        // Initial commit
+        Command::new("git").current_dir(root)
+            .args(["add", "."]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // NO .agent-doc/patches/ — no IDE plugin
+
+        // Run reposition
+        reposition_boundary_in_snapshot(&doc);
+
+        // Both snapshot AND working tree should be repositioned
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snap.contains("oldid456"), "snapshot boundary should be repositioned");
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(!working.contains("oldid456"),
+            "working tree should be repositioned when no IPC available");
     }
 }

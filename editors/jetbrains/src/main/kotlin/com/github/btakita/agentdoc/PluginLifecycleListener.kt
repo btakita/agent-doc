@@ -36,7 +36,22 @@ class PluginLifecycleListener : ProjectManagerListener {
 
         Thread({
             try {
-                val process = ProcessBuilder("agent-doc", "resync", "--fix")
+                // Determine the current tmux session so resync uses relocation
+                // instead of killing panes in a different session.
+                val sessionName = try {
+                    val tmuxProc = ProcessBuilder("tmux", "display-message", "-p", "#{session_name}")
+                        .redirectErrorStream(true)
+                        .start()
+                    val name = tmuxProc.inputStream.bufferedReader().readText().trim()
+                    if (tmuxProc.waitFor() == 0 && name.isNotEmpty()) name else null
+                } catch (_: Exception) { null }
+
+                val cmd = mutableListOf("agent-doc", "resync", "--fix")
+                if (sessionName != null) {
+                    cmd.addAll(listOf("--session", sessionName))
+                    LOG.info("[resync] using relocation mode with session: $sessionName")
+                }
+                val process = ProcessBuilder(cmd)
                     .directory(java.io.File(basePath))
                     .redirectErrorStream(true)
                     .start()

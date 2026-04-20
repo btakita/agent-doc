@@ -130,7 +130,7 @@ fn is_agent_process(tmux: &Tmux, pane_id: &str) -> bool {
 /// Determine if the file is in the first column of the editor layout.
 /// When true, the new pane should be split BEFORE (left of) the existing pane.
 /// Returns false when col_args is empty (no layout context — default to split right).
-fn is_first_column(file: &Path, col_args: &[String]) -> bool {
+pub(crate) fn is_first_column(file: &Path, col_args: &[String]) -> bool {
     if col_args.len() < 2 {
         return false;
     }
@@ -468,8 +468,23 @@ fn resolve_target_session(
         return configured.unwrap();
     }
 
-    current_tmux_session(tmux)
-        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
+    let resolved = current_tmux_session(tmux)
+        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+
+    // Auto-update config.toml when the configured session is stale.
+    // This prevents resync from killing panes in the actual session
+    // because config still points to a dead session name.
+    if configured.as_ref().is_some_and(|s| s != &resolved) {
+        eprintln!(
+            "[route] configured tmux_session '{}' is not alive, updating config to '{}'",
+            configured.as_ref().unwrap(), resolved
+        );
+        if let Err(e) = crate::config::update_project_tmux_session(&resolved) {
+            eprintln!("[route] warning: failed to update config.toml: {}", e);
+        }
+    }
+
+    resolved
 }
 
 /// Find an active target pane for lazy claiming.
@@ -657,13 +672,13 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     // over stash panes — splitting in the stash creates invisible panes.
     let existing_pane = if skip_wait {
         // Sync path: find a pane in the agent-doc window (not stash)
-        let window_panes = tmux.list_window_panes(
+        let window_panes = tmux.list_panes_ordered(
             &format!("{}:agent-doc", session_name)
         ).unwrap_or_default();
         let positional = if split_before {
-            window_panes.into_iter().next()       // leftmost for left-column file
+            window_panes.into_iter().next()       // leftmost by screen position
         } else {
-            window_panes.into_iter().last()       // rightmost for right-column file
+            window_panes.into_iter().last()       // rightmost by screen position
         };
         positional.or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
     } else {
@@ -2016,5 +2031,89 @@ mod tests {
         let after = iso.list_window_panes(&window).unwrap();
 
         assert_eq!(before.len(), after.len(), "no panes should be created when no registry exists");
+    }
+
+    #[test]
+    fn list_panes_ordered_returns_screen_position_after_rearrange() {
+        // When panes are broken out and re-joined, creation order can diverge from
+        // screen position. list_panes_ordered must return screen order (by pane_left).
+        let iso = IsolatedTmux::new("route-test-pane-order-rearrange");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane_a = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_a).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_b = iso.split_window(&pane_a, &cwd, "-dh").unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Rearrange: break pane_b out, rejoin to the LEFT of pane_a.
+        let _ = iso.raw_cmd(&["break-pane", "-d", "-t", &pane_b]);
+        let _ = iso.raw_cmd(&[
+            "join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a,
+        ]);
+
+        let screen_order = iso.list_panes_ordered(
+            &format!("{}:agent-doc", session),
+        ).unwrap();
+        assert_eq!(screen_order.len(), 2);
+        assert_eq!(
+            screen_order[0], pane_b,
+            "pane_b should be leftmost after rejoin to the left"
+        );
+        assert_eq!(
+            screen_order[1], pane_a,
+            "pane_a should be rightmost after rejoin shifted it right"
+        );
+    }
+
+    #[test]
+    fn provision_pane_right_col_picks_rightmost_after_rearrange() {
+        // Regression: provision_pane must use screen position, not creation order.
+        // After rearranging panes so creation order != screen order,
+        // split_before=false should split from the rightmost pane by screen position.
+        let iso = IsolatedTmux::new("route-test-provision-rearranged");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane_a = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_a).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_b = iso.split_window(&pane_a, &cwd, "-dh").unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Rearrange: break pane_b, rejoin LEFT of pane_a.
+        // Screen: [pane_b, pane_a]. pane_a is now rightmost.
+        let _ = iso.raw_cmd(&["break-pane", "-d", "-t", &pane_b]);
+        let _ = iso.raw_cmd(&[
+            "join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a,
+        ]);
+
+        // Provision a right-column file — should split from pane_a (rightmost by screen).
+        let col_args = vec![
+            "tasks/file_a.md".to_string(),
+            "tasks/file_b.md".to_string(),
+        ];
+        let file_b = Path::new("tasks/file_b.md");
+        let result = provision_pane(
+            &iso, file_b, "session-b", "tasks/file_b.md",
+            Some(session), &col_args,
+        );
+        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
+
+        let after = iso.list_panes_ordered(
+            &format!("{}:agent-doc", session),
+        ).unwrap();
+        assert_eq!(after.len(), 3, "should have 3 panes");
+
+        // The new pane should be rightmost (split after pane_a which is rightmost).
+        let new_pane: Vec<_> = after.iter()
+            .filter(|p| *p != &pane_a && *p != &pane_b)
+            .collect();
+        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
+        assert_eq!(
+            after.last().unwrap(), new_pane[0],
+            "right-column file should produce rightmost pane even after rearrangement"
+        );
     }
 }

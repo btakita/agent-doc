@@ -204,6 +204,67 @@ pub fn annotate_diff(diff_text: &str) -> Option<String> {
     }
 }
 
+/// Extract user additions that appear within agent content (inline annotations).
+///
+/// An inline annotation is a `[user+]` or `[user~]` line that has at least one
+/// substantive `[agent]` line after it — meaning the user inserted or modified text
+/// inside an agent response block rather than appending at the end.
+///
+/// Structural markers (component tags `<!-- ... -->`, section headers `# ...`) are
+/// excluded from the "agent lines after" check to avoid false positives where
+/// end-of-exchange user input is followed only by closing markers.
+pub fn extract_inline_annotations(annotated_diff: &str) -> Vec<String> {
+    let lines: Vec<&str> = annotated_diff.lines().collect();
+    let mut annotations = Vec::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        let content = if let Some(c) = line.strip_prefix("[user+] ") {
+            c
+        } else if let Some(c) = line.strip_prefix("[user~] ") {
+            c
+        } else {
+            continue;
+        };
+        if content.trim().is_empty() {
+            continue;
+        }
+        // Exclude [user~] lines that are only boundary marker additions ("(HEAD)" suffix).
+        if is_head_boundary_artifact(content) {
+            continue;
+        }
+        let has_substantive_agent_after = lines[i + 1..]
+            .iter()
+            .any(|l| is_substantive_agent_line(l));
+        if has_substantive_agent_after {
+            annotations.push(content.to_string());
+        }
+    }
+
+    annotations
+}
+
+/// Returns true if the annotated line is a substantive agent line (not a structural marker).
+/// Component tags (`<!-- ... -->`), section headers (`# ...`), and blank lines are
+/// structural — they should not count as "agent response content" for inline annotation detection.
+fn is_substantive_agent_line(line: &str) -> bool {
+    let Some(content) = line.strip_prefix("[agent] ") else {
+        return false;
+    };
+    let t = content.trim_start();
+    !t.is_empty() && !t.starts_with("<!--") && !t.starts_with('#')
+}
+
+/// Returns true when a `[user~]` line is just the boundary marker `(HEAD)` being appended
+/// to a response heading — a reposition artifact from `agent-doc commit`, not a user edit.
+fn is_head_boundary_artifact(content: &str) -> bool {
+    content.ends_with(" (HEAD)") && {
+        let base = &content[..content.len() - " (HEAD)".len()];
+        base.trim_start_matches('#').starts_with(' ')
+            || base.contains("### Re:")
+            || base.contains("## ")
+    }
+}
+
 /// Flush buffered remove lines as `[user-]`.
 fn flush_removes(pending: &mut Vec<String>, result: &mut Vec<String>) {
     for removed in pending.drain(..) {
@@ -1589,6 +1650,115 @@ Please fix the bug.\n\
     fn annotate_diff_empty() {
         let diff = "--- snapshot\n+++ document\n";
         assert!(annotate_diff(diff).is_none());
+    }
+
+    // --- extract_inline_annotations tests ---
+
+    #[test]
+    fn inline_annotations_user_addition_between_agent_lines() {
+        let annotated = "[agent] previous agent line\n\
+                         [user+] This is wrong, fix it\n\
+                         [agent] more agent content";
+        let anns = extract_inline_annotations(annotated);
+        assert_eq!(anns, vec!["This is wrong, fix it"]);
+    }
+
+    #[test]
+    fn inline_annotations_user_modification_between_agent_lines() {
+        let annotated = "[agent] context before\n\
+                         [user~] The corrected line\n\
+                         [agent] context after";
+        let anns = extract_inline_annotations(annotated);
+        assert_eq!(anns, vec!["The corrected line"]);
+    }
+
+    #[test]
+    fn inline_annotations_user_addition_at_end_is_not_inline() {
+        let annotated = "[agent] agent content\n\
+                         [agent] more agent content\n\
+                         [user+] New user input at end";
+        let anns = extract_inline_annotations(annotated);
+        assert!(anns.is_empty());
+    }
+
+    #[test]
+    fn inline_annotations_component_markers_not_substantive() {
+        // Component closing + section header after user input should NOT classify as inline
+        let annotated = "[agent] response prose\n\
+                         [user+] The fix did not seem to work\n\
+                         [agent] <!-- /agent:exchange -->\n\
+                         [agent] \n\
+                         [agent] ## Pending / Not Built\n\
+                         [agent] \n\
+                         [agent] <!-- agent:pending patch=replace -->";
+        let anns = extract_inline_annotations(annotated);
+        assert!(anns.is_empty(), "component markers should not make end-of-exchange input inline");
+    }
+
+    #[test]
+    fn inline_annotations_head_boundary_artifact_excluded() {
+        // [user~] that only appended (HEAD) to a heading is a reposition artifact
+        let annotated = "[agent] previous content\n\
+                         [user~] ### Re: topic — sonnet-4-6 (HEAD)\n\
+                         [agent] response prose\n\
+                         [agent] more content";
+        let anns = extract_inline_annotations(annotated);
+        assert!(anns.is_empty(), "(HEAD) boundary reposition should not be an inline annotation");
+    }
+
+    #[test]
+    fn inline_annotations_real_correction_between_prose() {
+        // Genuine user correction inside agent prose (not a structural marker)
+        let annotated = "[agent] The score is 5 out of 10.\n\
+                         [user+] This is wrong. Score should be 8-9.\n\
+                         [agent] Here is more analysis below.";
+        let anns = extract_inline_annotations(annotated);
+        assert_eq!(anns, vec!["This is wrong. Score should be 8-9."]);
+    }
+
+    #[test]
+    fn inline_annotations_multiple() {
+        let annotated = "[agent] ### Re: topic\n\
+                         [user+] First correction\n\
+                         [agent] agent paragraph\n\
+                         [user+] Second correction\n\
+                         [agent] agent closing\n\
+                         [user+] New input at end";
+        let anns = extract_inline_annotations(annotated);
+        assert_eq!(anns, vec!["First correction", "Second correction"]);
+    }
+
+    #[test]
+    fn inline_annotations_skips_blank_user_lines() {
+        let annotated = "[agent] agent line\n\
+                         [user+] \n\
+                         [agent] more agent";
+        let anns = extract_inline_annotations(annotated);
+        assert!(anns.is_empty());
+    }
+
+    #[test]
+    fn inline_annotations_empty_annotated_diff() {
+        let anns = extract_inline_annotations("");
+        assert!(anns.is_empty());
+    }
+
+    #[test]
+    fn inline_annotations_claudescore_table_scenario() {
+        // Reproduces the claudescore bug: user corrections inside agent response
+        // with table rows as agent content after them
+        let annotated = "[agent] | Category | Score |\n\
+                         [agent] |----------|-------|\n\
+                         [agent] | Quality  | 7     |\n\
+                         [user+] This is wrong. Do not lower expert scores.\n\
+                         [agent] | Speed    | 8     |\n\
+                         [user+] We may need to broaden the gate.\n\
+                         [agent] | Total    | 7.5   |";
+        let anns = extract_inline_annotations(annotated);
+        assert_eq!(anns, vec![
+            "This is wrong. Do not lower expert scores.",
+            "We may need to broaden the gate.",
+        ]);
     }
 
     // parse_slash_commands tests

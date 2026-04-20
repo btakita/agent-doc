@@ -4,6 +4,32 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.7
+
+- **Boundary reposition CAS guard (JB plugin 0.2.68 + VS Code extension).** `repositionBoundaryViaDocument()` in `PatchWatcher.kt` and `repositionBoundaryWithDebounce()` in `extension.ts` now verify the document content is unchanged between the `document.text` read and `document.setText()` / `WorkspaceEdit.apply()`. If the user typed between `await_idle` timeout expiry and the write dispatch, the reposition is silently skipped rather than overwriting the new keystrokes. Adds `repositionBoundaryToEndUtil` / `findCodeBlockRangesUtil` as internal top-level functions (JB) and `repositionBoundaryToEnd` as a vscode-free module (VS Code) for unit testability. New: `RepositionBoundaryTest.kt` (7 cases) and `reposition.test.ts` (5 cases).
+
+- **Skip working-tree boundary reposition when IPC available.** `reposition_boundary_in_snapshot()` in `git.rs` now checks for `.agent-doc/patches/` before touching the working tree. When the IDE plugin is installed (IPC path), the CLI skips the disk-level read-modify-write entirely and relies on the IPC reposition signal — eliminating the TOCTOU race where concurrent user typing could produce duplicate boundary markers in the committed state. New regression tests: `reposition_skips_working_tree_when_ipc_available` and `reposition_updates_working_tree_when_no_ipc`.
+
+## 0.33.6
+
+- **Inline annotation surfacing.** Preflight JSON now includes `inline_annotations: Vec<String>` — user additions (`[user+]`/`[user~]`) that appear inside agent response blocks rather than at the end of the exchange. These are corrections or questions the user inserted into previous agent responses, requiring direct response before new content. SKILL.md updated with priority handling rule. Empty when no inline annotations exist (field omitted from JSON).
+
+- **False positive fixes for `inline_annotations`.** Two exclusion rules eliminate boundary artifacts: (1) `[user~]` lines where the only change is appending ` (HEAD)` to a heading are skipped — these are binary reposition artifacts. (2) `[agent]` lines that are component tags (`<!-- ... -->`), section headers (`# ...`), or blank are excluded from the "substantive agent lines after" check — end-of-exchange user input followed only by structural markers is now correctly classified as regular input, not inline annotations.
+
+## 0.33.5
+
+- **FFI library hot-reload (JNA + koffi).** Fixes SIGSEGV crash (PC=0x0) when `cargo install` overwrote `libagent_doc.so` while IDEA held it mmap'd via JNA. Both plugins now stat the `.so` on every `get()` / `ensureLoaded()` call; if mtime changed, they force `Native.unregister` + reload (JNA) or `koffi.unload` + reload (VS Code). One `stat(2)`/`statSync()` per FFI dispatch — negligible overhead. Race window narrows to sub-microsecond.
+
+- **Versioned cdylib install.** `cargo install` / `make install` now writes `libagent_doc-<version>.so` and atomically updates the `libagent_doc.so` symlink via `ln -sfn` + `rename(2)`. The old inode stays alive in any running editor's mmap — editor restarts pick up the new version. Backward-compatible: `agent-doc lib-path` still returns `libagent_doc.so` (now a symlink). Legacy installs (regular file) are upgraded to the symlink layout on first install.
+
+- **Lockfile-tracked GC (`agent-doc gc-libs`).** On JNA/koffi load, plugins write `<so-path>.lock` containing their PID; on clean exit (JVM shutdown hook / VS Code `deactivate()`), they remove the lock. `agent-doc gc-libs` walks all `libagent_doc-*.so` siblings: keeps the current symlink target and any .so whose `.lock` has a live `/proc/<pid>`; unlinks stale .so files and orphaned locks. Triggered on load, on install, and manually. Crash-safe: stale locks from SIGKILL'd processes are cleaned on next sweep.
+
+- **Post-reload version sanity check (JB + VS Code).** After each native library (re)load, both plugins now call `agent_doc_version()` and log `[native] loaded libagent_doc v{version} from {path}` on success. Warns on null return or exception (ABI mismatch). Helps diagnose cases where a reload brings in an incompatible .so.
+
+## 0.33.4
+
+- **SKILL.md § 1b: pending promotion heuristic.** Agents now have an explicit rule: if a response ends with a numbered list of distinct, actionable recommendations and pending is empty (or the user asked for backlog/tasks), each recommendation must be added via `--pending-add` in the same write. Prevents actionable items from being silently lost as prose-only responses.
+
 ## 0.33.3
 
 - **IPC sidecar timeout: fall back to disk write instead of claiming success.** `try_ipc()` previously returned `success: true` when the socket acknowledged but the sidecar ack timed out, causing the caller to skip the disk write path. If the plugin didn't actually apply the content, the response was silently lost. Fixed: sidecar timeout now returns `success: false`, so the caller falls through to the CRDT disk write path — the reliable fallback that always works.

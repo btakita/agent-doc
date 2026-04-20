@@ -239,6 +239,11 @@ fn resolve_ipc_project_root(canonical: &Path) -> std::path::PathBuf {
     parent.to_path_buf()
 }
 
+/// Public accessor for `resolve_ipc_project_root` (used by git.rs).
+pub fn resolve_ipc_project_root_pub(canonical: &Path) -> std::path::PathBuf {
+    resolve_ipc_project_root(canonical)
+}
+
 /// Helper: extract boundary_id for a named component from the document.
 ///
 /// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
@@ -435,11 +440,21 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
         fl >= fence_len && trimmed[fl..].trim().is_empty()
     }
 
+    fn heading_level(trimmed: &str) -> Option<usize> {
+        let n = trimmed.bytes().take_while(|&b| b == b'#').count();
+        if (1..=6).contains(&n) && trimmed.as_bytes().get(n) == Some(&b' ') {
+            Some(n)
+        } else {
+            None
+        }
+    }
+
     let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
     let mut user_added = std::collections::HashSet::<String>::new();
     let mut in_baseline_fence = false;
     let mut baseline_fence_char = '`';
     let mut baseline_fence_len = 3usize;
+    let mut in_agent_block = false;
     for change in diff.iter_all_changes() {
         let line = change.value().trim_end_matches('\n');
         let trimmed = line.trim();
@@ -456,6 +471,13 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             } else if fence_close(trimmed, baseline_fence_char, baseline_fence_len) {
                 in_baseline_fence = false;
             }
+            if !in_baseline_fence {
+                if heading_level(trimmed).is_some() {
+                    in_agent_block = change.tag() == ChangeTag::Insert;
+                } else if in_agent_block && (trimmed.starts_with('❯') || trimmed.starts_with("<!--")) {
+                    in_agent_block = false;
+                }
+            }
         }
         // A line is a fence delimiter if it opens a fence (fence_open), or closes the current
         // one (was_in_fence before update, and matches close pattern).
@@ -463,6 +485,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             || (was_in_fence && fence_close(trimmed, baseline_fence_char, baseline_fence_len));
         if change.tag() == ChangeTag::Insert
             && !in_baseline_fence
+            && !in_agent_block
             && !trimmed.is_empty()
             && !trimmed.starts_with('❯')
             && !trimmed.starts_with("<!--")
@@ -1198,6 +1221,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let (final_content, crdt_state) = if content_current == base {
                 let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
                 (content_ours.clone(), doc.encode_state())
+            } else if response_already_in_current(base, &content_ours, &content_current) {
+                // Plugin already applied the response before the sidecar ack
+                // arrived. Using content_current preserves user edits and avoids
+                // duplicating the response via CRDT merge.
+                eprintln!("[write] IPC timeout path: response already in current file (plugin applied), skipping CRDT merge");
+                crate::ops_log::log_op(file, "ipc_timeout_plugin_already_applied: skipping CRDT merge");
+                let doc = crate::crdt::CrdtDoc::from_text(&content_current);
+                (content_current.clone(), doc.encode_state())
             } else {
                 eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
                 let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
@@ -2403,6 +2434,71 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
+/// Detect whether the plugin has already applied the agent's response patches.
+///
+/// On IPC sidecar ack timeout, the socket delivery may have succeeded but the
+/// confirmation didn't arrive in time. If the plugin applied the patches, the
+/// exchange component in `content_current` already contains the response content
+/// from `content_ours`. CRDT merging in this state would duplicate the response.
+///
+/// Detection: extract the lines that `content_ours` added to the exchange
+/// component (relative to `base`), and check if they're already present in
+/// `content_current`'s exchange. Conservative — returns false on any parse
+/// failure or ambiguous state.
+fn response_already_in_current(base: &str, content_ours: &str, content_current: &str) -> bool {
+    let base_comps = crate::component::parse(base).unwrap_or_default();
+    let ours_comps = crate::component::parse(content_ours).unwrap_or_default();
+    let current_comps = crate::component::parse(content_current).unwrap_or_default();
+
+    let base_exc = base_comps.iter().find(|c| c.name == "exchange");
+    let ours_exc = ours_comps.iter().find(|c| c.name == "exchange");
+    let current_exc = current_comps.iter().find(|c| c.name == "exchange");
+
+    let (Some(base_e), Some(ours_e), Some(current_e)) = (base_exc, ours_exc, current_exc) else {
+        return false;
+    };
+
+    let base_content = base_e.content(base);
+    let ours_content = ours_e.content(content_ours);
+    let current_content = current_e.content(content_current);
+
+    // No changes to exchange — nothing to detect
+    if ours_content.trim() == base_content.trim() {
+        return false;
+    }
+
+    // Find lines added by ours that aren't in base
+    let base_lines: std::collections::HashSet<&str> = base_content.lines().collect();
+    let response_lines: Vec<&str> = ours_content.lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| !base_lines.contains(line))
+        .collect();
+
+    if response_lines.is_empty() {
+        return false;
+    }
+
+    // Check if the majority of response lines are already in current
+    let current_lines: std::collections::HashSet<&str> = current_content.lines().collect();
+    let present_count = response_lines.iter()
+        .filter(|line| current_lines.contains(*line))
+        .count();
+
+    // Require ≥80% of response lines present to confirm plugin applied.
+    // A lower threshold risks false positives from coincidental line matches.
+    let threshold = std::cmp::max(1, (response_lines.len() * 4) / 5);
+    let detected = present_count >= threshold;
+
+    if detected {
+        eprintln!(
+            "[write] plugin-applied detection: {}/{} response lines already in current",
+            present_count, response_lines.len()
+        );
+    }
+
+    detected
+}
+
 /// Transfer the `agent:pending` component content from `source` into `target`.
 ///
 /// When the on-disk file has pending mutations applied (e.g. `--pending-done`)
@@ -3258,14 +3354,15 @@ mod tests {
     }
 
     #[test]
-    fn normalize_user_prompts_heading_in_user_region_prefixed() {
-        // Option 2 invariant: the component defines the context, so a user-typed heading
-        // in the exchange user region gets the ❯ prefix like any other added line.
+    fn normalize_user_prompts_heading_treated_as_agent_content() {
+        // Headings in the exchange are agent response markers. A standalone heading
+        // (not ❯-prefixed) is treated as agent content and does NOT get the ❯ prefix.
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ ### My heading"), "user heading should get prefix: {}", result);
+        assert!(!result.contains("❯ ### My heading"), "heading should NOT get prefix (treated as agent content): {}", result);
+        assert!(result.contains("### My heading"), "heading should be preserved: {}", result);
     }
 
     #[test]
@@ -3428,6 +3525,66 @@ mod tests {
         assert!(!result.contains("\ndo\n"), "bare do line must not remain without prefix: {}", result);
         // ❯ done must not be double-prefixed
         assert!(!result.contains("❯ ❯"), "no double-prefix: {}", result);
+    }
+
+    // ── agent-response-block tracking ────────────────────────────────────────
+
+    #[test]
+    fn normalize_user_prompts_agent_table_rows_not_prefixed() {
+        // Core bug: stale snapshot causes agent response table rows (inside ### Re: blocks)
+        // to appear as Insert lines and incorrectly receive ❯ prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n❯ Question\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ Question\n### Re: analysis — opus-4-6\n| model | score |\n|-------|-------|\n| gpt-4 | 85.0 |\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n❯ Question\n### Re: analysis — opus-4-6\n| model | score |\n|-------|-------|\n| gpt-4 | 85.0 |\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(!result.contains("❯ |"), "table rows inside agent response should NOT get prefix: {}", result);
+        assert!(!result.contains("❯ ###"), "agent heading should NOT get prefix: {}", result);
+        assert!(result.contains("| model | score |"), "table content should be preserved: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_agent_subheadings_not_prefixed() {
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n### Re: topic\nSome text.\n#### Details\nMore text.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n### Re: topic\nSome text.\n#### Details\nMore text.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(!result.contains("❯ "), "no lines should get prefix — all are agent content: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_user_text_after_equal_heading() {
+        // Heading is Equal (in snapshot), user adds text after it. User text gets ❯ prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n❯ Old question\n### Re: answer\nOld answer.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ Old question\n### Re: answer\nOld answer.\nNew user input\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n❯ Old question\n### Re: answer\nOld answer.\nNew user input\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ New user input"), "user text after Equal heading should get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_agent_block_ends_at_prompt() {
+        // Agent block (Insert heading) ends when ❯-prefixed line appears.
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n### Re: answer\nAgent text.\n❯ New question\nFollow-up text.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n### Re: answer\nAgent text.\n❯ New question\nFollow-up text.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(!result.contains("❯ Agent text"), "agent text should NOT get prefix: {}", result);
+        assert!(!result.contains("❯ ###"), "agent heading should NOT get prefix: {}", result);
+        assert!(result.contains("❯ New question"), "already-prefixed line should be preserved: {}", result);
+        assert!(result.contains("❯ Follow-up text."), "user text after ❯ should get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_heading_in_fence_not_agent_block() {
+        // A heading inside a code fence is code, not an agent response marker.
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nBefore.\n```md\n### Not a real heading\nSome code.\n```\nAfter.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\nBefore.\n```md\n### Not a real heading\nSome code.\n```\nAfter.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ Before."), "text before fence should get prefix: {}", result);
+        assert!(result.contains("❯ After."), "text after fence should get prefix: {}", result);
+        assert!(!result.contains("❯ ###"), "heading inside fence should not get prefix: {}", result);
+        assert!(!result.contains("❯ Some code"), "code inside fence should not get prefix: {}", result);
     }
 
     // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
@@ -3991,5 +4148,88 @@ mod submodule_patch_routing_tests {
 
         mark_ipc_degraded(root);
         assert!(is_ipc_degraded(root), "fresh marker should block IPC");
+    }
+
+    #[test]
+    fn response_already_in_current_detects_plugin_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        // Plugin applied the response AND user added an edit
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User added this line.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "should detect plugin-applied response"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_not_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        // Plugin did NOT apply — only user edits present
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User typed something new.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should not detect when plugin hasn't applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_exchange() {
+        let base = "No components here.";
+        let content_ours = "No components here either.";
+        let content_current = "Still no components.";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should return false when no exchange components"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_changes() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+Same content.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, base, base),
+            "should return false when ours equals base"
+        );
     }
 }

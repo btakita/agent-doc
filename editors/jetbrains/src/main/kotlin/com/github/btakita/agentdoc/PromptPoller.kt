@@ -6,6 +6,10 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -31,6 +35,8 @@ class PromptPoller(private val project: Project) : Disposable {
     @Volatile private var currentPromptKey: String? = null
     /** Cycle counter for periodic state logging. */
     private var cycleCount = 0L
+    /** Whether the BulkFileListener has been registered. */
+    private var fileListenerRegistered = false
 
     /** All active prompt keys from the last poll, for stable queue ordering. */
     @Volatile private var activePromptQueue: List<String> = emptyList()
@@ -80,6 +86,7 @@ class PromptPoller(private val project: Project) : Disposable {
         if (task != null) return
         val basePath = project.basePath ?: return
 
+        registerFileListener()
         LOG.info("[prompt-poller] starting polling for ${project.name}")
         task = executor.scheduleWithFixedDelay({
             try {
@@ -111,8 +118,36 @@ class PromptPoller(private val project: Project) : Disposable {
     }
 
     /**
+     * Listen for external disk writes to tracked files and merge immediately,
+     * rather than waiting for the next 1.5s poll cycle.
+     */
+    private fun registerFileListener() {
+        if (fileListenerRegistered) return
+        fileListenerRegistered = true
+        project.messageBus.connect(this).subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
+            override fun after(events: List<VFileEvent>) {
+                for (event in events) {
+                    if (event !is VFileContentChangeEvent) continue
+                    val file = event.file
+                    val tracked = trackedFiles.values.find { it.file == file } ?: continue
+                    tracked.lastKnownModStamp = file.modificationStamp
+                    ApplicationManager.getApplication().invokeLater {
+                        if (file.isValid) {
+                            mergeOrReload(tracked)
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /**
      * Auto-save unsaved tracked documents so Claude sees the user's latest edits.
      * Uses invokeAndWait (blocking) to ensure saves complete before prompt polling.
+     *
+     * Refreshes VFS before saving to detect external disk writes (e.g. agent-doc
+     * CRDT merge). If disk changed, merges first so we don't overwrite with a
+     * stale in-memory buffer.
      */
     private fun autoSaveTrackedFiles() {
         ApplicationManager.getApplication().invokeAndWait {
@@ -122,9 +157,17 @@ class PromptPoller(private val project: Project) : Disposable {
                     if (!tracked.file.isValid) continue
                     val doc = fdm.getDocument(tracked.file) ?: continue
                     if (fdm.isDocumentUnsaved(doc)) {
-                        tracked.lastSavedContent = doc.text
-                        fdm.saveDocument(doc)
-                        tracked.lastKnownModStamp = tracked.file.modificationStamp
+                        tracked.file.refresh(false, false)
+                        val currentStamp = tracked.file.modificationStamp
+                        if (currentStamp != tracked.lastKnownModStamp) {
+                            mergeOrReload(tracked)
+                            tracked.lastKnownModStamp = tracked.file.modificationStamp
+                        }
+                        if (fdm.isDocumentUnsaved(doc)) {
+                            tracked.lastSavedContent = doc.text
+                            fdm.saveDocument(doc)
+                            tracked.lastKnownModStamp = tracked.file.modificationStamp
+                        }
                     }
                 }
             } catch (_: Exception) {

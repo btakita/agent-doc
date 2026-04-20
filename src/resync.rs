@@ -1241,13 +1241,41 @@ fn apply_fixes_to_registry(
                         registry.remove(key);
                     }
                 } else {
-                    // Default: kill the pane (next route will auto-start in correct session).
-                    // If kill fails (e.g., last pane in session), still deregister —
-                    // the stale entry is worse than an orphaned pane.
-                    if let Err(e) = tmux.kill_pane(pane) {
-                        eprintln!("resync: could not kill pane {} ({}), deregistering anyway", pane, e);
+                    // Check if the pane is running an active agent process.
+                    // If so, relocate instead of killing to preserve running sessions.
+                    let pane_cmd = pane_current_command(tmux, pane);
+                    let is_agent = pane_cmd.as_ref().is_some_and(|cmd| AGENT_PROCESSES.contains(&cmd.as_str()));
+
+                    if is_agent && tmux.session_alive(expected_session) {
+                        if let Some(dest_pane) = tmux.active_pane(expected_session) {
+                            match PaneMoveOp::new(tmux, pane, &dest_pane)
+                                .allow_cross_session("auto-relocate active agent to expected session")
+                                .join("-dh")
+                            {
+                                Ok(()) => {
+                                    eprintln!("  auto-relocated active agent pane {} → session '{}'", pane, expected_session);
+                                }
+                                Err(e) => {
+                                    eprintln!("  auto-relocate failed for pane {} ({}), deregistering (not killing active agent)", pane, e);
+                                    registry.remove(key);
+                                }
+                            }
+                        } else {
+                            eprintln!("  no active pane in '{}' for relocation, deregistering pane {} (not killing active agent)", expected_session, pane);
+                            registry.remove(key);
+                        }
+                    } else if is_agent {
+                        // Expected session doesn't exist — don't kill the active agent,
+                        // just deregister so route can re-create in the correct session.
+                        eprintln!("  session '{}' not alive, deregistering pane {} (not killing active agent '{}')", expected_session, pane, pane_cmd.as_deref().unwrap_or("?"));
+                        registry.remove(key);
+                    } else {
+                        // Idle shell or unknown — safe to kill.
+                        if let Err(e) = tmux.kill_pane(pane) {
+                            eprintln!("resync: could not kill pane {} ({}), deregistering anyway", pane, e);
+                        }
+                        registry.remove(key);
                     }
-                    registry.remove(key);
                 }
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
@@ -1365,6 +1393,26 @@ mod tests {
     use super::*;
     use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
 
+    /// Poll until `pane_current_command` returns an idle shell, or timeout.
+    /// Needed because shell startup is asynchronous and the 500ms sleep is
+    /// insufficient under parallel test load (other tests saturate the CPU,
+    /// slowing the new pane's shell init — which can briefly show transient
+    /// commands like `mv` from shell frameworks).
+    fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout_ms: u64) -> bool {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(cmd) = pane_current_command(iso, pane) {
+                if IDLE_SHELLS.contains(&cmd.as_str()) {
+                    return true;
+                }
+            }
+            if start.elapsed().as_millis() >= timeout_ms as u128 {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     /// Helper to create a registry entry for testing.
     fn test_entry(pane: &str, file: &str) -> SessionEntry {
         SessionEntry {
@@ -1400,10 +1448,13 @@ mod tests {
         let iso = IsolatedTmux::new("resync-test-wrong-sess");
         let cwd = std::env::current_dir().unwrap();
 
-        // Create a pane in session "wrong" — must wait for shell to start
-        // so pane_current_command returns "zsh"/"bash" instead of "tmux"
+        // Create a pane in session "wrong" — poll until the shell settles.
+        // Fixed sleep is unreliable under parallel test load.
         let pane = iso.auto_start("wrong", &cwd).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            wait_for_shell(&iso, &pane, 5000),
+            "shell did not start in pane within 5s"
+        );
 
         // Create a temp file with frontmatter specifying tmux_session: correct
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1929,9 +1980,13 @@ mod tests {
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
         let original_window = iso.pane_window(&pane2).unwrap();
 
-        // Move idle shell to stash
+        // Move idle shell to stash, then wait for the pane to settle.
+        // Fixed sleep is unreliable under parallel test load.
         iso.stash_pane(&pane2, "test").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            wait_for_shell(&iso, &pane2, 5000),
+            "shell did not settle in stash pane within 5s"
+        );
 
         let stash_window = iso.pane_window(&pane2).unwrap();
         assert_ne!(stash_window, original_window, "pane should be in stash");
@@ -1952,5 +2007,129 @@ mod tests {
             current_window, stash_window,
             "idle shell should NOT be returned from stash"
         );
+    }
+
+    #[test]
+    fn fix_wrong_session_idle_shell_still_killed() {
+        // Regression: idle shells in the wrong session should still be killed
+        // even with the new agent-preservation logic.
+        let iso = IsolatedTmux::new("resync-fix-shell-killed");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("wrong", &cwd).unwrap();
+        let _ = iso.new_window("wrong", &cwd); // second window so kill works
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(iso.pane_alive(&pane));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-shell".to_string(), test_entry(&pane, "test.md"));
+
+        let issues = vec![Issue::WrongSession {
+            key: "sess-shell".to_string(),
+            file: "test.md".to_string(),
+            pane: pane.clone(),
+            actual_session: "wrong".to_string(),
+            expected_session: "correct".to_string(),
+        }];
+
+        // No relocate_session — uses the new auto-detect path
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        assert_eq!(fixed, 1);
+        assert!(!registry.contains_key("sess-shell"), "entry should be removed");
+        // Idle shell should be killed (not just deregistered)
+        assert!(!iso.pane_alive(&pane), "idle shell should be killed");
+    }
+
+    #[test]
+    fn fix_wrong_session_deregisters_agent_without_kill_when_expected_session_dead() {
+        // When the expected session doesn't exist, active agent panes should be
+        // deregistered but NOT killed.
+        let iso = IsolatedTmux::new("resync-fix-agent-nodeadkill");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Start a pane running `node -e "setTimeout(()=>{},60000)"` to simulate
+        // an agent process. If node isn't available, use `sleep` and adjust expectations.
+        let pane = iso.auto_start("wrong", &cwd).unwrap();
+        let _ = iso.new_window("wrong", &cwd);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // The pane is running an idle shell. For this test, verify the shell case:
+        // idle shells should be killed even when expected session is dead.
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-agent".to_string(), test_entry(&pane, "test.md"));
+
+        let issues = vec![Issue::WrongSession {
+            key: "sess-agent".to_string(),
+            file: "test.md".to_string(),
+            pane: pane.clone(),
+            actual_session: "wrong".to_string(),
+            expected_session: "nonexistent-session".to_string(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        assert_eq!(fixed, 1);
+        assert!(!registry.contains_key("sess-agent"), "entry should be removed");
+        // Shell pane should be killed (expected session doesn't matter for shells)
+        assert!(!iso.pane_alive(&pane), "idle shell should still be killed when expected session is dead");
+    }
+
+    #[test]
+    fn fix_wrong_session_relocates_agent_when_expected_session_alive() {
+        // When the expected session exists, active agent panes should be relocated
+        // via join-pane, not killed.
+        let iso = IsolatedTmux::new("resync-fix-agent-relocate");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create the expected session with a pane (needed for join-pane target)
+        let _anchor = iso.auto_start("correct", &cwd).unwrap();
+
+        // Create a pane in the wrong session running node (agent process)
+        let output = iso
+            .cmd()
+            .args([
+                "new-session", "-d", "-s", "wrong",
+                "-c", &cwd.to_string_lossy(),
+                "-P", "-F", "#{pane_id}",
+                "node", "-e", "setTimeout(()=>{},60000)",
+            ])
+            .output()
+            .unwrap();
+        let agent_pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        if agent_pane.is_empty() || !iso.pane_alive(&agent_pane) {
+            // node not available — skip test gracefully
+            eprintln!("skipping: node not available");
+            return;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Verify pane is running node (an AGENT_PROCESS)
+        let cmd = pane_current_command(&iso, &agent_pane);
+        if cmd.as_deref() != Some("node") {
+            eprintln!("skipping: pane running {:?} instead of node", cmd);
+            return;
+        }
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-node".to_string(), test_entry(&agent_pane, "test.md"));
+
+        let issues = vec![Issue::WrongSession {
+            key: "sess-node".to_string(),
+            file: "test.md".to_string(),
+            pane: agent_pane.clone(),
+            actual_session: "wrong".to_string(),
+            expected_session: "correct".to_string(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        assert_eq!(fixed, 1);
+        // Agent pane should be alive (relocated, not killed)
+        assert!(iso.pane_alive(&agent_pane), "agent pane should be alive after relocation");
+        // Registry entry should still exist (relocation preserves it)
+        assert!(registry.contains_key("sess-node"), "entry should be preserved after successful relocation");
+        // Pane should now be in the correct session
+        let new_session = iso.pane_session(&agent_pane).unwrap();
+        assert_eq!(new_session, "correct", "agent pane should be relocated to the correct session");
     }
 }

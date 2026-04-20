@@ -75,6 +75,8 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 If the document has an `<!-- agent:pending -->` component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
+**Promotion heuristic (when to add pending in the same cycle):** if your response ends with a numbered list of distinct, actionable recommendations (e.g., "What I'd recommend: 1. ..., 2. ..., 3. ..."), and either pending is currently empty OR the user asked for a backlog / "tasks" / "todo", add each recommendation as a pending item via `--pending-add` in the same `agent-doc write` invocation. Don't leave actionable ranked items as prose-only — the pending component is where backlog lives. Skip promotion when items are hypotheticals, options you're asking the user to choose between, or already captured elsewhere.
+
 ### 2. Write back (MANDATORY — never skip)
 
 Pipe the response through `agent-doc write --stream` — it handles patch parsing, CRDT merge, atomic write, and snapshot update. **This step is MANDATORY every cycle, regardless of response length or complexity. Skipping write breaks the document sync.**

@@ -18,6 +18,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion").get())
     }
+    testImplementation("junit:junit:4.13.2")
 }
 
 java {

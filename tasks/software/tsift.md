@@ -712,14 +712,12 @@ tier = "isolated"
 **Tests:** 9 new (110 total) — default config, missing file, full parsing, tier-implied federation, per-submodule DB paths, minimal config, federation-only overrides, no .gitmodules, .gitmodules parsing. Clippy clean.
 
 **Not wired yet:** the `tsift index` command still uses a single flat DB. Wiring per-submodule indexing + federated search is the next integration step.
-<!-- agent:boundary:92527cd1 -->
-<!-- agent:boundary:0feb91cc -->
+<!-- agent:boundary:06687cf2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)

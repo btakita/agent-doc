@@ -392,7 +392,69 @@ This layer needs entity extraction (which graphify already does) and is more use
 3. If graphify proves useful, tsift becomes the query interface with graphify as the graph backend
 
 The call graph is a prerequisite regardless — graphify would extend it, not replace it.
-<!-- agent:boundary:780f27d5 -->
+
+Could we implement the essential parts of graphify in tsift instead of depending on graphify? Can we create a knowledge graph from markdown files? Connecting links and concepts in text with other documents + location?
+### Re: built-in knowledge graph vs graphify dependency — opus-4-6
+
+Yes — the deterministic subset is a natural fit for tsift, and it avoids an external dependency for the core use case.
+
+**What tsift can extract from markdown with tree-sitter alone (no LLM):**
+
+| Entity | tree-sitter node | Example |
+|--------|-----------------|---------|
+| Outgoing links | `link_destination` | `[see corky](../corky/CLAUDE.md)` → edge to file |
+| Section headings | `atx_heading` → `inline` | `## Architecture` → section node at line N |
+| Code references | `code_span` | `` `walk_files()` `` → potential cross-ref to symbol |
+| Wikilinks | `inline` content matching `[[...]]` | `[[SPEC.md]]` → edge to file |
+| Bold terms | `strong_emphasis` | `**incremental indexing**` → concept entity |
+
+**Graph schema (SQLite, extends existing index.db):**
+
+```sql
+CREATE TABLE nodes (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL,      -- source file
+    name TEXT NOT NULL,      -- heading text, link text, symbol name
+    kind TEXT NOT NULL,       -- 'heading', 'link', 'code_ref', 'symbol', 'concept'
+    line INTEGER,
+    section TEXT              -- parent heading for context
+);
+
+CREATE TABLE edges (
+    source_id INTEGER REFERENCES nodes(id),
+    target_id INTEGER REFERENCES nodes(id),
+    kind TEXT NOT NULL,       -- 'links_to', 'defines', 'references', 'contains'
+    PRIMARY KEY (source_id, target_id, kind)
+);
+```
+
+**Query surface:**
+
+```bash
+tsift graph --links-to SPEC.md          # what documents link to this file?
+tsift graph --links-from plan.md        # what does this document reference?
+tsift graph --mentions "walk_files"     # where is this concept/symbol discussed?
+tsift graph --section "Architecture"    # find this heading across all docs
+```
+
+**What this replaces vs what graphify still adds:**
+
+| Capability | tsift built-in | graphify needed |
+|-----------|---------------|-----------------|
+| Link extraction | yes | no |
+| Heading/section graph | yes | no |
+| Code backtick → symbol cross-ref | yes | no |
+| Bold term extraction | yes | no |
+| LLM-based entity extraction | no | yes |
+| Community detection/clustering | no | yes |
+| HTML visualization | no | yes |
+| Semantic similarity between concepts | no | yes |
+
+The built-in graph covers the structural, deterministic connections — links, headings, code references. That's 80% of the value for navigating a workspace like agent-loop. graphify remains the option for the semantic layer (LLM-extracted entities, clustering, visualization) if you later want richer concept mapping beyond what the AST can see.
+
+**Implementation path:** extend the markdown `symbol_query()` to also capture links and code spans, add the graph tables to `index.db`, wire into `tsift graph` subcommands. Reuses existing infrastructure — walk, index, tree-sitter parsing.
+<!-- agent:boundary:499c30aa -->
+<!-- agent:boundary:20535f07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

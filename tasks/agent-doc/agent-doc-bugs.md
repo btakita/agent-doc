@@ -334,7 +334,28 @@ End-of-exchange user input followed only by `&lt;!-- /agent:exchange --&gt;` + `
 **2. `(HEAD)` boundary artifact exclusion** — `is_head_boundary_artifact()` skips `[user~]` lines where the only change is appending ` (HEAD)` to a heading. These are reposition artifacts from `agent-doc commit`.
 
 **13 tests pass** (4 new for false positive cases), 1175 total. Both binaries rebuilt.
-<!-- agent:boundary:9fbebfe0 -->
+
+❯ When I change files on either the right editor side (claudescore.md->shelltab-clone.md or shelltab-clone.md->claudescore.md), the claiming tmux pane is swapped from the right side to the left side...which is incorrect. Why?
+### Re: tmux pane side-swap on file change — opus-4-6
+
+**Root cause:** `route.rs:675` used `list_window_panes()` which returns panes in **tmux creation order**, not screen position order. When provisioning a right-column pane:
+
+1. `split_before=false` → `.last()` picks the last pane in creation order
+2. But that's not necessarily the rightmost pane on screen
+3. Splitting from the wrong reference pane → new pane ends up on the wrong side
+
+**Fix:** Replaced `list_window_panes()` with `list_panes_ordered()` at `route.rs:675`. The ordered variant queries `#{pane_left} #{pane_top}` and sorts by screen coordinates, so `.next()` = leftmost and `.last()` = rightmost by visual position.
+
+```diff
+-        let window_panes = tmux.list_window_panes(
++        let window_panes = tmux.list_panes_ordered(
+             &format!("{}:agent-doc", session_name)
+         ).unwrap_or_default();
+```
+
+**All 1175 tests pass.** Both binaries rebuilt. Ready to test — switch files on the right editor side and confirm the pane stays right.
+<!-- agent:boundary:fa80b711 -->
+<!-- agent:boundary:bfe7dc44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

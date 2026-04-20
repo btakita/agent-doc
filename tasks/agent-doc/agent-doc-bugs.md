@@ -323,7 +323,41 @@ You said you saw a pane for `tasks/buildside.md`. The logs show only `tasks/prof
 - Something outside of sync created it (manual route call, different hook)
 
 Do you remember any details — which tmux window, what was running in it, or how long it was alive? That would help me narrow it down.
-<!-- agent:boundary:7f8eb53c -->
+❯ The 0:agent-doc tmux window left pane showed a new tmux pane + claude code session created...presumably for tasks/buildside.md. It may have been for another agent doc but when I navigated to tasks/buildside.md, the auto start seemed to fire.
+❯ Do you have suggested fixes? The least we can do is add more logging to track if this scenario happens again.
+### Re: what you actually saw + fixes — opus-4-6
+
+Mystery solved. Five panes auto-started in a 58-second burst:
+
+```
+[1776716184] auto-starting: tasks/agent-doc/agent-doc-cursor.md
+[1776716185] auto-starting: tasks/agent-doc/agent-doc-feat.md
+[1776716201] auto-starting: tasks/software/agent-loop.md
+[1776716207] auto-starting: tasks/evals.md
+[1776716242] auto-starting: tasks/professional/buildside.md
+```
+
+The pane you saw appear in the left position of `0:agent-doc` wasn't for `tasks/buildside.md` — it was one of the other four (cursor, feat, agent-loop, or evals). They all fired because you navigated through several session documents that had UUIDs but no alive panes. The timing coincided with the buildside rename, making it look causal.
+
+#### Suggested fixes (3 tiers)
+
+**Tier 1 — immediate (logging)**
+
+1. **Log pane ID on auto-start**: Change `[sync] auto-starting session for <file>` to include the resulting pane ID: `[sync] auto-started %84 for <file>`. Lets you trace pane → file after the fact.
+
+2. **Batch summary**: When sync auto-starts >1 pane in a single call, print a summary table to stderr at the end: `[sync] auto-started 3 panes: %80→cursor.md, %81→feat.md, %82→agent-loop.md`.
+
+**Tier 2 — behavioral (#qam7)**
+
+3. **Rename debounce**: Already proposed. When `FileRenameListener` fires for a file with no alive pane, write a debounce marker (`.agent-doc/rename-debounce/<hash>`, TTL ~5s). Auto-start checks for this marker and skips. Prevents spurious pane creation on organizational file moves.
+
+**Tier 3 — UX improvement**
+
+4. **Focus-gated auto-start**: Only auto-start the `--focus` file, not every file in `--col`. Other files get panes when the user actually focuses them. This eliminates burst spawning — you'd get one pane at a time, for the file you're looking at. Tradeoff: first focus on a non-auto-started file has a cold-start delay (~3-5s for Claude to initialize).
+
+I'd recommend starting with tier 1 (low risk, immediate value) and #qam7 (tier 2). Tier 3 is a bigger behavior change worth discussing separately.
+<!-- agent:boundary:ed0ec4da -->
+<!-- agent:boundary:1d61ace3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

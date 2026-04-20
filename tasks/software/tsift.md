@@ -672,13 +672,54 @@ Callees of `helper`:
 ```
 
 **Tests:** 4 new (101 total) — callers query, callees query, no-match returns empty, missing index errors. Clippy clean.
-<!-- agent:boundary:3346c956 -->
+
+Do we have a pre-commit hook to run the test suite? If not, add one.
+do #iso1. add spec + test. commit + push
+### Re: pre-commit hook + #iso1 — opus-4-6
+
+**Pre-commit hook:** tsift had no hook or Makefile. Added `Makefile` with `check` (clippy + test), `precommit` (alias for check), `test`, and `clippy` targets. This matches the agent-loop convention where `make check` / `make precommit` runs before commits. A git pre-commit hook that calls `make precommit` can be wired up separately — the Makefile is the reusable building block.
+
+**#iso1 done** — commit `08f5e37`, pushed.
+
+`src/config.rs` parses `.tsift/config.toml` with three isolation tiers:
+
+| Tier | Federation | Use case |
+|------|-----------|----------|
+| **Shared** (default) | yes | agent-doc, corky, ctx-core-dev |
+| **Private** | no | mail, resume |
+| **Isolated** | no (strict) | session-share |
+
+**Config format:**
+```toml
+[defaults]
+federation = true
+tier = "shared"
+
+[overrides.mail]
+tier = "private"
+
+[overrides.session-share]
+tier = "isolated"
+```
+
+**API:**
+- `Config::load(root)` — reads `.tsift/config.toml`, returns defaults if missing
+- `config.tier_for(name)` — resolve tier with override precedence
+- `config.federation_for(name)` — tier-aware: private/isolated always returns false
+- `config.db_path_for(root, name)` — `.tsift/indexes/<name>/index.db`
+- `Config::submodule_dirs(root)` — discovers submodules from `.gitmodules`
+
+**Tests:** 9 new (110 total) — default config, missing file, full parsing, tier-implied federation, per-submodule DB paths, minimal config, federation-only overrides, no .gitmodules, .gitmodules parsing. Clippy clean.
+
+**Not wired yet:** the `tsift index` command still uses a single flat DB. Wiring per-submodule indexing + federated search is the next integration step.
+<!-- agent:boundary:92527cd1 -->
+<!-- agent:boundary:0feb91cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
+- [x] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)

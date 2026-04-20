@@ -650,14 +650,12 @@ Implemented in commit `00c0c9c`, pushed.
 **Tests:** 21 new (97 total) covering call-site extraction per language, edge resolution (basic, nested/innermost, top-level exclusion), full roundtrip, IndexDb integration (edge storage, callers/callees queries, delete propagation, rebuild, modification updates, Python edges). Clippy clean.
 
 **Next:** #grp2 adds `tsift graph --callers/--callees` CLI subcommands to expose these queries.
-<!-- agent:boundary:9904360e -->
-<!-- agent:boundary:c933edcf -->
+<!-- agent:boundary:66bec2b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#grp1] Call graph module (tree-sitter) — internal to tsift, not a separate crate
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)

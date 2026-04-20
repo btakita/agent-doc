@@ -375,7 +375,35 @@ Both binaries freshly built and installed:
 - `.bin/agent-doc` (release symlink) → rebuilt
 
 Ready to test: switch files on the right editor side and confirm the pane stays right.
-<!-- agent:boundary:6aa9c929 -->
+
+When switching the right editor between claudescore.md and shelltab-clone.md...the tmux pane layout is still reversing sides. Why?
+### Re: pane swap still happening — second fix in sync.rs rescue path — opus-4-6
+
+The route.rs fix was correct but addressed the wrong code path. The actual reversal happens in the **stash rescue** at `sync.rs:793-795`.
+
+**Root cause:** When a pane is rescued from the stash, the rescue code picks a swap target using `list_window_panes().first()` — which returns the first pane by tmux creation order, not screen position. If the left pane happens to be `.first()` and the rescued pane belongs on the right, `swap-pane` puts the rescued pane on the LEFT (where the swap target was), displacing the left pane to the stash.
+
+**Two fixes applied:**
+
+1. **`list_panes_ordered()`** — replaced `list_window_panes()` with position-aware ordering at `sync.rs:794`.
+
+2. **Column-position-aware target selection** — instead of always picking `.first()`, the rescue now uses `is_first_column(file_path, col_args)` to pick `.first()` (leftmost) for left-column files and `.last()` (rightmost) for right-column files. Made `is_first_column` `pub(crate)` to share between route.rs and sync.rs.
+
+```diff
+-let target_panes = tmux.list_window_panes(target_win).unwrap_or_default();
+-if let Some(target) = target_panes.first() {
++let target_panes = tmux.list_panes_ordered(target_win).unwrap_or_default();
++let target = if crate::route::is_first_column(file_path, col_args) {
++    target_panes.first()
++} else {
++    target_panes.last()
++};
++if let Some(target) = target {
+```
+
+**All 1177 tests pass.** Both binaries rebuilt. Try switching right editor between claudescore.md and shelltab-clone.md.
+<!-- agent:boundary:8b94dfe6 -->
+<!-- agent:boundary:f0ff01e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

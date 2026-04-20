@@ -712,7 +712,30 @@ tier = "isolated"
 **Tests:** 9 new (110 total) — default config, missing file, full parsing, tier-implied federation, per-submodule DB paths, minimal config, federation-only overrides, no .gitmodules, .gitmodules parsing. Clippy clean.
 
 **Not wired yet:** the `tsift index` command still uses a single flat DB. Wiring per-submodule indexing + federated search is the next integration step.
-<!-- agent:boundary:06687cf2 -->
+
+do "Wiring per-submodule indexing + federated search is the next integration step.". add spec + test. commit + push
+### Re: per-submodule indexing + federated search — opus-4-6
+
+Done in commit `c33dc49`, pushed. The config module is now wired into all three commands.
+
+**New CLI flags:**
+
+| Command | Flag | Effect |
+|---------|------|--------|
+| `tsift index` | `--workspace` | Discovers submodules, indexes each into `.tsift/indexes/<name>/index.db` |
+| `tsift index` | `--submodule <name>` | Index just one submodule |
+| `tsift search` | `--scope <name>` | Search within a specific submodule's index |
+| `tsift search` | `--federated` | Search all federated submodule indexes (respects tier) |
+| `tsift graph` | `--scope <name>` | Query a submodule's call graph |
+
+**Federation behavior:**
+- Private/Isolated submodules are excluded from `--federated` search
+- `--scope` always works regardless of tier (explicit access)
+- Without any workspace flags, behavior is unchanged (flat `.tsift/index.db`)
+
+**Tests:** 6 new (116 total) — workspace creates per-submodule DBs, single submodule indexing, federated search across submodules, federated search respects isolation, scoped search finds submodule symbols, scoped graph query. Clippy clean.
+<!-- agent:boundary:c6ce1378 -->
+<!-- agent:boundary:4e0016d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

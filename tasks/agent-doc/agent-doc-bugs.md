@@ -186,7 +186,39 @@ The `sync.rs` module spec (top-level `//!` doc comments) had no mention of file 
 - `file_rename_updates_registry`
 
 The JB `FileRenameListener.kt` and VS Code `extension.ts` handler are thin event dispatchers — their spec is effectively the sync.rs spec plus the event subscription pattern. No separate module spec needed for them since the business logic lives in the CLI.
-<!-- agent:boundary:e65315e6 -->
+
+❯ Any more pending work to make specs in sync with implementation?
+### Re: remaining spec gaps — opus-4-6
+
+One more gap: `write.rs` was missing spec coverage for the future-work signal lint (#7x90). Fixed.
+
+#### Added to `write.rs` spec
+
+**Spec section** — new `check_future_work_signals` entry:
+- Scans response for deferred-work phrases ("worth revisiting", "revisit later", "follow-up needed", "future work") case-insensitively
+- Returns `Some(signal)` when match found and `has_pending_add` is false
+- `warn_future_work_signals` wrapper reads `AGENT_DOC_HAS_PENDING_ADD` env var (set by CLI dispatcher)
+- Integrated into `run_stream` after patch application
+
+**Evals** (6 entries matching the 6 tests):
+- `detects_worth_revisiting`, `detects_future_work`, `detects_follow_up_needed`
+- `suppressed_when_pending_add_present`, `no_false_positive_on_normal_text`
+- `case_insensitive_detection`
+
+#### Current spec coverage status
+
+| Feature | Module | Spec'd? |
+|---------|--------|---------|
+| File rename detection | `sync.rs` | yes (this session) |
+| Future-work signal lint | `write.rs` | yes (this cycle) |
+| FileRenameListener (JB) | thin dispatcher | covered by sync.rs spec |
+| onDidRenameFiles (VS Code) | thin dispatcher | covered by sync.rs spec |
+| `is_file_rename` helper | `sync.rs` | yes — Spec + Contracts + Evals |
+| `shouldHandleFile` / `buildSyncCommand` (JB) | utility helpers | trivial, no separate spec needed |
+
+All implementation from this session is now spec'd. No remaining gaps.
+<!-- agent:boundary:f2aba210 -->
+<!-- agent:boundary:a01515ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

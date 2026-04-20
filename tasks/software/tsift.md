@@ -580,13 +580,41 @@ Can't write to tagpath.md from this pane — it's owned by pane %86 (this is %78
 3. tsift integration: tag-based search ranking — exact tag match > partial > BM25 fallback
 
 To apply: run `/agent-doc tasks/software/tagpath.md` from pane %86 and paste the content, or reclaim from here with `agent-doc claim tasks/software/tagpath.md`.
-<!-- agent:boundary:03da89ea -->
+
+tagpath 0.6.0 was released as a library/cli combo. See tasks/software/tagpath.md
+do #ast4 #xrfe #rbxy. add spec + test. run tests. commit + push
+### Re: #ast4 #xrfe #rbxy — tagpath + symbol search — opus-4-6
+
+All three done in commit `10a9b61`.
+
+**#xrfe — tagpath at index time:**
+- Added `tagpath` as path dep (`default-features = false` — no tree-sitter grammars pulled)
+- New `tags TEXT` column on `symbols` table (with ALTER migration for existing DBs)
+- `compute_tags()` runs tagpath's `detect_convention` + `parse` on each symbol name, stores comma-separated canonical tags (e.g., `get_user_name` → `"get,user,name"`, `UserProfile` → `"user,profile"`)
+
+**#ast4 — symbol search in `tsift search`:**
+- `cmd_search` now checks for `.tsift/index.db` in the search path
+- If present, runs `symbol_search()` before sift BM25
+- Symbol matches display above BM25 results with rank, match_type, kind, name, file:line, score
+- JSON output includes `symbols` array alongside sift response
+
+**#rbxy — tag-based ranking:**
+- `symbol_search(query, limit)` parses query through tagpath, matches against stored tags
+- **Scoring:** exact name match = 1.0, tag matches use F1 score (2 * precision * recall / (precision + recall))
+- **Match types:** `exact_name` > `all_tags` > `partial_tags`
+- **Cross-convention:** querying `getUserName` finds `get_user_name` — both decompose to `[get, user, name]`
+
+**Tests (6 new, 76 total):** tags stored correctly, exact name search, cross-convention matching, partial tag matching, no-match returns empty, limit respected. Clippy clean.
+<!-- agent:boundary:21bbebea -->
+<!-- agent:boundary:f27bdbca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
+- [x] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
+- [x] [#xrfe] tagpath integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
+- [x] [#rbxy] tagpath integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers

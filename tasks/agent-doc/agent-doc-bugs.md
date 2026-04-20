@@ -522,7 +522,56 @@ The committed state had `<!-- agent:boundary:5bb175d8 -->` AND `<!-- agent:bound
 3. **Skip reposition for documents with user edits** — `reposition_boundary_in_snapshot()` already skips when a pending file exists (active run). Extend this: also skip the working-tree reposition when the file has user content beyond the last boundary marker that differs from the snapshot.
 
 Fix #1 is the simplest and eliminates the most common path. Added to pending.
-<!-- agent:boundary:c87a7ddf -->
+❯ I want all race condition cases fixed. Would you recommend Fix #2 and/or Fix #3?
+### Re: which fixes to implement — opus-4-6
+
+**Fix #1 + Fix #2. Skip Fix #3.**
+
+#### Fix #1 — skip disk reposition when IPC available (git.rs)
+
+Eliminates the most common path. In `reposition_boundary_in_snapshot()` at git.rs:681-698, guard the working-tree reposition:
+
+```rust
+// Skip working-tree reposition when IDE plugin is installed —
+// the IPC handler owns this path and coordinates with user edits.
+let patches_dir = crate::snapshot::agent_doc_dir(file)
+    .map(|d| d.join("patches"));
+let ipc_available = patches_dir.map_or(false, |d| d.exists());
+if !ipc_available {
+    // Non-IDE path: reposition on disk (no concurrent editor to race with)
+    if let Ok(working) = std::fs::read_to_string(file) { ... }
+}
+```
+
+The snapshot reposition (lines 649-665) stays unconditional — the CLI owns the snapshot exclusively.
+
+#### Fix #2 — CAS guard in IDE reposition handler (PatchWatcher.kt + extension.ts)
+
+Even with Fix #1, the IDE handler still has a TOCTOU between `document.text` read and `document.setText(result)`. The `await_idle` guard has a 5s timeout that can expire while the user is still typing. Add a CAS check:
+
+```kotlin
+WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
+    val content = document.text
+    val result = NativePatching.repositionBoundaryToEnd(content)
+        ?: repositionBoundaryToEnd(content, "exchange")
+        ?: return@runWriteCommandAction
+    if (result != content && document.text == content) {  // CAS: verify unchanged
+        document.setText(result)
+    }
+})
+```
+
+Same pattern for VS Code: check `document.getText() === originalContent` before applying the edit.
+
+Since both reads and the write run on EDT (JB) or the extension host (VS Code), and those are single-threaded, the CAS is effectively atomic — no keystrokes can arrive between the final check and the write within the same event loop tick.
+
+#### Why skip Fix #3
+
+Fix #3 (snapshot-diff check in the CLI) is redundant with Fix #1. When IPC is available, the CLI doesn't touch the working tree at all. When IPC is unavailable (no IDE plugin), there's no concurrent document API to race with — the user is editing in a plain text editor, and boundary reposition on disk is safe.
+
+Updated pending to combine Fix #1 + Fix #2.
+<!-- agent:boundary:bcf3e6e3 -->
+<!-- agent:boundary:2e8ae74b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -532,6 +581,6 @@ Fix #1 is the simplest and eliminates the most common path. Added to pending.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [ ] [#xbs3] Boundary reposition TOCTOU race: skip working-tree reposition in git.rs when IPC available; IDE handler needs CAS guard (crdt.rs/git.rs/PatchWatcher.kt)
+- [ ] [#xbs3] Boundary reposition TOCTOU race — Fix #1 (skip working-tree disk reposition when IPC available, git.rs) + Fix #2 (CAS guard in JB/VS Code reposition handler, PatchWatcher.kt + extension.ts)
 <!-- /agent:pending -->
 ## Assistant

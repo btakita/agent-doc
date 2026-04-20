@@ -217,7 +217,25 @@ One more gap: `write.rs` was missing spec coverage for the future-work signal li
 | `shouldHandleFile` / `buildSyncCommand` (JB) | utility helpers | trivial, no separate spec needed |
 
 All implementation from this session is now spec'd. No remaining gaps.
-<!-- agent:boundary:8806e9c5 -->
+❯ commit + push
+### Re: commit + push — sonnet-4-6
+
+Done.
+
+Fixed a pre-existing clippy warning first (nested `if let` → let-chain in sync.rs), then `make check` clean.
+
+Commit `a41bdd1` on `btakita/agent-doc` main:
+- `src/sync.rs` — `is_file_rename()` + 5 tests + spec/contracts/evals
+- `src/write.rs` — future-work signal spec/evals (#7x90)
+- `editors/jetbrains/FileRenameListener.kt` — extracted helpers + updated call sites
+- `editors/jetbrains/FileRenameListenerTest.kt` — 6 new unit tests
+- `editors/jetbrains/PluginLifecycleListener.kt` — VFS_CHANGES subscription
+- `editors/vscode/extension.ts` — `onDidRenameFiles` handler
+- `editors/jetbrains/gradle.properties` — v0.2.69
+
+Parent repo pointer updated (`f4d91c10`) and pushed.
+<!-- agent:boundary:6718c025 -->
+<!-- agent:boundary:f20cafa2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

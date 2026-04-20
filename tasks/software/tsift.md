@@ -247,8 +247,7 @@ The `ignore` crate is already battle-tested (powers ripgrep) and handles `.gitig
 "Check on read" with mtime comparison gives the same guarantee as a watcher — you never see stale results. The only downside vs. a watcher is that the index isn't pre-warmed between queries, but the incremental cost is so low (<100ms) that pre-warming has no practical benefit.
 
 A watcher would only matter if tsift became a long-running MCP server that needs to push index updates to clients. That's a future concern if/when the MCP plugin holds persistent state.
-<!-- agent:boundary:fbab5331 -->
-<!-- agent:boundary:a32c3d28 -->
+<!-- agent:boundary:52f5dbaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -319,7 +319,75 @@ Don't build the full system upfront. Start with:
 1. Index one submodule (agent-doc — it's Rust, tree-sitter has excellent Rust support)
 2. Validate the retrieval quality — does it return the right functions for natural-language queries?
 3. If yes, scale to other submodules with the per-directory layout above
-<!-- agent:boundary:17a57a92 -->
+
+❯ Would you recommend building this into tsift?
+### Re: building into tsift — opus-4-6
+
+**Yes — tsift is the right home for this.** It already owns the "token-efficient code search" surface area for your Claude Code sessions. The retrieval interface stays unified: one tool for "find me the relevant code."
+
+#### Why tsift specifically
+
+1. **Already has the storage layer** — rusqlite + sift (BM25 + vector). Adding AST-extracted symbols as a new index type is additive, not a rewrite.
+2. **Already integrated as a Claude Code plugin** — MCP tool routing is done. New capabilities surface automatically.
+3. **Same output contract** — the user (Claude) asks "find X" and gets back token-efficient code snippets. Whether those came from BM25 text match or AST graph traversal is an implementation detail.
+4. **Per-submodule isolation maps to SQLite files** — each submodule gets its own `.tsift/index.db`. The isolation tier config controls which indexes are queryable in a given session.
+
+#### Architecture Addition
+
+Keep the AST + graph logic as a **separate Rust crate** (`tsift-graph` or `code-graph`) that tsift depends on. This way:
+- tsift stays focused on retrieval + CLI
+- The graph crate is reusable (graphify could use it too)
+- Testing is isolated — graph logic tests don't need the full tsift harness
+
+```
+tsift (CLI + MCP plugin)
+├── sift (BM25 + vector — existing)
+├── tsift-graph (new crate)
+│   ├── tree-sitter parsing (function extraction)
+│   ├── dependency graph (call/import relationships)
+│   └── graph-ranked retrieval (PageRank-style)
+└── rusqlite (storage — existing)
+```
+
+#### New Subcommands
+
+```bash
+tsift index <path>              # existing text indexing
+tsift index --ast <path>        # NEW: tree-sitter AST extraction
+tsift graph <path>              # NEW: build/query dependency graph
+tsift graph --callers <symbol>  # who calls this function?
+tsift graph --callees <symbol>  # what does this function call?
+tsift search <query>            # existing — gains AST-aware ranking
+tsift search --scope <submod>   # restrict to one submodule's index
+```
+
+#### Per-Submodule Config
+
+```toml
+# .tsift/config.toml (in agent-loop root)
+[submodules]
+agent-doc = { ast = true, graph = true, federated = true }
+corky = { ast = true, graph = true, federated = true }
+session-share = { ast = true, graph = true, federated = false }  # isolated
+mail = { index = false }  # skip entirely
+```
+
+#### What NOT to build into tsift
+
+- **Visualization** (Mermaid graphs, HTML output) — leave that to graphify
+- **Full repo intelligence** (LSP-level type inference, cross-crate resolution) — too complex, diminishing returns
+- **Embedding model hosting** — use an external embedding API or a lightweight local model (all-MiniLM-L6-v2)
+
+#### Development Order
+
+1. Add `tree-sitter` + `tree-sitter-rust` deps to tsift
+2. Implement `tsift index --ast` for a single directory (extract function signatures + locations)
+3. Store in existing SQLite with a new `symbols` table
+4. Wire into `tsift search` — when AST index exists, rank by symbol match first, fall back to BM25
+5. Add `tsift-graph` crate — call graph extraction + traversal
+6. Add per-submodule config + isolation tiers
+<!-- agent:boundary:68cd0cec -->
+<!-- agent:boundary:4e6801b6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

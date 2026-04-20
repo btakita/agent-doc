@@ -369,18 +369,20 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 ## transfer
 
-`agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim]` — move entire component content from source to target document.
+`agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim] [--items ID1,ID2,...]` — move entire component content from source to target document.
 
-1. Validate source exists; auto-create target if missing (template format)
-2. **Pane ownership check:** unless `--bypass-claim` is set, verify the current tmux pane owns the target document's session. If a different pane owns it, reject with an error suggesting `--bypass-claim`.
-3. Read named component from source; bail if empty or absent
-4. Clear source component (single newline)
-5. Append content to target's matching component with `> **[TRANSFER from <source>]** (timestamp)` annotation
+1. **Argument validation:** if `--items` is set and component is not `pending`, reject immediately.
+2. Validate source exists; auto-create target if missing (template format)
+3. **Pane ownership check:** unless `--bypass-claim` is set, verify the current tmux pane owns the target document's session. If a different pane owns it, reject with an error suggesting `--bypass-claim`.
+4. **If `--items` is set (selective mode):** match pending lines by `[#id]` pattern, move only matching lines to target, leave the rest in source. Report unmatched IDs as warnings.
+5. **Otherwise (full transfer):** read named component from source; bail if empty or absent. Clear source component (single newline). Append content to target's matching component with `> **[TRANSFER from <source>]** (timestamp)` annotation.
 6. If the transferred component is not `pending`, also merge pending items from source → target
 7. Commit the target so transferred headings appear in git HEAD (prevents `(HEAD)` marking on next cycle)
 8. Save snapshots for both files
 
 **`--bypass-claim`:** Explicitly opt into cross-pane transfer. Required when the target document is owned by a different tmux pane. Without it, transfer refuses to write to another pane's document. This flag exists because transfers are deliberate user actions (not concurrent writes) and should not be blocked by session ownership.
+
+**`--items`:** Selective pending transfer. Only moves pending items whose lines contain `[#id]` for each comma-separated ID. IDs may include or omit the `#` prefix (both `--items "#abc,#def"` and `--items "abc,def"` work). Only valid with `component=pending`.
 
 ## extract
 

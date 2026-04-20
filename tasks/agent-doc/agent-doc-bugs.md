@@ -485,7 +485,32 @@ Published to crates.io, tagged, GitHub Release created with binary.
 - Parent repo pointer updated
 
 PyPI will publish automatically via CI on the `release: published` event.
-<!-- agent:boundary:89836b9a -->
+While an agent-doc is currently running, if I were to write additional prompts, agent-doc does not seem to detect the changes.
+Could we have agent-doc scan the document again, perhaps as a postflight command, to detect any changes. Could these changes be moved after the response patchback if under the agent:boundary?
+### Re: mid-cycle edit detection — opus-4-6
+
+This is a real gap. The current flow is strictly single-pass: preflight snapshots the diff, agent responds, write merges, commit closes. Edits made between preflight and write are preserved by CRDT merge but never seen by the agent.
+
+**Two approaches, not mutually exclusive:**
+
+**1. Post-commit re-scan (simplest):** After `agent-doc commit`, run a diff between the new snapshot and the current document. If non-empty, report it. The skill can then do another preflight→respond→write→commit cycle automatically. This is essentially a loop: "keep cycling until the document is stable."
+
+Implementation: `agent-doc postflight <FILE>` → returns `{ "pending_edits": true/false, "diff": "..." }`. The skill checks this after commit and re-enters if edits exist. Bounded to 1 extra pass to prevent infinite loops if the user is actively typing.
+
+**2. Boundary-aware reposition (more surgical):** During `agent-doc write`, if the binary detects new content between the just-written `(HEAD)` marker and the `&lt;!-- /agent:exchange --&gt;` boundary that wasn't in the baseline, it repositions that content to AFTER the patchback response. This keeps the document timeline linear — user prompt always appears before agent response, even if typed mid-cycle.
+
+**My recommendation:** Start with approach 1 (postflight re-scan). It's orthogonal to existing code, easy to test, and handles the general case. Approach 2 is an optimization for visual ordering that can layer on later.
+
+For the skill integration, the cycle would become:
+```
+preflight → respond → write → commit → postflight
+                                          ↓ (if edits detected)
+                                        preflight → respond → write → commit
+```
+
+Shall I implement the `postflight` subcommand? It's ~50 lines in the binary (reuse diff logic from preflight) plus a skill update to check it after commit.
+<!-- agent:boundary:a3da9635 -->
+<!-- agent:boundary:45230872 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

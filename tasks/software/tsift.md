@@ -488,13 +488,50 @@ SPEC.md:78  "CLAUDE.md" is a file path — suggest [CLAUDE.md](../CLAUDE.md)
 **`tsift lint --fix`** could auto-apply suggestions (wrap code symbols in backticks, add links for file references). Bold/heading suggestions would stay advisory since they change the document's emphasis, which is a writing choice.
 
 Added to pending.
-<!-- agent:boundary:b6428790 -->
+do #ast3. add spec + test. run tests. commit + push
+### Re: #ast3 SQLite symbols table — opus-4-6
+
+Done. `index.rs` now creates a `symbols` table on DB open and populates it during `apply_changes`:
+
+**Schema:**
+```sql
+CREATE TABLE symbols (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    language TEXT NOT NULL,
+    signature TEXT,
+    file TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    end_line INTEGER,
+    parent_module TEXT,
+    visibility TEXT
+);
+-- + indexes on name, language, file
+```
+
+**What changed:**
+- `apply_changes` now reads each new/modified file, runs `Lang::extract_symbols()`, and inserts rows. Deleted files get their symbols removed.
+- `rebuild` clears both `file_state` and `symbols` before re-indexing.
+- New query methods: `symbol_count()`, `symbols_for_file(path)` → `Vec<StoredSymbol>`.
+- `signature`, `parent_module`, `visibility` are nullable — ready for enrichment passes later (e.g. Rust `pub`/`pub(crate)` visibility, function parameter lists).
+
+**Tests (6 new, 70 total):** symbols extracted on index, correct properties (name/kind/language/line), updated on modification, deleted with file, rebuild consistency, empty result for nonexistent file. Clippy clean.
+
+Committed `95177df`, pushed.
+<!-- agent:boundary:b8c7affa -->
+<!-- agent:boundary:03b6335e -->
+add pending items for gap with graphify including:
+- LLM-based entity extraction
+- Community detection/clustering
+- HTML visualization
+- Semantic similarity between concepts
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
+- [x] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands

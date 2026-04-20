@@ -562,7 +562,7 @@ pub fn auto_start(
     session_id: &str,
     file_path: &str,
     context_session: Option<&str>,
-) -> Result<()> {
+) -> Result<String> {
     auto_start_ext(tmux, file, session_id, file_path, context_session, false, false)
 }
 
@@ -600,7 +600,7 @@ pub fn provision_pane(
     file_path: &str,
     context_session: Option<&str>,
     col_args: &[String],
-) -> Result<()> {
+) -> Result<String> {
     let split_before = is_first_column(file, col_args);
     auto_start_ext(tmux, file, session_id, file_path, context_session, true, split_before)
 }
@@ -613,7 +613,7 @@ fn auto_start_ext(
     context_session: Option<&str>,
     skip_wait: bool,
     split_before: bool,
-) -> Result<()> {
+) -> Result<String> {
     let session_name = resolve_target_session(tmux, context_session);
     auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before)
 }
@@ -628,7 +628,7 @@ fn auto_start_ext(
 ///
 /// When `skip_wait` is true, skips `wait_for_claude_ready` and `send_command`.
 /// Used by sync which only needs the pane to exist with Claude starting.
-fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool) -> Result<()> {
+fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool) -> Result<String> {
     // Startup lock: prevent double-spawn when sync fires twice in quick succession.
     // Check for a lock file; if it exists and is < 5s old, skip this auto-start.
     // Best-effort: skip lock entirely if file doesn't exist or hash fails.
@@ -648,7 +648,7 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
                 "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
                 file_path, age.as_secs_f64()
             );
-            return Ok(());
+            return Err(anyhow::anyhow!("startup lock active for {}", file_path));
         }
         // Create the lock
         let _ = std::fs::create_dir_all(&starting_dir);
@@ -784,7 +784,7 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     }
 
     let _ = file; // suppress unused warning
-    Ok(())
+    Ok(new_pane)
 }
 
 /// Poll a tmux pane until Claude Code is ready to accept input.

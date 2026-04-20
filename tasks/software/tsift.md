@@ -121,8 +121,7 @@ Updated `src/tsift/SPEC.md` with a full "Multi-Language Architecture" section. A
 The spec covers: Cargo feature flags (all 8 default-enabled), `Language` enum with `#[cfg(feature)]` gating, per-language symbol extraction tables, SQLite schema with `language` column, module structure (`src/lang/*.rs`), and future dynamic loading path.
 
 Development phases updated: Rust + Python queries first, then remaining languages, then graph + federation.
-<!-- agent:boundary:c40e2b47 -->
-<!-- agent:boundary:bdba6e5b -->
+<!-- agent:boundary:18a1e9f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

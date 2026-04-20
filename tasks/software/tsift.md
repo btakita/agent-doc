@@ -285,32 +285,55 @@ The file walk items are there — they're near the bottom of the pending list:
 - **#p3fj** — Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 
 Added large repo optimization to pending — directory mtime pruning to skip unchanged subtrees for 100K+ file repos.
-<!-- agent:boundary:821c975c -->
+do #rws4. add spec + test. commit + push
+### Re: #rws4 done — opus-4-6
+
+Implemented and pushed `7de90a0`:
+
+- **Cargo.toml**: Added `ignore = "0.4"` (from ripgrep — handles .gitignore, .ignore, hidden dirs, symlinks)
+- **`src/walk.rs`**: New module with:
+  - `FileEntry` struct — path, mtime (`SystemTime`), detected `Lang`
+  - `walk_files(root)` — walks directory tree respecting .gitignore, filters to supported language extensions via `Lang::from_extension()`
+  - `changed_since(entries, since)` — returns entries with mtime newer than threshold (for incremental indexing)
+- **`src/main.rs`**: `pub mod walk;` declaration
+
+**7 new tests** (46 total passing):
+- `walk_finds_supported_files` — .rs/.py/.tsx found, .txt/.json excluded
+- `walk_assigns_correct_language` — extension→Lang dispatch verified
+- `walk_captures_mtime` — mtime is recent for freshly created files
+- `walk_respects_gitignore` — `target/` dir and `*.generated.rs` pattern excluded
+- `changed_since_filters_by_mtime` — future threshold returns empty, epoch returns all
+- `walk_empty_dir_returns_empty` — no panic on empty directory
+- `walk_skips_hidden_dirs` — `.hidden/` directory excluded
+
+This is the foundation for #p3fj (incremental indexing). The walk module provides file discovery; #p3fj will wire it into the SQLite `file_state` table for mtime comparison and selective re-parsing.
+<!-- agent:boundary:930d2049 -->
+<!-- agent:boundary:75579da9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
+- [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
-- [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
-- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
-- [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
-- [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
-- [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
-- [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
-- [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
-- [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
-- [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 - [ ] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
+- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
+- [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
+- [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
+- [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
+- [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
+- [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
+- [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
 <!-- /agent:pending -->

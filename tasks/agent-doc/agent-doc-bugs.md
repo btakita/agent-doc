@@ -323,8 +323,7 @@ You said you saw a pane for `tasks/buildside.md`. The logs show only `tasks/prof
 - Something outside of sync created it (manual route call, different hook)
 
 Do you remember any details — which tmux window, what was running in it, or how long it was alive? That would help me narrow it down.
-<!-- agent:boundary:5fff2f72 -->
-<!-- agent:boundary:6e4339a2 -->
+<!-- agent:boundary:7f8eb53c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

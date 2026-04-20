@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Project created. Repo: https://github.com/btakita/tsift. Submodule: src/tsift. Rust CLI skeleton pushed.
+Project created. Repo: https://github.com/btakita/tsift. Submodule: src/tsift. Spec extracted to src/tsift/SPEC.md.
 <!-- /agent:status -->
 
 ## Spec: AST-Aware Code RAG
@@ -108,8 +108,20 @@ Retrieval returns function-level results, not file-level:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ Session established tsift as a local MIT-licensed Rust CLI replacing WozCode. Implemented: tsift search (sift library direct integration, #92bz), tsift edit batch (#mwhg), tsift sql, tsift route model-tier routing (#6jmq), CI workflow (#e15f). /tsift skill installed with TRIGGER/SKIP + runbooks/search-strategies.md. WozCode fully uninstalled (settings.json, plugins, hooks). Spinner verbs added: sifting, panning, winnowing, filtering, prospecting, sieving, distilling, unearthing, tsifting. 9 unit tests passing. Repo: btakita/tsift (private). Pending: release workflow + tsift audit subcommands (skill drift, duplicate detection, usage tracking, cleanup recommendations, nightly report).
+❯ Move the spec that was transferred tasks/software/agent-loop.md into a spec file.
+Note I just moved this file to tasks/software/tsift.md
+### Re: spec extraction + file move — opus-4-6
 
-<!-- agent:boundary:feb8fa12 -->
+Extracted the full "Spec: AST-Aware Code RAG" section to `src/tsift/SPEC.md`. The session doc now links to it instead of inlining the spec.
+
+Acknowledged the file move to `tasks/software/tsift.md`.
+<!-- replace:spec -->
+See [SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec.
+<!-- /replace:spec -->
+<!-- agent:boundary:608b3149 -->
+Note I just moved this file to tasks/software/tsift.md
+<!-- agent:boundary:827b8086 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

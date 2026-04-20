@@ -54,8 +54,7 @@ Also, could you recover the output from the tmux session running `agent-doc task
 2. **Pane reuse on path change** — When the plugin resolves which pane to focus, it should match by session ID first (read from frontmatter), not by file path. If a session ID match exists in sessions.json but the path differs, update the path and reuse the pane.
 
 Added to pending.
-<!-- agent:boundary:f15fe9d0 -->
-<!-- agent:boundary:d70a0d34 -->
+<!-- agent:boundary:380ef583 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -476,7 +476,54 @@ Is #15mw implemented? Implement #3yc9 with tests.
 - Existing multi-line dedup tests unchanged and passing
 
 **Test results:** 1185 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
-<!-- agent:boundary:32f40dbf -->
+src/session-share/tasks/shelltab-clone.md duplicated my currently edited prompt. Why? See `Create a project plan document in tasks/shelltab-clone/*.md to the demo. T`
+### Re: shelltab-clone.md prompt duplication — opus-4-6
+
+**Root cause: TOCTOU race in boundary reposition during concurrent user edits.**
+
+The shelltab-clone.md working tree shows a classic read-modify-write race:
+
+```
+...Start with BYOK — it's the right MVP choice.
+Create a project plan document in tasks/shelltab-clone/*.md to the demo. T   ← partial capture
+<!-- agent:boundary:5ba2df36 -->
+&lt;!-- /agent:exchange --&gt;
+## Pending / Not Built
+&lt;!-- agent:pending patch=replace --&gt;
+&lt;!-- /agent:pending --&gt;
+Create a project plan document in tasks/shelltab-clone/*.md to the demo. Then from demo to production.  ← full input
+<!-- agent:boundary:5ba2df36 -->
+&lt;!-- /agent:exchange --&gt;
+...  (structural tail duplicated)
+```
+
+#### How the race works
+
+`reposition_boundary_in_snapshot()` in `git.rs:681-698` does a disk-level read-modify-write on the working tree:
+
+```rust
+let working = std::fs::read_to_string(file)?;        // T1: reads partial user input
+let repositioned = reposition_boundary_to_end(...);    // strips old boundaries, inserts new one
+atomic_write_pub(file, &repositioned)?;                // T2: writes back — truncates user input
+```
+
+Then `try_ipc_reposition_boundary(file)` sends a signal to the IDE, which does a second reposition via Document API. Between T1 and T2 (or between disk write and IDE refresh), the user typed more characters. The result: two copies of the structural tail with different user content prefixes.
+
+#### Why two boundary markers in the committed state
+
+The committed state had `<!-- agent:boundary:5bb175d8 -->` AND `<!-- agent:boundary:d9d8d6b6 -->` — two markers. This is itself a pre-existing bug: `reposition_boundary_to_end` should produce exactly one, but something left a stale one behind.
+
+#### Fix direction
+
+1. **Skip working-tree reposition when IPC is available** — if `.agent-doc/patches/` exists (IDE plugin installed), let the IDE handler own the working-tree boundary. The CLI should only reposition the snapshot (which it controls exclusively). This eliminates the disk-level TOCTOU entirely.
+
+2. **IDE handler CAS guard** — in the JB plugin's `repositionBoundaryViaDocument`, compare `document.text` before `setText(result)` to verify it hasn't changed since the read. If it has, skip — the user is editing.
+
+3. **Skip reposition for documents with user edits** — `reposition_boundary_in_snapshot()` already skips when a pending file exists (active run). Extend this: also skip the working-tree reposition when the file has user content beyond the last boundary marker that differs from the snapshot.
+
+Fix #1 is the simplest and eliminates the most common path. Added to pending.
+<!-- agent:boundary:90c57ad9 -->
+<!-- agent:boundary:8bb92935 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -486,5 +533,6 @@ Is #15mw implemented? Implement #3yc9 with tests.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
+- [ ] [#xbs3] Boundary reposition TOCTOU race: skip working-tree reposition in git.rs when IPC available; IDE handler needs CAS guard (crdt.rs/git.rs/PatchWatcher.kt)
 <!-- /agent:pending -->
 ## Assistant

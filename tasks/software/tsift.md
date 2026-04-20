@@ -109,7 +109,7 @@ Retrieval returns function-level results, not file-level:
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:1b324c3a -->
+<!-- agent:boundary:f1f24d99 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

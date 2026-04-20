@@ -340,14 +340,12 @@ do #p3fj. add spec + test. run tests. commit + push
 - `unsupported_extensions_ignored` — .txt files not tracked
 - `check_mode_does_not_update_state` — compute_changes is read-only
 - `apply_then_delete_then_apply` — full lifecycle: index, delete, re-index
-<!-- agent:boundary:9fee4c28 -->
-<!-- agent:boundary:9118021d -->
+<!-- agent:boundary:b3fa5378 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback

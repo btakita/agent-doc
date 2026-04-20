@@ -334,8 +334,7 @@ End-of-exchange user input followed only by `&lt;!-- /agent:exchange --&gt;` + `
 **2. `(HEAD)` boundary artifact exclusion** — `is_head_boundary_artifact()` skips `[user~]` lines where the only change is appending ` (HEAD)` to a heading. These are reposition artifacts from `agent-doc commit`.
 
 **13 tests pass** (4 new for false positive cases), 1175 total. Both binaries rebuilt.
-<!-- agent:boundary:62746487 -->
-<!-- agent:boundary:1dea0e27 -->
+<!-- agent:boundary:9fbebfe0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

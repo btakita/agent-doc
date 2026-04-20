@@ -400,8 +400,7 @@ You're right — focus-gating is too aggressive. It breaks the cold-start case:
 **Recommendation: revert focus-gate, keep #qam7 as the targeted fix.** The rename debounce (#qam7) solves the actual bug (spurious pane creation on file renames) without degrading the cold-start experience. Focus-gating was a sledgehammer where a scalpel is needed.
 
 I'll revert the focus-gate code but keep the Tier 1 logging (pane ID in auto-start messages + batch summary). Want me to proceed with the revert?
-<!-- agent:boundary:96ca0c10 -->
-<!-- agent:boundary:22c38102 -->
+<!-- agent:boundary:4a8efd1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -367,8 +367,7 @@ Two integration tests added to `route.rs`:
 The rearrangement technique: `break-pane` + `join-pane -bh` moves a right pane to the left of another, creating the creation-order/screen-order divergence that triggers the original bug.
 
 **1177 tests pass.** Both binaries rebuilt.
-<!-- agent:boundary:493ca430 -->
-<!-- agent:boundary:fb517a32 -->
+<!-- agent:boundary:dab8cc5f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -90,7 +90,32 @@ Warning format: `[write] WARN: response contains future-work signal "worth revis
 Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 
 **#v30f — file rename handling: Not done.** This is the IDE plugin bug filed this session — needs `FileMovedEvent` (JB) / `onDidRenameFiles` (VS Code) handlers plus session-ID-first pane resolution. No implementation yet.
-<!-- agent:boundary:1f78086c -->
+do #v30f with tests
+### Re: #v30f file rename handling — opus-4-6
+
+Implemented across three layers:
+
+#### 1. Rust CLI (sync.rs) — core fix
+
+The bug: when `sync` found an alive pane but the registered file no longer existed, it **killed the pane** and auto-started a new one. Fixed to **reuse the pane** by re-registering with the new path and continuing:
+
+```
+[sync] file renamed: tasks/tsift.md → tasks/software/tsift.md — reusing pane %77 (session tsift-v0.1)
+```
+
+42 sync tests still passing.
+
+#### 2. VS Code extension (extension.ts)
+
+Added `workspace.onDidRenameFiles` subscription in `activate()`. On rename of any `.md` file, triggers `agent-doc sync --col ... --focus <newPath>` which hits the Rust fix above.
+
+#### 3. JetBrains plugin (new FileRenameListener.kt)
+
+Created `FileRenameListener` implementing `BulkFileListener`, registered in `PluginLifecycleListener.projectOpened()` on `VFS_CHANGES`. Detects `VFileMoveEvent` and `VFilePropertyChangeEvent(PROP_NAME)`, triggers `agent-doc sync` with the new relative path.
+
+Both binaries rebuilt. JB plugin zip needs rebuild (pending item added).
+<!-- agent:boundary:a2cf3884 -->
+<!-- agent:boundary:31c6464b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -98,6 +123,7 @@ Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
+- [x] [#v30f] File rename handling: when a session document is moved/renamed, IDE plugin should detect same session ID at new path and reuse existing tmux pane instead of spawning a new one. Update sessions.json path atomically on rename event (FileMovedEvent in JB, onDidRenameFiles in VS Code).
+- [ ] [#k0ra] Build JB plugin zip with FileRenameListener and test rename → sync path update end-to-end
 <!-- /agent:pending -->
 ## Assistant

@@ -26,7 +26,20 @@ Both can be closed.
 **#y2gr — skill install runbooks sync:** Fixed in v0.33.7. Verified just now: `agent-doc skill install --reload compact` propagates all 15 runbook files to both `~/.claude/skills/agent-doc/runbooks/` and `<project>/.claude/skills/agent-doc/runbooks/`. The original bug (only SKILL.md propagated) is resolved.
 
 **#a002 — normalize telemetry:** Code-complete. Safety rail + forensic log + `normalize_threshold_exceeded` telemetry emission are all implemented and unit-tested. The "awaiting large-drift trip" was observational validation — the code path works, and if a real drift exceeds the threshold, the telemetry will fire. No implementation work remains; keeping it open just waits for a production event that may never happen in exactly the expected form. Closing as code-complete.
-<!-- agent:boundary:4fc88f7d -->
+
+In src/session-share/tasks/claudescore.md, "Worth revisiting" or any similar note for future work should be added to pending. Please update skill/runbook.
+> This is a legitimate rubric design question — the 7-8 band may be over-weighting "documentation about CI" vs "CI that's discoverable and has local equivalents." Worth revisiting.
+### Re: future-work signal → pending promotion — opus-4-6
+
+Updated both:
+
+1. **SKILL.md** (§1b promotion heuristic) — added "Future-work signal promotion" paragraph: phrases like "Worth revisiting", "TODO", "revisit later", "follow-up needed", "future work" auto-promote to pending via `--pending-add` in the same write. The pending item captures the actionable kernel, not the full paragraph.
+
+2. **runbooks/pending-ops.md** (§What to decide each cycle) — added matching bullet under the existing decision list.
+
+The rule is now: if my response contains deferred-action language, I must also `--pending-add` it. This prevents "Worth revisiting" from dying as prose in a compacted exchange.
+<!-- agent:boundary:f79cc535 -->
+<!-- agent:boundary:b46b7524 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -34,5 +47,6 @@ Both can be closed.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#7x90] Embed future-work signal promotion in agent-doc binary — currently skill-only (SKILL.md + pending-ops.md). Consider compile-time enforcement or lint warning when response contains 'Worth revisiting' without a corresponding --pending-add
 <!-- /agent:pending -->
 ## Assistant

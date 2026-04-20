@@ -640,8 +640,7 @@ Released.
 - **PyPI**: triggered automatically via `.github/workflows/pypi.yml` on release publish
 - **JB plugin**: v0.2.68 built and signed locally — Marketplace publish is a separate step if needed
 - `cargo install --path .` done post-publish — `~/.cargo/bin/agent-doc` confirmed at v0.33.7
-<!-- agent:boundary:1b00ddc2 -->
-<!-- agent:boundary:acc76fca -->
+<!-- agent:boundary:d48f9b11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

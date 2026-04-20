@@ -191,7 +191,7 @@ The MCP server cleanup is the highest ROI: each disabled server saves name/descr
 
 ❯ do
 ❯ - [ ] [#bx57] Disable unused MCP servers (gmail, chrome-devtools, etc.) in settings.json
-### Re: snapshot cleanup & MCP servers (HEAD)
+### Re: snapshot cleanup & MCP servers
 
 **Snapshot status:** Checked `.agent-doc/baselines/` — 170 snapshots total. Oldest are from Apr 4 (9 days ago). Nothing >30 days yet, so deletion has nothing to reap.
 
@@ -203,11 +203,10 @@ The MCP server cleanup is the highest ROI: each disabled server saves name/descr
 The cleanup task for baselines should become an agent-doc feature (snapshot GC with configurable reap cycle, as you noted). I've transferred that to pending for agent-doc-feat.
 
 For the MCP disable, no file-based approach available — it's app-managed. You'll need to disable them through the UI, or we could explore whether agent-doc should expose an `mcp disable` command that writes to the app's config location (if that location is available).
-<!-- agent:boundary:f75850fe -->
+<!-- agent:boundary:c08ae8de -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] [#vx3s] Delete snapshots older than 30 days from .agent-doc/baselines/
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`

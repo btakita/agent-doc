@@ -40,6 +40,35 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md pending --b
 4. Commits target; saves both snapshots
 5. Warns about any IDs that didn't match
 
+## Referral (pointer instead of copy)
+
+Inserts a structured referral tag in the target, leaving content in the source. The target session can read the source for context without duplicating history.
+
+```bash
+agent-doc transfer <SOURCE> <TARGET> <COMPONENT> --referral [--bypass-claim]
+```
+
+**Example:** Reference tsift's exchange from tagpath without copying:
+```bash
+agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md exchange --referral --bypass-claim
+```
+
+**What gets inserted in target:**
+```html
+<!-- agent:referral src="../tsift.md" component="exchange" created="2026-04-20T..." -->
+*Context from [../tsift.md](../tsift.md) — read source exchange for full history.*
+<!-- /agent:referral -->
+```
+
+**What happens:**
+1. Checks pane ownership (unless `--bypass-claim`)
+2. Computes relative path from target to source
+3. Inserts referral block into target's matching component
+4. Source content is NOT modified
+5. Commits target; saves snapshot
+
+**When preflight sees referrals:** Future enhancement — preflight can resolve `<!-- agent:referral -->` tags and inject referenced content as context for the responding agent.
+
 ## Extract (move last exchange entry)
 
 Extracts the last `### Re:` entry from the source exchange to the target document.

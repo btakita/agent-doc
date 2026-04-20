@@ -369,7 +369,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 ## transfer
 
-`agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim] [--items ID1,ID2,...]` — move entire component content from source to target document.
+`agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim] [--items ID1,ID2,...] [--referral]` — move entire component content from source to target document.
 
 1. **Argument validation:** if `--items` is set and component is not `pending`, reject immediately.
 2. Validate source exists; auto-create target if missing (template format)
@@ -382,7 +382,15 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **`--bypass-claim`:** Explicitly opt into cross-pane transfer. Required when the target document is owned by a different tmux pane. Without it, transfer refuses to write to another pane's document. This flag exists because transfers are deliberate user actions (not concurrent writes) and should not be blocked by session ownership.
 
-**`--items`:** Selective pending transfer. Only moves pending items whose lines contain `[#id]` for each comma-separated ID. IDs may include or omit the `#` prefix (both `--items "#abc,#def"` and `--items "abc,def"` work). Only valid with `component=pending`.
+**`--items`:** Selective pending transfer. Only moves pending items whose lines contain `[#id]` for each comma-separated ID. IDs may include or omit the `#` prefix (both `--items "#abc,#def"` and `--items "abc,def"` work). Only valid with `component=pending`. Mutually exclusive with `--referral`.
+
+**`--referral`:** Instead of moving content, inserts a structured referral pointer in the target's component:
+```html
+<!-- agent:referral src="<relative-path>" component="<name>" created="<timestamp>" -->
+*Context from [<path>](<path>) — read source <component> for full history.*
+<!-- /agent:referral -->
+```
+The source content stays in place. When preflight sees `<!-- agent:referral -->` tags, it can optionally resolve and inject the referenced content as context. Mutually exclusive with `--items`.
 
 ## extract
 

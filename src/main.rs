@@ -631,6 +631,9 @@ enum Commands {
         /// Transfer only specific pending items by ID (comma-separated, e.g., "#id1,#id2")
         #[arg(long)]
         items: Option<String>,
+        /// Insert a referral pointer instead of moving content (target reads source on demand)
+        #[arg(long)]
+        referral: bool,
     },
     /// Migrate session state after a document file rename/move
     Rename {
@@ -1089,10 +1092,10 @@ fn main() -> anyhow::Result<()> {
             focus,
             rename,
         } => {
-            if rename {
-                if let Some(ref f) = focus {
-                    sync::write_rename_debounce(f);
-                }
+            if rename
+                && let Some(ref f) = focus
+            {
+                sync::write_rename_debounce(f);
             }
             sync::run(&columns, window.as_deref(), focus.as_deref())
         }
@@ -1353,11 +1356,11 @@ fn main() -> anyhow::Result<()> {
         Commands::Annotate { file, force, history } => annotate::run(&file, force, history),
         Commands::Undo { file } => undo::run(&file),
         Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
-        Commands::Transfer { source, target, component, bypass_claim, items } => {
+        Commands::Transfer { source, target, component, bypass_claim, items, referral } => {
             let item_ids: Option<Vec<String>> = items.map(|s| {
                 s.split(',').map(|id| id.trim().trim_start_matches('#').to_string()).collect()
             });
-            extract::transfer(&source, &target, &component, bypass_claim, item_ids.as_deref())
+            extract::transfer(&source, &target, &component, bypass_claim, item_ids.as_deref(), referral)
         }
         Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
         Commands::Claims => {

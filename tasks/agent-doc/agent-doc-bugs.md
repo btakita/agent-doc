@@ -606,8 +606,7 @@ do #qdb4. add tests
 - **TypeScript** `reposition.test.ts` (5 tests): reposition from middle, no boundary → null, collapse multiple, nonexistent component, component with attributes
 
 **Test results:** JB gradle test — BUILD SUCCESSFUL. VS Code npm test — 11 pass, 0 fail. Both plugin test suites green.
-<!-- agent:boundary:5064361b -->
-<!-- agent:boundary:c434721e -->
+<!-- agent:boundary:0e8f1b76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -617,6 +616,5 @@ do #qdb4. add tests
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [x] [#qdb4] Fix #2: CAS guard in JB PatchWatcher.kt + VS Code extension.ts reposition handler — verify document.text unchanged between read and setText (PatchWatcher.kt/extension.ts)
 <!-- /agent:pending -->
 ## Assistant

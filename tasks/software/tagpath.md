@@ -105,7 +105,7 @@ presets/               Convention presets (immutable-tag.toml)
 ## Status
 
 <!-- agent:status patch=replace -->
-#pz75 done — lib.rs added, 80 tests pass, pushed
+v0.6.0 published to crates.io
 <!-- /agent:status -->
 
 ## Exchange
@@ -122,13 +122,19 @@ Done. Created `src/lib.rs` with all 9 modules as `pub mod`. Updated `main.rs` to
 - `alias::generate_aliases`, `prose::to_prose`, `config::generate_config`
 
 80 tests pass (72 existing + 8 new), clippy clean. Committed and pushed.
-<!-- agent:boundary:6e22fe2a -->
+
+release
+### Re: release — sonnet-4-6
+
+Bumped to v0.6.0 (minor — new library API), ran 80 tests + clippy clean, tagged and pushed, published to [crates.io/crates/tagpath](https://crates.io/crates/tagpath).
+<!-- agent:boundary:5e292e5b -->
+<!-- agent:boundary:17e53722 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#pz75] Add lib.rs — expose parser/tokenizer as library API for downstream crates (tsift)
+- [x] [#pz75] Add lib.rs — expose parser/tokenizer as library API for downstream crates (tsift)
 - [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
 - [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
 <!-- /agent:pending -->

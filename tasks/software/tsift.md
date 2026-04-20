@@ -198,8 +198,7 @@ On incremental update: hash each changed file, compare against `file_state`. Ski
 For a repo like agent-loop (~500 files across submodules): full index takes seconds, incremental update <100ms for typical 1-5 file changes. The search path adds ~10ms overhead for staleness check (one `git diff` + hash comparison).
 
 The auto-incremental on search means users never query stale data. No hooks, no daemons, no cron — just "check on read."
-<!-- agent:boundary:da5b98ea -->
-<!-- agent:boundary:9edf2b3b -->
+<!-- agent:boundary:88f9e179 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

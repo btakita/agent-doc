@@ -588,7 +588,26 @@ Updated pending to combine Fix #1 + Fix #2.
 **Test results:** 1187 pass, clippy clean. Both binaries rebuilt.
 
 Fix #2 (CAS guard in IDE reposition handlers) added as separate pending item.
-<!-- agent:boundary:73be2f34 -->
+do #qdb4. add tests
+### Re: #qdb4 CAS guard implemented + tests — opus-4-6
+
+**Fix #2 done.** Both IDE reposition handlers now verify `document.text` is unchanged between read and `setText` — if the user typed between `await_idle` timeout and the write action, the reposition is silently skipped.
+
+**JB PatchWatcher.kt:**
+- `repositionBoundaryViaDocument()` — added CAS check: `if (result != content && document.text == content)`. Within the `WriteCommandAction`, the second `document.text` read verifies no keystrokes landed between `reloadFromDisk` and the write action dispatch.
+- Extracted `repositionBoundaryToEndUtil` and `findCodeBlockRangesUtil` as internal top-level functions for testability. Instance methods delegate.
+
+**VS Code extension.ts:**
+- `repositionBoundaryWithDebounce()` — added CAS check: `document.getText() === content` before applying the `WorkspaceEdit`.
+- Extracted `repositionBoundaryToEnd` into `reposition.ts` (vscode-free module). PatchWatcher's `repositionBoundaryToEndTs` delegates to it.
+
+**New tests:**
+- **Kotlin** `RepositionBoundaryTest.kt` (7 tests): reposition from middle to end, no boundary → null, already at end → null, collapse multiple boundaries, skip code-block fakes, code block range detection, nonexistent component → null
+- **TypeScript** `reposition.test.ts` (5 tests): reposition from middle, no boundary → null, collapse multiple, nonexistent component, component with attributes
+
+**Test results:** JB gradle test — BUILD SUCCESSFUL. VS Code npm test — 11 pass, 0 fail. Both plugin test suites green.
+<!-- agent:boundary:5064361b -->
+<!-- agent:boundary:c434721e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -598,6 +617,6 @@ Fix #2 (CAS guard in IDE reposition handlers) added as separate pending item.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [ ] [#qdb4] Fix #2: CAS guard in JB PatchWatcher.kt + VS Code extension.ts reposition handler — verify document.text unchanged between read and setText (PatchWatcher.kt/extension.ts)
+- [x] [#qdb4] Fix #2: CAS guard in JB PatchWatcher.kt + VS Code extension.ts reposition handler — verify document.text unchanged between read and setText (PatchWatcher.kt/extension.ts)
 <!-- /agent:pending -->
 ## Assistant

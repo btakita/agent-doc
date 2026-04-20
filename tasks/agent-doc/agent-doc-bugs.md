@@ -588,8 +588,7 @@ Updated pending to combine Fix #1 + Fix #2.
 **Test results:** 1187 pass, clippy clean. Both binaries rebuilt.
 
 Fix #2 (CAS guard in IDE reposition handlers) added as separate pending item.
-<!-- agent:boundary:b4014353 -->
-<!-- agent:boundary:edb4862b -->
+<!-- agent:boundary:73be2f34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -599,7 +598,6 @@ Fix #2 (CAS guard in IDE reposition handlers) added as separate pending item.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [x] [#xbs3] Boundary reposition TOCTOU race — Fix #1 (skip working-tree disk reposition when IPC available, git.rs) + Fix #2 (CAS guard in JB/VS Code reposition handler, PatchWatcher.kt + extension.ts)
 - [ ] [#qdb4] Fix #2: CAS guard in JB PatchWatcher.kt + VS Code extension.ts reposition handler — verify document.text unchanged between read and setText (PatchWatcher.kt/extension.ts)
 <!-- /agent:pending -->
 ## Assistant

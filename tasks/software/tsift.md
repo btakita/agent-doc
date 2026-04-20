@@ -650,13 +650,36 @@ Implemented in commit `00c0c9c`, pushed.
 **Tests:** 21 new (97 total) covering call-site extraction per language, edge resolution (basic, nested/innermost, top-level exclusion), full roundtrip, IndexDb integration (edge storage, callers/callees queries, delete propagation, rebuild, modification updates, Python edges). Clippy clean.
 
 **Next:** #grp2 adds `tsift graph --callers/--callees` CLI subcommands to expose these queries.
-<!-- agent:boundary:66bec2b8 -->
+do #grp2. add spec + test. run tests. commit + push
+### Re: #grp2 done — opus-4-6
+
+Implemented in commit `a805325`, pushed.
+
+**`tsift graph <symbol> [path]`:**
+- No flags → shows both callers and callees
+- `--callers` → callers only
+- `--callees` → callees only
+- `--json` → structured JSON (combined object when showing both, array when filtered)
+- Errors with clear message if no index exists
+
+**Output format (human):**
+```
+Callers of `helper`:
+  main (src/main.rs:1)
+
+Callees of `helper`:
+  println (src/main.rs:0)
+```
+
+**Tests:** 4 new (101 total) — callers query, callees query, no-match returns empty, missing index errors. Clippy clean.
+<!-- agent:boundary:bc1cb428 -->
+<!-- agent:boundary:634a0eeb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#grp2] `tsift graph --callers/--callees` subcommands
+- [x] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer

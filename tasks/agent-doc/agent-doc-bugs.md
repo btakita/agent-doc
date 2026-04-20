@@ -563,16 +563,35 @@ Then when preflight runs on tagpath.md and sees the referral tag, it can optiona
 This also naturally handles the "exchange-only transfer" case — `transfer exchange` without `--referral` copies the content; with `--referral` it leaves a pointer. And `transfer pending --items #ast4,#0m97` can be combined with either mode.
 
 The `split` subcommand from before becomes sugar over: `transfer --bypass-claim --referral exchange` + `transfer --bypass-claim pending --items <ids>`.
-<!-- agent:boundary:97b60871 -->
+
+do #kvgb. add spec + test. update agent-doc and agent-loop skill/runbook. run tests. commit + push
+### Re: #kvgb done — opus-4-6
+
+Implemented `transfer --bypass-claim`. Pushed to main.
+
+**What was built:**
+
+- `src/extract.rs` — added `check_target_ownership()` that reads `sessions.json`, compares canonical paths, and rejects if a different pane owns the target. Skipped when `--bypass-claim` is set.
+- `src/main.rs` — `--bypass-claim` flag on Transfer command, wired through to `extract::transfer()`
+- 2 new tests: `check_target_ownership_passes_outside_tmux` + `check_target_ownership_passes_no_project_root`
+- Spec: `specs/07-commands.md` — added `## transfer` and `## extract` sections (were undocumented)
+- Runbook: `runbooks/transfer-extract.md` — updated with `--bypass-claim` usage and cross-pane guidance
+- Skill runbook: `~/.claude/skills/agent-doc/runbooks/transfer-extract.md` — same update
+
+**Test results:** 1205 passed, clippy clean, both binaries installed.
+
+**Key design point:** Previously, `transfer` used `atomic_write_pub` (no ownership check) — the binary allowed cross-pane writes but the skill/LLM refused to call it. Now the binary enforces ownership (consistent with `write` command's `verify_pane_ownership`) and provides `--bypass-claim` as the explicit escape hatch.
+<!-- agent:boundary:103f2600 -->
+<!-- agent:boundary:aaca74a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#kvgb] [#tf01] transfer --bypass-claim: ignore pane ownership on explicit transfer operations (primary blocker for cross-session moves)
+- [x] [#kvgb] [#tf01] transfer --bypass-claim: ignore pane ownership on explicit transfer operations (primary blocker for cross-session moves)
 - [ ] [#35zm] [#tf02] transfer pending --items <ids>: selective pending item migration by ID (move subset, not all-or-nothing)
 - [ ] [#a9q1] [#tf03] transfer --referral: insert a pointer in target doc referencing source exchange instead of copying content. Target session reads source for context on demand. Supports exchange-only transfer (no pending) and referral-only (no content move)
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
 ## Assistant

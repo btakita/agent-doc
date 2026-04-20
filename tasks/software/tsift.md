@@ -672,14 +672,12 @@ Callees of `helper`:
 ```
 
 **Tests:** 4 new (101 total) — callers query, callees query, no-match returns empty, missing index errors. Clippy clean.
-<!-- agent:boundary:bc1cb428 -->
-<!-- agent:boundary:634a0eeb -->
+<!-- agent:boundary:3346c956 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer

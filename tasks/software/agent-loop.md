@@ -250,8 +250,7 @@ source files
 3. **Bridge to tsift** — if tsift can accept a pre-indexed corpus, feed it the AST-extracted symbols instead of raw files.
 
 Worth revisiting whether graphify could serve as the graph layer directly (extend its extractors with tree-sitter code parsing).
-<!-- agent:boundary:c42c93a9 -->
-<!-- agent:boundary:0e6d9b77 -->
+<!-- agent:boundary:62407f0b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

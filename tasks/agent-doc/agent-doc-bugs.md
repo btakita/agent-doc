@@ -402,7 +402,43 @@ The route.rs fix was correct but addressed the wrong code path. The actual rever
 ```
 
 **All 1177 tests pass.** Both binaries rebuilt. Try switching right editor between claudescore.md and shelltab-clone.md.
-<!-- agent:boundary:bb098541 -->
+
+When I write to shelltab-clone.md, the line I am typing is duplicated via CRDT a bit before where I was typing. Why?
+### Re: CRDT line duplication in shelltab-clone.md — opus-4-6
+
+Investigated the CRDT merge pipeline end-to-end. The duplication is most likely caused by the **IPC sidecar ack timeout race** in write.rs, amplified by a **single-line dedup gap** in the CRDT post-merge.
+
+**Root cause chain:**
+
+1. `agent-doc write --stream` delivers the patch via socket IPC (write.rs:1808)
+2. Plugin receives and starts applying the patch to the Document API
+3. Sidecar ack times out after 1000ms (write.rs:1812-1814) — plugin was slow but DID apply
+4. Binary marks IPC degraded, falls through to file IPC or disk write
+5. Binary re-reads the file (write.rs:1214) — which now has the plugin's changes (agent response already applied)
+6. CRDT merge runs with:
+   - `base` = preflight baseline (no user line, no agent response)
+   - `ours` = baseline + agent response
+   - `theirs` = file on disk = baseline + user line + agent response (plugin applied)
+7. Both `base → ours` and `base → theirs` diffs include the agent response as an insertion at the end of the exchange
+8. CRDT creates two copies: client_id=1 (ours) before client_id=2 (theirs) — **"a bit before"**
+9. `dedup_adjacent_blocks` only catches blocks with ≥2 non-empty lines, so short duplicates slip through
+
+**Why "a bit before":** Yrs orders concurrent inserts at the same position by client_id (lower first). Agent=client_id(1), user=client_id(2). The ours-side copy appears above the theirs-side copy.
+
+**Evidence supporting this theory:**
+- shelltab-clone.md has `agent_doc_write: crdt` and `.agent-doc/patches/` exists (IPC active)
+- The 22.8K CRDT state file suggests many merge cycles
+- The `patch=append` exchange mode means responses append at the end — the exact position where races collide
+
+**Diagnostic:** Check the tmux pane running shelltab-clone.md's session for `[write] sidecar ack timed out` or `[write] IPC degraded` messages. If present, that confirms the race.
+
+**Two fixes needed:**
+
+1. **Guard the disk write on sidecar timeout:** Before CRDT merging on the IPC timeout path, check if `content_current` already contains the agent response. If `content_ours` content appears in `content_current`, skip the merge — the plugin already applied it.
+
+2. **Lower dedup threshold or add content-aware dedup:** Either lower `dedup_adjacent_blocks` to ≥1 non-empty line (risk: false positives on intentionally repeated single lines like `---`), or add a targeted dedup that compares the ours-side patches against the merged result.
+<!-- agent:boundary:35fdb842 -->
+<!-- agent:boundary:bdcb9a38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

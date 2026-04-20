@@ -488,8 +488,7 @@ SPEC.md:78  "CLAUDE.md" is a file path — suggest [CLAUDE.md](../CLAUDE.md)
 **`tsift lint --fix`** could auto-apply suggestions (wrap code symbols in backticks, add links for file references). Bold/heading suggestions would stay advisory since they change the document's emphasis, which is a writing choice.
 
 Added to pending.
-<!-- agent:boundary:73b06249 -->
-<!-- agent:boundary:7a2ea863 -->
+<!-- agent:boundary:b6428790 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

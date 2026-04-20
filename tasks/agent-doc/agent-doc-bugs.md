@@ -466,8 +466,7 @@ The rename detection EVENT can't move to FFI/binary because it requires hooking 
 **Could we go further?** One option: the FFI layer could expose a `agent_doc_notify_rename(old_path, new_path)` function that plugins call instead of constructing the sync CLI command themselves. But that would mean maintaining FFI bindings for something that's already a one-line CLI call. Net complexity increase, not decrease.
 
 The current design is the right one — plugin reports event, binary owns logic.
-<!-- agent:boundary:a833e844 -->
-<!-- agent:boundary:d2472040 -->
+<!-- agent:boundary:b9c0b521 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

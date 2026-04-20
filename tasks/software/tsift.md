@@ -285,8 +285,7 @@ The file walk items are there — they're near the bottom of the pending list:
 - **#p3fj** — Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
 
 Added large repo optimization to pending — directory mtime pruning to skip unchanged subtrees for 100K+ file repos.
-<!-- agent:boundary:1b41c796 -->
-<!-- agent:boundary:3b510956 -->
+<!-- agent:boundary:821c975c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

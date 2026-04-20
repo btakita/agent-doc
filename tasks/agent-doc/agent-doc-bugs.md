@@ -234,7 +234,35 @@ Commit `a41bdd1` on `btakita/agent-doc` main:
 - `editors/jetbrains/gradle.properties` — v0.2.69
 
 Parent repo pointer updated (`f4d91c10`) and pushed.
-<!-- agent:boundary:132312a7 -->
+I moved tasks/buildside.md to tasks/professional/buildside.md...But a new tmux pane + Claude Code session started. Why?
+### Re: buildside rename spawned new session — opus-4-6
+
+The rename detection code works correctly for its designed case (alive pane + path change). But your case is different: **there was no alive pane for `tasks/buildside.md` before the rename**.
+
+#### What happened (from `/tmp/agent-doc-sync.log`)
+
+```
+[1776716223] sync: focus=tasks/buildside.md (old path, no alive pane)
+[1776716236] sync: focus=tasks/professional/buildside.md (FileRenameListener fired)
+[1776716242] sync: auto-starting session for tasks/professional/buildside.md (no alive pane)
+```
+
+1. IDEA refactored the file → `EditorTabSyncListener` fired with old layout
+2. `FileRenameListener` (v0.2.69) fired and triggered sync with the new path
+3. Sync #3 resolved the session UUID (`3f091e1b`), looked up the registry, found **no alive pane** for that session
+4. Since `has_alive_pane == false`, it skipped the rename detection block entirely and fell through to auto-start
+
+#### Why rename detection didn't help
+
+The `is_file_rename()` check lives inside the `if has_alive_pane { ... }` block (sync.rs:871). When the pane is dead/absent, we never enter that block — we go straight to auto-start because sync's job is "visible file with session UUID → ensure it has a pane."
+
+#### The actual bug: unnecessary auto-start on organizational moves
+
+The file rename was purely organizational — you weren't requesting a new Claude session. But sync can't distinguish "user moved a file to reorganize" from "user opened a file they want to work with." Both look the same: focused file + session UUID + no alive pane → auto-start.
+
+**Fix:** When `FileRenameListener` fires for a file with no alive pane, set a short-lived debounce marker (e.g., `.agent-doc/rename-debounce/<session_id>` with TTL ~5s). The auto-start path in sync checks for this marker and skips if present. This suppresses spurious session creation on renames without affecting normal tab-focus auto-start.
+<!-- agent:boundary:a735ae79 -->
+<!-- agent:boundary:9ba49525 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -242,5 +270,6 @@ Parent repo pointer updated (`f4d91c10`) and pushed.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#qam7] Suppress auto-start for recently-renamed files: when FileRenameListener fires for a file with no alive pane, set a short-lived debounce marker so the subsequent EditorTabSyncListener-triggered sync skips auto-start for that file. Prevents spurious session creation on organizational file moves.
 <!-- /agent:pending -->
 ## Assistant

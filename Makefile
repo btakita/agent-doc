@@ -73,12 +73,13 @@ install:
 	@agent-doc lib-install
 
 
-# Install git hooks
+# Install git hooks (works for both standalone repos and submodules)
 install-hooks:
-	@mkdir -p .git/hooks
-	@printf '#!/bin/sh\nmake precommit\n' > .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@echo "Installed .git/hooks/pre-commit"
+	@HOOK_DIR=$$(git rev-parse --git-dir)/hooks; \
+	mkdir -p "$$HOOK_DIR"; \
+	printf '#!/bin/sh\nmake precommit\n' > "$$HOOK_DIR/pre-commit"; \
+	chmod +x "$$HOOK_DIR/pre-commit"; \
+	echo "Installed $$HOOK_DIR/pre-commit"
 
 # Remove build artifacts
 clean:

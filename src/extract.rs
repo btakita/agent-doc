@@ -30,7 +30,7 @@
 //! - split_last_entry_no_headers: no headers present → entire content extracted as single entry
 
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{component, frontmatter, snapshot, write};
@@ -203,10 +203,14 @@ fn split_last_entry(content: &str) -> (String, String) {
 /// Moves the entire component content from source to target.
 /// When `bypass_claim` is false, refuses to write to a target owned by a different pane.
 /// When `items` is Some, only transfers matching pending items (by ID) instead of all content.
-pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool, items: Option<&[String]>) -> Result<()> {
+/// When `referral` is true, inserts a referral pointer in the target instead of moving content.
+pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool, items: Option<&[String]>, referral: bool) -> Result<()> {
     // Validate --items usage before any filesystem operations
     if items.is_some() && component_name != "pending" {
         anyhow::bail!("--items flag is only supported for the 'pending' component");
+    }
+    if referral && items.is_some() {
+        anyhow::bail!("--referral and --items cannot be used together");
     }
 
     if !source.exists() {
@@ -217,6 +221,11 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
         check_target_ownership(target)?;
     } else {
         eprintln!("[transfer] --bypass-claim: skipping pane ownership check on target");
+    }
+
+    // Referral mode: insert pointer in target, don't move content
+    if referral {
+        return transfer_referral(source, target, component_name);
     }
 
     // Selective pending transfer via --items
@@ -439,6 +448,92 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
     Ok(())
 }
 
+/// Compute a relative path from target's directory to source.
+/// Falls back to the source path as-is if canonicalization fails.
+fn make_relative(source: &Path, target: &Path) -> PathBuf {
+    let source_abs = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let target_dir = target.parent()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    // Walk up from target_dir, building "../" prefix, until we find common ancestor
+    let source_components: Vec<_> = source_abs.components().collect();
+    let target_components: Vec<_> = target_dir.components().collect();
+
+    let common_len = source_components.iter().zip(target_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    if common_len == 0 {
+        return source.to_path_buf();
+    }
+
+    let ups = target_components.len() - common_len;
+    let mut rel = PathBuf::new();
+    for _ in 0..ups {
+        rel.push("..");
+    }
+    for comp in &source_components[common_len..] {
+        rel.push(comp);
+    }
+    rel
+}
+
+/// Insert a referral pointer in the target document referencing the source.
+/// Content stays in the source — the target gets a structured comment that
+/// preflight can resolve to provide context on demand.
+fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Result<()> {
+    if !target.exists() {
+        anyhow::bail!("target file not found: {} (auto-create not supported for --referral)", target.display());
+    }
+
+    let target_content = std::fs::read_to_string(target)
+        .with_context(|| format!("failed to read {}", target.display()))?;
+
+    let target_comps = component::parse(&target_content)
+        .context("failed to parse components in target")?;
+
+    // Compute relative path from target's directory to source
+    let source_rel = make_relative(source, target);
+
+    let timestamp = Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let referral_block = format!(
+        "\n<!-- agent:referral src=\"{}\" component=\"{}\" created=\"{}\" -->\n*Context from [{}]({}) — read source {} for full history.*\n<!-- /agent:referral -->\n",
+        source_rel.display(),
+        component_name,
+        timestamp,
+        source_rel.display(),
+        source_rel.display(),
+        component_name,
+    );
+
+    let target_comp = target_comps.iter().find(|c| c.name == component_name);
+    let new_target = if let Some(tc) = target_comp {
+        let existing = tc.content(&target_content);
+        tc.replace_content(&target_content, &format!("{}{}", existing, referral_block))
+    } else {
+        format!("{}\n{}", target_content.trim_end(), referral_block)
+    };
+
+    write::atomic_write_pub(target, &new_target)?;
+    snapshot::save(target, &new_target)?;
+
+    crate::git::commit(target)?;
+
+    eprintln!(
+        "[transfer] Inserted referral to {}:{} in {}",
+        source.display(), component_name, target.display()
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,8 +639,28 @@ mod tests {
         let source = Path::new("/tmp/nonexistent-source.md");
         let target = Path::new("/tmp/nonexistent-target.md");
         let ids = vec!["abc".to_string()];
-        let result = transfer(source, target, "exchange", false, Some(&ids));
+        let result = transfer(source, target, "exchange", false, Some(&ids), false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("only supported for the 'pending' component"));
+    }
+
+    /// --referral and --items are mutually exclusive.
+    #[test]
+    fn referral_and_items_mutually_exclusive() {
+        let source = Path::new("/tmp/nonexistent-source.md");
+        let target = Path::new("/tmp/nonexistent-target.md");
+        let ids = vec!["abc".to_string()];
+        let result = transfer(source, target, "pending", false, Some(&ids), true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("--referral and --items cannot be used together"));
+    }
+
+    /// make_relative doesn't panic on non-existent paths.
+    #[test]
+    fn make_relative_no_panic() {
+        let source = Path::new("/tmp/nonexistent-a.md");
+        let target = Path::new("/tmp/nonexistent-b.md");
+        let _rel = make_relative(source, target);
+        // Just verify it doesn't panic; exact output depends on CWD
     }
 }

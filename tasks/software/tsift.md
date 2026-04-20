@@ -274,7 +274,19 @@ The stat() for mtime is free — the `ignore` crate already calls `stat()` durin
 **Per-submodule scoping makes this fast by default:** the spec's isolation tiers mean each `tsift search --scope <submod>` only walks that submodule's tree. The common case is 50-500 files (~2ms), not the full 20K workspace.
 
 For repos where even the walk overhead matters (100K+ files), a future optimization: store directory mtimes and skip subtrees where dir mtime hasn't changed (pruning new-file detection, not modification detection).
-<!-- agent:boundary:53eac67f -->
+
+Add large repo support to the roadmap.
+Where is the agent:pending item?
+### Re: pending items + large repo roadmap — opus-4-6
+
+The file walk items are there — they're near the bottom of the pending list:
+
+- **#rws4** — Add ignore + walkdir crate for mtime-based incremental indexing
+- **#p3fj** — Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
+
+Added large repo optimization to pending — directory mtime pruning to skip unchanged subtrees for 100K+ file repos.
+<!-- agent:boundary:1b41c796 -->
+<!-- agent:boundary:3b510956 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -301,4 +313,5 @@ For repos where even the walk overhead matters (100K+ files), a future optimizat
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
 - [ ] [#rws4] Add ignore + walkdir crate for mtime-based incremental indexing (file discovery without git subprocess)
 - [ ] [#p3fj] Implement mtime-based incremental indexing with ignore crate (file walk + stat comparison + per-submodule scoping)
+- [ ] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
 <!-- /agent:pending -->

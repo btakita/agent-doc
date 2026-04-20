@@ -186,8 +186,7 @@ The `sync.rs` module spec (top-level `//!` doc comments) had no mention of file 
 - `file_rename_updates_registry`
 
 The JB `FileRenameListener.kt` and VS Code `extension.ts` handler are thin event dispatchers — their spec is effectively the sync.rs spec plus the event subscription pattern. No separate module spec needed for them since the business logic lives in the CLI.
-<!-- agent:boundary:72b6ff08 -->
-<!-- agent:boundary:9123103a -->
+<!-- agent:boundary:e65315e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -195,6 +194,5 @@ The JB `FileRenameListener.kt` and VS Code `extension.ts` handler are thin event
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#k0ra] Build JB plugin zip with FileRenameListener and test rename → sync path update end-to-end
 <!-- /agent:pending -->
 ## Assistant

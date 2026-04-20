@@ -386,8 +386,7 @@ mail = { index = false }  # skip entirely
 4. Wire into `tsift search` — when AST index exists, rank by symbol match first, fall back to BM25
 5. Add `tsift-graph` crate — call graph extraction + traversal
 6. Add per-submodule config + isolation tiers
-<!-- agent:boundary:68cd0cec -->
-<!-- agent:boundary:4e6801b6 -->
+<!-- agent:boundary:9f5f9b01 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

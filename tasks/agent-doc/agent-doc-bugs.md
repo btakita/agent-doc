@@ -509,7 +509,36 @@ preflight → respond → write → commit → postflight
 ```
 
 Shall I implement the `postflight` subcommand? It's ~50 lines in the binary (reuse diff logic from preflight) plus a skill update to check it after commit.
-<!-- agent:boundary:6a3b9690 -->
+
+Look at my attempt to transfer tasks + content from tasks/software/tsift.md to tasks/software/tagpath.md.
+What feature gaps do we have that prevent the transfer?
+### Re: transfer feature gaps — opus-4-6
+
+Looked at both documents. The tsift.md session correctly identified the content to transfer but couldn't write to tagpath.md because of pane ownership (pane %78 vs %86). It punted to manual instructions. The pending items made it to tagpath.md (likely manually), but the exchange context didn't.
+
+**Feature gaps that blocked the transfer:**
+
+1. **Cross-pane write prohibition** — `agent-doc transfer` respects pane ownership. If the target doc is claimed by a different pane, the write is refused. This is the primary blocker. Transfer should be a privileged operation that bypasses pane claims (or auto-reclaims atomically).
+
+2. **No selective pending transfer** — `transfer <src> <dst> pending` moves ALL pending items. No `--items #ast4,#0m97` flag to pick specific IDs. The user wanted 3 of 20 items moved.
+
+3. **No multi-component atomic transfer** — Can't move exchange context + pending items in one operation. Two separate `transfer` calls risk partial state if one fails.
+
+4. **No "split-off" semantics** — What the user really wanted was a project split: tsift spawned tagpath, and a subset of tasks + historical context belong to the new project. This is closer to `git subtree split` than simple copy. The ideal command:
+   ```bash
+   agent-doc split <SOURCE> <TARGET> --items #pz75,#xrfe,#rbxy --context "tagpath parser library"
+   ```
+   This would: (a) move specified pending items, (b) synthesize an exchange entry summarizing relevant history, (c) ignore pane ownership, (d) update both snapshots atomically.
+
+5. **No exchange filtering** — `extract` only moves the last `### Re:` entry. Can't extract a range or filter by topic. For a project split, you'd want all exchanges mentioning tagpath.
+
+**What I'd recommend building (priority order):**
+
+1. `transfer --force` or `transfer --bypass-claim` — let transfer ignore pane ownership (it's a deliberate user action, not a concurrent write)
+2. `transfer pending --items <ids>` — selective pending item migration
+3. `split` subcommand — compound operation for project splits (transfer + context synthesis)
+<!-- agent:boundary:fcf0b5cf -->
+<!-- agent:boundary:477fa82d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -261,8 +261,7 @@ The `is_file_rename()` check lives inside the `if has_alive_pane { ... }` block 
 The file rename was purely organizational — you weren't requesting a new Claude session. But sync can't distinguish "user moved a file to reorganize" from "user opened a file they want to work with." Both look the same: focused file + session UUID + no alive pane → auto-start.
 
 **Fix:** When `FileRenameListener` fires for a file with no alive pane, set a short-lived debounce marker (e.g., `.agent-doc/rename-debounce/<session_id>` with TTL ~5s). The auto-start path in sync checks for this marker and skips if present. This suppresses spurious session creation on renames without affecting normal tab-focus auto-start.
-<!-- agent:boundary:a735ae79 -->
-<!-- agent:boundary:9ba49525 -->
+<!-- agent:boundary:55cf6103 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

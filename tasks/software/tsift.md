@@ -11,99 +11,9 @@ claude_args: --dangerously-skip-permissions
 Project created. Repo: https://github.com/btakita/tsift. Submodule: src/tsift. Spec extracted to src/tsift/SPEC.md.
 <!-- /agent:status -->
 
-## Spec: AST-Aware Code RAG
+## Spec
 
-### Goal
-
-Extend tsift with tree-sitter AST parsing, dependency graph tracking, and per-submodule isolation to enable token-efficient code retrieval at the function/symbol level rather than file level.
-
-### Architecture
-
-```
-tsift (CLI + MCP plugin)
-├── sift (BM25 + vector — existing)
-├── tsift-graph (new crate)
-│   ├── tree-sitter parsing (function/type/trait extraction)
-│   ├── dependency graph (call/import relationships)
-│   └── graph-ranked retrieval (PageRank-style symbol ranking)
-└── rusqlite (storage — existing)
-```
-
-### Per-Submodule Isolation
-
-Each git submodule gets its own index. Isolation tiers control federation (cross-submodule queries):
-
-| Tier | Behavior | Examples |
-|------|----------|----------|
-| **Isolated** | Never federated, strict boundary | session-share, monsterrodholders-dev |
-| **Private** | Never federated | mail, resume |
-| **Shared** | Federated by default | agent-doc, corky, ctx-core-dev |
-
-Config: `.tsift/config.toml` in workspace root.
-
-```toml
-[defaults]
-federation = true
-
-[overrides.session-share]
-federation = false
-isolated = true
-
-[overrides.mail]
-federation = false
-```
-
-### Storage Layout
-
-```
-.tsift/
-  indexes/
-    agent-doc/
-      symbols.db      # SQLite: function signatures, types, locations
-      embeddings.lance # LanceDB: vector embeddings of signatures
-      deps.json        # call graph + import graph
-      meta.json        # last indexed commit, language stats
-    corky/
-      ...
-  config.toml
-```
-
-### New Subcommands
-
-```bash
-tsift index --ast <path>        # tree-sitter AST extraction → symbols.db
-tsift graph <path>              # build dependency graph → deps.json
-tsift graph --callers <symbol>  # who calls this function?
-tsift graph --callees <symbol>  # what does this function call?
-tsift search <query>            # gains AST-aware ranking when index exists
-tsift search --scope <submod>   # restrict to one submodule's index
-```
-
-### Key Design Decision: Graph > Vector for Code
-
-Aider's repo-map research showed graph-ranked retrieval (PageRank over call/import references) outperforms pure vector similarity for code. The approach: extract symbols via tree-sitter, rank by reference count (centrality), embed only top-ranked. This gives best token efficiency.
-
-### Output Contract
-
-Retrieval returns function-level results, not file-level:
-- Function signature + file:line location
-- 1-hop dependencies (callers/callees)
-- 50-200 tokens per result vs. 2000+ for full-file reads
-
-### Development Phases
-
-1. Add `tree-sitter` + `tree-sitter-rust` deps
-2. Implement `tsift index --ast` for single directory (extract function signatures + locations)
-3. Store in SQLite `symbols` table
-4. Wire into `tsift search` — AST index ranking first, BM25 fallback
-5. Add `tsift-graph` crate — call graph extraction + traversal
-6. Per-submodule config + isolation tiers
-
-### What NOT to build
-
-- Visualization (Mermaid, HTML) — leave to graphify
-- Full LSP-level type inference — diminishing returns
-- Embedding model hosting — use external API or lightweight local model (all-MiniLM-L6-v2)
+See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec.
 
 ## Exchange
 
@@ -116,18 +26,38 @@ Note I just moved this file to tasks/software/tsift.md
 Extracted the full "Spec: AST-Aware Code RAG" section to `src/tsift/SPEC.md`. The session doc now links to it instead of inlining the spec.
 
 Acknowledged the file move to `tasks/software/tsift.md`.
-<!-- replace:spec -->
-See [SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec.
-<!-- /replace:spec -->
-Note I just moved this file to tasks/software/tsift.md
-<!-- agent:boundary:c0fce058 -->
+We should support any tree-sitter supported programming language. I have immediate needs for python and typescript with React support.
+### Re: multi-language tree-sitter support — opus-4-6
+
+tree-sitter grammars are separate crates. For your immediate needs:
+
+| Crate | Covers | Key extractions |
+|-------|--------|-----------------|
+| `tree-sitter-rust` | `.rs` | `fn`, `struct`, `enum`, `trait`, `impl` blocks |
+| `tree-sitter-python` | `.py` | `def`, `async def`, `class`, decorators |
+| `tree-sitter-typescript` | `.ts`, `.tsx` | `function`, `class`, `interface`, `type`, arrow exports, React components (JSX) |
+| `tree-sitter-javascript` | `.js`, `.jsx` | Same as TS minus type constructs |
+
+**Architecture for multi-language:**
+
+1. **Language enum** — `Rust | Python | TypeScript | Tsx | JavaScript | Jsx` with auto-detection from file extension
+2. **Per-language query files** — tree-sitter's `.scm` query format, one per language. These define what node types to extract as symbols (e.g., `(function_definition name: (identifier) @name)` for Python)
+3. **Unified symbol table** — `symbols` SQLite table gets a `language TEXT` column; everything else (name, kind, signature, file, line) is language-agnostic
+4. **Pluggable grammars** — adding a new language = grammar crate + query file + enum variant. No core changes needed
+
+The TypeScript crate handles both `.ts` and `.tsx` via separate grammar entry points (`tree_sitter_typescript::LANGUAGE_TYPESCRIPT` vs `LANGUAGE_TSX`), so React/JSX support comes for free.
+
+I'll update SPEC.md to reflect this. Updated pending items to replace Rust-only with multi-language approach.
+<!-- agent:boundary:f9a5743e -->
+We should support any tree-sitter supported programming language. I have immediate needs for python and typescript with React support.
+<!-- agent:boundary:4f2fd0bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ast1] Add tree-sitter + tree-sitter-rust deps to Cargo.toml
-- [ ] [#ast2] Implement `tsift index --ast` — extract function signatures/types/traits from a directory
+- [ ] [#ast1] Add tree-sitter + language grammars (rust, python, typescript/tsx) to Cargo.toml
+- [ ] [#ast2] Implement tsift index --ast with multi-language extraction (Language enum + per-language query patterns)
 - [ ] [#ast3] SQLite `symbols` table schema — name, kind, signature, file, line, parent_module
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback
 - [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
@@ -140,4 +70,6 @@ Note I just moved this file to tasks/software/tsift.md
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
+- [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
+- [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 <!-- /agent:pending -->

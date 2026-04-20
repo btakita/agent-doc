@@ -392,8 +392,7 @@ This layer needs entity extraction (which graphify already does) and is more use
 3. If graphify proves useful, tsift becomes the query interface with graphify as the graph backend
 
 The call graph is a prerequisite regardless — graphify would extend it, not replace it.
-<!-- agent:boundary:06a63e72 -->
-<!-- agent:boundary:116cb3a8 -->
+<!-- agent:boundary:780f27d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

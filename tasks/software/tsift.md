@@ -734,8 +734,7 @@ Done in commit `c33dc49`, pushed. The config module is now wired into all three 
 - Without any workspace flags, behavior is unchanged (flat `.tsift/index.db`)
 
 **Tests:** 6 new (116 total) — workspace creates per-submodule DBs, single submodule indexing, federated search across submodules, federated search respects isolation, scoped search finds submodule symbols, scoped graph query. Clippy clean.
-<!-- agent:boundary:c6ce1378 -->
-<!-- agent:boundary:4e0016d6 -->
+<!-- agent:boundary:b3fc38a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

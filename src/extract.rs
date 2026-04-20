@@ -202,7 +202,13 @@ fn split_last_entry(content: &str) -> (String, String) {
 /// Transfer content between documents by component name.
 /// Moves the entire component content from source to target.
 /// When `bypass_claim` is false, refuses to write to a target owned by a different pane.
-pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool) -> Result<()> {
+/// When `items` is Some, only transfers matching pending items (by ID) instead of all content.
+pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool, items: Option<&[String]>) -> Result<()> {
+    // Validate --items usage before any filesystem operations
+    if items.is_some() && component_name != "pending" {
+        anyhow::bail!("--items flag is only supported for the 'pending' component");
+    }
+
     if !source.exists() {
         anyhow::bail!("source file not found: {}", source.display());
     }
@@ -212,6 +218,12 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
     } else {
         eprintln!("[transfer] --bypass-claim: skipping pane ownership check on target");
     }
+
+    // Selective pending transfer via --items
+    if let Some(ids) = items {
+        return transfer_pending_items(source, target, ids, bypass_claim);
+    }
+
     // Auto-init target if it doesn't exist (always template mode)
     if !target.exists() {
         let source_content = std::fs::read_to_string(source)
@@ -327,6 +339,106 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
     Ok(())
 }
 
+/// Transfer specific pending items by ID from source to target.
+/// Items are identified by `[#id]` patterns in pending lines.
+/// Matching items are removed from source and appended to target's pending.
+fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_claim: bool) -> Result<()> {
+    if !target.exists() {
+        anyhow::bail!("target file not found: {} (auto-create not supported for --items)", target.display());
+    }
+
+    let source_content = std::fs::read_to_string(source)
+        .with_context(|| format!("failed to read {}", source.display()))?;
+    let target_content = std::fs::read_to_string(target)
+        .with_context(|| format!("failed to read {}", target.display()))?;
+
+    let source_comps = component::parse(&source_content)
+        .context("failed to parse components in source")?;
+    let target_comps = component::parse(&target_content)
+        .context("failed to parse components in target")?;
+
+    let source_pending = source_comps.iter().find(|c| c.name == "pending");
+    let Some(source_pending) = source_pending else {
+        anyhow::bail!("component 'pending' not found in {}", source.display());
+    };
+
+    let pending_content = source_pending.content(&source_content);
+    if pending_content.trim().is_empty() {
+        anyhow::bail!("pending component is empty in {}", source.display());
+    }
+
+    let mut matched_lines: Vec<String> = Vec::new();
+    let mut remaining_lines: Vec<String> = Vec::new();
+    let mut matched_ids: Vec<String> = Vec::new();
+
+    for line in pending_content.lines() {
+        let mut is_match = false;
+        for id in ids {
+            let pattern = format!("[#{}]", id);
+            if line.contains(&pattern) {
+                is_match = true;
+                matched_ids.push(id.clone());
+                break;
+            }
+        }
+        if is_match {
+            matched_lines.push(line.to_string());
+        } else {
+            remaining_lines.push(line.to_string());
+        }
+    }
+
+    if matched_lines.is_empty() {
+        let id_list: Vec<String> = ids.iter().map(|id| format!("#{}", id)).collect();
+        anyhow::bail!("no pending items matched: {}", id_list.join(", "));
+    }
+
+    // Update source: keep only remaining lines
+    let new_pending_content = if remaining_lines.is_empty() {
+        "\n".to_string()
+    } else {
+        format!("{}\n", remaining_lines.join("\n"))
+    };
+    let new_source = source_pending.replace_content(&source_content, &new_pending_content);
+    write::atomic_write_pub(source, &new_source)?;
+    snapshot::save(source, &new_source)?;
+
+    // Append matched items to target pending
+    let target_pending = target_comps.iter().find(|c| c.name == "pending");
+    let new_target = if let Some(tp) = target_pending {
+        let existing = tp.content(&target_content);
+        let appended = format!("{}{}\n", existing, matched_lines.join("\n"));
+        tp.replace_content(&target_content, &appended)
+    } else {
+        format!("{}\n{}\n", target_content.trim_end(), matched_lines.join("\n"))
+    };
+
+    write::atomic_write_pub(target, &new_target)?;
+    snapshot::save(target, &new_target)?;
+
+    crate::git::commit(target)?;
+
+    eprintln!(
+        "[transfer] Moved {} pending item(s) ({}) from {} → {}",
+        matched_lines.len(),
+        matched_ids.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(", "),
+        source.display(),
+        target.display()
+    );
+
+    // Report any IDs that didn't match
+    let unmatched: Vec<&String> = ids.iter().filter(|id| !matched_ids.contains(id)).collect();
+    if !unmatched.is_empty() {
+        eprintln!(
+            "[transfer] WARNING: {} ID(s) not found in source: {}",
+            unmatched.len(),
+            unmatched.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(", ")
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +504,48 @@ mod tests {
         let result = check_target_ownership(target);
         assert!(result.is_ok());
         unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    /// Selective pending item matching by ID pattern.
+    #[test]
+    fn pending_item_selection_by_id() {
+        let pending = "- [ ] [#abc1] First item\n- [ ] [#def2] Second item\n- [ ] [#ghi3] Third item\n";
+        let ids = vec!["abc1".to_string(), "ghi3".to_string()];
+
+        let mut matched: Vec<String> = Vec::new();
+        let mut remaining: Vec<String> = Vec::new();
+
+        for line in pending.lines() {
+            let mut is_match = false;
+            for id in &ids {
+                let pattern = format!("[#{}]", id);
+                if line.contains(&pattern) {
+                    is_match = true;
+                    break;
+                }
+            }
+            if is_match {
+                matched.push(line.to_string());
+            } else {
+                remaining.push(line.to_string());
+            }
+        }
+
+        assert_eq!(matched.len(), 2);
+        assert!(matched[0].contains("[#abc1]"));
+        assert!(matched[1].contains("[#ghi3]"));
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].contains("[#def2]"));
+    }
+
+    /// Items flag only works with pending component.
+    #[test]
+    fn items_flag_rejects_non_pending_component() {
+        let source = Path::new("/tmp/nonexistent-source.md");
+        let target = Path::new("/tmp/nonexistent-target.md");
+        let ids = vec!["abc".to_string()];
+        let result = transfer(source, target, "exchange", false, Some(&ids));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("only supported for the 'pending' component"));
     }
 }

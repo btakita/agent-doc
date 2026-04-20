@@ -134,14 +134,12 @@ Implemented and pushed `83bf239`:
 - **SPEC.md**: full multi-language architecture section
 
 All 39 tests pass, clippy clean. Single `tree-sitter-language v0.1.7` ABI — no version splits.
-<!-- agent:boundary:1dc3f24e -->
-<!-- agent:boundary:d56c51ec -->
+<!-- agent:boundary:223336ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#ast1] Add tree-sitter core + 8 grammar crates behind Cargo feature flags (rust, python, typescript, javascript, kotlin, zig, bash, markdown)
 - [ ] [#ast2] Implement Language enum with extension dispatch + per-language .scm query patterns
 - [ ] [#ast3] SQLite symbols table — name, kind, language, signature, file, line, end_line, parent_module, visibility
 - [ ] [#ast4] Wire AST index into `tsift search` — rank by symbol match first, BM25 fallback

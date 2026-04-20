@@ -261,7 +261,43 @@ The `is_file_rename()` check lives inside the `if has_alive_pane { ... }` block 
 The file rename was purely organizational — you weren't requesting a new Claude session. But sync can't distinguish "user moved a file to reorganize" from "user opened a file they want to work with." Both look the same: focused file + session UUID + no alive pane → auto-start.
 
 **Fix:** When `FileRenameListener` fires for a file with no alive pane, set a short-lived debounce marker (e.g., `.agent-doc/rename-debounce/<session_id>` with TTL ~5s). The auto-start path in sync checks for this marker and skips if present. This suppresses spurious session creation on renames without affecting normal tab-focus auto-start.
-<!-- agent:boundary:55cf6103 -->
+
+❯ The fix makes sense. However, a tmux pane and a fresh Claude Code session was created for tasks/buildside.md. Why was this pane not registered?
+### Re: buildside pane registration — opus-4-6
+
+Correction from the sync log — the previous cycle's event reconstruction was wrong. Here's what actually happened:
+
+#### Sync log (3 events, 19 seconds)
+
+```
+[1776716223] col_args=["tasks/evals.md", "claudescore.md"]
+             focus=tasks/buildside.md
+             → buildside.md NOT in col_args → no auto-start
+
+[1776716236] col_args=["tasks/professional/buildside.md,claudescore.md"]
+             focus=tasks/professional/buildside.md
+             → FileRenameListener fired (new path)
+
+[1776716242] col_args=["tasks/professional/buildside.md", "claudescore.md"]
+             focus=tasks/professional/buildside.md
+             → auto-starting session for tasks/professional/buildside.md (no alive pane)
+```
+
+#### What this shows
+
+1. **No pane was created for `tasks/buildside.md`** (the old path). Sync 1 had `focus=tasks/buildside.md` but the file wasn't in `col_args`. The auto-start loop only processes files from `col_args`, not `focus` — so buildside.md at the old path was never auto-start-eligible.
+
+2. **The pane was created for `tasks/professional/buildside.md`** (the new path). Sync 3 (EditorTabSyncListener) included the new path in `col_args`, found no alive pane for the session, and auto-started.
+
+3. **The pane IS registered.** sessions.json shows: `file: "tasks/professional/buildside.md"`, `pane: %84`, `started: 2026-04-20T20:17:24Z`. Confirmed alive: `agent-doc start tasks/professional/buildside.md` running as PID 3430228.
+
+#### Why "not registered" looked correct
+
+From the user's perspective, a pane appeared after a file move — which feels like the system lost track. But the system never had a pane for buildside.md in the first place. The rename made `tasks/professional/buildside.md` visible in the editor layout, and sync's auto-start treated it as "file with session UUID, no pane → provision one." The registration worked correctly; the bug is the auto-start trigger, not the registration.
+
+The #qam7 debounce fix remains the right solution: suppress auto-start for files that just entered `col_args` via a rename event.
+<!-- agent:boundary:20ca5be6 -->
+<!-- agent:boundary:a3c7775a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

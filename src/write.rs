@@ -73,6 +73,16 @@
 //!
 //! - `apply_stream_from_string`: recovery variant of `run_stream` (CRDT merge).
 //!
+//! - `check_future_work_signals(response, has_pending_add)`: scans the response
+//!   for deferred-work phrases ("worth revisiting", "revisit later",
+//!   "follow-up needed", "future work") case-insensitively. Returns
+//!   `Some(signal)` when a match is found and `has_pending_add` is false (i.e.,
+//!   the caller didn't already promote to pending). `warn_future_work_signals`
+//!   is the env-var wrapper: reads `AGENT_DOC_HAS_PENDING_ADD` (set to `1` by
+//!   the CLI dispatcher when `--pending-add` or `--pending-add-gated` is passed)
+//!   and emits a `[write] WARN:` message to stderr when the signal fires.
+//!   Integrated into `run_stream` after patch application.
+//!
 //! - `sanitize_component_tags`: escapes `<!-- agent:NAME -->` and
 //!   `<!-- /agent:NAME -->` markers appearing in patch content to prevent the
 //!   component parser from treating them as real delimiters.
@@ -149,6 +159,15 @@
 //!   user addition without character interleaving.
 //! - *(aspirational)* `ipc_fallback_on_timeout`: `run_stream` with IPC timeout
 //!   exits with code 75 and leaves a patch file for deferred plugin pickup.
+//! - `detects_worth_revisiting`: response with "Worth revisiting" and no
+//!   pending-add → returns `Some("worth revisiting")`.
+//! - `detects_future_work`: response with "future work" → returns the signal.
+//! - `detects_follow_up_needed`: response with "Follow-up needed" → returns signal.
+//! - `suppressed_when_pending_add_present`: response with signal but
+//!   `has_pending_add=true` → returns `None`.
+//! - `no_false_positive_on_normal_text`: response without any signal phrases →
+//!   returns `None`.
+//! - `case_insensitive_detection`: "WORTH REVISITING" (uppercase) → detected.
 //! - `normalize_user_prompts_new_line_gets_prefix`: user adds "Hello" to exchange
 //!   → normalized content has "❯ Hello".
 //! - `normalize_user_prompts_agent_response_not_prefixed`: agent response lines in content_ours
@@ -532,6 +551,41 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
 
     let new_exc_content = format!("{}{}", normalized_user, content_agent_region);
     exchange.replace_content(content, &new_exc_content)
+}
+
+/// Phrases that signal deferred/future work in an agent response.
+/// When detected without a corresponding `--pending-add`, a warning is emitted.
+const FUTURE_WORK_SIGNALS: &[&str] = &[
+    "worth revisiting",
+    "revisit later",
+    "follow-up needed",
+    "future work",
+];
+
+/// Check response for future-work signal phrases and warn if no `--pending-add`
+/// was provided. Reads `AGENT_DOC_HAS_PENDING_ADD` env var (set by CLI dispatcher).
+/// Returns the matched signal phrase if a warning was emitted, or None.
+pub fn warn_future_work_signals(response: &str) -> Option<&'static str> {
+    let has_pending_add = std::env::var("AGENT_DOC_HAS_PENDING_ADD").is_ok();
+    check_future_work_signals(response, has_pending_add)
+}
+
+/// Core detection logic (testable without env var races).
+pub fn check_future_work_signals(response: &str, has_pending_add: bool) -> Option<&'static str> {
+    if has_pending_add {
+        return None;
+    }
+    let lower = response.to_lowercase();
+    for &signal in FUTURE_WORK_SIGNALS {
+        if lower.contains(signal) {
+            eprintln!(
+                "[write] WARN: response contains future-work signal {:?} but no --pending-add was provided",
+                signal
+            );
+            return Some(signal);
+        }
+    }
+    None
 }
 
 /// Maximum number of `❯ `-prefix lines a single normalization cycle may add.
@@ -1004,6 +1058,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     if response.trim().is_empty() {
         anyhow::bail!("empty response — nothing to write");
     }
+
+    // Lint: warn if response contains future-work signals without --pending-add
+    warn_future_work_signals(&response);
 
     // Save response to pending store (survives context compaction)
     recover::save_pending(file, &response)?;
@@ -4231,5 +4288,46 @@ Same content.
             !response_already_in_current(base, base, base),
             "should return false when ours equals base"
         );
+    }
+}
+
+#[cfg(test)]
+mod future_work_signal_tests {
+    use super::*;
+
+    #[test]
+    fn detects_worth_revisiting() {
+        let result = check_future_work_signals("This design is fine. Worth revisiting after v2.", false);
+        assert_eq!(result, Some("worth revisiting"));
+    }
+
+    #[test]
+    fn detects_future_work() {
+        let result = check_future_work_signals("This is future work for the next release.", false);
+        assert_eq!(result, Some("future work"));
+    }
+
+    #[test]
+    fn detects_follow_up_needed() {
+        let result = check_future_work_signals("Follow-up needed on the auth migration.", false);
+        assert_eq!(result, Some("follow-up needed"));
+    }
+
+    #[test]
+    fn no_warning_when_pending_add_provided() {
+        let result = check_future_work_signals("Worth revisiting later.", true);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn no_warning_without_signals() {
+        let result = check_future_work_signals("Everything is complete and working.", false);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn case_insensitive_detection() {
+        let result = check_future_work_signals("WORTH REVISITING this approach.", false);
+        assert_eq!(result, Some("worth revisiting"));
     }
 }

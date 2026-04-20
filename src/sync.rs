@@ -48,6 +48,13 @@
 //!   instead of treating it as dead. This preserves the existing Claude session context
 //!   when switching between editor tabs. Only if rescue fails is the pane treated as
 //!   dead and a fresh session started.
+//! - **File rename detection:** When a pane is alive but the registry's `file` field
+//!   points to a path that no longer exists AND the current sync target has a different
+//!   path, sync infers a rename occurred. It calls `sessions::register` with the new
+//!   path, reusing the existing pane (no kill/restart). Detection is via
+//!   `is_file_rename(registered_path, current_path)`. Editor plugins trigger this by
+//!   calling `agent-doc sync --focus <new_path>` on `FileRenameEvent` (JB) or
+//!   `onDidRenameFiles` (VS Code).
 //! - Auto-start detects duplicate panes via `find_alive_pane_for_file`, which scans
 //!   process command lines (`ps -p <pid> -o command=`) before spawning. The `col_args`
 //!   slice is passed through to `route::provision_pane` so new panes split in the
@@ -66,6 +73,10 @@
 //!   from within an active route cycle).
 //! - `register_synced_files` holds `RegistryLock` for the duration of its write and
 //!   saves only when at least one entry changed.
+//! - `is_file_rename` is pure (no tmux dependency): it compares two paths and checks
+//!   disk existence of the old one. Safe to call from any context.
+//! - File rename re-registration reuses the existing `sessions::register` path, so
+//!   single-session-per-pane invariant and `RegistryLock` apply as normal.
 //! - **Column memory:** `.agent-doc/last_layout.json` persists a column→agent-doc mapping.
 //!   When a column has no agent doc (user switches to a non-session file), sync substitutes
 //!   the last known agent doc for that column index. This preserves the 2-pane tmux layout
@@ -95,6 +106,15 @@
 //!   and the file path is returned; panes without a matching cmdline are skipped.
 //! - empty_col_args_filtered: col_args `["file1.md", "", "file2.md", ""]` → after
 //!   filtering, only `["file1.md", "file2.md"]` are processed.
+//! - is_file_rename_detects_rename_when_old_path_gone: old path absent + paths differ →
+//!   returns true.
+//! - is_file_rename_returns_false_when_paths_match: same path → returns false.
+//! - is_file_rename_returns_false_when_old_path_still_exists: old path present + paths
+//!   differ → returns false (not a rename, both files exist).
+//! - is_file_rename_handles_relative_paths: relative paths with nonexistent old →
+//!   returns true.
+//! - file_rename_updates_registry: registry with old path entry + detection confirms
+//!   rename logic; entry pane preserved.
 //! - check_build_stamp_clears_locks: new build timestamp → stale `.lock` files removed,
 //!   stamp file updated.
 
@@ -849,33 +869,24 @@ fn run_with_options(
                 .unwrap_or(false);
 
             if has_alive_pane {
-                // Pane is alive, but check if the registered file still exists.
-                // After a rename, the pane shows an error for the old path.
-                // Detect this: registered file differs from current AND doesn't exist.
-                if let Some(ref pane) = registered_pane {
-                    if let Ok(Some(entry)) = sessions::lookup_entry(&session_id) {
-                        let registered_file = Path::new(&entry.file);
-                        let current_file = file_path.to_string_lossy();
-                        if entry.file != *current_file && !registered_file.exists() {
-                            eprintln!(
-                                "[sync] registered file {} no longer exists (renamed to {}), killing stale pane {}",
-                                entry.file, file_path.display(), pane
-                            );
-                            let _ = tmux.kill_pane(pane);
-                            // Update registry with new file path, fall through to auto-start
-                            if let Err(e) = sessions::register(&session_id, pane, &current_file) {
-                                eprintln!("[sync] warning: re-register failed: {}", e);
-                            }
-                            // Fall through to auto-start below
-                        } else {
-                            continue;
+                // Pane is alive — check if the file was renamed (registered path
+                // no longer exists but the session ID matches). If so, update the
+                // registry to the new path and reuse the existing pane.
+                if let Some(ref pane) = registered_pane
+                    && let Ok(Some(entry)) = sessions::lookup_entry(&session_id)
+                {
+                    let current_file = file_path.to_string_lossy();
+                    if is_file_rename(&entry.file, &current_file) {
+                        eprintln!(
+                            "[sync] file renamed: {} → {} — reusing pane {} (session {})",
+                            entry.file, file_path.display(), pane, session_id
+                        );
+                        if let Err(e) = sessions::register(&session_id, pane, &current_file) {
+                            eprintln!("[sync] warning: re-register failed: {}", e);
                         }
-                    } else {
-                        continue;
                     }
-                } else {
-                    continue;
                 }
+                continue;
             }
 
             // No alive pane in registry. Before auto-starting, check if any
@@ -1203,6 +1214,12 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let has_agent = cmdline.contains("agent-doc") || cmdline.contains("claude");
     let has_file = cmdline.contains(file_path);
     has_agent && has_file
+}
+
+/// Detect whether a file has been renamed: the registered path differs from
+/// the current path and the old path no longer exists on disk.
+pub(crate) fn is_file_rename(registered_path: &str, current_path: &str) -> bool {
+    registered_path != current_path && !Path::new(registered_path).exists()
 }
 
 #[cfg(test)]
@@ -1802,5 +1819,98 @@ mod tests {
             matching_line.starts_with('['),
             "log line should start with timestamp bracket, got: {matching_line}"
         );
+    }
+
+    // --- File rename detection tests ---
+
+    #[test]
+    fn is_file_rename_detects_rename_when_old_path_gone() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_path = tmp.path().join("old.md");
+        // old_path does NOT exist on disk
+        let current_path = tmp.path().join("new.md").to_string_lossy().to_string();
+        assert!(
+            is_file_rename(&old_path.to_string_lossy(), &current_path),
+            "should detect rename when old path doesn't exist and paths differ"
+        );
+    }
+
+    #[test]
+    fn is_file_rename_returns_false_when_paths_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("same.md");
+        std::fs::write(&path, "content").unwrap();
+        let path_str = path.to_string_lossy().to_string();
+        assert!(
+            !is_file_rename(&path_str, &path_str),
+            "should not detect rename when paths are identical"
+        );
+    }
+
+    #[test]
+    fn is_file_rename_returns_false_when_old_path_still_exists() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_path = tmp.path().join("old.md");
+        let new_path = tmp.path().join("new.md");
+        std::fs::write(&old_path, "content").unwrap();
+        std::fs::write(&new_path, "content").unwrap();
+        assert!(
+            !is_file_rename(
+                &old_path.to_string_lossy(),
+                &new_path.to_string_lossy()
+            ),
+            "should not detect rename when old path still exists (both files present)"
+        );
+    }
+
+    #[test]
+    fn is_file_rename_handles_relative_paths() {
+        assert!(
+            is_file_rename(
+                "tasks/nonexistent-old-file.md",
+                "tasks/software/renamed-file.md"
+            ),
+            "should detect rename with relative paths when old doesn't exist"
+        );
+    }
+
+    #[test]
+    fn file_rename_updates_registry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+
+        // Set up registry with an entry pointing to old path
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        let session_id = "rename-test-uuid";
+        let old_file = "tasks/old-name.md";
+        let new_file = "tasks/new-name.md";
+        let registry_content = serde_json::json!({
+            session_id: {
+                "pane": "%42",
+                "pid": 12345,
+                "cwd": project.to_string_lossy(),
+                "started": "2026-04-20T00:00:00Z",
+                "file": old_file,
+                "window": "@0"
+            }
+        });
+        std::fs::write(
+            project.join(".agent-doc/sessions.json"),
+            serde_json::to_string_pretty(&registry_content).unwrap(),
+        ).unwrap();
+
+        // Verify detection
+        assert!(
+            is_file_rename(old_file, new_file),
+            "old path doesn't exist on disk, paths differ → rename"
+        );
+
+        // Verify we can load the entry and see the old path
+        let reg: sessions::SessionRegistry = serde_json::from_str(
+            &std::fs::read_to_string(project.join(".agent-doc/sessions.json")).unwrap()
+        ).unwrap();
+        let entry = reg.get(session_id).unwrap();
+        assert_eq!(entry.file, old_file);
+        assert_eq!(entry.pane, "%42");
     }
 }

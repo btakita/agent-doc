@@ -1260,6 +1260,12 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
+            // Signal to write module whether --pending-add was provided (for future-work lint)
+            if !pending_add.is_empty() || !pending_add_gated.is_empty() {
+                // SAFETY: single-threaded at this point in the CLI entrypoint.
+                unsafe { std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1"); }
+            }
+
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)

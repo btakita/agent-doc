@@ -1139,6 +1139,22 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.onDidChangeVisibleTextEditors(() => onTabChanged())
     );
 
+    // Feature: File Rename Handling
+    // When a session document is renamed/moved, trigger a sync so the Rust
+    // CLI updates sessions.json with the new path and reuses the existing pane.
+    context.subscriptions.push(
+        vscode.workspace.onDidRenameFiles((event) => {
+            for (const { oldUri, newUri } of event.files) {
+                if (!newUri.fsPath.endsWith('.md')) continue;
+                const root = getWorkspaceRoot(newUri);
+                if (!root) continue;
+                const newRel = relativePath(root, newUri.fsPath);
+                const visibleMd = collectVisibleMdFiles(root);
+                runCli(['sync', '--col', visibleMd.join(','), '--focus', newRel], root).catch(() => {});
+            }
+        })
+    );
+
     // Feature 10: Slash Command Autocomplete
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider(

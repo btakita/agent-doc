@@ -524,7 +524,33 @@ add pending items for gap with graphify including:
 - Community detection/clustering
 - HTML visualization
 - Semantic similarity between concepts
-<!-- agent:boundary:80f6bf4f -->
+re #ast4. Would src/tagpath be beneficial in matching concepts?
+### Re: graphify gap items — opus-4-6
+
+Added four pending items for the graphify integration layer — the capabilities that live beyond what tree-sitter AST can provide deterministically.
+
+### Re: #ast4 and tagpath for concept matching — opus-4-6
+
+Yes. Tagpath solves the cross-convention matching problem that #ast4 needs.
+
+**What tagpath does:** decomposes identifiers into canonical tag sequences across naming conventions. `getUserName`, `get_user_name`, `GetUserName` all normalize to `[get, user, name]`. It handles camelCase, snake_case, PascalCase, kebab-case, UPPER_SNAKE_CASE, and mixed conventions.
+
+**How it helps #ast4:** When `tsift search` queries the symbols table, a user searching for `user_name` should find `userName` and `UserName` too. Without tagpath, you'd need fuzzy matching or multiple regex patterns. With tagpath, you normalize both the query and the stored symbol names to canonical tags and match on those.
+
+**Integration approach:**
+
+1. **Index time** — parse each symbol name through tagpath, store canonical tags in a new `tags` column (e.g., `"get,user,name"`)
+2. **Query time** — parse the search query through tagpath, match against the tags column (tag subsequence or containment)
+3. **Ranking** — exact tag match ranks above partial, BM25 fallback for non-symbol hits
+
+**Practical concern:** tagpath is CLI-only today (no `lib.rs`). Options:
+- Extract the parser (~260 lines, zero deps) into a library crate
+- Add `lib.rs` to tagpath and depend on it as a workspace crate
+- Inline the core tokenization logic (it's a case-boundary splitter + underscore splitter)
+
+The second option is cleanest — `tagpath` becomes a library with a CLI binary, tsift depends on `tagpath` as a path dep. The parser is stateless and fast enough for batch indexing.
+<!-- agent:boundary:4ea77447 -->
+<!-- agent:boundary:0a2fc792 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -549,4 +575,8 @@ add pending items for gap with graphify including:
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
 - [ ] [#cs4r] tsift lint: detect unannotated concepts in markdown — cross-reference plain text against known graph entities (symbols, headings, bold terms), suggest backtick/bold/link annotations
+- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
+- [ ] [#jzm8] graphify integration: community detection/clustering over code entity graph
+- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
+- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:pending -->

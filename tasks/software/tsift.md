@@ -605,13 +605,29 @@ All three done in commit `10a9b61`.
 - **Cross-convention:** querying `getUserName` finds `get_user_name` — both decompose to `[get, user, name]`
 
 **Tests (6 new, 76 total):** tags stored correctly, exact name search, cross-convention matching, partial tag matching, no-match returns empty, limit respected. Clippy clean.
-<!-- agent:boundary:fccf054b -->
+
+### Re: #grp1 crate extraction — opus-4-6
+
+Keep it in tsift. No good reason to extract.
+
+**Why a separate crate doesn't pay off here:**
+- Call graph extraction shares tree-sitter parsing with indexing — same `lang/` module, same grammar crates. Extracting means either duplicating the parser setup or adding a cross-crate dependency on tsift's internals.
+- The graph data feeds directly into search ranking (PageRank over call/import edges). That's a tight coupling by design — the graph exists *to improve search*, not as a standalone product.
+- tsift is a single end-user binary, not a library ecosystem. No external consumers for `tsift-graph`.
+- One crate = simpler build, simpler release, simpler CI.
+
+**What I'd recommend:** add a `src/graph/` module (like `src/lang/`) that owns call-graph extraction and query. The indexing pipeline calls into it during `tsift index`, and `tsift graph` subcommands expose it to the user. Clean separation of concerns via modules, without the overhead of a separate crate.
+
+Updated #grp1 description to reflect "internal module" instead of separate crate.
+<!-- agent:boundary:ca6258ec -->
+re: #grp1. Should this be its own crate or part of tsift. I would prefer to keep it part of tsift. But let me know if there's good reasons to extract a tsift-graph crate.
+<!-- agent:boundary:df77349e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#grp1] Create `tsift-graph` crate — call graph extraction via tree-sitter
+- [ ] [#grp1] Call graph module (tree-sitter) — internal to tsift, not a separate crate
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)

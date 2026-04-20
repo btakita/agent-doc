@@ -563,8 +563,7 @@ Then when preflight runs on tagpath.md and sees the referral tag, it can optiona
 This also naturally handles the "exchange-only transfer" case — `transfer exchange` without `--referral` copies the content; with `--referral` it leaves a pointer. And `transfer pending --items #ast4,#0m97` can be combined with either mode.
 
 The `split` subcommand from before becomes sugar over: `transfer --bypass-claim --referral exchange` + `transfer --bypass-claim pending --items <ids>`.
-<!-- agent:boundary:32e1d8c4 -->
-<!-- agent:boundary:f4dd51ad -->
+<!-- agent:boundary:97b60871 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

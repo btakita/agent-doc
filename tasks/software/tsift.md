@@ -620,13 +620,44 @@ Keep it in tsift. No good reason to extract.
 
 Updated #grp1 description to reflect "internal module" instead of separate crate.
 re: #grp1. Should this be its own crate or part of tsift. I would prefer to keep it part of tsift. But let me know if there's good reasons to extract a tsift-graph crate.
-<!-- agent:boundary:f84be6fd -->
+Is now a good time to begin iterating on a SKILL.md + runbooks?
+
+do #grp1. add spec + test. run tests. commit + push
+### Re: SKILL.md + runbooks timing — opus-4-6
+
+Yes, good time. You have enough surface area now (search, edit, route, index, graph) that the skill doc would stabilize rather than churn. I'd start with:
+
+1. **SKILL.md** — trigger/skip rules, subcommand reference, integration patterns (hook rewrite, MCP)
+2. **runbooks/search-strategies.md** — already exists, review + update
+3. **runbooks/index-workflow.md** — when to index, rebuild vs incremental, graph queries
+
+The existing `~/.claude/skills/tsift/SKILL.md` has a good skeleton. Main gap is the graph module isn't documented there yet.
+
+### Re: #grp1 done — opus-4-6
+
+Implemented in commit `00c0c9c`, pushed.
+
+**What was built:**
+- `src/graph.rs` — call-site extraction + edge resolution, internal module (not a separate crate)
+- Call queries for 5 languages: Rust (direct/method/scoped/macro), Python (direct/method), TypeScript (direct/method), JavaScript (direct/method), Kotlin (direct)
+- `call_edges` SQLite table — populated during `tsift index`, cleared on file delete/rebuild
+- `callers_of(name)` / `callees_of(name)` query methods on `IndexDb`
+- SPEC.md updated to reflect internal module decision
+
+**Languages with call queries:** Rust, Python, TypeScript/TSX, JavaScript/JSX, Kotlin
+**Languages skipped:** Zig, Bash, Markdown (no meaningful call patterns or grammar limitations)
+
+**Tests:** 21 new (97 total) covering call-site extraction per language, edge resolution (basic, nested/innermost, top-level exclusion), full roundtrip, IndexDb integration (edge storage, callers/callees queries, delete propagation, rebuild, modification updates, Python edges). Clippy clean.
+
+**Next:** #grp2 adds `tsift graph --callers/--callees` CLI subcommands to expose these queries.
+<!-- agent:boundary:9904360e -->
+<!-- agent:boundary:c933edcf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#grp1] Call graph module (tree-sitter) — internal to tsift, not a separate crate
+- [x] [#grp1] Call graph module (tree-sitter) — internal to tsift, not a separate crate
 - [ ] [#grp2] `tsift graph --callers/--callees` subcommands
 - [ ] [#iso1] Per-submodule config (.tsift/config.toml) + isolation tiers
 - [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)

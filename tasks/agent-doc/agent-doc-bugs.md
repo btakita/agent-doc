@@ -606,7 +606,18 @@ do #qdb4. add tests
 - **TypeScript** `reposition.test.ts` (5 tests): reposition from middle, no boundary → null, collapse multiple, nonexistent component, component with attributes
 
 **Test results:** JB gradle test — BUILD SUCCESSFUL. VS Code npm test — 11 pass, 0 fail. Both plugin test suites green.
-<!-- agent:boundary:0e8f1b76 -->
+build agent-doc. build plugin. install agent-doc for testing
+### Re: build + install — opus-4-6
+
+Done. All artifacts rebuilt and installed:
+
+- **agent-doc binary**: `cargo build --release` + `cargo install --path .` — v0.33.6 (no Rust changes for #qdb4, but fresh build confirms clean state)
+- **JB plugin**: v0.2.68 — `buildPlugin` + `signPlugin` green. Zips at `build/distributions/agent-doc-jetbrains-0.2.68{,-signed}.zip`
+- **VS Code extension**: `tsc` compiled, `npm test` 11/11 pass
+
+Install the JB plugin (Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.68-signed.zip`) to test the CAS guard live.
+<!-- agent:boundary:a357eaec -->
+<!-- agent:boundary:8a654959 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

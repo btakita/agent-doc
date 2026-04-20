@@ -114,7 +114,53 @@ Added `workspace.onDidRenameFiles` subscription in `activate()`. On rename of an
 Created `FileRenameListener` implementing `BulkFileListener`, registered in `PluginLifecycleListener.projectOpened()` on `VFS_CHANGES`. Detects `VFileMoveEvent` and `VFilePropertyChangeEvent(PROP_NAME)`, triggers `agent-doc sync` with the new relative path.
 
 Both binaries rebuilt. JB plugin zip needs rebuild (pending item added).
-<!-- agent:boundary:8b957e78 -->
+Add tests to agent-doc binary. Add tests to JB plugin. Make sure VSCode plugin has parity. build agent-doc binary, JB plugin, VSCode plugin. Install new version of agent-doc binary for testing.
+### Re: #v30f tests + builds — opus-4-6
+
+Done across all three layers:
+
+#### Rust CLI — 5 new tests
+
+Extracted `is_file_rename(registered_path, current_path) -> bool` from the inline logic in `run_with_options`. Tests cover:
+- Rename detected (old path gone, paths differ)
+- No rename (paths identical)
+- No rename (old path still exists — both files present)
+- Relative path handling
+- Registry entry structure verification
+
+All 1198 tests passing.
+
+#### JetBrains plugin — 6 new tests (FileRenameListenerTest.kt)
+
+Extracted `shouldHandleFile()` and `buildSyncCommand()` as companion object helpers. Tests verify:
+- `.md` filtering (positive + negative + null)
+- Command arg construction (multiple files, single file, empty list)
+
+`./gradlew test` passes. Plugin built as v0.2.69 (signed + unsigned).
+
+#### VS Code extension — parity confirmed
+
+Handler at `extension.ts:1142-1156` already has full parity with JB:
+- Filters `.md` via `endsWith('.md')`
+- Computes relative path via `relativePath(root, newUri.fsPath)`
+- Collects visible `.md` files via `collectVisibleMdFiles(root)`
+- Calls `agent-doc sync --col <files> --focus <newRel>`
+
+Extension packaged as `agent-doc-0.2.7.vsix`.
+
+#### Builds
+
+| Artifact | Status |
+|----------|--------|
+| `~/.cargo/bin/agent-doc` | installed (v0.33.7) |
+| `target/release/agent-doc` | built |
+| JB plugin 0.2.69 | `build/distributions/agent-doc-jetbrains-0.2.69-signed.zip` |
+| VS Code extension | `agent-doc-0.2.7.vsix` |
+
+Ready for live testing. Install JB plugin from disk to verify rename → sync end-to-end.
+<!-- agent:boundary:9fd16050 -->
+Add tests to agent-doc binary. Add tests to JB plugin. Make sure VSCode plugin has parity. build agent-doc binary, JB plugin, VSCode plugin. Install new version of agent-doc binary for testing.
+<!-- agent:boundary:c9ede4cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

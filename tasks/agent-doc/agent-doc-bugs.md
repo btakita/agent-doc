@@ -356,8 +356,7 @@ The pane you saw appear in the left position of `0:agent-doc` wasn't for `tasks/
 4. **Focus-gated auto-start**: Only auto-start the `--focus` file, not every file in `--col`. Other files get panes when the user actually focuses them. This eliminates burst spawning — you'd get one pane at a time, for the file you're looking at. Tradeoff: first focus on a non-auto-started file has a cold-start delay (~3-5s for Claude to initialize).
 
 I'd recommend starting with tier 1 (low risk, immediate value) and #qam7 (tier 2). Tier 3 is a bigger behavior change worth discussing separately.
-<!-- agent:boundary:ed0ec4da -->
-<!-- agent:boundary:1d61ace3 -->
+<!-- agent:boundary:c38a8943 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -476,8 +476,7 @@ Is #15mw implemented? Implement #3yc9 with tests.
 - Existing multi-line dedup tests unchanged and passing
 
 **Test results:** 1185 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
-<!-- agent:boundary:dd9cc179 -->
-<!-- agent:boundary:88aef220 -->
+<!-- agent:boundary:32f40dbf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -487,7 +486,5 @@ Is #15mw implemented? Implement #3yc9 with tests.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
-- [x] [#15mw] IPC sidecar ack timeout guard — skip CRDT merge when plugin already applied response (write.rs)
-- [x] [#3yc9] Lower dedup threshold or add content-aware dedup for single-line CRDT duplicates (crdt.rs)
 <!-- /agent:pending -->
 ## Assistant

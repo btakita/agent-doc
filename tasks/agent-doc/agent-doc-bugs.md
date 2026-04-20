@@ -616,8 +616,7 @@ Done. All artifacts rebuilt and installed:
 - **VS Code extension**: `tsc` compiled, `npm test` 11/11 pass
 
 Install the JB plugin (Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.68-signed.zip`) to test the CAS guard live.
-<!-- agent:boundary:a357eaec -->
-<!-- agent:boundary:8a654959 -->
+<!-- agent:boundary:d3c89916 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

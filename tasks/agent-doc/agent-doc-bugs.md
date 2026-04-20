@@ -387,7 +387,21 @@ When `--focus` is provided, only the focused file is auto-started. Non-focused f
 This eliminates the burst-spawning scenario from the buildside incident (5 panes in 58 seconds). Now only the file you're looking at gets a pane. Tradeoff: first focus on a non-auto-started file has a ~3-5s cold-start delay.
 
 **Tests:** 3 focus gate tests + 2 batch summary tests (all passing). **Spec:** Focus-gated auto-start section added to sync.rs (Spec + Contracts + Evals). All 306 tests passing. Both binaries rebuilt and installed.
-<!-- agent:boundary:dcfac38d -->
+
+I have a concern about this feature. If I were to start my editor, what would happen? Would only the focused file have a tmux pane + claude code started? I would want both to be started. If I navigate to other files, the file I navigate to would receive focus. I'm reconsidering if this feature is a good idea.
+### Re: reconsidering focus-gated auto-start — opus-4-6
+
+You're right — focus-gating is too aggressive. It breaks the cold-start case:
+
+**What happens on editor start with focus-gate:** You open your editor with `agent-doc-bugs.md` and `agent-doc-feat.md` in splits. Plugin fires `sync --col bugs.md,feat.md --focus bugs.md`. Only `bugs.md` gets a pane. `feat.md` stays dark until you click on it. That's a worse experience than the burst-spawn.
+
+**The actual problem was narrower:** The buildside incident was 5 panes spawning because you navigated through several files that all lacked alive panes. The rename just made one more file visible. The burst itself is the correct behavior for cold-start (editor launch with multiple session docs) — it's only wrong when triggered by a rename mid-session.
+
+**Recommendation: revert focus-gate, keep #qam7 as the targeted fix.** The rename debounce (#qam7) solves the actual bug (spurious pane creation on file renames) without degrading the cold-start experience. Focus-gating was a sledgehammer where a scalpel is needed.
+
+I'll revert the focus-gate code but keep the Tier 1 logging (pane ID in auto-start messages + batch summary). Want me to proceed with the revert?
+<!-- agent:boundary:96ca0c10 -->
+<!-- agent:boundary:22c38102 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

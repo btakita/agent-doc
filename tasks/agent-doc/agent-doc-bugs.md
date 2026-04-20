@@ -367,7 +367,16 @@ Two integration tests added to `route.rs`:
 The rearrangement technique: `break-pane` + `join-pane -bh` moves a right pane to the left of another, creating the creation-order/screen-order divergence that triggers the original bug.
 
 **1177 tests pass.** Both binaries rebuilt.
-<!-- agent:boundary:dab8cc5f -->
+build and install for testing
+### Re: 0.33.6 ready for testing — sonnet-4-6
+
+Both binaries freshly built and installed:
+- `~/.cargo/bin/agent-doc` → `agent-doc 0.33.6`
+- `.bin/agent-doc` (release symlink) → rebuilt
+
+Ready to test: switch files on the right editor side and confirm the pane stays right.
+<!-- agent:boundary:b02d6181 -->
+<!-- agent:boundary:4063f4e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

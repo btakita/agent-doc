@@ -466,7 +466,16 @@ The rename detection EVENT can't move to FFI/binary because it requires hooking 
 **Could we go further?** One option: the FFI layer could expose a `agent_doc_notify_rename(old_path, new_path)` function that plugins call instead of constructing the sync CLI command themselves. But that would mean maintaining FFI bindings for something that's already a one-line CLI call. Net complexity increase, not decrease.
 
 The current design is the right one — plugin reports event, binary owns logic.
-<!-- agent:boundary:b9c0b521 -->
+release
+### Re: release prep — sonnet-4-6
+
+Bumped to v0.33.8, VERSIONS.md updated, clippy clean, 301 tests passing, `~/.cargo/bin/agent-doc` installed.
+
+**Manual testing gate** (required before publish): verify rename debounce works in a live session — rename a session doc in IDEA, confirm no spurious pane creation.
+
+Let me know when confirmed and I'll proceed with: `cargo publish` → tag → GitHub Release.
+<!-- agent:boundary:4d703b6c -->
+<!-- agent:boundary:31e9c094 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

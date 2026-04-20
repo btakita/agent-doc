@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.33.2–0.33.7 bug session. Fixed: stream truncation, stdin wiring, submodule path, IPC auto-degrade, orphan dedup, IDE buffer overwrite (#s80z), PromptPoller stale buffer (#mpjv), resync kills agents (#2ea0), SIGSEGV FFI hot-reload (#mpjv IDEA crash), inline annotation surfacing. v0.33.7: TOCTOU boundary duplication — Fix #1 (git.rs IPC guard skips working-tree reposition when IDE plugin installed; CLI owns snapshot only) + Fix #2 (CAS guard in JB PatchWatcher.kt + VS Code extension.ts: verify document.text unchanged before setText; extracted repositionBoundaryToEndUtil + reposition.ts for unit tests). JB plugin v0.2.68. Released crates.io + GitHub Release; PyPI via CI. Decisions: Fix #3 skipped (redundant with Fix #1); IPC available → IDE owns working-tree reposition. Open: #a002 normalize telemetry awaiting large-drift, #ha3h recipient policy deferred, #066r Opus 4.7 test, #y2gr skill install runbooks sync.
-<!-- agent:boundary:c9cc8714 -->
+<!-- agent:boundary:cc4a2dc2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

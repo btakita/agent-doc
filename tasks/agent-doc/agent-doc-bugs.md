@@ -54,7 +54,25 @@ Also, could you recover the output from the tmux session running `agent-doc task
 2. **Pane reuse on path change** — When the plugin resolves which pane to focus, it should match by session ID first (read from frontmatter), not by file path. If a session ID match exists in sessions.json but the path differs, update the path and reuse the pane.
 
 Added to pending.
-<!-- agent:boundary:380ef583 -->
+
+I prompted tsift.md with an agent-doc run. Was the Claude Code session closed when the new tmux pane was created?
+```
+Move the spec that was transferred tasks/software/agent-loop.md into a spec file.
+Note I just moved this file to tasks/software/tsift.md 
+```
+### Re: was original session closed on new pane creation? — opus-4-6
+
+Yes — the original pane is gone. Here's the evidence from the commit timeline:
+
+- **14:34–14:35** — Three commits touched `tasks/tsift.md` (original session was active on an old pane, now dead)
+- **15:12:00** — Commit `f324f527` deletes `tasks/tsift.md` (29 lines), creates `tasks/software/tsift.md` (132 lines). This was done by the NEW session on pane %77 (started `2026-04-20T19:12:52Z` = 15:12 EDT).
+- The old pane doesn't appear in the active pane list anymore.
+
+So the IDE plugin created pane %77 and started a fresh Claude Code instance. Your prompt ("Move the spec... Note I just moved this file to tasks/software/tsift.md") was received by the NEW session, which successfully did the compact/relocate. The original session (14:34 commits) was abandoned — its pane was either killed by the plugin or exited on its own when the session document disappeared from its expected path.
+
+**What should have happened:** The plugin should have detected the rename, updated sessions.json, and routed your prompt to the EXISTING pane. Instead it treated the renamed file as "new session needed" and orphaned the original.
+<!-- agent:boundary:2fa9a1ff -->
+<!-- agent:boundary:7656c7d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

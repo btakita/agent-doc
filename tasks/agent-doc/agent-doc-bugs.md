@@ -371,8 +371,7 @@ Changed `route::provision_pane` to return `Result<String>` (the new pane ID). Up
 All 301 lib tests + full `make check` pass. Both binaries rebuilt and installed.
 
 **Pending updated:** Added Tier 1 (logging) and Tier 3 (focus-gated auto-start) items. #qam7 (Tier 2 — rename debounce) remains open — the existing `is_file_rename` only covers files WITH an alive pane; #qam7 addresses the no-alive-pane case (buildside scenario).
-<!-- agent:boundary:88a0b571 -->
-<!-- agent:boundary:30cd7863 -->
+<!-- agent:boundary:c08639d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -380,7 +379,6 @@ All 301 lib tests + full `make check` pass. Both binaries rebuilt and installed.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#qam7] Suppress auto-start for recently-renamed files: when FileRenameListener fires for a file with no alive pane, set a short-lived debounce marker so the subsequent EditorTabSyncListener-triggered sync skips auto-start for that file. Prevents spurious session creation on organizational file moves.
 - [ ] [#sgj3] Tier 1 logging: auto-start messages now include pane ID (e.g. [sync] auto-started %84 for file.md); batch summary printed when >1 pane auto-starts in a single sync call. Implemented — verify in next multi-file sync event.
 - [ ] [#4avv] Focus-gated auto-start: only auto-start the --focus file, not every file in --col. Other files get panes on first focus. Eliminates burst spawning. Tradeoff: cold-start delay (~3-5s) on first focus of non-auto-started file.
 <!-- /agent:pending -->

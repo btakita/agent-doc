@@ -444,8 +444,7 @@ Ready for live testing. To verify rename debounce end-to-end:
 2. Open a session document, ensure pane is running
 3. Rename/move the file in IDEA
 4. Check `/tmp/agent-doc-sync.log` for `rename-debounce: set marker` + `rename-debounce: skipped auto-start`
-<!-- agent:boundary:9f36468a -->
-<!-- agent:boundary:36dc72b7 -->
+<!-- agent:boundary:806e6479 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

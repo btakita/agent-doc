@@ -295,8 +295,36 @@ Correction from the sync log — the previous cycle's event reconstruction was w
 
 From the user's perspective, a pane appeared after a file move — which feels like the system lost track. But the system never had a pane for buildside.md in the first place. The rename made `tasks/professional/buildside.md` visible in the editor layout, and sync's auto-start treated it as "file with session UUID, no pane → provision one." The registration worked correctly; the bug is the auto-start trigger, not the registration.
 
+❯ There was a pane that was auto-started for `tasks/buildside.md`. Not sure if the pane was auto-claimed. Can you help me figure out why I saw a new pane created for `tasks/buildside.md` but you don't see it in the logs?
+
 The #qam7 debounce fix remains the right solution: suppress auto-start for files that just entered `col_args` via a rename event.
-<!-- agent:boundary:da1de9de -->
+### Re: investigating the "missing" pane — opus-4-6
+
+I went through the sync log, ops log, git history, and live tmux state. I can't find evidence that a pane was ever created for the old path `tasks/buildside.md`. But let me show you what I found — you might recognize something I'm misinterpreting.
+
+#### Evidence trail
+
+**Sync log** — 3 events total for buildside:
+1. `[1776716223]` — EditorTabSyncListener: `focus=tasks/buildside.md` but **col_args = [evals.md, claudescore.md]**. Buildside was the focus file but not in any column. Auto-start only processes col_args → no pane created.
+2. `[1776716236]` — FileRenameListener: `col_args=[professional/buildside.md,claudescore.md]`, focus = new path. No auto-start logged.
+3. `[1776716242]` — EditorTabSyncListener: `col_args=[professional/buildside.md, claudescore.md]`. **Auto-started for `tasks/professional/buildside.md`** (no alive pane).
+
+**Commit `d7bfa4dd`** (16:17:16, 6 seconds before the auto-start) — this came from `ensure_initialized()` in Sync 2's `resolve_file` phase, not from a pane. `ensure_initialized` creates the initial snapshot + git baseline when a file appears at a new path.
+
+**sessions.json** — one entry for buildside: `file: tasks/professional/buildside.md`, `pane: %84`, `started: 20:17:24Z`. Pane %84 is alive, running `agent-doc start tasks/professional/buildside.md`.
+
+**No orphan panes** — checked all agent-loop panes (%58, %57, %78, %84, %81, %82, %80, %83). None are running agent-doc for `tasks/buildside.md`.
+
+#### What I can't explain
+
+You said you saw a pane for `tasks/buildside.md`. The logs show only `tasks/professional/buildside.md`. Possible explanations:
+- The pane's Claude Code session inherited the session_id from the old path, so it may have displayed context referencing "buildside.md" even though it was running for the new path
+- The pane appeared very briefly and was killed before I could capture it
+- Something outside of sync created it (manual route call, different hook)
+
+Do you remember any details — which tmux window, what was running in it, or how long it was alive? That would help me narrow it down.
+<!-- agent:boundary:5fff2f72 -->
+<!-- agent:boundary:6e4339a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -65,7 +65,6 @@ Starting the audit. I need one thing from you first:
 
 ❯ Please analyze my sessions and investigate how tokens are being wasted. What are some ways that we can save on tokens. Are there any features that can be added to agent-doc to save tokens from the claude's tool usage and output?
 
-❯ Please analyze my sessions and investigate how tokens are being wasted. What are some ways that we can save on tokens. Are there any features that can be added to agent-doc to save tokens from the claude's tool usage and output?
 
 ### Re: token optimization strategies
 
@@ -167,7 +166,6 @@ For example, if you don't need `gmail` or `chrome-devtools` in every session, di
 
 ❯ Have you done #### Immediate High-ROI Wins. If not, add each item to agent:pending
 
-❯ Have you done #### Immediate High-ROI Wins. If not, add each item to agent:pending
 
 ### Re: Immediate High-ROI Wins — Adding Concrete Tasks
 
@@ -203,7 +201,57 @@ The MCP server cleanup is the highest ROI: each disabled server saves name/descr
 The cleanup task for baselines should become an agent-doc feature (snapshot GC with configurable reap cycle, as you noted). I've transferred that to pending for agent-doc-feat.
 
 For the MCP disable, no file-based approach available — it's app-managed. You'll need to disable them through the UI, or we could explore whether agent-doc should expose an `mcp disable` command that writes to the app's config location (if that location is available).
-<!-- agent:boundary:c08ae8de -->
+
+❯ Please review src/session-share/tasks/claudescore.md prompt for and response of `### Re: Token savings from file reads — opus-4-6`
+
+❯ What tools are available to create a RAG database of the project code, how functions interrelate, and token efficient retrieval of source code. I prefer lightweight and fast implementations to store a token-efficient and accurate representation code into a database. This could be a vector database that uses AST (tree-sitter?) to parse code and to function track dependency graphs...along with the file and location of each function.
+### Re: claudescore token-savings review — opus-4-6
+
+Reviewed the `### Re: Token savings from file reads — opus-4-6` section. It correctly identifies the two levers: **offset/limit targeting** and **no re-read after edit**. The 28k → ~20k estimate is reasonable — it's agent-side discipline, not user-actionable. The response is accurate and complete. No corrections needed.
+
+### Re: code RAG database options — opus-4-6
+
+You already have pieces of this: **tsift** (BM25 + vector retrieval), **smart-explore** (tree-sitter AST parsing), and **graphify** (knowledge graph + community detection). The gap is connecting them — AST-extracted symbols stored with embeddings and a dependency graph for graph-aware retrieval.
+
+#### Recommended Stack (all Rust/embedded, no servers)
+
+| Layer | Tool | Why |
+|-------|------|-----|
+| AST parsing | **tree-sitter** (via smart-explore or `tree-sitter-graph` crate) | Already available, fast, multi-language |
+| Dependency graph | **code-graph-cli** (crates.io) | Tree-sitter → call graphs + impact analysis, Cargo workspace-aware |
+| Vector storage | **LanceDB** (Rust crate, embedded) | Apache Arrow format, disk-based, sub-20ms at 100K vectors, no server |
+| Retrieval | **tsift** or custom | Hybrid BM25 + vector, already familiar |
+
+#### Key Insight: Graph > Vector for Code
+
+Aider's repo-map research showed that **graph-ranked retrieval** (PageRank over call/import references) outperforms pure vector similarity for code. The approach: extract symbols via tree-sitter, rank by reference count (how central they are), embed only the top-ranked ones. This gives best token efficiency — you retrieve the 5 most-referenced functions, not the 5 most similar strings.
+
+#### Architecture
+
+```
+source files
+  → tree-sitter (AST extraction: functions, types, signatures)
+  → code-graph-cli (dependency graph: who calls what, imports)
+  → LanceDB (embed function signatures + docstrings)
+  → retrieval: graph walk (follow call chain) + vector similarity (semantic)
+  → output: function signature + location + 1-hop dependencies
+```
+
+#### What This Gets You
+
+- Query: "how does the write path work?" → graph walks from `write()` through its callees, returns signatures + file:line for each
+- Query: "token validation" → vector search finds `validate_token()`, graph adds its callers and callees
+- Output is function-level, not file-level — 50-200 tokens per result vs. 2000+
+
+#### Lightweight Path Forward
+
+1. **Start with code-graph-cli** — `cargo install code-graph-cli`, run against `src/agent-doc/`. See if its output format suits your needs.
+2. **Add LanceDB** for embedding storage — embed function signatures extracted from the graph.
+3. **Bridge to tsift** — if tsift can accept a pre-indexed corpus, feed it the AST-extracted symbols instead of raw files.
+
+Worth revisiting whether graphify could serve as the graph layer directly (extend its extractors with tree-sitter code parsing).
+<!-- agent:boundary:c42c93a9 -->
+<!-- agent:boundary:0e6d9b77 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

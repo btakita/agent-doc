@@ -159,7 +159,35 @@ Extension packaged as `agent-doc-0.2.7.vsix`.
 
 Ready for live testing. Install JB plugin from disk to verify rename → sync end-to-end.
 Add tests to agent-doc binary. Add tests to JB plugin. Make sure VSCode plugin has parity. build agent-doc binary, JB plugin, VSCode plugin. Install new version of agent-doc binary for testing.
-<!-- agent:boundary:3d23af3c -->
+
+❯ Do we have specs for handling agent doc file renames. Are the specs in sync with the current functionality?
+### Re: file rename specs — opus-4-6
+
+No, the specs were not in sync. The feature was implemented but undocumented. Fixed now.
+
+#### What was missing
+
+The `sync.rs` module spec (top-level `//!` doc comments) had no mention of file rename detection. It covered repair_layout, auto-start, stash rescue, column memory — but the rename path was invisible.
+
+#### What I added to `sync.rs` spec
+
+**Spec section** (new bullet):
+- File rename detection: when a pane is alive but the registry's `file` field points to a path that no longer exists AND the current sync target has a different path, sync infers a rename. Calls `sessions::register` with the new path, reusing the existing pane. Detection via `is_file_rename(registered_path, current_path)`. Editor plugins trigger via `agent-doc sync --focus <new_path>` on file rename events.
+
+**Agentic Contracts** (2 new bullets):
+- `is_file_rename` is pure (no tmux dependency) — compares paths and checks disk existence
+- Re-registration uses standard `sessions::register`, so RegistryLock and single-session-per-pane invariant apply
+
+**Evals** (5 new entries matching the 5 tests):
+- `is_file_rename_detects_rename_when_old_path_gone`
+- `is_file_rename_returns_false_when_paths_match`
+- `is_file_rename_returns_false_when_old_path_still_exists`
+- `is_file_rename_handles_relative_paths`
+- `file_rename_updates_registry`
+
+The JB `FileRenameListener.kt` and VS Code `extension.ts` handler are thin event dispatchers — their spec is effectively the sync.rs spec plus the event subscription pattern. No separate module spec needed for them since the business logic lives in the CLI.
+<!-- agent:boundary:72b6ff08 -->
+<!-- agent:boundary:9123103a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -167,6 +195,6 @@ Add tests to agent-doc binary. Add tests to JB plugin. Make sure VSCode plugin h
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#k0ra] Build JB plugin zip with FileRenameListener and test rename → sync path update end-to-end
+- [x] [#k0ra] Build JB plugin zip with FileRenameListener and test rename → sync path update end-to-end
 <!-- /agent:pending -->
 ## Assistant

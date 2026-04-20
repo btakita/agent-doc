@@ -630,7 +630,18 @@ Version bumped and checks passing. Ready for manual testing gate.
 **Test results:** 1187 passed, 6 ignored — clippy clean.
 
 **Manual testing gate:** Please confirm Fix #1 + Fix #2 work in a live session (no boundary duplication under concurrent typing). Reply to publish when ready.
-<!-- agent:boundary:9ecf68bc -->
+release
+### Re: 0.33.7 published — sonnet-4-6
+
+Released.
+
+- **crates.io**: [agent-doc v0.33.7](https://crates.io/crates/agent-doc/0.33.7) ✓
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.7 — `agent-doc-linux-x86_64` binary attached
+- **PyPI**: triggered automatically via `.github/workflows/pypi.yml` on release publish
+- **JB plugin**: v0.2.68 built and signed locally — Marketplace publish is a separate step if needed
+- `cargo install --path .` done post-publish — `~/.cargo/bin/agent-doc` confirmed at v0.33.7
+<!-- agent:boundary:1b00ddc2 -->
+<!-- agent:boundary:acc76fca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

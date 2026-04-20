@@ -134,7 +134,72 @@ Implemented and pushed `83bf239`:
 - **SPEC.md**: full multi-language architecture section
 
 All 39 tests pass, clippy clean. Single `tree-sitter-language v0.1.7` ABI — no version splits.
-<!-- agent:boundary:223336ff -->
+I need a way to guarantee that the code cache is always up to date. How can we ensure that inserts, updates, deletes, and/or rebuilds happen when the code changes.
+### Re: cache invalidation strategy — opus-4-6
+
+tsift is a CLI, not a daemon, so file-system watchers don't apply. The natural approach is **git-based incremental indexing** — git already tracks every file change.
+
+#### Core mechanism
+
+Store indexing state in SQLite metadata:
+
+```sql
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+-- key: 'last_indexed_commit' → SHA of HEAD when index was last fully synced
+-- key: 'last_indexed_at' → timestamp
+```
+
+#### Staleness detection (runs on every `tsift search` / `tsift index`)
+
+1. Load `last_indexed_commit` from meta
+2. If HEAD != last_indexed_commit:
+   - `git diff --name-status <last_commit>..HEAD` → committed changes since last index
+   - Batch: INSERT new files, UPDATE modified files (re-parse), DELETE removed files' symbols
+3. Check working tree for uncommitted changes:
+   - `git diff --name-status` (unstaged) + `git diff --cached --name-status` (staged)
+   - Store per-file content hash in a `file_state` table to avoid redundant re-parsing
+4. Update `last_indexed_commit` = HEAD
+
+#### File state table
+
+```sql
+CREATE TABLE file_state (
+    path TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,  -- blake3 or sha256 of file content
+    indexed_at TEXT NOT NULL,
+    language TEXT NOT NULL
+);
+```
+
+On incremental update: hash each changed file, compare against `file_state`. Skip if hash matches (file was modified then reverted). This handles the common case of switching branches back and forth.
+
+#### Trigger points
+
+| Trigger | Behavior |
+|---------|----------|
+| `tsift search <query>` | Auto-incremental before search (fast — only changed files) |
+| `tsift index` | Explicit incremental update |
+| `tsift index --rebuild` | Drop all symbols + file_state, full re-index |
+| `tsift index --check` | Report stale files without updating |
+
+#### Edge cases
+
+- **Branch switch**: large diff, but git handles it — just more files to re-index
+- **Rebase**: commit SHAs change, `git diff` still computes the right file set
+- **File renames**: `git diff -M --name-status` detects renames → update `path` in symbols + file_state without re-parsing
+- **Submodule updates**: detect via `git diff --submodule=short` → re-index affected submodule
+- **Working tree only** (no commits): falls back to hashing all tracked files against file_state
+
+#### Performance budget
+
+For a repo like agent-loop (~500 files across submodules): full index takes seconds, incremental update <100ms for typical 1-5 file changes. The search path adds ~10ms overhead for staleness check (one `git diff` + hash comparison).
+
+The auto-incremental on search means users never query stale data. No hooks, no daemons, no cron — just "check on read."
+<!-- agent:boundary:da5b98ea -->
+<!-- agent:boundary:9edf2b3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

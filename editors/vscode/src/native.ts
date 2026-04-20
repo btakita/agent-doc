@@ -31,6 +31,51 @@ let lib: any = null;
 let koffi: any = null;
 let loaded = false;
 let loadAttempted = false;
+let loadedPath: string | null = null;
+let loadedMtime: number = 0;
+let currentLockFile: string | null = null;
+
+export function libMtimeChanged(filePath: string, storedMtime: number): boolean {
+    try {
+        const currentMtime = fs.statSync(filePath).mtimeMs;
+        return currentMtime !== storedMtime && currentMtime > 0;
+    } catch {
+        return false;
+    }
+}
+
+export function writePidLock(libPath: string): void {
+    try {
+        const resolved = fs.realpathSync(libPath);
+        const pid = process.pid;
+        const lockPath = `${resolved}.pid.${pid}`;
+        fs.writeFileSync(lockPath, '');
+        currentLockFile = lockPath;
+    } catch {
+        // best-effort
+    }
+}
+
+export function removePidLock(): void {
+    if (!currentLockFile) return;
+    try {
+        fs.unlinkSync(currentLockFile);
+    } catch {
+        // already removed or never created
+    }
+    currentLockFile = null;
+}
+
+function resetBindings(): void {
+    _reposition_boundary_to_end = null;
+    _is_idle = null;
+    _await_idle = null;
+    _document_changed = null;
+    _is_tracked = null;
+    _resolve_project_path = null;
+    _free_string = null;
+    _version = null;
+}
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 
@@ -65,7 +110,22 @@ function findLibrary(projectRoot?: string): string | null {
 }
 
 function ensureLoaded(projectRoot?: string): boolean {
-    if (loaded) return true;
+    if (loaded) {
+        if (loadedPath && libMtimeChanged(loadedPath, loadedMtime)) {
+            console.log(`[agent-doc/native] mtime changed, reloading from ${loadedPath}`);
+            removePidLock();
+            resetBindings();
+            try {
+                lib = koffi.load(loadedPath);
+                loadedMtime = fs.statSync(loadedPath).mtimeMs;
+                writePidLock(loadedPath);
+                verifyVersion(loadedPath);
+            } catch (e: any) {
+                console.log(`[agent-doc/native] reload failed, keeping previous: ${e.message}`);
+            }
+        }
+        return true;
+    }
     if (loadAttempted) return false;
     loadAttempted = true;
 
@@ -85,7 +145,11 @@ function ensureLoaded(projectRoot?: string): boolean {
     try {
         lib = koffi.load(libPath);
         loaded = true;
-        console.log(`[agent-doc/native] loaded ${libPath}`);
+        loadedPath = libPath;
+        loadedMtime = fs.statSync(libPath).mtimeMs;
+        writePidLock(libPath);
+        process.on('exit', removePidLock);
+        verifyVersion(libPath);
         return true;
     } catch (e: any) {
         console.log(`[agent-doc/native] failed to load ${libPath}: ${e.message}`);
@@ -101,6 +165,7 @@ let _document_changed: any = null;
 let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_string: any = null;
+let _version: any = null;
 
 function bindFunctions(): void {
     if (_reposition_boundary_to_end) return;
@@ -123,6 +188,23 @@ function bindFunctions(): void {
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
+    _version = lib.func('agent_doc_version', 'char*', []);
+}
+
+function verifyVersion(libPath: string): void {
+    try {
+        bindFunctions();
+        const ptr = _version();
+        if (ptr) {
+            const version = koffi.decode(ptr, 'char', -1);
+            _free_string(ptr);
+            console.log(`[agent-doc/native] loaded libagent_doc v${version} from ${libPath}`);
+        } else {
+            console.log(`[agent-doc/native] agent_doc_version() returned null — possible ABI mismatch at ${libPath}`);
+        }
+    } catch (e: any) {
+        console.log(`[agent-doc/native] agent_doc_version() failed — ABI mismatch at ${libPath}: ${e.message}`);
+    }
 }
 
 /**

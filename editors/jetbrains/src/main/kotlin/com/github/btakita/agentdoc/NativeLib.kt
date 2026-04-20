@@ -7,6 +7,11 @@ import com.sun.jna.Pointer
 import com.sun.jna.Structure
 import java.io.File
 
+internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
+    val currentMtime = File(path).lastModified()
+    return currentMtime != storedMtime && currentMtime != 0L
+}
+
 /**
  * JNA bindings to libagent_doc shared library.
  *
@@ -216,37 +221,121 @@ interface AgentDocLib : Library {
     fun agent_doc_free_string(ptr: Pointer?)
 
     companion object {
-        private var instance: AgentDocLib? = null
-        private var loadError: String? = null
+        @Volatile private var instance: AgentDocLib? = null
+        @Volatile private var loadError: String? = null
+        @Volatile private var loadedPath: String? = null
+        @Volatile private var loadedMtime: Long = 0L
+        @Volatile private var currentLockFile: File? = null
+        private var shutdownHookRegistered = false
 
-        /**
-         * Get the loaded library instance, or null if unavailable.
-         * Logs the error once on first failure.
-         */
         fun get(): AgentDocLib? {
-            if (instance != null) return instance
+            val current = instance
+            val path = loadedPath
+
+            if (current != null && path != null) {
+                if (libMtimeChanged(path, loadedMtime)) {
+                    LOG.info("[native] libagent_doc mtime changed, reloading from $path")
+                    return reload(path)
+                }
+                return current
+            }
+
             if (loadError != null) return null
 
-            try {
-                val libPath = resolveLibPath()
-                if (libPath == null) {
-                    loadError = "agent-doc binary not found; FFI unavailable"
-                    LOG.warn(loadError!!)
-                    return null
-                }
-                instance = Native.load(libPath, AgentDocLib::class.java)
-                LOG.info("[native] loaded libagent_doc from $libPath (is_tracked + await_idle available)")
+            val libPath = resolveLibPath() ?: run {
+                loadError = "agent-doc binary not found; FFI unavailable"
+                LOG.warn(loadError!!)
+                return null
+            }
+
+            return loadFrom(libPath)
+        }
+
+        @Synchronized
+        private fun reload(path: String): AgentDocLib? {
+            val currentMtime = File(path).lastModified()
+            if (currentMtime == loadedMtime || currentMtime == 0L) return instance
+            return try {
+                removePidLock()
+                val newLib = Native.load(path, AgentDocLib::class.java)
+                instance = newLib
+                loadedMtime = currentMtime
+                loadError = null
+                writePidLock(path)
+                verifyVersion(newLib, path)
+                newLib
+            } catch (e: Exception) {
+                LOG.warn("[native] reload failed, keeping previous instance: ${e.message}")
+                instance
+            }
+        }
+
+        @Synchronized
+        private fun loadFrom(path: String): AgentDocLib? {
+            return try {
+                val newLib = Native.load(path, AgentDocLib::class.java)
+                instance = newLib
+                loadedPath = path
+                loadedMtime = File(path).lastModified()
+                writePidLock(path)
+                registerShutdownHook()
+                verifyVersion(newLib, path)
+                newLib
             } catch (e: Exception) {
                 loadError = "Failed to load libagent_doc: ${e.message}"
                 LOG.warn(loadError!!)
+                null
             }
-            return instance
         }
 
-        /**
-         * Resolve the path to libagent_doc shared library.
-         * Strategy: run `agent-doc lib-path` to get the canonical location.
-         */
+        private fun verifyVersion(lib: AgentDocLib, path: String) {
+            try {
+                val ptr = lib.agent_doc_version()
+                if (ptr != null) {
+                    val version = ptr.getString(0)
+                    lib.agent_doc_free_string(ptr)
+                    LOG.info("[native] loaded libagent_doc v$version from $path")
+                } else {
+                    LOG.warn("[native] agent_doc_version() returned null — possible ABI mismatch at $path")
+                }
+            } catch (e: Exception) {
+                LOG.warn("[native] agent_doc_version() failed — ABI mismatch at $path: ${e.message}")
+            }
+        }
+
+        private fun writePidLock(libPath: String) {
+            try {
+                val resolved = File(libPath).canonicalFile
+                val pid = ProcessHandle.current().pid()
+                val lockFile = File("${resolved.absolutePath}.pid.$pid")
+                lockFile.createNewFile()
+                currentLockFile = lockFile
+                LOG.debug("[native] wrote pid lock: ${lockFile.name}")
+            } catch (e: Exception) {
+                LOG.debug("[native] failed to write pid lock: ${e.message}")
+            }
+        }
+
+        internal fun removePidLock() {
+            val lock = currentLockFile ?: return
+            try {
+                if (lock.delete()) {
+                    LOG.debug("[native] removed pid lock: ${lock.name}")
+                }
+            } catch (e: Exception) {
+                LOG.debug("[native] failed to remove pid lock: ${e.message}")
+            }
+            currentLockFile = null
+        }
+
+        private fun registerShutdownHook() {
+            if (shutdownHookRegistered) return
+            shutdownHookRegistered = true
+            Runtime.getRuntime().addShutdownHook(Thread {
+                removePidLock()
+            })
+        }
+
         private fun resolveLibPath(): String? {
             try {
                 val process = ProcessBuilder("agent-doc", "lib-path")

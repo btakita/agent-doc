@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
+import { repositionBoundaryToEnd } from './reposition';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -804,7 +805,7 @@ class PatchWatcher implements vscode.Disposable {
             // Prefer FFI reposition, fall back to TS
             const repositioned = native.repositionBoundaryToEnd(content, projectRoot)
                 ?? this.repositionBoundaryToEndTs(content, 'exchange');
-            if (repositioned && repositioned !== content) {
+            if (repositioned && repositioned !== content && document.getText() === content) {
                 const fullRange = new vscode.Range(
                     document.positionAt(0),
                     document.positionAt(content.length),
@@ -822,37 +823,8 @@ class PatchWatcher implements vscode.Disposable {
         });
     }
 
-    /**
-     * TS fallback: reposition boundary marker to end of exchange component.
-     * Removes all existing `<!-- agent:boundary:... -->` markers and inserts
-     * a single fresh one just before the close tag.
-     * Used when FFI (koffi) is not available.
-     */
     private repositionBoundaryToEndTs(doc: string, component: string): string | null {
-        const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`);
-        const closeTag = `<!-- /agent:${component} -->`;
-
-        const openMatch = openPattern.exec(doc);
-        if (!openMatch) return null;
-
-        const closeIdx = doc.indexOf(closeTag, openMatch.index + openMatch[0].length);
-        if (closeIdx < 0) return null;
-
-        const contentStart = openMatch.index + openMatch[0].length;
-        let content = doc.substring(contentStart, closeIdx);
-
-        // Remove all existing boundary markers
-        content = content.replace(/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g, '');
-
-        // Generate a fresh boundary ID (8 hex chars)
-        const id = Array.from({ length: 8 }, () =>
-            Math.floor(Math.random() * 16).toString(16)
-        ).join('');
-
-        const trimmed = content.trimEnd();
-        const newContent = `${trimmed}\n<!-- agent:boundary:${id} -->\n`;
-
-        return doc.substring(0, contentStart) + newContent + doc.substring(closeIdx);
+        return repositionBoundaryToEnd(doc, component);
     }
 
     private async applyPatch(patch: IpcPatch): Promise<boolean> {

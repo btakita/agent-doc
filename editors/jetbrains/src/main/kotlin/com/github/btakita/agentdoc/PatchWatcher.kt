@@ -370,7 +370,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     val result = NativePatching.repositionBoundaryToEnd(content)
                         ?: repositionBoundaryToEnd(content, "exchange")
                         ?: return@runWriteCommandAction
-                    if (result != content) {
+                    if (result != content && document.text == content) {
                         document.setText(result)
                     }
                 })
@@ -999,32 +999,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
-    /**
-     * Find byte ranges of fenced code blocks in the document.
-     * Returns a list of (start, end) pairs where start is the offset of the opening
-     * fence line and end is the offset just past the closing fence line.
-     */
-    private fun findCodeBlockRanges(doc: String): List<Pair<Int, Int>> {
-        val ranges = mutableListOf<Pair<Int, Int>>()
-        val fencePattern = Regex("""^[ \t]*```""", RegexOption.MULTILINE)
-        var insideFence = false
-        var fenceStart = 0
-
-        for (match in fencePattern.findAll(doc)) {
-            if (!insideFence) {
-                fenceStart = match.range.first
-                insideFence = true
-            } else {
-                // End of fenced block: include everything up to the end of the closing fence line
-                val lineEnd = doc.indexOf('\n', match.range.last + 1)
-                val blockEnd = if (lineEnd >= 0) lineEnd + 1 else doc.length
-                ranges.add(Pair(fenceStart, blockEnd))
-                insideFence = false
-            }
-        }
-
-        return ranges
-    }
+    private fun findCodeBlockRanges(doc: String) = findCodeBlockRangesUtil(doc)
 
     /** Debounce window for VCS refresh signals (ms). Multiple commits within this window coalesce into one refresh. */
     private val vcsRefreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
@@ -1050,59 +1025,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         }, VCS_REFRESH_DEBOUNCE_MS)
     }
 
-    /**
-     * Move the boundary marker to end of exchange component.
-     * Returns the repositioned content, or null if no reposition needed.
-     */
-    private fun repositionBoundaryToEnd(doc: String, component: String): String? {
-        val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
-        val closeTag = "<!-- /agent:$component -->"
-        val boundaryPattern = Regex("""<!-- agent:boundary:([a-z0-9][a-z0-9:-]*) -->""")
-
-        val codeRanges = findCodeBlockRanges(doc)
-
-        val openMatch = openPattern.findAll(doc).firstOrNull { match ->
-            codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
-        } ?: return null
-
-        val contentStart = openMatch.range.last + 1
-        var searchFrom = contentStart
-        var closeIdx: Int
-        while (true) {
-            closeIdx = doc.indexOf(closeTag, searchFrom)
-            if (closeIdx < 0) return null
-            if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
-            searchFrom = closeIdx + closeTag.length
-        }
-
-        val componentContent = doc.substring(contentStart, closeIdx)
-        val allBoundaries = boundaryPattern.findAll(componentContent).toList()
-        if (allBoundaries.isEmpty()) return null
-
-        // Check if already clean: single boundary at end with nothing after it
-        if (allBoundaries.size == 1) {
-            val onlyMatch = allBoundaries[0]
-            val boundaryEnd = contentStart + onlyMatch.range.last + 1
-            val afterBoundary = doc.substring(boundaryEnd, closeIdx).trim()
-            if (afterBoundary.isEmpty()) return null
-        }
-
-        // Remove ALL boundary lines from the component content, then insert one at end.
-        // This prevents boundary accumulation when multiple write cycles each add a new one.
-        val lines = componentContent.split("\n")
-        val filteredLines = lines.filter { line ->
-            val trimmed = line.trim()
-            !(trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->"))
-        }
-        val cleanContent = filteredLines.joinToString("\n")
-
-        val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
-        val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
-        val before = doc.substring(0, contentStart)
-        val after = doc.substring(closeIdx)
-        val prefix = if (cleanContent.endsWith("\n")) "" else "\n"
-        return before + cleanContent + prefix + newBoundary + "\n" + after
-    }
+    private fun repositionBoundaryToEnd(doc: String, component: String) = repositionBoundaryToEndUtil(doc, component)
 
     override fun dispose() {
         running = false
@@ -1189,6 +1112,74 @@ data class ComponentPatch(
     val boundaryId: String? = null,
     val ensureBoundary: Boolean = false,
 )
+
+internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
+    val ranges = mutableListOf<Pair<Int, Int>>()
+    val fencePattern = Regex("""^[ \t]*```""", RegexOption.MULTILINE)
+    var insideFence = false
+    var fenceStart = 0
+
+    for (match in fencePattern.findAll(doc)) {
+        if (!insideFence) {
+            fenceStart = match.range.first
+            insideFence = true
+        } else {
+            val lineEnd = doc.indexOf('\n', match.range.last + 1)
+            val blockEnd = if (lineEnd >= 0) lineEnd + 1 else doc.length
+            ranges.add(Pair(fenceStart, blockEnd))
+            insideFence = false
+        }
+    }
+
+    return ranges
+}
+
+internal fun repositionBoundaryToEndUtil(doc: String, component: String): String? {
+    val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+    val closeTag = "<!-- /agent:$component -->"
+    val boundaryPattern = Regex("""<!-- agent:boundary:([a-z0-9][a-z0-9:-]*) -->""")
+
+    val codeRanges = findCodeBlockRangesUtil(doc)
+
+    val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+        codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+    } ?: return null
+
+    val contentStart = openMatch.range.last + 1
+    var searchFrom = contentStart
+    var closeIdx: Int
+    while (true) {
+        closeIdx = doc.indexOf(closeTag, searchFrom)
+        if (closeIdx < 0) return null
+        if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+        searchFrom = closeIdx + closeTag.length
+    }
+
+    val componentContent = doc.substring(contentStart, closeIdx)
+    val allBoundaries = boundaryPattern.findAll(componentContent).toList()
+    if (allBoundaries.isEmpty()) return null
+
+    if (allBoundaries.size == 1) {
+        val onlyMatch = allBoundaries[0]
+        val boundaryEnd = contentStart + onlyMatch.range.last + 1
+        val afterBoundary = doc.substring(boundaryEnd, closeIdx).trim()
+        if (afterBoundary.isEmpty()) return null
+    }
+
+    val lines = componentContent.split("\n")
+    val filteredLines = lines.filter { line ->
+        val trimmed = line.trim()
+        !(trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->"))
+    }
+    val cleanContent = filteredLines.joinToString("\n")
+
+    val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
+    val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
+    val before = doc.substring(0, contentStart)
+    val after = doc.substring(closeIdx)
+    val prefix = if (cleanContent.endsWith("\n")) "" else "\n"
+    return before + cleanContent + prefix + newBoundary + "\n" + after
+}
 
 /**
  * Parse IPC patch JSON using Gson (bundled with IntelliJ Platform).

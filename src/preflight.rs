@@ -194,6 +194,12 @@ pub struct PreflightOutput {
     /// JSON to keep the common case quiet.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub pending_gated_count: usize,
+    /// User additions found inside agent response blocks (inline annotations).
+    /// These are `[user+]`/`[user~]` lines from the annotated diff that have
+    /// `[agent]` lines after them — corrections or questions the user inserted
+    /// into a previous agent response rather than appending at the end.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline_annotations: Vec<String>,
     /// Short model name for attribution in `### Re:` response headers.
     ///
     /// Resolved from (in priority order): `ANTHROPIC_MODEL` env var → frontmatter
@@ -762,6 +768,12 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
+    // Step 4c2: Extract inline annotations (user edits inside agent response blocks).
+    let inline_annotations = annotated_diff
+        .as_ref()
+        .map(|a| diff::extract_inline_annotations(a))
+        .unwrap_or_default();
+
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let parsed_commands = diff_result
         .as_ref()
@@ -841,6 +853,7 @@ pub fn run(file: &Path) -> Result<()> {
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
+        inline_annotations,
         slash_commands,
         builtin_commands,
         effective_tier: Some(effective_tier_value.to_string()),
@@ -1817,6 +1830,37 @@ mod tests {
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("annotated_diff").is_none(), "annotated_diff should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_inline_annotations() {
+        let output = PreflightOutput {
+            inline_annotations: vec![
+                "This is wrong, fix it".to_string(),
+                "Broaden the gate".to_string(),
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let anns = parsed["inline_annotations"].as_array().unwrap();
+        assert_eq!(anns.len(), 2);
+        assert_eq!(anns[0], "This is wrong, fix it");
+        assert_eq!(anns[1], "Broaden the gate");
+    }
+
+    #[test]
+    fn preflight_output_omits_inline_annotations_when_empty() {
+        let output = PreflightOutput {
+            inline_annotations: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("inline_annotations").is_none(),
+            "inline_annotations should be omitted when empty"
+        );
     }
 
     #[test]

@@ -73,6 +73,8 @@ mod hooks;
 mod init;
 mod install;
 mod layout;
+mod lib_gc;
+mod lib_install;
 mod mode;
 mod notify;
 mod outline;
@@ -670,6 +672,21 @@ enum Commands {
     },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
+    /// Remove stale versioned shared libraries not in use
+    GcLibs {
+        /// Target directory (default: directory containing agent-doc binary)
+        #[arg(long)]
+        target_dir: Option<String>,
+    },
+    /// Install versioned shared library with atomic symlink swap
+    LibInstall {
+        /// Source .so path (default: target/release/libagent_doc.so)
+        #[arg(long)]
+        source: Option<String>,
+        /// Target directory (default: directory containing agent-doc binary)
+        #[arg(long)]
+        target_dir: Option<String>,
+    },
     /// List all available commands as JSON (for editor plugin autocomplete)
     #[command(name = "commands")]
     #[allow(clippy::enum_variant_names)]
@@ -1364,6 +1381,12 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
             Ok(())
+        }
+        Commands::GcLibs { target_dir } => {
+            lib_gc::run(target_dir.as_deref())
+        }
+        Commands::LibInstall { source, target_dir } => {
+            lib_install::run(source.as_deref(), target_dir.as_deref())
         }
         Commands::ListCommands => commands::run(),
         Commands::Session { action } => match action {

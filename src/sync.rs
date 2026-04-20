@@ -791,8 +791,13 @@ fn run_with_options(
                             // is invalid because tmux parses `:` as session:window, treating
                             // the window ID as a session name (which doesn't exist).
                             if let Some(target_win) = window {
-                                let target_panes = tmux.list_window_panes(target_win).unwrap_or_default();
-                                if let Some(target) = target_panes.first() {
+                                let target_panes = tmux.list_panes_ordered(target_win).unwrap_or_default();
+                                let target = if crate::route::is_first_column(file_path, col_args) {
+                                    target_panes.first()
+                                } else {
+                                    target_panes.last()
+                                };
+                                if let Some(target) = target {
                                     let swap_session = target_sess.to_string();
                                     sync_log(&format!(
                                         "rescue_action=swap-pane src={} dst={} target_window={}",

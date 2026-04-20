@@ -402,8 +402,7 @@ The route.rs fix was correct but addressed the wrong code path. The actual rever
 ```
 
 **All 1177 tests pass.** Both binaries rebuilt. Try switching right editor between claudescore.md and shelltab-clone.md.
-<!-- agent:boundary:8b94dfe6 -->
-<!-- agent:boundary:f0ff01e5 -->
+<!-- agent:boundary:bb098541 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -472,9 +472,21 @@ release
 Bumped to v0.33.8, VERSIONS.md updated, clippy clean, 301 tests passing, `~/.cargo/bin/agent-doc` installed.
 
 **Manual testing gate** (required before publish): verify rename debounce works in a live session — rename a session doc in IDEA, confirm no spurious pane creation.
-
 Let me know when confirmed and I'll proceed with: `cargo publish` → tag → GitHub Release.
-<!-- agent:boundary:7c4d325f -->
+publish
+### Re: v0.33.8 published — sonnet-4-6
+
+Published to crates.io, tagged, GitHub Release created with binary.
+
+- crates.io: `agent-doc v0.33.8`
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.33.8
+- `~/.cargo/bin/agent-doc` reinstalled (post-publish)
+- `target/release/agent-doc` built
+- Parent repo pointer updated
+
+PyPI will publish automatically via CI on the `release: published` event.
+<!-- agent:boundary:952dcf3c -->
+<!-- agent:boundary:9816801b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

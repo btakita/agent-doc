@@ -71,8 +71,7 @@ Yes — the original pane is gone. Here's the evidence from the commit timeline:
 So the IDE plugin created pane %77 and started a fresh Claude Code instance. Your prompt ("Move the spec... Note I just moved this file to tasks/software/tsift.md") was received by the NEW session, which successfully did the compact/relocate. The original session (14:34 commits) was abandoned — its pane was either killed by the plugin or exited on its own when the session document disappeared from its expected path.
 
 **What should have happened:** The plugin should have detected the rename, updated sessions.json, and routed your prompt to the EXISTING pane. Instead it treated the renamed file as "new session needed" and orphaned the original.
-<!-- agent:boundary:2fa9a1ff -->
-<!-- agent:boundary:7656c7d8 -->
+<!-- agent:boundary:b5dcd4c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -38,8 +38,7 @@ Updated both:
 2. **runbooks/pending-ops.md** (§What to decide each cycle) — added matching bullet under the existing decision list.
 
 The rule is now: if my response contains deferred-action language, I must also `--pending-add` it. This prevents "Worth revisiting" from dying as prose in a compacted exchange.
-<!-- agent:boundary:f79cc535 -->
-<!-- agent:boundary:b46b7524 -->
+<!-- agent:boundary:e9b76325 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

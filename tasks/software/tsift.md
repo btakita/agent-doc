@@ -453,8 +453,7 @@ tsift graph --section "Architecture"    # find this heading across all docs
 The built-in graph covers the structural, deterministic connections — links, headings, code references. That's 80% of the value for navigating a workspace like agent-loop. graphify remains the option for the semantic layer (LLM-extracted entities, clustering, visualization) if you later want richer concept mapping beyond what the AST can see.
 
 **Implementation path:** extend the markdown `symbol_query()` to also capture links and code spans, add the graph tables to `index.db`, wire into `tsift graph` subcommands. Reuses existing infrastructure — walk, index, tree-sitter parsing.
-<!-- agent:boundary:499c30aa -->
-<!-- agent:boundary:20535f07 -->
+<!-- agent:boundary:40f7d3a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

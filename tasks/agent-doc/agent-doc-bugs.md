@@ -437,7 +437,25 @@ Investigated the CRDT merge pipeline end-to-end. The duplication is most likely 
 1. **Guard the disk write on sidecar timeout:** Before CRDT merging on the IPC timeout path, check if `content_current` already contains the agent response. If `content_ours` content appears in `content_current`, skip the merge — the plugin already applied it.
 
 2. **Lower dedup threshold or add content-aware dedup:** Either lower `dedup_adjacent_blocks` to ≥1 non-empty line (risk: false positives on intentionally repeated single lines like `---`), or add a targeted dedup that compares the ours-side patches against the merged result.
-<!-- agent:boundary:acbaa65c -->
+
+Add the fixes to agent:pending. We have a skill for this but the skill is not working.
+Implement fix #1 with tests.
+### Re: pending + fix #1 implementation — opus-4-6
+
+**Fix #1 implemented:** Added `response_already_in_current()` guard to the IPC timeout path in `write.rs`.
+
+**What it does:** Before CRDT merging on the IPC timeout/exit(75) path, the guard extracts lines that `content_ours` added to the exchange component (relative to `base`). If ≥80% of those lines are already in `content_current`, the plugin has already applied the response — skip the CRDT merge and use `content_current` directly.
+
+**Code changes:**
+- `write.rs` — new function `response_already_in_current(base, content_ours, content_current) -> bool`
+- `write.rs` — new branch in IPC timeout path (line ~1219): returns `content_current` when plugin applied, avoiding duplicate response via CRDT
+- 4 new tests: detects plugin-applied, false when not applied, false when no exchange, false when no changes
+
+**Test results:** 1181 pass, clippy clean. Both binaries rebuilt (`cargo install` + `cargo build --release`).
+
+Two items added to pending. Fix #2 (dedup threshold) is lower priority — fix #1 addresses the root cause; fix #2 is defense-in-depth.
+<!-- agent:boundary:4ddcdd70 -->
+<!-- agent:boundary:0aa5a3d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -447,5 +465,7 @@ Investigated the CRDT merge pipeline end-to-end. The duplication is most likely 
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
+- [ ] [#15mw] IPC sidecar ack timeout guard — skip CRDT merge when plugin already applied response (write.rs)
+- [ ] [#3yc9] Lower dedup threshold or add content-aware dedup for single-line CRDT duplicates (crdt.rs)
 <!-- /agent:pending -->
 ## Assistant

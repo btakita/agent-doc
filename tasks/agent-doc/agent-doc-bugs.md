@@ -400,7 +400,34 @@ You're right — focus-gating is too aggressive. It breaks the cold-start case:
 **Recommendation: revert focus-gate, keep #qam7 as the targeted fix.** The rename debounce (#qam7) solves the actual bug (spurious pane creation on file renames) without degrading the cold-start experience. Focus-gating was a sledgehammer where a scalpel is needed.
 
 I'll revert the focus-gate code but keep the Tier 1 logging (pane ID in auto-start messages + batch summary). Want me to proceed with the revert?
-<!-- agent:boundary:4a8efd1a -->
+Revert focus-gate code, including tests and specs.
+Do #qam7 with spec and tests.
+### Re: focus-gate reverted, #qam7 done — opus-4-6
+
+**Focus-gate reverted:** Removed the focus-gate code, tests (3), and spec entries from sync.rs. Batch summary tests (2) and Tier 1 pane ID logging remain.
+
+**#qam7 — Rename debounce (done):**
+
+Added `--rename` flag to `agent-doc sync`. When FileRenameListener fires:
+1. Plugin calls `agent-doc sync --col ... --focus <new_path> --rename`
+2. CLI writes debounce marker: `.agent-doc/rename-debounce/<hash>.marker` (5s TTL)
+3. Auto-start loop checks markers before spawning — skips if marker is active
+4. EditorTabSyncListener-triggered sync (no `--rename`) also respects the marker
+5. After 5s, marker expires and normal auto-start resumes
+
+**Changes across layers:**
+- `sync.rs` — `write_rename_debounce()`, `has_rename_debounce()`, debounce check in auto-start loop
+- `main.rs` — `--rename` CLI flag on Sync command
+- `FileRenameListener.kt` — passes `--rename` in `buildSyncCommand()`
+- `extension.ts` — passes `--rename` in `onDidRenameFiles` handler
+- `FileRenameListenerTest.kt` — updated assertions for `--rename` flag
+
+**Tests:** 3 new rename debounce tests + updated JB tests. **Spec:** Rename debounce section added (Spec + Contracts + Evals). All 301 lib tests + clippy clean. Both binaries installed.
+
+JB plugin needs rebuild for testing.
+<!-- agent:boundary:04f41684 -->
+build + install
+<!-- agent:boundary:20bab3ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

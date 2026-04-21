@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.9
+
+- **Fix: CommitLock uses try_lock_exclusive to prevent indefinite hang.** `CommitLock::acquire` (git.rs) previously called `fs2::lock_exclusive()` which blocks indefinitely when another process holds the lock. In the IPC-sidecar-timeout fallback path (exit 75), the write to disk succeeded but `git::commit` blocked at the flock — causing the skill process to hang. Changed to `try_lock_exclusive()`: returns `None` immediately when contended, proceeding unlocked. Git's own `index.lock` retry loop (3 attempts with exponential backoff) handles serialization at the git layer.
+
 ## 0.33.8
 
 - **Rename debounce (#qam7).** `agent-doc sync --rename` writes a 5s debounce marker (`.agent-doc/rename-debounce/<hash>.marker`) for the focused file; subsequent auto-start checks skip files with active markers. Prevents spurious pane creation when `FileRenameListener` (JB) or `onDidRenameFiles` (VS Code) triggers sync for a file with no alive pane. Both editor plugins now pass `--rename` on file rename/move events. JB plugin 0.2.70, VS Code extension 0.2.7.

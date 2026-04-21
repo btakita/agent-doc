@@ -848,7 +848,59 @@ These no-op paths are common during normal operation (boundary reposition, prefi
 **Install the JB plugin** to activate the sidecar fix. The CLI changes are already live.
 
 **Why no degraded mode?** Socket delivery is fast (<10ms). Even when sidecar fails, the plugin still applies patches from the socket message — the editor updates instantly. The only cost of a sidecar timeout is a 200ms poll + disk write fallback (~50ms). The degraded mode was saving 250ms per write but costing 30-60s in editor latency — net negative.
-<!-- agent:boundary:0178e090 -->
+
+❯ In src/session-share/tasks/claude-code-action.md, the last line of my prompt "This seems to be running claude-code-action with default settings. What would the default settings do?" has 2 issues. Why?
+❯ - The line was duplicated after the response patch
+❯ - The line does not have a `❯ ` prefix.
+
+❯ Also, this document's user prompts don't have `❯ ` prefixes. Why?
+### Re: line duplication + missing ❯ prefixes — opus-4-6
+
+#### 1. Why was the line duplicated after the response patch?
+
+Confirmed via git history of `src/session-share/tasks/claude-code-action.md`. Three commits tell the story:
+
+| Commit | What happened |
+|---|---|
+| `a9144a3` | Initial doc — empty exchange with boundary `5d3ae871` |
+| `38a4966` | Boundary repositioned to `9151cb12` (no content) |
+| `f01dec3` | User prompt + response written — **duplication here** |
+
+The diff in `f01dec3` shows:
+
+```
++In short — this is a minimal "tag-and-respond" setup...
++<!-- agent:boundary:f3d2a08e -->
++This seems to be running claude-code-action with default settings...
++<!-- agent:boundary:36af1a17 -->
+ &lt;!-- /agent:exchange --&gt;
+```
+
+Two boundary markers sandwich the duplicated line. Root cause: the **baseline was empty** (exchange had no content when the snapshot was taken), so the CRDT merge saw the user's prompt line as a user-only addition and the response as an agent-only addition. During merge, the last prompt line landed in both the user region (correct position, line 27) and after the agent region (spurious, line 80). The two boundaries confirm this — each write path (IPC + disk fallback, or two merge passes) contributed its own boundary, with the orphaned user line trapped between them.
+
+This is a CRDT merge edge case: when the baseline is empty, the merge has no shared anchor between user content and agent content, so it can't reliably determine ordering at the junction point.
+
+#### 2. Why doesn't the duplicated line have a `❯ ` prefix?
+
+Because the original doesn't either. Line 27 in the document:
+
+```
+This seems to be running claude-code-action with default settings. What would the default settings do?
+```
+
+The user typed lines 15–16 with `❯ ` (`❯ Review...`, `❯ In claudescore.com...`) but line 27 was typed without it — it's a continuation thought after the code block, not a new command.
+
+The duplication preserved the exact text, so line 80 is a byte-identical copy of line 27 — no `❯ ` on either.
+
+#### 3. Why don't some user prompts in agent-doc-bugs.md have `❯ ` prefixes?
+
+The `❯ ` is a **manual convention** — agent-doc doesn't auto-add it. The `❯` symbol in the codebase is only used in `route.rs` for detecting Claude Code's idle prompt in tmux panes (pane-ready detection), not for document content.
+
+In this document, 11 user prompts have `❯ ` and at least 4 don't (e.g., "In src/session-share/tasks/claudescore.md...", "I moved tasks/tsift.md...", "The response did eventually appear..."). Whether a prompt has `❯ ` depends entirely on whether the user typed it in the editor.
+
+**Design question this surfaces:** should agent-doc auto-prepend `❯ ` to new user content detected in the diff? This would make user/agent attribution unambiguous in the exchange, especially after compaction removes structural cues. It could be a preflight or write-time normalization: if the diff introduces new lines before the boundary that don't start with `###` (agent heading) or `❯`, auto-prepend `❯ ` to the first line of each contiguous user block.
+<!-- agent:boundary:e6e2f1db -->
+<!-- agent:boundary:97b8573f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

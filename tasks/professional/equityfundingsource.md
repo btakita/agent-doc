@@ -165,7 +165,32 @@ The bucket **does exist** on your `brian.takita@gmail.com` account. I just verif
 It's listed alongside your other R2 buckets (assets-briantakita-me, assets-brookebrodack, etc.).
 
 **To find it in the dashboard:** Go to Cloudflare Dashboard → select your account → R2 Object Storage (left sidebar). It should appear as `equityfundingsource-assets`. If you're on the wrong account in the dashboard (e.g., the Monsterrodholder account), you won't see it — make sure you're viewing the `Brian.takita@gmail.com` account.
-<!-- agent:boundary:d6cb490a -->
+
+Please give btak.dev@gmail.com `BTAK_DEV_CLOUDFLARE_ACCOUNT_ID="$(passage btak.dev/CLOUDFLARE_ACCOUNT_ID)"` rw access to the equityfundingsource-assets bucket
+### Re: R2 access for btak.dev — opus-4-6
+
+The wrangler OAuth token only has `account:read` — it can't add members programmatically. Two options:
+
+#### Option A: Add as account member (dashboard)
+
+1. Cloudflare Dashboard → Manage Account → Members
+2. Invite `btak.dev@gmail.com`
+3. Assign the **Workers Editor** role (no dedicated R2 role exists — R2 access comes through Workers permissions)
+4. The dev accepts the invite, then `wrangler` commands against the R2 bucket work under their own auth
+
+#### Option B: Create R2 API token (S3-compatible credentials)
+
+1. Dashboard → R2 Object Storage → Manage R2 API Tokens → Create API Token
+2. Permissions: Object Read & Write
+3. Specify bucket: `equityfundingsource-assets` (scoped, not account-wide)
+4. Create → gives Access Key ID + Secret Access Key
+5. Share credentials with the dev via `passage` — they configure wrangler or use S3-compatible tools
+
+**Recommendation:** Option A is better for a developer who'll be using `wrangler` regularly. Option B is better for CI/CD or a dev who only needs S3-compatible access to this one bucket.
+
+Note: Cloudflare R2 doesn't support cross-account bucket policies (unlike AWS S3), so even though btak.dev has their own Cloudflare account, bucket access must go through your account — either as a member or via shared API credentials.
+<!-- agent:boundary:b76c16f3 -->
+<!-- agent:boundary:fb56c350 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

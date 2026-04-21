@@ -90,7 +90,7 @@ I crawled both sites side by side. Here's how the rappstack build (equityfunding
 **Design quality:** The pages.dev build is cleaner and more modern — minimal clutter, better section separation, mobile-first responsive. The WordPress site reads as a template with content poured in. The pages.dev version reads as a purpose-built site. Neither is going to win design awards, but pages.dev is meaningfully better positioned for trust with borrowers considering six-figure loans.
 
 **Bottom line:** pages.dev is already ahead. The gaps (blog, investor opt-in) are additive features we can build, not architectural disadvantages. WordPress's only real advantage is that it's the live domain — which is just a DNS change.
-<!-- agent:boundary:c7e98b32 -->
+<!-- agent:boundary:83b24257 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -105,8 +105,7 @@ bucket_name = "equityfundingsource-assets"
 **Current usage:** The loan application form (`POST /api/apply`) uploads documents into this bucket under `quarantine/applications/{application_id}/{timestamp}-{filename}`. Uploads are tracked in D1 (`uploaded_documents` table) with `r2_key`, `content_type`, and `size_bytes`. Max file size: 256 MB. Allowed types: PDF, JPEG, PNG, GIF, WebP, DOC, DOCX, XLS, XLSX.
 
 **Not currently used for:** static asset hosting (images, CSS, etc.) — the pages.dev build serves those from the Pages deployment itself. If you're asking because you want to serve assets (e.g., property photos, PDFs) from R2 via a custom domain, that's straightforward to add with an R2 custom domain binding or a Workers route.
-<!-- agent:boundary:1ac92ecc -->
-<!-- agent:boundary:e3d1c75f -->
+<!-- agent:boundary:f35c8daf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

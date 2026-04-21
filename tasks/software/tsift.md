@@ -756,7 +756,22 @@ $ tsift graph cmd_graph --callees
 **Docs updated:** `src/tsift/CLAUDE.md` now documents `index`, `search`, `graph` commands with workspace flags, the graph module architecture, tree-sitter dependency, and updated test count (116).
 
 **Skill missing:** The `/tsift` skill (`.claude/skills/tsift/`) doesn't exist — session doc mentions it was installed previously but it's gone from the repo. Want me to recreate it?
-<!-- agent:boundary:7dadec98 -->
+
+yes
+### Re: recreate tsift skill — opus-4-6
+
+Done. Created `.claude/skills/tsift/` with:
+
+- **SKILL.md** — TRIGGER/SKIP rules, all 7 commands documented (index, search, graph, edit, route, rewrite, sql), workspace flags, submodule scoping
+- **runbooks/search-strategies.md** — when to use lexical vs hybrid vs vector, workspace search patterns, first-run model download note
+
+The skill is already live in the available skills list (`/tsift`).
+
+**Also committed:**
+- Bug fix (`end_line` in `extract_symbols`) + CLAUDE.md update pushed to tsift submodule (`e0c37f1`)
+- Parent submodule pointer updated (`528d91b3`)
+<!-- agent:boundary:3fd0b63b -->
+<!-- agent:boundary:2987df40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

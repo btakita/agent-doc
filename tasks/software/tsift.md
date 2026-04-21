@@ -793,13 +793,29 @@ Done in commit `77b8fd8`, pushed. Parent submodule updated (`6ebc02eb`).
 - `test_jsx_arrow_component` — arrow + function components
 
 Clippy clean, all 122 tests pass.
-<!-- agent:boundary:7ab96fe8 -->
+do #6xwr. add spec + test. run tests. commit + push
+### Re: #6xwr language auto-detection — opus-4-6
+
+Already implemented — no code changes needed.
+
+`Lang::from_extension()` in `lang/mod.rs:39` handles all extensions: `.rs`, `.py`, `.pyi`, `.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`, `.jsx`, `.kt`, `.kts`, `.zig`, `.sh`, `.bash`, `.zsh`, `.md`, `.mdx`. The walker (`walk.rs:31`) uses it during indexing to assign languages automatically.
+
+**Spec:** SPEC.md documents the full extension table (lines 105-114) and the `from_extension` API (line 154).
+
+**Tests already exist:**
+- `test_extension_dispatch` — verifies all 17 extensions map to correct language names
+- `test_unknown_extension_returns_none` — verifies `.xyz`, empty, `.txt` return None
+- `walk_assigns_correct_language` — verifies `.rs` → rust, `.py` → python, `.tsx` → tsx in the walker
+
+Marking as done — this was completed as part of the initial multi-language tree-sitter implementation.
+<!-- agent:boundary:ca70bc63 -->
+<!-- agent:boundary:537d3a16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
+- [x] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)

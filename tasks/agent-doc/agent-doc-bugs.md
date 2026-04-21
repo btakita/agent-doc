@@ -740,8 +740,7 @@ If both processes try to `git commit` simultaneously, git's own `index.lock` han
 **Net result:** The commit still happens in the common case (no contention = same behavior as today). When contended, it either succeeds after a brief retry or defers to the next cycle — but never hangs.
 
 One-line change, no behavioral regression on the happy path, the exit(75) path still commits when the lock is free.
-<!-- agent:boundary:c713e618 -->
-<!-- agent:boundary:f23de566 -->
+<!-- agent:boundary:b81f7a48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

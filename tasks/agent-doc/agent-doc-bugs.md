@@ -998,7 +998,19 @@ Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment
 ### Re: return_stashed_panes_skips_idle_shells — opus-4-6
 
 No — the test passes cleanly (ran it just now: 1 passed, 0 failures). It's in `resync.rs` and tests tmux pane management (idle shells in stash should stay in stash, not be returned). It's unrelated to the HTML comment parser fix — no component parsing involved. Nothing to fix here.
-<!-- agent:boundary:3f39cf03 -->
+
+do #cfdy. add tests. build + install for local testing
+### Re: #cfdy verification — opus-4-6
+
+Added 3 tests to `component.rs` covering the #cfdy scenario (literal HTML comments in pending items):
+
+1. **pending_item_with_literal_html_comment_opener** — pending item containing `` `<!-- ` `` doesn't eat the close marker
+2. **multiple_non_agent_html_comments_in_pending** — multiple non-agent `<!-- ... -->` fragments in pending items
+3. **exchange_and_pending_both_with_html_comments_in_content** — sibling components both containing non-agent HTML comments parse correctly without crossing boundaries
+
+All 3 pass. Full suite: 1215 passed, 6 ignored, 0 failures. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
+<!-- agent:boundary:f67a958d -->
+<!-- agent:boundary:c49b8dbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1007,6 +1019,6 @@ No — the test passes cleanly (ran it just now: 1 passed, 0 failures). It's in 
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [ ] [#1n7f] Empty-baseline CRDT merge duplication — fixed in crdt.rs (stale detection + prefix advancement). Verify live behavior on next IPC-timeout write.
-- [ ] [#cfdy] Component parser: non-agent HTML comments in content ate close markers — fixed with peek guard in component.rs. Verify with documents containing literal HTML comments in pending items.
+- [x] [#cfdy] Component parser: non-agent HTML comments in content ate close markers — fixed with peek guard in component.rs. Verify with documents containing literal HTML comments in pending items.
 <!-- /agent:pending -->
 ## Assistant

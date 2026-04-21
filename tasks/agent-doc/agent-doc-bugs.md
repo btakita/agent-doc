@@ -1027,7 +1027,42 @@ v0.33.10 released. Full changelog:
 Two bugs found and fixed during the release process: (1) `git init` in the `ffi_git_commit` test was inheriting `GIT_DIR` from the hook context, corrupting the submodule's `core.worktree` config to a temp path. Fixed by adding `env_remove` + macro in the test. (2) The `core.worktree` got set to `/tmp/.tmpY9lu0u` and had to be manually repaired.
 
 **Links**: [crates.io](https://crates.io/crates/agent-doc/0.33.10) · [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.33.10)
-<!-- agent:boundary:689e7805 -->
+
+Please assess why the response patchback was not sent to src/session-share/tasks/claudescore.md
+
+Please assess why agent-doc turns are taking a very long time in this session >20 minutes.
+### Re: claudescore patchback failure, slow turn times — opus-4-6
+
+#### Claudescore patchback: orphaned response found
+
+There's a pending response file sitting in `src/session-share/.agent-doc/pending/b29c0ad1...md` that was never applied to the document. It contains a full "Re: claude-code-action workflow" response (~3.4KB). A second degenerate pending file (`b1eddaa9...md`, 24 bytes — empty `<!-- patch:exchange -->`) also exists.
+
+**Root cause: repeated commit failures.** The ops.log shows **25 `commit_failed` events** for claudescore.md, all with `exit_code=1`. The pattern:
+- IPC writes succeed — `ipc_file_delivered`, `snapshot_save`, `ipc_write_consumed` all log normally
+- Git commits fail immediately after — always when using absolute paths (`/home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md`)
+- The last cluster of failures: timestamps 1775882422, 1775883572, 1775883886, 1775884031
+
+The commit failures don't prevent the IPC write from updating the file, but they break the snapshot-to-git synchronization. When the next preflight runs, the snapshot is stale relative to git, causing drift warnings and eventually desynchronized diffs. The pending response file was generated but the cycle never completed cleanly — the file was saved as a fallback but never recovered on a subsequent preflight.
+
+**Why preflight recovery missed it:** The recover step found a *different* pending file whose content was already present in the document and cleaned that one up. The two remaining files (including the real response) weren't matched.
+
+**Immediate fix:** Run `agent-doc write src/session-share/tasks/claudescore.md` with the pending content manually, or delete the stale pending files and re-generate the response in the claudescore session.
+
+**Longer-term:** The absolute-path commit failures suggest a path-resolution bug in the submodule commit logic. Relative-path commits (`src/session-share/tasks/claudescore.md`) succeed in the same ops.log window where absolute-path commits fail.
+
+#### Slow turn times: three compounding factors
+
+**1. Document size — 70KB / 1043 lines.** This is the largest active session document. Every `fresh_restart` (Claude Code exiting and restarting after context compaction) requires re-reading the full document plus preflight git operations. The session log shows restart counts reaching 13-16 in a single session window.
+
+**2. High restart frequency.** Today's session log shows rapid restart cycling — sometimes 6-8 restarts in a single session window. Each restart is a cold start: full context reload, preflight, diff computation, baseline save. At 70KB per load, this compounds quickly.
+
+**3. Complex multi-step work.** The 21-minute and 24-minute gaps in the commit log correspond to:
+- 15:44 → 16:05 (21 min): component parser bug discovery, root-cause analysis, fix, 5 new tests, full suite run (1215 tests), build + install
+- 16:17 → 16:41 (24 min): full release cycle — version bump, cargo publish, GitHub Release creation, pyproject sync, build verification, changelog generation
+
+These are genuine work time, not idle. A `compact exchange` would reduce the 70KB document and speed up cold-start reloads.
+<!-- agent:boundary:9ba31a20 -->
+<!-- agent:boundary:18f0b586 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

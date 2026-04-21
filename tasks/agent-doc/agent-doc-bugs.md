@@ -740,7 +740,24 @@ If both processes try to `git commit` simultaneously, git's own `index.lock` han
 **Net result:** The commit still happens in the common case (no contention = same behavior as today). When contended, it either succeeds after a brief retry or defers to the next cycle — but never hangs.
 
 One-line change, no behavioral regression on the happy path, the exit(75) path still commits when the lock is free.
-<!-- agent:boundary:b81f7a48 -->
+do the fix. add spec + test. run tests. commit + push. build + install for testing
+### Re: CommitLock fix done — opus-4-6
+
+**Implemented and pushed.** Commit: `1004028` on main.
+
+**Change:** `git.rs:92` — `lock_exclusive()` → `try_lock_exclusive()`. One-line behavioral change. When the lock is contended, `CommitLock::acquire` now returns `None` immediately (proceeding unlocked) instead of blocking indefinitely.
+
+**Test added:** `commit_lock_nonblocking_when_held` — acquires the lock manually from another handle, verifies `CommitLock::acquire` returns `None` in <100ms.
+
+**Test results:** 1216 passed + 1 known-flaky (`ffi_git_commit_commits_staged_file` — parallel race, passes isolated). Clippy clean.
+
+**Both binaries installed:**
+- `~/.cargo/bin/agent-doc` (tmux sessions)
+- `target/release/agent-doc` (via `.bin/agent-doc` symlink)
+
+Ready for live testing. The next time you hit the IPC-sidecar-timeout scenario, `git::commit` should return in milliseconds rather than hanging.
+<!-- agent:boundary:ddf0e608 -->
+<!-- agent:boundary:c2bdff83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

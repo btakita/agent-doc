@@ -2,11 +2,13 @@
 agent_doc_session: test
 ---
 
-<!-- agent:exchange -->
-### Re: older
-old body
+## User
 
-### Re: newer
-new body
-<!-- agent:boundary:92034255 -->
-<!-- /agent:exchange -->
+Hello
+
+## Assistant
+
+Response
+
+## User
+

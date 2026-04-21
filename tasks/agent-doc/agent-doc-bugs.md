@@ -1112,7 +1112,37 @@ I have a background agent reading the actual commit code to pinpoint the exact l
 #### Trailing dash on point 1
 
 Noticed the trailing `-` on the document size paragraph — looks like an accidental edit artifact. No action needed unless intentional.
-<!-- agent:boundary:14669dfc -->
+❯ do the proposed fix. add tests. build + install for local testing.
+### Re: submodule commit path fix — opus-4-6
+
+#### Root cause
+
+`git rev-parse --show-toplevel` returns canonicalized paths (symlinks resolved), but `resolved` from `resolve_to_git_root` preserves the original non-canonical path. When any symlink exists in the path chain, `strip_prefix` fails silently and the `unwrap_or` fallback passes the full absolute path to `git update-index --cacheinfo`, which rejects it.
+
+#### Fix: `relative_to()` helper in git.rs
+
+Added a `relative_to(path, root)` function that canonicalizes both sides before `strip_prefix`, with graceful fallback:
+
+1. Canonicalize both → `strip_prefix` (handles symlinks)
+2. Fall back to non-canonical `strip_prefix` (handles canonicalize failure)
+3. Final fallback: return path as-is
+
+Applied in two locations:
+- `commit()` line 453: replaces the raw `strip_prefix` for `update-index --cacheinfo`
+- `git_add_force()` line 805: replaces the manual `if is_absolute` block
+
+#### Tests added (4)
+
+1. **relative_to_strips_prefix_for_normal_paths** — basic path stripping
+2. **relative_to_returns_original_when_no_common_prefix** — disjoint paths
+3. **relative_to_handles_symlinked_path** — file accessed via symlink produces correct relative path
+4. **commit_in_submodule_with_symlinked_absolute_path** — full integration: creates superproject + submodule, accesses file through a symlink, verifies commit succeeds and agent-doc commit appears in submodule log
+
+**Full suite: 1219 passed, 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
+<!-- agent:boundary:f448402a -->
+In src/session-share, I ran `agent-doc tasks/claudescore.md`. When I navigated the editor to this document then back to claudescore.md, the running tmux pane with the running turn was swapped out for a new tmux pane. Why?
+Can we reassociate the old claiming tmux pane with claudescore.md?
+<!-- agent:boundary:602f387b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

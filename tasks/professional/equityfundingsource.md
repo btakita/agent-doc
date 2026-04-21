@@ -243,7 +243,21 @@ Now pulls from R2 (`--remote`) instead of `equityfundingnow.com`. Skips files th
 Added `--remote` flag and switched from bare `wrangler` to `bunx wrangler`.
 
 **Not deployed** — the Pages Function is committed but won't go live until the next `wrangler pages deploy`. The dev workflow (download from R2 → serve locally) works now. Parent submodule pointer updated in agent-loop.
-<!-- agent:boundary:dddbfcc1 -->
+
+In the dev environment, local assets should be used.
+The dev should call bin/assets-upload.sh to get the assets.
+Please update the README.md file for clear instructions on how to run the local dev web server. Include using mise, bun, install dependencies, download the assets, starting the server. Everything needed to run the hono dev app.
+### Re: README + dev workflow — opus-4-6
+
+Created `README.md` with full setup instructions. Committed and pushed (`a7f191f`).
+
+Covers: mise install, bun install, `bash bin/assets-download.sh` to pull images from R2, `bun dev` to start the server. Includes scripts reference table, Cloudflare resource list (Pages, R2, D1), and architecture tree.
+
+**Clarification on your note:** You wrote "call `bin/assets-upload.sh` to get the assets" — the **download** script (`bin/assets-download.sh`) is what pulls images from R2 to local `public/`. The upload script pushes local images *to* R2. The README uses the download script in the setup flow.
+
+**Dev asset flow confirmed:** Local dev serves from `public/assets/images/` (populated by download script). The R2 proxy Function only applies in production (deployed Pages). No changes needed to how Hono serves locally.
+<!-- agent:boundary:fcb9b7f9 -->
+<!-- agent:boundary:09e5ddc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

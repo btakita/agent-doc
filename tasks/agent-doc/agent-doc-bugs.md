@@ -1139,10 +1139,9 @@ Applied in two locations:
 4. **commit_in_submodule_with_symlinked_absolute_path** — full integration: creates superproject + submodule, accesses file through a symlink, verifies commit succeeds and agent-doc commit appears in submodule log
 
 **Full suite: 1219 passed, 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
-<!-- agent:boundary:f448402a -->
 In src/session-share, I ran `agent-doc tasks/claudescore.md`. When I navigated the editor to this document then back to claudescore.md, the running tmux pane with the running turn was swapped out for a new tmux pane. Why?
 Can we reassociate the old claiming tmux pane with claudescore.md?
-<!-- agent:boundary:602f387b -->
+<!-- agent:boundary:2b948892 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

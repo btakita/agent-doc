@@ -189,7 +189,45 @@ The wrangler OAuth token only has `account:read` — it can't add members progra
 **Recommendation:** Option A is better for a developer who'll be using `wrangler` regularly. Option B is better for CI/CD or a dev who only needs S3-compatible access to this one bucket.
 
 Note: Cloudflare R2 doesn't support cross-account bucket policies (unlike AWS S3), so even though btak.dev has their own Cloudflare account, bucket access must go through your account — either as a member or via shared API credentials.
-<!-- agent:boundary:c774cd29 -->
+
+❯ Please give me the proper env variable names for:
+❯ - CF Token value
+❯ - Access Key ID
+❯ - Secret Access Key
+❯ - Use jurisdiction-specific endpoints for S3 clients
+### Re: R2 env variable names — opus-4-6
+
+#### For wrangler CLI
+
+```bash
+CLOUDFLARE_API_TOKEN="<token>"        # API token (not OAuth — create via dashboard)
+CLOUDFLARE_ACCOUNT_ID="<account_id>"  # Account ID
+```
+
+#### For S3-compatible clients (aws-sdk, boto3, rclone, etc.)
+
+```bash
+AWS_ACCESS_KEY_ID="<r2_access_key_id>"
+AWS_SECRET_ACCESS_KEY="<r2_secret_access_key>"
+AWS_ENDPOINT_URL_S3="https://<account_id>.r2.cloudflarestorage.com"
+```
+
+#### Jurisdiction-specific S3 endpoints
+
+```bash
+# Default (auto)
+AWS_ENDPOINT_URL_S3="https://<account_id>.r2.cloudflarestorage.com"
+
+# EU jurisdiction
+AWS_ENDPOINT_URL_S3="https://<account_id>.eu.r2.cloudflarestorage.com"
+
+# FedRAMP
+AWS_ENDPOINT_URL_S3="https://<account_id>.fedramp.r2.cloudflarestorage.com"
+```
+
+**Note:** `AWS_ENDPOINT_URL_S3` is the newer standard (used by AWS SDK v3, boto3). Some older tools use `AWS_ENDPOINT_URL` or require `--endpoint-url` flag. The R2 Access Key ID and Secret Access Key are separate from Cloudflare API tokens — they're created specifically for S3-compatible access under R2 → Manage R2 API Tokens in the dashboard.
+<!-- agent:boundary:45504e70 -->
+<!-- agent:boundary:ab61a86c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

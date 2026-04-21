@@ -226,7 +226,25 @@ AWS_ENDPOINT_URL_S3="https://<account_id>.fedramp.r2.cloudflarestorage.com"
 ```
 
 **Note:** `AWS_ENDPOINT_URL_S3` is the newer standard (used by AWS SDK v3, boto3). Some older tools use `AWS_ENDPOINT_URL` or require `--endpoint-url` flag. The R2 Access Key ID and Secret Access Key are separate from Cloudflare API tokens — they're created specifically for S3-compatible access under R2 → Manage R2 API Tokens in the dashboard.
-<!-- agent:boundary:22d05711 -->
+❯ commit + push equityfundingsource-dev changes.
+
+❯ Switch the dev source to serve from the r2 bucket. Update the download and upload assets scripts to use the R2 bucket. Do not deploy yet.
+### Re: R2 asset serving + commit — opus-4-6
+
+Done. Three changes committed and pushed to `equityfundingsource-dev` (`382cc76`):
+
+**1. New Pages Function: `functions/assets/[[path]].ts`**
+Proxies `/assets/*` requests to the `R2_ASSETS` bucket. Sets `Cache-Control: public, max-age=31536000, immutable` and detects content type by extension. In production, this replaces static file serving for images.
+
+**2. Updated `bin/assets-download.sh`**
+Now pulls from R2 (`--remote`) instead of `equityfundingnow.com`. Skips files that already exist locally (incremental sync). Requires `wrangler` auth — the other dev will need Cloudflare account access (Options A/B from earlier).
+
+**3. Updated `bin/assets-upload.sh`**
+Added `--remote` flag and switched from bare `wrangler` to `bunx wrangler`.
+
+**Not deployed** — the Pages Function is committed but won't go live until the next `wrangler pages deploy`. The dev workflow (download from R2 → serve locally) works now. Parent submodule pointer updated in agent-loop.
+<!-- agent:boundary:13890664 -->
+<!-- agent:boundary:7a0539db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

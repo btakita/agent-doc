@@ -1701,40 +1701,11 @@ fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Optio
     Ok(Some(content))
 }
 
-const IPC_DEGRADED_FILE: &str = ".agent-doc/ipc-degraded";
-const IPC_DEGRADED_TTL_SECS: u64 = 3600; // 1 hour
-
-fn is_ipc_degraded(project_root: &Path) -> bool {
-    let marker = project_root.join(IPC_DEGRADED_FILE);
-    match marker.metadata() {
-        Ok(meta) => {
-            if let Ok(modified) = meta.modified()
-                && let Ok(age) = modified.elapsed()
-                && age.as_secs() > IPC_DEGRADED_TTL_SECS
-            {
-                let _ = std::fs::remove_file(&marker);
-                return false;
-            }
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-fn mark_ipc_degraded(project_root: &Path) {
-    let marker = project_root.join(IPC_DEGRADED_FILE);
-    if let Err(e) = std::fs::write(&marker, "") {
-        eprintln!("[write] WARNING: failed to write IPC degraded marker: {}", e);
-    } else {
-        eprintln!("[write] IPC degraded — subsequent writes will use disk until marker cleared or expires (1h)");
-    }
-}
-
-fn clear_ipc_degraded(project_root: &Path) {
-    let marker = project_root.join(IPC_DEGRADED_FILE);
+/// Remove any stale ipc-degraded marker left by older versions.
+fn cleanup_legacy_ipc_degraded(project_root: &Path) {
+    let marker = project_root.join(".agent-doc/ipc-degraded");
     if marker.exists() {
         let _ = std::fs::remove_file(&marker);
-        eprintln!("[write] IPC degraded marker cleared — sidecar received successfully");
     }
 }
 
@@ -1804,11 +1775,8 @@ pub fn try_ipc(
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Skip IPC entirely if degraded (previous sidecar timeout in this project)
-    if is_ipc_degraded(&project_root) {
-        eprintln!("[write] IPC degraded — skipping socket/file IPC, using disk write");
-        return Ok(IpcResult { success: false, patch_id });
-    }
+    // Clean up any legacy degraded marker from older versions
+    cleanup_legacy_ipc_degraded(&project_root);
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
@@ -1881,13 +1849,12 @@ pub fn try_ipc(
                 // Poll for ack-content sidecar (written by plugin after apply).
                 let sidecar = poll_ack_content_sidecar(
                     &project_root, &patch_id,
-                    std::time::Duration::from_millis(1000),
+                    std::time::Duration::from_millis(200),
                     std::time::Duration::from_millis(25),
                 )?;
                 if let Some(snap_content) = sidecar {
                     // Sidecar confirmed — plugin applied the content
                     eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", snap_content.len());
-                    clear_ipc_degraded(&project_root);
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
                     }
@@ -1917,13 +1884,13 @@ pub fn try_ipc(
                     }
                     return Ok(IpcResult { success: true, patch_id });
                 }
-                // Sidecar timed out — can't confirm plugin applied content.
-                // Fall through to disk write as reliable fallback.
-                eprintln!("[write] sidecar ack timed out after 1000ms — socket delivery unconfirmed, falling back to disk write");
+                // Sidecar timed out — plugin likely applied the patch but the
+                // ack write was slow. Fall through to disk write for a reliable
+                // snapshot. No degradation — next write will still try socket.
+                eprintln!("[write] sidecar ack timed out — socket delivery unconfirmed, falling back to disk write");
                 if fallback_patch_file.is_some() {
                     eprintln!("[write] fallback patch file left for file watcher recovery");
                 }
-                mark_ipc_degraded(&project_root);
                 crate::ops_log::log_op(file, &format!(
                     "ipc_socket_sidecar_timeout file={} — falling back to disk write",
                     file.display()
@@ -4159,52 +4126,15 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn ipc_degraded_marker_blocks_ipc() {
+    fn cleanup_legacy_ipc_degraded_removes_marker() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
+        let marker = root.join(".agent-doc/ipc-degraded");
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-
-        assert!(!is_ipc_degraded(root), "should not be degraded initially");
-
-        mark_ipc_degraded(root);
-        assert!(is_ipc_degraded(root), "should be degraded after marking");
-
-        clear_ipc_degraded(root);
-        assert!(!is_ipc_degraded(root), "should not be degraded after clearing");
-    }
-
-    #[test]
-    fn ipc_degraded_marker_expires() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-
-        let marker = root.join(IPC_DEGRADED_FILE);
         std::fs::write(&marker, "").unwrap();
-
-        let two_hours_ago = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() - IPC_DEGRADED_TTL_SECS - 1;
-        let times = [
-            libc::timespec { tv_sec: two_hours_ago as i64, tv_nsec: 0 },
-            libc::timespec { tv_sec: two_hours_ago as i64, tv_nsec: 0 },
-        ];
-        let path_cstr = std::ffi::CString::new(marker.to_str().unwrap()).unwrap();
-        unsafe { libc::utimensat(libc::AT_FDCWD, path_cstr.as_ptr(), times.as_ptr(), 0); }
-
-        assert!(!is_ipc_degraded(root), "expired marker should not block IPC");
-        assert!(!marker.exists(), "expired marker should be cleaned up");
-    }
-
-    #[test]
-    fn ipc_degraded_marker_not_expired() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-
-        mark_ipc_degraded(root);
-        assert!(is_ipc_degraded(root), "fresh marker should block IPC");
+        assert!(marker.exists());
+        cleanup_legacy_ipc_degraded(root);
+        assert!(!marker.exists(), "legacy marker should be removed");
     }
 
     #[test]

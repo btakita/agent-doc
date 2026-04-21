@@ -149,44 +149,65 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         theirs_text.len()
     );
 
-    // Stale base detection: if the base text doesn't share a common prefix
+    // Stale base detection: if the base text doesn't share enough content
     // with both sides, it's stale. Use ours as the base instead.
     // This prevents duplicate insertions when both sides contain text
     // that the stale base doesn't have.
-    let ours_common = common_prefix_len(&base_text, ours_text);
-    let theirs_common = common_prefix_len(&base_text, theirs_text);
+    //
+    // We check both common prefix AND common suffix. Template documents
+    // have structural content (frontmatter, component markers, pending
+    // sections) that bookend the exchange. When the exchange is short or
+    // empty, only checking the prefix classifies a correct base as stale
+    // (the suffix — closing markers + pending — goes uncounted).
+    let ours_prefix = common_prefix_len(&base_text, ours_text);
+    let ours_suffix = common_suffix_len(&base_text, ours_text);
+    let theirs_prefix = common_prefix_len(&base_text, theirs_text);
+    let theirs_suffix = common_suffix_len(&base_text, theirs_text);
     let base_len = base_text.len();
 
+    // Clamp shared bytes to base_len (prefix + suffix can overlap for short strings)
+    let ours_shared = (ours_prefix + ours_suffix).min(base_len);
+    let theirs_shared = (theirs_prefix + theirs_suffix).min(base_len);
+
     if base_len > 0
-        && (ours_common as f64 / base_len as f64) < 0.5
-        && (theirs_common as f64 / base_len as f64) < 0.5
+        && (ours_shared as f64 / base_len as f64) < 0.5
+        && (theirs_shared as f64 / base_len as f64) < 0.5
     {
         eprintln!(
-            "[crdt] Stale CRDT base detected (common prefix: ours={}%, theirs={}%). Using ours as base.",
-            (ours_common * 100) / base_len,
-            (theirs_common * 100) / base_len
+            "[crdt] Stale CRDT base detected (shared: ours={}%, theirs={}%). Using ours as base.",
+            (ours_shared * 100) / base_len,
+            (theirs_shared * 100) / base_len
         );
         base_text = ours_text.to_string();
     }
 
     // Advance base to the common prefix of ours and theirs when it extends
-    // beyond the current base.
+    // beyond the point where the base diverges from either side.
     //
     // When both ours and theirs independently added the same text beyond the
-    // stale base (e.g., both contain a user prompt that the base doesn't have),
+    // base (e.g., both contain a user prompt that the base doesn't have),
     // the CRDT treats each insertion as independent and includes both, causing
     // duplication. Fix: use the common prefix of ours and theirs as the effective
     // base, so shared additions are not treated as independent insertions.
     //
-    // This handles the common pattern where:
-    //   base   = "old content"
-    //   ours   = "old content + user prompt + agent response"
-    //   theirs = "old content + user prompt + small edit"
-    // Without fix: user prompt appears twice (from both sides).
-    // With fix: base advances to "old content + user prompt", ours' diff is
-    //           just the agent response, theirs' diff is just the small edit.
+    // The divergence point (`base_diverge`) is where the base stops matching
+    // either side. Content shared by ours and theirs beyond this point was
+    // added by both sides independently and must be promoted into the base.
+    //
+    // This handles two patterns:
+    //   Pattern 1 (mutual prefix > base length):
+    //     base   = "old content"
+    //     ours   = "old content + user prompt + agent response"
+    //     theirs = "old content + user prompt + small edit"
+    //   Pattern 2 (base has trailing structure beyond divergence):
+    //     base   = "header + empty exchange + footer"
+    //     ours   = "header + prompt + response + footer"
+    //     theirs = "header + prompt + boundary + footer"
+    //   Both diverge from base at "header", but share "prompt" beyond it.
     let mutual_prefix = common_prefix_len(ours_text, theirs_text);
-    if mutual_prefix > base_text.len() {
+    let base_diverge = common_prefix_len(&base_text, ours_text)
+        .max(common_prefix_len(&base_text, theirs_text));
+    if mutual_prefix > base_diverge {
         // Snap to a line boundary to avoid splitting mid-line/mid-word.
         // Without this, the shared prefix can include partial formatting
         // sequences (e.g., a leading `*` from `**bold**`), causing the
@@ -195,13 +216,13 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         // instead of `**Soft-bristle brush only**`.
         let snap = &ours_text[..mutual_prefix];
         let snapped = match snap.rfind('\n') {
-            Some(pos) if pos >= base_text.len() => pos + 1,
-            _ => base_text.len(), // no suitable line boundary — don't advance
+            Some(pos) if pos >= base_diverge => pos + 1,
+            _ => base_diverge, // no suitable line boundary — don't advance
         };
-        if snapped > base_text.len() {
+        if snapped > base_diverge {
             eprintln!(
-                "[crdt] Advancing base to shared prefix (base_len={} → {})",
-                base_text.len(),
+                "[crdt] Advancing base to shared prefix (diverge={} → {})",
+                base_diverge,
                 snapped
             );
             base_text = ours_text[..snapped].to_string();
@@ -338,6 +359,11 @@ pub fn compact(state: &[u8]) -> Result<Vec<u8>> {
 /// Count the number of bytes in the common prefix of two strings.
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
+
+/// Count the number of bytes in the common suffix of two strings.
+fn common_suffix_len(a: &str, b: &str) -> usize {
+    a.bytes().rev().zip(b.bytes().rev()).take_while(|(x, y)| x == y).count()
 }
 
 /// Edit operation for replaying diffs onto a CRDT text.
@@ -1075,5 +1101,81 @@ commit and push all rappstack packages.
         assert!(!is_structural_block("### Heading"));
         assert!(!is_structural_block("some text"));
         assert!(!is_structural_block("---\nmore"));
+    }
+
+    /// Regression test: empty-baseline CRDT merge duplicates last user prompt line.
+    ///
+    /// Scenario (claude-code-action.md bug):
+    /// 1. Baseline = template document with empty exchange (just boundary marker)
+    /// 2. content_ours = baseline + response patches (response replaces boundary)
+    /// 3. content_current = user's file (user typed prompt before boundary)
+    /// 4. CRDT merge: both sides added content to the empty exchange
+    /// 5. BUG: last line of user's prompt appears twice (before and after response)
+    #[test]
+    fn merge_empty_exchange_no_duplicate_user_line() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let footer = "<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n";
+
+        // Base: empty exchange with boundary marker
+        let base = format!("{header}\n<!-- agent:boundary:base-id -->\n{footer}");
+
+        // Ours: response applied via boundary-aware append (boundary replaced)
+        let ours = format!("{header}\n### Re: topic — opus-4-6\n\nResponse content here.\n\nMore response text.\n\n<!-- agent:boundary:new-id -->\n{footer}");
+
+        // Theirs: user typed prompt before the boundary
+        let theirs = format!("{header}User prompt line one.\nUser prompt line two.\nLast line of user prompt.\n<!-- agent:boundary:base-id -->\n{footer}");
+
+        let base_doc = CrdtDoc::from_text(&base);
+        let base_state = base_doc.encode_state();
+
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        // Each user prompt line should appear exactly once
+        let count1 = merged.matches("User prompt line one.").count();
+        assert_eq!(count1, 1, "Line one duplicated (count={}). Merged:\n{}", count1, merged);
+
+        let count2 = merged.matches("User prompt line two.").count();
+        assert_eq!(count2, 1, "Line two duplicated (count={}). Merged:\n{}", count2, merged);
+
+        let count3 = merged.matches("Last line of user prompt.").count();
+        assert_eq!(count3, 1, "Last line duplicated (count={}). Merged:\n{}", count3, merged);
+
+        // Response should appear exactly once
+        assert!(merged.contains("### Re: topic — opus-4-6"), "Response heading missing:\n{}", merged);
+        assert!(merged.contains("Response content here."), "Response content missing:\n{}", merged);
+
+        // User prompt should come BEFORE response
+        let prompt_pos = merged.find("User prompt line one.").unwrap();
+        let response_pos = merged.find("### Re: topic").unwrap();
+        assert!(
+            prompt_pos < response_pos,
+            "User prompt should precede response. prompt={} response={}\nMerged:\n{}",
+            prompt_pos, response_pos, merged
+        );
+    }
+
+    /// Same as above but with ❯ prefixed user content (post-normalization).
+    #[test]
+    fn merge_empty_exchange_prefixed_prompts_no_duplicate() {
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let footer = "<!-- /agent:exchange -->\n";
+
+        let base = format!("{header}\n<!-- agent:boundary:base-id -->\n{footer}");
+
+        // Ours: response + normalized ❯ prefix on user lines
+        let ours = format!("{header}❯ Review the code\n❯ What does it do?\n\n### Re: code review — opus-4-6\n\nThe code does X.\n\n<!-- agent:boundary:new-id -->\n{footer}");
+
+        // Theirs: user's file with same prompt (also ❯ prefixed by IPC normalization)
+        let theirs = format!("{header}❯ Review the code\n❯ What does it do?\n<!-- agent:boundary:base-id -->\n{footer}");
+
+        let base_doc = CrdtDoc::from_text(&base);
+        let base_state = base_doc.encode_state();
+
+        let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        let count = merged.matches("❯ Review the code").count();
+        assert_eq!(count, 1, "Prompt duplicated (count={}). Merged:\n{}", count, merged);
+
+        assert!(merged.contains("The code does X."), "Response missing:\n{}", merged);
     }
 }

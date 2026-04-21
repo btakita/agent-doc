@@ -105,7 +105,37 @@ bucket_name = "equityfundingsource-assets"
 **Current usage:** The loan application form (`POST /api/apply`) uploads documents into this bucket under `quarantine/applications/{application_id}/{timestamp}-{filename}`. Uploads are tracked in D1 (`uploaded_documents` table) with `r2_key`, `content_type`, and `size_bytes`. Max file size: 256 MB. Allowed types: PDF, JPEG, PNG, GIF, WebP, DOC, DOCX, XLS, XLSX.
 
 **Not currently used for:** static asset hosting (images, CSS, etc.) — the pages.dev build serves those from the Pages deployment itself. If you're asking because you want to serve assets (e.g., property photos, PDFs) from R2 via a custom domain, that's straightforward to add with an R2 custom domain binding or a Workers route.
-<!-- agent:boundary:f35c8daf -->
+
+Yes. This will be for static asset hosting. The directory tree under src/equityfundingsource-dev/public
+### Re: R2 static asset hosting — opus-4-6
+
+Good call. The `public/` tree has 32 files (2 MB) — all images:
+
+```
+assets/images/
+├── about/       (7 files — judith-krug.jpg, family-home.jpg, etc.)
+├── deals/       (16 files — property photos for each funded deal)
+├── hero/        (3 files — hero-house.jpg, investor section)
+└── credentials/ (4 files — association logos, badges)
+```
+
+**Two approaches for serving from R2:**
+
+1. **R2 public access + CNAME** — enable public access on `equityfundingsource-assets`, point `assets.equityfundingsource.com` to the R2 public URL. Zero code changes beyond updating image `src` attributes. Simplest option.
+
+2. **Worker-proxied R2** — add a `/assets/*` route in the Pages Functions that reads from `R2_ASSETS` and serves with cache headers. More control (Cache-Control, content-type detection, future image transforms), and keeps everything under the main domain.
+
+**Migration steps (either approach):**
+1. Upload files: `wrangler r2 object put equityfundingsource-assets/assets/images/deals/malibu-500k.jpg --file public/assets/images/deals/malibu-500k.jpg` (or batch with a script)
+2. Update image references in the app to point to R2 URLs
+3. Remove images from `public/` and `.gitignore` the path
+4. Redeploy
+
+**Recommendation:** Option 2 (Worker-proxied) — keeps URLs on the main domain (better for SEO, no CORS), and you already have the `R2_ASSETS` binding wired up. The Worker route is ~20 lines.
+
+Which approach do you want, or should I just implement option 2?
+<!-- agent:boundary:102ff8c3 -->
+<!-- agent:boundary:0dfd1bce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

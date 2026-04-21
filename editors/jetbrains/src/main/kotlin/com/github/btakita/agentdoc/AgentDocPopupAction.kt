@@ -1,0 +1,46 @@
+package com.github.btakita.agentdoc
+
+import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.ui.popup.JBPopupFactory
+
+/**
+ * Shows a popup menu with Agent Doc commands when Alt+Enter is pressed in a .md file.
+ */
+class AgentDocPopupAction : AnAction() {
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val editor = e.getData(CommonDataKeys.EDITOR) ?: return
+
+        val group = DefaultActionGroup().apply {
+            add(ActionManager.getInstance().getAction("AgentDoc.Submit"))
+            add(ActionManager.getInstance().getAction("AgentDoc.RunWithJunie"))
+            add(ActionManager.getInstance().getAction("AgentDoc.Claim"))
+            add(ActionManager.getInstance().getAction("AgentDoc.ForceClaim"))
+            addSeparator()
+            add(ActionManager.getInstance().getAction("AgentDoc.SyncLayout"))
+            addSeparator()
+            add(ActionManager.getInstance().getAction("AgentDoc.RefreshEnvironment"))
+        }
+
+        val popup = JBPopupFactory.getInstance()
+            .createActionGroupPopup(
+                "Agent Doc",
+                group,
+                e.dataContext,
+                JBPopupFactory.ActionSelectionAid.NUMBERING,
+                true
+            )
+
+        popup.showInBestPositionFor(editor)
+    }
+
+    override fun update(e: AnActionEvent) {
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        e.presentation.isEnabledAndVisible =
+            file != null && file.extension?.lowercase() == "md"
+    }
+
+    override fun getActionUpdateThread(): ActionUpdateThread {
+        return ActionUpdateThread.BGT
+    }
+}

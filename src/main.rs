@@ -1,0 +1,1521 @@
+//! # Module: main (agent-doc CLI)
+//!
+//! ## Spec
+//! - Entry point for the `agent-doc` binary; parses the command line with `clap` derive.
+//! - Top-level struct `Cli` holds a single `Commands` subcommand enum (40+ variants).
+//! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
+//!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
+//! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
+//! - Loads global config via `config::load()` before dispatching; config is threaded into
+//!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
+//! - Each subcommand delegates immediately to its own module (`run::run`, `diff::run`, etc.);
+//!   `main` contains no business logic beyond argument destructuring and dispatch.
+//! - `Route` additionally calls `sync::run_layout_only` when `--col` args are present,
+//!   logging layout-sync failures to stderr without propagating the error.
+//! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
+//!   flag is given; CRDT-mode documents use `write::run_stream`, others use `write::run`.
+//! - `Prompt --all` runs `prompt::run_all()`; otherwise `FILE` is required.
+//! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
+//! - `Watch` dispatches to `watch::stop`, `watch::status`, or `watch::start` based on flags.
+//! - `Skill install --reload` prints `SKILL_RELOAD=compact` or `SKILL_RELOAD=restart` when the
+//!   skill was updated, enabling the caller to take the appropriate reload action.
+//! - `LibPath` prints the platform-appropriate shared library path (`libagent_doc.so/dylib/dll`)
+//!   next to the binary, exiting with code 1 if not found.
+//! - `ListCommands` emits a JSON array of all available subcommand names for plugin autocomplete.
+//!
+//! ## Agentic Contracts
+//! - `main` returns `anyhow::Result<()>`; any subcommand error propagates and prints to stderr.
+//! - Subcommand modules are the single source of truth for their behavior; `main` only routes.
+//! - Config is loaded once and passed by reference; subcommands must not reload config.
+//! - `Upgrade` bypasses the version check that all other subcommands run on startup.
+//!
+//! ## Evals
+//! - dispatch_run: `agent-doc run <file>` → `run::run` called with correct args
+//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `write::run_stream` selected
+//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `write::run` selected
+//! - dispatch_route_with_cols: `--col` args present → `sync::run_layout_only` called after route
+//! - dispatch_prompt_all: `--all` → `prompt::run_all`, no FILE required
+//! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
+//! - dispatch_watch_stop: `--stop` flag → `watch::stop` called
+//! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
+//! - dispatch_lib_path_missing: library absent → exits with code 1
+
+mod agent;
+mod annotate;
+mod audit_docs;
+mod autoclaim;
+mod boundary;
+mod callback;
+mod claim;
+mod clean;
+mod cleanup_cmd;
+mod commands;
+mod compact;
+mod config;
+mod convert;
+mod pending;
+mod pending_cmd;
+mod status_cmd;
+mod project_config;
+mod gc;
+mod parallel;
+mod preflight;
+mod read;
+mod dedupe;
+mod diff;
+mod env;
+mod extract;
+mod focus;
+mod git;
+mod history;
+mod hook_cmd;
+mod hooks;
+mod init;
+mod install;
+mod layout;
+mod lib_gc;
+mod lib_install;
+mod mode;
+mod notify;
+mod outline;
+mod patch;
+mod plugin;
+mod prompt;
+mod recover;
+mod rename;
+mod reset;
+mod resync;
+mod route;
+mod session_check;
+mod session_cmd;
+mod sessions;
+mod skill;
+mod snapshot;
+mod start;
+mod stream;
+mod supervisor;
+mod run;
+mod sync;
+mod terminal;
+pub(crate) use agent_doc::ipc_socket;
+mod undo;
+mod upgrade;
+mod watch;
+mod worktree;
+mod ops_log;
+mod write;
+
+// Re-export library modules so binary-internal modules can use `crate::` paths
+pub(crate) use agent_doc::component;
+pub(crate) use agent_doc::crdt;
+pub(crate) use agent_doc::frontmatter;
+pub(crate) use agent_doc::merge;
+pub(crate) use agent_doc::template;
+
+use anyhow::Context;
+use clap::{Parser, Subcommand, ValueEnum};
+use std::path::{Path, PathBuf};
+
+/// Document mode for agent-doc sessions.
+#[derive(Clone, Debug, ValueEnum)]
+pub enum AgentDocMode {
+    /// Append-mode: alternating ## User / ## Assistant blocks
+    Append,
+    /// Template-mode: in-place component patching
+    Template,
+    /// Stream-mode: real-time CRDT write-back (superset of template)
+    Stream,
+}
+
+#[derive(Parser)]
+#[command(name = "agent-doc", version, about = "Interactive document sessions with AI agents")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a session: diff, send to agent, append response
+    Run {
+        /// Path to the session document
+        file: PathBuf,
+        /// Auto-create a branch for session commits
+        #[arg(short = 'b')]
+        branch: bool,
+        /// Agent backend to use
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Preview what would be sent without submitting
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip git commit after submit
+        #[arg(long)]
+        no_git: bool,
+    },
+    /// List or restore exchange component versions from git history
+    History {
+        /// Path to the session document
+        file: PathBuf,
+        /// Restore exchange content from a specific commit (prepend to current)
+        #[arg(long)]
+        restore: Option<String>,
+    },
+    /// Annotated git log for a session document (shows pre-compact tags)
+    Log {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Show document content at a specific point in git history
+    Show {
+        /// Path to the session document
+        file: PathBuf,
+        /// Show the file N commits back from HEAD (e.g. --back 1 → HEAD~1)
+        #[arg(long)]
+        back: Option<usize>,
+        /// Show the Nth commit in git log order (0 = newest, 1 = next oldest, …)
+        #[arg(long)]
+        at: Option<usize>,
+        /// Show the commit pointed to by this tag
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// Scaffold a new session document (omit file to initialize project)
+    Init {
+        /// Path for the new session document (omit to initialize project)
+        file: Option<PathBuf>,
+        /// Session title
+        title: Option<String>,
+        /// Agent backend to use
+        #[arg(long)]
+        agent: Option<String>,
+        /// Document mode: append (default) or template
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// System-level setup: check prerequisites, install editor plugins
+    Install {
+        /// Editor to install plugin for (jetbrains or vscode; auto-detected if omitted)
+        #[arg(long)]
+        editor: Option<String>,
+        /// Skip prerequisite checks
+        #[arg(long)]
+        skip_prereqs: bool,
+        /// Skip plugin installation
+        #[arg(long)]
+        skip_plugins: bool,
+    },
+    /// Preview the diff that would be sent, or diff between two git refs
+    Diff {
+        /// Path to the session document
+        file: PathBuf,
+        /// Wait for stable content (truncation detection) before computing diff
+        #[arg(long)]
+        wait: bool,
+        /// Starting git ref for historical diff (e.g. commit hash, tag, HEAD~2)
+        #[arg(long)]
+        from: Option<String>,
+        /// Ending git ref for historical diff (default: HEAD)
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Clear session ID and delete snapshot
+    Reset {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Squash session git history into one commit
+    Clean {
+        /// Path to the session document
+        file: PathBuf,
+        /// Create an archive tag before squashing (preserves full history)
+        #[arg(long)]
+        archive: bool,
+    },
+    /// Audit instruction files against the codebase
+    AuditDocs {
+        /// Project root directory (auto-detected if omitted)
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
+    /// Garbage-collect orphaned files in .agent-doc/
+    Gc {
+        /// Project root directory (auto-detected if omitted)
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Show what would be deleted without deleting
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Start Claude in a tmux pane and register the session
+    Start {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Route /agent-doc command to the correct tmux pane
+    Route {
+        /// Path to the session document
+        file: PathBuf,
+        /// Tmux pane ID for lazy claiming (auto-claims if existing claim is stale)
+        #[arg(long)]
+        pane: Option<String>,
+        /// Editor layout columns (comma-separated files per column, repeatable)
+        #[arg(long = "col")]
+        cols: Vec<String>,
+        /// Focused file in the editor (for tmux pane focus)
+        #[arg(long)]
+        focus: Option<String>,
+        /// Wait for typing to settle before routing (milliseconds, 0 = no debounce)
+        #[arg(long, default_value_t = 0)]
+        debounce: u64,
+    },
+    /// Detect permission prompts from a Claude Code session
+    Prompt {
+        /// Path to the session document (omit with --all)
+        file: Option<PathBuf>,
+        /// Answer a prompt by selecting option N (1-based)
+        #[arg(long)]
+        answer: Option<usize>,
+        /// Poll all active sessions instead of a single file
+        #[arg(long)]
+        all: bool,
+    },
+    /// Commit a session document (git add + commit with timestamp)
+    Commit {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Remove consecutive duplicate response blocks
+    Dedupe {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Claim a document for the current tmux pane
+    Claim {
+        /// Path to the session document
+        file: PathBuf,
+        /// Positional hint to select pane by position (left, right, top, bottom)
+        #[arg(long)]
+        position: Option<String>,
+        /// Explicit tmux pane ID (e.g. %42) — overrides position detection
+        #[arg(long)]
+        pane: Option<String>,
+        /// Scope pane resolution to this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
+        /// Force overwrite tmux_session even if already set to a different session
+        #[arg(long)]
+        force: bool,
+        /// Spawn a fresh Claude Code session in a new tmux window scoped to the
+        /// document's nearest git repo root (loads CLAUDE.md, memory, skills for
+        /// that repo rather than the superproject)
+        #[arg(long)]
+        isolate: bool,
+    },
+    /// Focus the tmux pane for a session document
+    Focus {
+        /// Path to the session document
+        file: PathBuf,
+        /// Explicit tmux pane ID — overrides session lookup
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Arrange tmux panes to mirror editor split layout
+    Layout {
+        /// Session documents to arrange
+        files: Vec<PathBuf>,
+        /// Split direction: h (horizontal/side-by-side) or v (vertical/stacked)
+        #[arg(long, short, default_value = "h")]
+        split: String,
+        /// Explicit tmux pane ID — scopes pane selection to this pane's session
+        #[arg(long)]
+        pane: Option<String>,
+        /// Only operate on panes within this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
+    },
+    /// Sync tmux panes to a 2D columnar layout matching the editor
+    Sync {
+        /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
+        #[arg(long = "col", required = true)]
+        columns: Vec<String>,
+        /// Only operate on panes within this tmux window (e.g. @1)
+        #[arg(long)]
+        window: Option<String>,
+        /// Focus this file's pane after arranging (defaults to first file)
+        #[arg(long)]
+        focus: Option<String>,
+        /// Signal that this sync was triggered by a file rename. Creates a debounce marker
+        /// that suppresses auto-start for the focused file across subsequent syncs (5s TTL).
+        #[arg(long)]
+        rename: bool,
+    },
+    /// Replace content in a named component
+    Patch {
+        /// Path to the document
+        file: PathBuf,
+        /// Component name (e.g. "status", "log")
+        component: String,
+        /// Replacement content (reads from stdin if omitted)
+        content: Option<String>,
+    },
+    /// Watch session files for changes and auto-submit
+    Watch {
+        /// Stop the running watch daemon
+        #[arg(long)]
+        stop: bool,
+        /// Show watch daemon status
+        #[arg(long)]
+        status: bool,
+        /// Debounce delay in milliseconds
+        #[arg(long, default_value = "500")]
+        debounce: u64,
+        /// Maximum agent-triggered cycles per file
+        #[arg(long, default_value = "3")]
+        max_cycles: u32,
+    },
+    /// Display markdown outline with section structure and token counts
+    Outline {
+        /// Path to the markdown document
+        file: PathBuf,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate sessions.json against live tmux panes, remove stale entries
+    Resync {
+        /// Actually kill wrong-session panes and deregister stale entries (without this flag, dry-run only)
+        #[arg(long)]
+        fix: bool,
+        /// Relocate WrongSession panes to this tmux session via join-pane instead of killing them.
+        /// Requires --fix. Example: --session 10
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Manage the Claude Code skill definition
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
+    /// Manage editor plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+    /// Append an assistant response to a session document (reads from stdin)
+    Write {
+        /// Path to the session document
+        file: PathBuf,
+        /// Baseline content for 3-way merge (reads from file if omitted)
+        #[arg(long)]
+        baseline_file: Option<PathBuf>,
+        /// Template mode: parse <!-- patch:name --> blocks and apply to components
+        #[arg(long)]
+        template: bool,
+        /// Stream mode: template patches with CRDT merge (conflict-free)
+        #[arg(long)]
+        stream: bool,
+        /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
+        #[arg(long)]
+        ipc: bool,
+        /// Force direct disk write, skip IPC even when plugin is installed
+        #[arg(long)]
+        force_disk: bool,
+        /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
+        #[arg(long)]
+        origin: Option<String>,
+        /// Commit the document to git after a successful write (skipped silently if not in a git repo)
+        #[arg(long)]
+        commit: bool,
+        /// Append a new pending item (repeatable). Binary assigns hash id and `[ ]`.
+        #[arg(long = "pending-add")]
+        pending_add: Vec<String>,
+        /// Append a new gated pending item (repeatable). Like --pending-add but assigns `[/]` instead of `[ ]`.
+        #[arg(long = "pending-add-gated")]
+        pending_add_gated: Vec<String>,
+        /// Mark a pending item `[x]` by hash id (repeatable).
+        #[arg(long = "pending-done")]
+        pending_done: Vec<String>,
+        /// Edit a pending item: `id=new text` (repeatable).
+        #[arg(long = "pending-edit")]
+        pending_edit: Vec<String>,
+        /// Clear all pending items.
+        #[arg(long = "pending-clear")]
+        pending_clear: bool,
+        /// Reorder pending items by comma-separated hash ids.
+        #[arg(long = "pending-reorder")]
+        pending_reorder: Option<String>,
+        /// Transition a pending item to `[/]` (gated) by hash id (repeatable).
+        /// Idempotent on already-gated items; errors on `[x]` items.
+        #[arg(long = "pending-gate")]
+        pending_gate: Vec<String>,
+        /// Transition a pending item from `[/]` back to `[ ]` by hash id (repeatable).
+        /// Errors on `[ ]` or `[x]` items — the source must be gated.
+        #[arg(long = "pending-ungate")]
+        pending_ungate: Vec<String>,
+        /// Resolve all items matching a typed gate (e.g., [/release] → [x]).
+        #[arg(long = "pending-resolve-gate")]
+        pending_resolve_gate: Vec<String>,
+        /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
+        #[arg(long = "pending-set-gate-type")]
+        pending_set_gate_type: Vec<String>,
+        /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
+        /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
+        #[arg(long = "allow-replace-pending", alias = "allow-patch-pending", hide = true)]
+        allow_replace_pending: bool,
+        /// Only mutate pending component — skip stdin reading and exchange synthesis.
+        /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
+        #[arg(long = "pending-only")]
+        pending_only: bool,
+        /// Replace the status component content (repeatable for multi-line).
+        #[arg(long = "status")]
+        status: Option<String>,
+    },
+    /// Stream agent output to document in real-time (CRDT merge)
+    Stream {
+        /// Path to the session document
+        file: PathBuf,
+        /// Write-back interval in milliseconds
+        #[arg(long, default_value = "200")]
+        interval: u64,
+        /// Agent backend to use
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Skip git commit after stream completes
+        #[arg(long)]
+        no_git: bool,
+    },
+    /// Show template structure of a document (components, modes, content)
+    TemplateInfo {
+        /// Path to the document
+        file: PathBuf,
+    },
+    /// Recover an orphaned response (from interrupted write-back after compaction)
+    Recover {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Run all pre-agent steps (recover, commit, claims, diff, document HEAD) and output JSON
+    Preflight {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Check end-of-cycle write invariant — nonzero exit if last ops.log event is `preflight_diff_start`
+    SessionCheck {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Print document content to stdout (full file or a single named component).
+    Read {
+        /// Path to the session document
+        file: PathBuf,
+        /// Name of a specific component to extract (e.g. "exchange", "pending").
+        /// If omitted, the full file is printed.
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// Archive old exchanges / compact component content
+    Compact {
+        /// Path to the session document
+        file: PathBuf,
+        /// Number of recent exchanges/topics to keep.
+        /// Append mode default: 2. Template mode: omit to archive all (full compact),
+        /// or pass N to keep last N `### Re:` topic sections (partial compact).
+        #[arg(long)]
+        keep: Option<usize>,
+        /// Component to compact (template/stream mode, default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+        /// Summary message to replace content with
+        #[arg(long)]
+        message: Option<String>,
+        /// Git tag name for pre-compact checkpoint (default: auto-generated
+        /// agent-doc/<doc-name>/pre-compact-N). Use "skip" to disable tagging.
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// Convert a document between append and template modes
+    Convert {
+        /// Path to the session document
+        file: PathBuf,
+        /// Target mode (deprecated positional — use --agent-doc-format / --agent-doc-write instead)
+        #[arg(value_enum)]
+        mode: Option<AgentDocMode>,
+        /// Set document format (append | template)
+        #[arg(long, value_enum)]
+        agent_doc_format: Option<frontmatter::AgentDocFormat>,
+        /// Set write strategy (merge | crdt)
+        #[arg(long, value_enum)]
+        agent_doc_write: Option<frontmatter::AgentDocWrite>,
+    },
+    /// Get or set the document mode (format + write strategy)
+    Mode {
+        /// Path to the session document
+        file: PathBuf,
+        /// Set mode: append or template (deprecated — use --format / --write)
+        #[arg(long)]
+        set: Option<String>,
+    },
+    /// Print and clear the claims log (.agent-doc/claims.log)
+    Claims,
+    /// Fan-out: decompose task into parallel worktree-isolated subagents
+    Parallel {
+        /// Path to the session document
+        file: PathBuf,
+        /// Explicit subtask descriptions (repeatable)
+        #[arg(long = "task")]
+        tasks_explicit: Vec<String>,
+        /// Model override for subtask agents
+        #[arg(long)]
+        model: Option<String>,
+        /// Skip git commits in worktrees
+        #[arg(long)]
+        no_git: bool,
+        /// Run without worktrees (read-only tasks, shared CWD)
+        #[arg(long)]
+        no_worktree: bool,
+        /// Per-task timeout in seconds
+        #[arg(long, default_value = "600")]
+        timeout: u64,
+        /// Show plan without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Re-establish claims after context compaction (SessionStart hook)
+    Autoclaim,
+    /// Check for updates and upgrade to the latest version.
+    Upgrade,
+    /// Generate content-source annotation sidecar for a document
+    Annotate {
+        /// Path to the session document
+        file: PathBuf,
+        /// Force regeneration even if cache is valid
+        #[arg(long)]
+        force: bool,
+        /// Use git blame for full history attribution
+        #[arg(long)]
+        history: bool,
+    },
+    /// Undo the last agent response (restore pre-response state)
+    Undo {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Extract the last exchange entry from source to target document
+    Extract {
+        /// Source document
+        source: PathBuf,
+        /// Target document
+        target: PathBuf,
+        /// Component name to extract from (default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// Transfer entire component content from source to target document
+    Transfer {
+        /// Source document
+        source: PathBuf,
+        /// Target document
+        target: PathBuf,
+        /// Component name to transfer
+        component: String,
+        /// Bypass pane ownership check on target (for cross-session transfers)
+        #[arg(long)]
+        bypass_claim: bool,
+        /// Transfer only specific pending items by ID (comma-separated, e.g., "#id1,#id2")
+        #[arg(long)]
+        items: Option<String>,
+        /// Insert a referral pointer instead of moving content (target reads source on demand)
+        #[arg(long)]
+        referral: bool,
+    },
+    /// Migrate session state after a document file rename/move
+    Rename {
+        /// Original document path (may no longer exist on disk)
+        old_path: PathBuf,
+        /// New document path (must exist)
+        new_path: PathBuf,
+    },
+    /// Open an external terminal with tmux attached to the session
+    Terminal {
+        /// Path to the session document
+        file: PathBuf,
+        /// Tmux session name (overrides frontmatter tmux_session)
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Insert a boundary marker at the end of a component for response ordering
+    Boundary {
+        /// Path to the session document
+        file: PathBuf,
+        /// Component name (default: exchange)
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// Append a blockquote notification to a document's exchange component
+    Notify {
+        /// Path to the document
+        file: PathBuf,
+        /// Notification message (optional when --pending-add is used)
+        message: Option<String>,
+        /// Source document or session
+        #[arg(long)]
+        source: Option<String>,
+        /// Sections affected (for re-evaluation directive)
+        #[arg(long)]
+        affects: Option<String>,
+        /// Skip git commit after notification
+        #[arg(long)]
+        no_commit: bool,
+        /// Add a pending item to the target document (repeatable). Auto-creates agent:pending if absent.
+        #[arg(long = "pending-add")]
+        pending_add: Vec<String>,
+        /// Add a gated pending item (repeatable). Like --pending-add but assigns [/] instead of [ ].
+        #[arg(long = "pending-add-gated")]
+        pending_add_gated: Vec<String>,
+        /// Do not auto-create agent:pending component if absent
+        #[arg(long = "no-create-pending")]
+        no_create_pending: bool,
+    },
+    /// Print the path to the shared library (libagent_doc.so/dylib/dll)
+    LibPath,
+    /// Remove stale versioned shared libraries not in use
+    GcLibs {
+        /// Target directory (default: directory containing agent-doc binary)
+        #[arg(long)]
+        target_dir: Option<String>,
+    },
+    /// Install versioned shared library with atomic symlink swap
+    LibInstall {
+        /// Source .so path (default: target/release/libagent_doc.so)
+        #[arg(long)]
+        source: Option<String>,
+        /// Target directory (default: directory containing agent-doc binary)
+        #[arg(long)]
+        target_dir: Option<String>,
+    },
+    /// List all available commands as JSON (for editor plugin autocomplete)
+    #[command(name = "commands")]
+    #[allow(clippy::enum_variant_names)]
+    ListCommands,
+    /// Hook system for cross-session coordination
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+    /// Clean up document: compact, prune pending, apply callback results
+    Cleanup {
+        /// Path to the session document
+        file: PathBuf,
+        /// Timeout waiting for Claude session response (seconds)
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Polling interval for callback response (milliseconds)
+        #[arg(long, default_value_t = 1000)]
+        poll_interval: u64,
+        /// Model for fallback agent (default: sonnet)
+        #[arg(long, default_value = "sonnet")]
+        fallback_model: String,
+    },
+    /// Manage the agent:pending component
+    Pending {
+        /// Path to the session document
+        file: PathBuf,
+        #[command(subcommand)]
+        action: PendingAction,
+    },
+    /// Resolve typed gates across tracked documents.
+    /// Scans documents under the project root for [/<type>] items and flips to [x].
+    /// Designed for hook integration: `agent-doc resolve-gate release`
+    #[command(name = "resolve-gate")]
+    ResolveGateCmd {
+        /// Gate type to resolve (e.g., "release", "deploy")
+        gate_type: String,
+        /// Restrict scan to documents under this directory (defaults to project root)
+        #[arg(long)]
+        scope: Option<PathBuf>,
+    },
+    /// Manage bidirectional IPC callbacks
+    Callback {
+        #[command(subcommand)]
+        action: CallbackAction,
+    },
+    /// Show or change the configured tmux session
+    Session {
+        #[command(subcommand)]
+        action: Option<SessionAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookAction {
+    /// Fire a hook event
+    Fire {
+        /// Event name (e.g., post_write, post_commit, claim)
+        event: String,
+        /// Document file path
+        file: String,
+        /// Session ID (auto-read from frontmatter if omitted)
+        #[arg(long)]
+        session_id: Option<String>,
+        /// JSON data to attach to the event
+        #[arg(long)]
+        data: Option<String>,
+    },
+    /// Poll for hook events
+    Poll {
+        /// Event name to poll
+        event: String,
+        /// Only return events newer than this timestamp (unix seconds)
+        #[arg(long, default_value_t = 0)]
+        since: u64,
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Start hook socket listener
+    Listen {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Clean up expired events
+    Gc {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Check for pending callback requests (called by PostToolUse hooks)
+    CheckCallbacks {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PendingAction {
+    /// Add an item to the pending component (assigns stable hash id + `[ ]`)
+    Add {
+        /// The pending item description
+        item: String,
+    },
+    /// Add a gated item to the pending component (assigns stable hash id + `[/]`)
+    AddGated {
+        /// The pending item description
+        item: String,
+    },
+    /// Remove an item from the pending component
+    Remove {
+        /// Content to match
+        target: String,
+        /// Treat target as a substring match
+        #[arg(long, short)]
+        contains: bool,
+    },
+    /// Remove completed items (legacy — alias for `reap`)
+    Prune,
+    /// Reap `[x]` items and print removed ids
+    Reap,
+    /// Run lazy backfill — assign missing hash ids and checkboxes
+    Backfill,
+    /// Mark an item done by id
+    Done {
+        /// Hash id (without the `#` prefix)
+        id: String,
+    },
+    /// Rewrite an item's text, preserving its hash id
+    Edit {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// New item text
+        text: String,
+    },
+    /// Clear all pending items
+    Clear,
+    /// Reorder items by hash id (comma-separated)
+    Reorder {
+        /// Comma-separated list of hash ids
+        ids: String,
+    },
+    /// List current pending items
+    List,
+    /// Resolve all items matching a typed gate (e.g., [/release] → [x])
+    ResolveGate {
+        /// Gate type to resolve (e.g., "release", "deploy")
+        gate_type: String,
+    },
+    /// Set a typed gate on a gated item ([/] → [/release])
+    SetGateType {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// Gate type (e.g., "release", "deploy")
+        gate_type: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CallbackAction {
+    /// Create a callback request for a document
+    Request {
+        /// Path to the session document
+        file: PathBuf,
+        /// Operations requested (comma-separated: compact,prune-pending,summary)
+        operations: String,
+        /// Optional additional context
+        #[arg(long)]
+        context: Option<String>,
+        /// TTL in seconds before the request expires
+        #[arg(long, default_value_t = 300)]
+        ttl: u64,
+    },
+    /// Read the pending callback request for a document
+    Read {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Write a callback response for a document
+    Respond {
+        /// Path to the session document
+        file: PathBuf,
+        /// The request_id to respond to (must match the pending request)
+        #[arg(long)]
+        request_id: String,
+        /// Response status: "success" or "error"
+        #[arg(long, default_value = "success")]
+        status: String,
+        /// Summary text
+        #[arg(long)]
+        summary: String,
+    },
+    /// Clean up expired callback requests
+    Gc {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionAction {
+    /// Set the configured tmux session and migrate panes
+    Set {
+        /// Target tmux session name (e.g., "5")
+        name: String,
+    },
+    /// Clear the configured session, returning to auto-detect mode
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum PluginAction {
+    /// Download and install an editor plugin
+    Install {
+        /// Editor: jetbrains, vscode
+        editor: String,
+        /// Install from local build instead of GitHub Releases
+        #[clap(long)]
+        local: bool,
+    },
+    /// Update an installed plugin to the latest version
+    Update {
+        /// Editor: jetbrains, vscode
+        editor: String,
+    },
+    /// List installed editor plugins
+    List,
+}
+
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// Install the skill definition for the detected (or specified) agent harness
+    Install {
+        /// After install, output reload instructions: compact (default) or restart
+        #[arg(long)]
+        reload: Option<String>,
+        /// Target harness: claude, opencode, codex, cursor, generic (auto-detected if omitted)
+        #[arg(long)]
+        harness: Option<String>,
+        /// Install for all supported harnesses
+        #[arg(long)]
+        all: bool,
+    },
+    /// Check if the installed skill matches the binary version
+    Check,
+}
+
+/// Initialize structured logging. When `AGENT_DOC_LOG` is set (e.g., "debug"),
+/// logs are written to `.agent-doc/logs/debug.log`. When unset, this is a no-op.
+fn init_tracing() {
+    let filter = match std::env::var("AGENT_DOC_LOG") {
+        Ok(val) => val,
+        Err(_) => return, // No logging configured — zero overhead
+    };
+
+    // Find .agent-doc/logs/ directory (walk up from CWD)
+    let log_dir = {
+        let mut dir = std::env::current_dir().unwrap_or_default();
+        loop {
+            let candidate = dir.join(".agent-doc/logs");
+            if candidate.is_dir() {
+                break Some(candidate);
+            }
+            if !dir.pop() {
+                break None;
+            }
+        }
+    };
+
+    let Some(log_dir) = log_dir else {
+        eprintln!("[tracing] AGENT_DOC_LOG set but no .agent-doc/logs/ found — logging disabled");
+        return;
+    };
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "debug.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Leak the guard so it lives for the program lifetime
+    std::mem::forget(_guard);
+
+    use tracing_subscriber::EnvFilter;
+    let env_filter = EnvFilter::try_new(&filter)
+        .unwrap_or_else(|_| EnvFilter::new("debug"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(true)
+        .init();
+
+    tracing::debug!("agent-doc tracing initialized (filter: {})", filter);
+}
+
+fn main() -> anyhow::Result<()> {
+    // Initialize structured logging via AGENT_DOC_LOG env var.
+    // Examples: AGENT_DOC_LOG=debug, AGENT_DOC_LOG=agent_doc::preflight=debug
+    // When set, logs to .agent-doc/logs/debug.log (auto-rotated).
+    // When unset, no file logging (zero overhead).
+    init_tracing();
+
+    let cli = Cli::parse();
+
+    // Warn about newer versions on startup, but skip if running the upgrade command itself.
+    if !matches!(cli.command, Commands::Upgrade) {
+        upgrade::warn_if_outdated();
+    }
+
+    let config = config::load()?;
+
+    match cli.command {
+        Commands::Run {
+            file,
+            branch,
+            agent,
+            model,
+            dry_run,
+            no_git,
+        } => run::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
+        Commands::History { file, restore } => match restore {
+            Some(commit) => history::restore(&file, &commit),
+            None => history::list(&file),
+        },
+        Commands::Log { file } => history::log(&file),
+        Commands::Show { file, back, at, tag } => {
+            history::show(&file, back, at, tag.as_deref())
+        }
+        Commands::Init { file, title, agent, mode } => {
+            init::run(file.as_deref(), title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
+        }
+        Commands::Install { editor, skip_prereqs, skip_plugins } => {
+            install::run(editor.as_deref(), skip_prereqs, skip_plugins)
+        }
+        Commands::Diff { file, wait, from, to } => {
+            if let Some(from_ref) = from {
+                let to_ref = to.as_deref().unwrap_or("HEAD");
+                history::git_diff(&file, &from_ref, to_ref)
+            } else {
+                diff::run(&file, wait)
+            }
+        }
+        Commands::Reset { file } => reset::run(&file),
+        Commands::Clean { file, archive } => clean::run(&file, archive),
+        Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
+        Commands::Gc { root, dry_run } => {
+            let result = gc::run(root.as_deref(), dry_run)?;
+            if dry_run {
+                eprintln!("[gc] Dry run: {} files would be deleted, {} kept", result.deleted, result.skipped);
+            }
+            Ok(())
+        }
+        Commands::Start { file } => start::run(&file),
+        Commands::Route { file, pane, cols, focus: _focus, debounce } => {
+            // NOTE: sync::run_layout_only was previously called here after route when
+            // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
+            // separately with the correct --window arg. Running sync from both route AND
+            // the plugin created a double-sync glitch (panes bouncing between stash and
+            // agent-doc window). The plugin's sync is authoritative for layout.
+            route::run(&file, pane.as_deref(), debounce, &cols)
+        }
+        Commands::Prompt { file, answer, all } => {
+            if all {
+                return prompt::run_all();
+            }
+            let file = file.context("FILE required when not using --all")?;
+            match answer {
+                Some(option) => prompt::answer(&file, option),
+                None => prompt::run(&file),
+            }
+        }
+        Commands::Commit { file } => git::commit(&file),
+        Commands::Dedupe { file } => dedupe::run(&file),
+        Commands::Claim { file, position, pane, window, force, isolate } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force, isolate),
+        Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
+        Commands::Layout { files, split, pane, window } => {
+            let split = match split.as_str() {
+                "v" | "vertical" => layout::Split::Vertical,
+                _ => layout::Split::Horizontal,
+            };
+            let paths: Vec<&Path> = files.iter().map(|f| f.as_path()).collect();
+            layout::run(&paths, split, pane.as_deref(), window.as_deref())
+        }
+        Commands::Sync {
+            columns,
+            window,
+            focus,
+            rename,
+        } => {
+            if rename
+                && let Some(ref f) = focus
+            {
+                sync::write_rename_debounce(f);
+            }
+            sync::run(&columns, window.as_deref(), focus.as_deref())
+        }
+        Commands::Patch {
+            file,
+            component,
+            content,
+        } => patch::run(&file, &component, content.as_deref()),
+        Commands::Watch {
+            stop,
+            status,
+            debounce,
+            max_cycles,
+        } => {
+            if stop {
+                watch::stop()
+            } else if status {
+                watch::status()
+            } else {
+                watch::start(
+                    &config,
+                    watch::WatchConfig {
+                        debounce_ms: debounce,
+                        max_cycles,
+                    },
+                )
+            }
+        }
+        Commands::Outline { file, json } => outline::run(&file, json),
+        Commands::Resync { fix, session } => resync::run(fix, session.as_deref()),
+        Commands::Skill { command } => match command {
+            SkillCommands::Install { reload, harness, all } => {
+                if all {
+                    skill::install_all()?;
+                } else if let Some(ref h) = harness {
+                    let env = agent_kit::detect::Environment::from_name(h)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "unknown harness '{}'. Valid: claude, opencode, codex, cursor, generic", h
+                        ))?;
+                    skill::install_for(env)?;
+                } else {
+                    let updated = skill::install_and_check_updated()?;
+                    if updated
+                        && let Some(ref mode) = reload
+                    {
+                        match mode.as_str() {
+                            "restart" => {
+                                println!("SKILL_RELOAD=restart");
+                                println!("Skill updated. Please restart this session with --resume to reload the skill.");
+                            }
+                            _ => {
+                                println!("SKILL_RELOAD=compact");
+                                println!("Skill updated. Please run /compact to reload the updated skill instructions.");
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            SkillCommands::Check => skill::check(),
+        },
+        Commands::Plugin { action } => match action {
+            PluginAction::Install { editor, local } => {
+                if local {
+                    plugin::install_local(&editor)
+                } else {
+                    plugin::install(&editor)
+                }
+            }
+            PluginAction::Update { editor } => plugin::update(&editor),
+            PluginAction::List => plugin::list(),
+        },
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_add_gated, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, pending_resolve_gate, pending_set_gate_type, allow_replace_pending, pending_only, status } => {
+            // Log write origin for tracing
+            if let Some(ref orig) = origin {
+                crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
+            }
+
+            // Apply pending ops BEFORE the patch payload write so both mutations
+            // land in the same atomic cycle (the pending ops write directly to disk;
+            // the subsequent patch write reads the already-updated document).
+            let has_pending_ops = !pending_add.is_empty()
+                || !pending_add_gated.is_empty()
+                || !pending_done.is_empty()
+                || !pending_edit.is_empty()
+                || pending_clear
+                || pending_reorder.is_some()
+                || !pending_gate.is_empty()
+                || !pending_ungate.is_empty()
+                || !pending_resolve_gate.is_empty()
+                || !pending_set_gate_type.is_empty();
+            // Validate --pending-only constraints
+            if pending_only && !has_pending_ops {
+                anyhow::bail!("--pending-only requires at least one --pending-* flag");
+            }
+            if pending_only && (is_template || is_stream || is_ipc) {
+                anyhow::bail!("--pending-only cannot be combined with --template, --stream, or --ipc");
+            }
+            if has_pending_ops {
+                // Order: clear (destructive) → add → edit → gate → ungate → done → reorder.
+                // Gate/ungate run before done so a `--pending-gate X --pending-done X`
+                // pair is rejected (Done→Gate error) instead of silently swallowed.
+                if pending_clear {
+                    pending_cmd::clear(&file)?;
+                }
+                for item in &pending_add {
+                    pending_cmd::add(&file, item, false)?;
+                }
+                for item in &pending_add_gated {
+                    pending_cmd::add(&file, item, true)?;
+                }
+                for pair in &pending_edit {
+                    let (id, text) = pair
+                        .split_once('=')
+                        .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+                    pending_cmd::edit(&file, id, text)?;
+                }
+                for id in &pending_gate {
+                    pending_cmd::gate(&file, id)?;
+                }
+                for pair in &pending_set_gate_type {
+                    let (id, gt) = pair
+                        .split_once('=')
+                        .with_context(|| format!("--pending-set-gate-type expects 'id=type', got: {}", pair))?;
+                    pending_cmd::set_gate_type(&file, id, gt)?;
+                }
+                for id in &pending_ungate {
+                    pending_cmd::ungate(&file, id)?;
+                }
+                for gt in &pending_resolve_gate {
+                    pending_cmd::resolve_gate(&file, gt)?;
+                }
+                for id in &pending_done {
+                    pending_cmd::done(&file, id)?;
+                }
+                if let Some(ref order) = pending_reorder {
+                    let ids: Vec<String> = order
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    pending_cmd::reorder(&file, &ids)?;
+                }
+            }
+
+            // Apply --status before the patch payload write (same pattern as pending).
+            if let Some(ref status_text) = status {
+                status_cmd::set(&file, status_text)?;
+            }
+
+            // --pending-only: skip stdin reading and exchange synthesis entirely.
+            // Pending ops already applied above; just commit if requested and return.
+            if pending_only {
+                if do_commit {
+                    if git::is_in_git_repo(&file) {
+                        if let Err(e) = git::commit(&file) {
+                            eprintln!("[commit] warning: {}", e);
+                        }
+                    } else {
+                        eprintln!("[commit] skipped (not in git repo)");
+                    }
+                }
+                return Ok(());
+            }
+
+            // Enforcement: reject `replace:pending` (and the deprecated
+            // `patch:pending`) blocks in stdin unless the caller explicitly
+            // opts in. Default is reject (Phase 3 inversion); the env var
+            // below is the escape hatch shared with library callers. The
+            // skill MUST use the granular flags above.
+            //
+            // `AGENT_DOC_ALLOW_REPLACE_PENDING` is the canonical env var.
+            // `AGENT_DOC_ALLOW_PATCH_PENDING` is accepted for one release as
+            // a deprecated alias (#25ag migration).
+            if allow_replace_pending {
+                // SAFETY: single-threaded at this point in the CLI entrypoint.
+                unsafe {
+                    std::env::set_var("AGENT_DOC_ALLOW_REPLACE_PENDING", "1");
+                    // Also set the legacy var so any library-layer code that
+                    // still checks only the old name keeps working during the
+                    // dual-accept window.
+                    std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1");
+                }
+            }
+
+            // Signal to write module whether --pending-add was provided (for future-work lint)
+            if !pending_add.is_empty() || !pending_add_gated.is_empty() {
+                // SAFETY: single-threaded at this point in the CLI entrypoint.
+                unsafe { std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1"); }
+            }
+
+            let baseline = baseline_file
+                .as_ref()
+                .map(std::fs::read_to_string)
+                .transpose()
+                .context("failed to read baseline file")?;
+            let result = if is_ipc {
+                write::run_ipc(&file, baseline.as_deref())
+            } else if is_stream {
+                write::run_stream(&file, baseline.as_deref(), force_disk)
+            } else if is_template {
+                write::run_template(&file, baseline.as_deref())
+            } else {
+                // Auto-detect write strategy from frontmatter
+                let content = std::fs::read_to_string(&file)
+                    .context("failed to read document for mode detection")?;
+                let (fm, _) = frontmatter::parse(&content)?;
+                if fm.resolve_mode().is_crdt() {
+                    write::run_stream(&file, baseline.as_deref(), force_disk)
+                } else {
+                    write::run(&file, baseline.as_deref())
+                }
+            };
+            // Fix 2: attempt commit even when run_stream returns Err — a partial write
+            // may have already saved the snapshot, and we want it tracked before
+            // propagating the error.
+            if do_commit {
+                if git::is_in_git_repo(&file) {
+                    if let Err(e) = git::commit(&file) {
+                        eprintln!("[commit] warning: {}", e);
+                    }
+                } else {
+                    eprintln!("[commit] skipped (not in git repo)");
+                }
+            }
+            result?;
+            Ok(())
+        }
+        Commands::Stream { file, interval, agent, model, no_git } => {
+            stream::run(&file, interval, agent.as_deref(), model.as_deref(), no_git, &config)
+        }
+        Commands::TemplateInfo { file } => {
+            let info = template::template_info(&file)?;
+            println!("{}", serde_json::to_string_pretty(&info)?);
+            Ok(())
+        }
+        Commands::Recover { file } => {
+            let recovered = recover::run(&file)?;
+            if !recovered {
+                eprintln!("[recover] No pending response found for {}", file.display());
+            }
+            Ok(())
+        }
+        Commands::Preflight { file } => preflight::run(&file),
+        Commands::SessionCheck { file } => session_check::run(&file),
+        Commands::Read { file, component } => read::run(&file, component.as_deref()),
+        Commands::Compact {
+            file,
+            keep,
+            component,
+            message,
+            tag,
+        } => compact::run(&file, keep, component.as_deref(), message.as_deref(), tag.as_deref()),
+        Commands::Convert { file, mode, agent_doc_format, agent_doc_write } => {
+            convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
+        }
+        Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
+        Commands::Annotate { file, force, history } => annotate::run(&file, force, history),
+        Commands::Undo { file } => undo::run(&file),
+        Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
+        Commands::Transfer { source, target, component, bypass_claim, items, referral } => {
+            let item_ids: Option<Vec<String>> = items.map(|s| {
+                s.split(',').map(|id| id.trim().trim_start_matches('#').to_string()).collect()
+            });
+            extract::transfer(&source, &target, &component, bypass_claim, item_ids.as_deref(), referral)
+        }
+        Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
+        Commands::Claims => {
+            let cwd = std::env::current_dir()?;
+            if let Some(root) = snapshot::find_project_root(&cwd) {
+                let log_path = root.join(".agent-doc/claims.log");
+                if let Ok(contents) = std::fs::read_to_string(&log_path)
+                    && !contents.is_empty()
+                {
+                    print!("{}", contents);
+                    std::fs::write(&log_path, "")?;
+                }
+            }
+            Ok(())
+        }
+        Commands::Parallel { file, tasks_explicit, model, no_git, no_worktree, timeout, dry_run } => {
+            parallel::run(&file, parallel::ParallelConfig {
+                tasks: tasks_explicit,
+                model,
+                no_git,
+                no_worktree,
+                timeout_secs: timeout,
+                dry_run,
+            })
+        }
+        Commands::Notify { file, message, source, affects, no_commit, pending_add, pending_add_gated, no_create_pending } => {
+            notify::run(&file, message.as_deref(), source.as_deref(), affects.as_deref(), !no_commit, &pending_add, &pending_add_gated, no_create_pending)
+        }
+        Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
+        Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
+        Commands::Autoclaim => autoclaim::run(),
+        Commands::Upgrade => upgrade::run(),
+        Commands::LibPath => {
+            // Print the path to the shared library built alongside this binary.
+            // The cdylib is in the same target directory as the binary.
+            let exe = std::env::current_exe()?;
+            let dir = exe.parent().unwrap();
+            #[cfg(target_os = "linux")]
+            let lib_name = "libagent_doc.so";
+            #[cfg(target_os = "macos")]
+            let lib_name = "libagent_doc.dylib";
+            #[cfg(target_os = "windows")]
+            let lib_name = "agent_doc.dll";
+            let lib_path = dir.join(lib_name);
+            if lib_path.exists() {
+                println!("{}", lib_path.display());
+            } else {
+                eprintln!("[lib-path] library not found at {}", lib_path.display());
+                eprintln!("[lib-path] build with: cargo build --release");
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Commands::GcLibs { target_dir } => {
+            lib_gc::run(target_dir.as_deref())
+        }
+        Commands::LibInstall { source, target_dir } => {
+            lib_install::run(source.as_deref(), target_dir.as_deref())
+        }
+        Commands::ListCommands => commands::run(),
+        Commands::Session { action } => match action {
+            Some(SessionAction::Set { name }) => session_cmd::set(&name),
+            Some(SessionAction::Clear) => session_cmd::clear(),
+            None => session_cmd::show(),
+        },
+        Commands::Hook { action } => match action {
+            HookAction::Fire { event, file, session_id, data } => {
+                hook_cmd::fire(&event, &file, session_id.as_deref(), data.as_deref())
+            }
+            HookAction::Poll { event, since, root } => {
+                hook_cmd::poll(&event, since, root.as_deref())
+            }
+            HookAction::Listen { root } => {
+                hook_cmd::listen(root.as_deref())
+            }
+            HookAction::Gc { root } => {
+                hook_cmd::gc(root.as_deref())
+            }
+            HookAction::CheckCallbacks { root } => {
+                let pending = callback::scan_pending_callbacks(root.as_deref())?;
+                let json = serde_json::to_string_pretty(
+                    &serde_json::json!({"pending_callbacks": pending})
+                )?;
+                println!("{}", json);
+                Ok(())
+            }
+        },
+        Commands::Cleanup { file, timeout, poll_interval, fallback_model } => {
+            cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model)
+        }
+        Commands::Pending { file, action } => match action {
+            PendingAction::Add { item } => pending_cmd::add(&file, &item, false),
+            PendingAction::AddGated { item } => pending_cmd::add(&file, &item, true),
+            PendingAction::Remove { target, contains } => pending_cmd::remove(&file, &target, contains),
+            PendingAction::Prune => pending_cmd::reap(&file),
+            PendingAction::Reap => pending_cmd::reap(&file),
+            PendingAction::Backfill => pending_cmd::backfill(&file),
+            PendingAction::Done { id } => pending_cmd::done(&file, &id),
+            PendingAction::Edit { id, text } => pending_cmd::edit(&file, &id, &text),
+            PendingAction::Clear => pending_cmd::clear(&file),
+            PendingAction::Reorder { ids } => {
+                let ids: Vec<String> = ids.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                pending_cmd::reorder(&file, &ids)
+            }
+            PendingAction::List => pending_cmd::list(&file),
+            PendingAction::ResolveGate { gate_type } => pending_cmd::resolve_gate(&file, &gate_type),
+            PendingAction::SetGateType { id, gate_type } => pending_cmd::set_gate_type(&file, &id, &gate_type),
+        },
+        Commands::ResolveGateCmd { gate_type, scope } => {
+            // Determine scan root: explicit --scope, or cwd, or project root
+            let scan_root = if let Some(s) = scope {
+                s
+            } else {
+                let cwd = std::env::current_dir()?;
+                snapshot::find_project_root(&cwd).unwrap_or(cwd)
+            };
+            let total = pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
+            if total == 0 {
+                eprintln!("[resolve-gate] no [/{}] items found under {}", gate_type, scan_root.display());
+            } else {
+                eprintln!("[resolve-gate] resolved {} total [/{}] item(s)", total, gate_type);
+            }
+            Ok(())
+        },
+        Commands::Callback { action } => match action {
+            CallbackAction::Request { file, operations, context, ttl } => {
+                let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
+                let request = callback::create_request(&file, &ops, context.as_deref(), ttl)?;
+                println!("{}", serde_json::to_string_pretty(&request)?);
+                Ok(())
+            }
+            CallbackAction::Read { file } => {
+                match callback::read_request(&file)? {
+                    Some(request) => {
+                        println!("{}", serde_json::to_string_pretty(&request)?);
+                    }
+                    None => {
+                        println!("{{}}");
+                        eprintln!("[callback] no pending request for {}", file.display());
+                    }
+                }
+                Ok(())
+            }
+            CallbackAction::Respond { file, request_id, status, summary } => {
+                callback::write_response(&file, &request_id, &status, &summary, None)?;
+                eprintln!("[callback] response written for request {}", request_id);
+                Ok(())
+            }
+            CallbackAction::Gc { root } => {
+                let cwd = std::env::current_dir()?;
+                let root_path = root.map(PathBuf::from)
+                    .or_else(|| snapshot::find_project_root(&cwd))
+                    .context("could not find project root")?;
+                callback::cleanup_expired(&root_path, 300)
+            }
+        },
+    }
+}

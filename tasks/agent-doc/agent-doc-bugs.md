@@ -848,8 +848,7 @@ These no-op paths are common during normal operation (boundary reposition, prefi
 **Install the JB plugin** to activate the sidecar fix. The CLI changes are already live.
 
 **Why no degraded mode?** Socket delivery is fast (<10ms). Even when sidecar fails, the plugin still applies patches from the socket message — the editor updates instantly. The only cost of a sidecar timeout is a 200ms poll + disk write fallback (~50ms). The degraded mode was saving 250ms per write but costing 30-60s in editor latency — net negative.
-<!-- agent:boundary:6c2bbd23 -->
-<!-- agent:boundary:b096d1ee -->
+<!-- agent:boundary:0178e090 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -857,6 +856,5 @@ These no-op paths are common during normal operation (boundary reposition, prefi
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#beea] [#bk47] Fix JB plugin ack-content sidecar — socket delivery succeeds but sidecar never written, causing every write to degrade to disk (30-60s editor latency)
 <!-- /agent:pending -->
 ## Assistant

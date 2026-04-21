@@ -1009,8 +1009,7 @@ Added 3 tests to `component.rs` covering the #cfdy scenario (literal HTML commen
 3. **exchange_and_pending_both_with_html_comments_in_content** — sibling components both containing non-agent HTML comments parse correctly without crossing boundaries
 
 All 3 pass. Full suite: 1215 passed, 6 ignored, 0 failures. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
-<!-- agent:boundary:f67a958d -->
-<!-- agent:boundary:c49b8dbc -->
+<!-- agent:boundary:925d43d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1018,7 +1017,5 @@ All 3 pass. Full suite: 1215 passed, 6 ignored, 0 failures. Binary rebuilt and i
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#1n7f] Empty-baseline CRDT merge duplication — fixed in crdt.rs (stale detection + prefix advancement). Verify live behavior on next IPC-timeout write.
-- [x] [#cfdy] Component parser: non-agent HTML comments in content ate close markers — fixed with peek guard in component.rs. Verify with documents containing literal HTML comments in pending items.
 <!-- /agent:pending -->
 ## Assistant

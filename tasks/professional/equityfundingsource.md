@@ -243,8 +243,7 @@ Now pulls from R2 (`--remote`) instead of `equityfundingnow.com`. Skips files th
 Added `--remote` flag and switched from bare `wrangler` to `bunx wrangler`.
 
 **Not deployed** — the Pages Function is committed but won't go live until the next `wrangler pages deploy`. The dev workflow (download from R2 → serve locally) works now. Parent submodule pointer updated in agent-loop.
-<!-- agent:boundary:13890664 -->
-<!-- agent:boundary:7a0539db -->
+<!-- agent:boundary:dddbfcc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

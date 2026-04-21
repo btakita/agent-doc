@@ -774,7 +774,7 @@ publish
 - GitHub Release created with prebuilt `agent-doc-v0.33.9-x86_64-unknown-linux-gnu` binary
 
 **crates.io:** Token not found in password store (`crates.io/token` not in passage). Please run `cargo publish` manually once you have the token available, or point me to the correct passage path.
-<!-- agent:boundary:169e4578 -->
+<!-- agent:boundary:47c1d464 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

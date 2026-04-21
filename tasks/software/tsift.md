@@ -770,8 +770,7 @@ The skill is already live in the available skills list (`/tsift`).
 **Also committed:**
 - Bug fix (`end_line` in `extract_symbols`) + CLAUDE.md update pushed to tsift submodule (`e0c37f1`)
 - Parent submodule pointer updated (`528d91b3`)
-<!-- agent:boundary:3fd0b63b -->
-<!-- agent:boundary:2987df40 -->
+<!-- agent:boundary:64dce2ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

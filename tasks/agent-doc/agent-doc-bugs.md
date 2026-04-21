@@ -994,7 +994,7 @@ Fix: peek after `<!--` — only consume the comment span if it starts with `agen
 Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment_like_text_in_exchange.
 
 **Full suite: 1215 passed (5 new tests), 0 regressions.** Binary rebuilt and installed.
-<!-- agent:boundary:3dd8d837 -->
+<!-- agent:boundary:185319d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1002,7 +1002,6 @@ Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#r7hw] Auto-prepend ❯ to user prompts in exchange — normalize during preflight commit (after diff is computed but before snapshot update). Rules: first line of each contiguous user block (not starting with ### or ❯ or <!-- ) gets ❯ prefix. Preserve continuation lines as-is. Implement in git.rs commit normalization path.
 - [ ] [#1n7f] Empty-baseline CRDT merge duplication — fixed in crdt.rs (stale detection + prefix advancement). Verify live behavior on next IPC-timeout write.
 - [ ] [#cfdy] Component parser: non-agent HTML comments in content ate close markers — fixed with peek guard in component.rs. Verify with documents containing literal HTML comments in pending items.
 <!-- /agent:pending -->

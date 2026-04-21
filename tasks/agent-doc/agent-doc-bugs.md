@@ -1141,7 +1141,7 @@ Applied in two locations:
 **Full suite: 1219 passed, 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
 In src/session-share, I ran `agent-doc tasks/claudescore.md`. When I navigated the editor to this document then back to claudescore.md, the running tmux pane with the running turn was swapped out for a new tmux pane. Why?
 Can we reassociate the old claiming tmux pane with claudescore.md?
-<!-- agent:boundary:2b948892 -->
+<!-- agent:boundary:755d8807 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

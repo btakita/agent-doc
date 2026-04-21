@@ -165,8 +165,7 @@ The bucket **does exist** on your `brian.takita@gmail.com` account. I just verif
 It's listed alongside your other R2 buckets (assets-briantakita-me, assets-brookebrodack, etc.).
 
 **To find it in the dashboard:** Go to Cloudflare Dashboard → select your account → R2 Object Storage (left sidebar). It should appear as `equityfundingsource-assets`. If you're on the wrong account in the dashboard (e.g., the Monsterrodholder account), you won't see it — make sure you're viewing the `Brian.takita@gmail.com` account.
-<!-- agent:boundary:007f7a00 -->
-<!-- agent:boundary:5ae6c5ea -->
+<!-- agent:boundary:d6cb490a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

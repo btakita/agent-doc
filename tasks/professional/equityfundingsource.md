@@ -189,8 +189,7 @@ The wrangler OAuth token only has `account:read` — it can't add members progra
 **Recommendation:** Option A is better for a developer who'll be using `wrangler` regularly. Option B is better for CI/CD or a dev who only needs S3-compatible access to this one bucket.
 
 Note: Cloudflare R2 doesn't support cross-account bucket policies (unlike AWS S3), so even though btak.dev has their own Cloudflare account, bucket access must go through your account — either as a member or via shared API credentials.
-<!-- agent:boundary:b76c16f3 -->
-<!-- agent:boundary:fb56c350 -->
+<!-- agent:boundary:c774cd29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

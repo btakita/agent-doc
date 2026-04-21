@@ -817,7 +817,39 @@ Evidence: `.agent-doc/ipc-degraded` marker exists (0 bytes); 4 stale patch files
    - Clear the marker when a new socket connection succeeds, even without sidecar confirmation
 
 Filed as **#bk47** in pending.
-<!-- agent:boundary:09ac7629 -->
+❯ do #bk47. Why do we have a "degraded mode"? We should always attempt the lowest latency IPC path. Should we have a retry?
+### Re: #bk47 — remove degraded mode + fix sidecar — opus-4-6
+
+**Done.** Three changes:
+
+#### 1. Removed IPC degraded mode (write.rs)
+
+- Deleted `is_ipc_degraded`, `mark_ipc_degraded`, `clear_ipc_degraded`, `IPC_DEGRADED_FILE`, `IPC_DEGRADED_TTL_SECS`
+- Socket IPC now always attempted — no circuit breaker
+- Added `cleanup_legacy_ipc_degraded` to remove stale markers from older versions
+- Reduced sidecar poll timeout from 1000ms → 200ms (non-blocking optimization, not a gate)
+- On sidecar timeout: log + fall through to disk write — no state mutation
+
+#### 2. Fixed JB plugin sidecar write on no-op patches (PatchWatcher.kt)
+
+Root cause: three early-return paths in `applyPatch` skipped `writeAckContent` when patches produced no document changes:
+- Line 529: fullContent no-op → now writes sidecar
+- Line 580: component-patch no-op → now writes sidecar  
+- Line 658: VFS no-op → now writes sidecar
+
+These no-op paths are common during normal operation (boundary reposition, prefix normalization already applied, duplicate patches).
+
+#### 3. Build artifacts
+
+- `cargo build --release` + `cargo install --path .` — binary updated in both paths
+- 1208 tests passing
+- JB plugin v0.2.71 built (unsigned + signed zips)
+
+**Install the JB plugin** to activate the sidecar fix. The CLI changes are already live.
+
+**Why no degraded mode?** Socket delivery is fast (<10ms). Even when sidecar fails, the plugin still applies patches from the socket message — the editor updates instantly. The only cost of a sidecar timeout is a 200ms poll + disk write fallback (~50ms). The degraded mode was saving 250ms per write but costing 30-60s in editor latency — net negative.
+<!-- agent:boundary:6c2bbd23 -->
+<!-- agent:boundary:b096d1ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -825,6 +857,6 @@ Filed as **#bk47** in pending.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#beea] [#bk47] Fix JB plugin ack-content sidecar — socket delivery succeeds but sidecar never written, causing every write to degrade to disk (30-60s editor latency)
+- [x] [#beea] [#bk47] Fix JB plugin ack-content sidecar — socket delivery succeeds but sidecar never written, causing every write to degrade to disk (30-60s editor latency)
 <!-- /agent:pending -->
 ## Assistant

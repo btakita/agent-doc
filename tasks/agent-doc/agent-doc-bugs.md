@@ -998,8 +998,7 @@ Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment
 ### Re: return_stashed_panes_skips_idle_shells — opus-4-6
 
 No — the test passes cleanly (ran it just now: 1 passed, 0 failures). It's in `resync.rs` and tests tmux pane management (idle shells in stash should stay in stash, not be returned). It's unrelated to the HTML comment parser fix — no component parsing involved. Nothing to fix here.
-<!-- agent:boundary:45118da4 -->
-<!-- agent:boundary:7c29614c -->
+<!-- agent:boundary:3f39cf03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

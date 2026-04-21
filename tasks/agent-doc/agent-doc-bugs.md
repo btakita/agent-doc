@@ -765,8 +765,7 @@ release
 **Manual testing gate:** Per release process — please confirm the CommitLock fix works in a live session before I publish to crates.io + GitHub Releases. Specifically: trigger the IPC-sidecar-timeout scenario (or any scenario that previously hung) and verify the process exits cleanly.
 
 When you confirm, I'll commit the version bump, tag `v0.33.9`, push, and publish.
-<!-- agent:boundary:cc893525 -->
-<!-- agent:boundary:1e62f1de -->
+<!-- agent:boundary:b60f86db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

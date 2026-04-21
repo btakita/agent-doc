@@ -1027,8 +1027,7 @@ v0.33.10 released. Full changelog:
 Two bugs found and fixed during the release process: (1) `git init` in the `ffi_git_commit` test was inheriting `GIT_DIR` from the hook context, corrupting the submodule's `core.worktree` config to a temp path. Fixed by adding `env_remove` + macro in the test. (2) The `core.worktree` got set to `/tmp/.tmpY9lu0u` and had to be manually repaired.
 
 **Links**: [crates.io](https://crates.io/crates/agent-doc/0.33.10) · [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.33.10)
-<!-- agent:boundary:b88838c2 -->
-<!-- agent:boundary:d529a96f -->
+<!-- agent:boundary:689e7805 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -665,6 +665,8 @@ Do both:
 
 Remove `git::commit(file)` from the IPC-timeout fallback entirely. Rationale: the snapshot is already saved, exit(75) already signals a degraded write, and preflight's step 2 will commit on the very next cycle. There's zero data loss risk — just a deferred commit. This eliminates the specific hang you hit with zero behavioral change to the happy path.
 
+Why would a commit hang the process? I don't want an uncommitted patchback to be seen. Can we have a conditional on the git commit, so a commit won't occur if another job already handled the response patchback?
+
 ```rust
 // Before:
 if crate::git::is_in_git_repo(file)
@@ -707,7 +709,39 @@ fn acquire(doc: &Path) -> Option<Self> {
 ```
 
 **Why both:** Fix (1) is surgical — zero risk, solves the exact scenario you hit. Fix (2) is defense-in-depth — any future caller of `git::commit` can't hang. Doing just (2) would still leave a ~500ms wait in the exit(75) path for no benefit.
-<!-- agent:boundary:689a098a -->
+### Re: why it hangs + conditional commit — opus-4-6
+
+**Why the commit hangs:**
+
+`CommitLock::acquire` (git.rs:92) calls `fs2::FileExt::lock_exclusive()` — which is `flock(fd, LOCK_EX)` on Linux. This blocks **indefinitely** until the other holder releases. There's no timeout. The only failure case is EINTR or bad fd, not contention. So if a concurrent preflight (step 2) or another `agent-doc write` for the same document is mid-commit, your process stops dead at that flock call.
+
+**Your concern is valid — uncommitted patchback shows as gutter changes.** Skipping the commit entirely would leave modified markers until the next preflight. Not ideal.
+
+**Recommended fix: make `CommitLock::acquire` non-blocking via `try_lock_exclusive()`**
+
+Change one line in git.rs:92:
+
+```rust
+// Before (blocks indefinitely):
+if let Err(e) = file.lock_exclusive() {
+
+// After (returns immediately if held):
+if let Err(e) = file.try_lock_exclusive() {
+```
+
+This preserves the existing fallthrough behavior — when `try_lock_exclusive()` returns `Err(EWOULDBLOCK)`, the function hits the existing `return None` path (git.rs:94), and the commit proceeds **unlocked**. It still commits — it just doesn't serialize against the other holder.
+
+If both processes try to `git commit` simultaneously, git's own `index.lock` handles it. The existing retry loop (git.rs:479–498) already retries 3x with exponential backoff on index.lock contention. So the worst case is:
+
+1. `try_lock_exclusive()` → EWOULDBLOCK → proceed unlocked
+2. `git commit` → index.lock contention → retry up to 3x (50ms/100ms/200ms backoff)
+3. If still contended → commit fails non-fatally (logged, next preflight picks it up)
+
+**Net result:** The commit still happens in the common case (no contention = same behavior as today). When contended, it either succeeds after a brief retry or defers to the next cycle — but never hangs.
+
+One-line change, no behavioral regression on the happy path, the exit(75) path still commits when the lock is free.
+<!-- agent:boundary:c713e618 -->
+<!-- agent:boundary:f23de566 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

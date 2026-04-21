@@ -43,6 +43,7 @@
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
 //! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob so prior-cycle headings don't take phantom diffs when the boundary moves
+//! - commit_lock_nonblocking_when_held: CommitLock::acquire returns None immediately when another process holds the lock (no indefinite blocking)
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
@@ -60,6 +61,9 @@ use std::process::Command;
 /// read-modify-write on the working tree + index from interleaving.
 ///
 /// Lock file lives at `<project_root>/.agent-doc/locks/commit-<hash>.lock`.
+/// Uses `try_lock_exclusive()` (non-blocking): if another process holds the
+/// lock, returns `None` immediately and the caller proceeds unlocked. Git's
+/// own index.lock retry loop handles serialization at the git layer.
 /// Best-effort: if the path cannot be resolved (no project root yet), returns
 /// `None` and the caller proceeds unlocked.
 struct CommitLock {
@@ -89,8 +93,8 @@ impl CommitLock {
                 return None;
             }
         };
-        if let Err(e) = file.lock_exclusive() {
-            eprintln!("[commit] commit-lock flock failed: {} (proceeding unlocked)", e);
+        if let Err(e) = file.try_lock_exclusive() {
+            eprintln!("[commit] commit-lock contended: {} (proceeding unlocked)", e);
             return None;
         }
         Some(Self { _file: file })
@@ -1557,5 +1561,45 @@ mod tests {
         let working = fs::read_to_string(&doc).unwrap();
         assert!(!working.contains("oldid456"),
             "working tree should be repositioned when no IPC available");
+    }
+
+    #[test]
+    fn commit_lock_nonblocking_when_held() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+
+        let doc = root.join("plan.md");
+        fs::write(&doc, "test").unwrap();
+
+        // Create .agent-doc structure so CommitLock can resolve paths
+        let lock_dir = root.join(".agent-doc/locks");
+        fs::create_dir_all(&lock_dir).unwrap();
+        // Create snapshots dir so doc_hash works
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+
+        // Acquire lock manually to simulate contention
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
+        let held = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        held.lock_exclusive().unwrap();
+
+        // CommitLock::acquire should return None immediately (non-blocking)
+        let start = std::time::Instant::now();
+        let result = CommitLock::acquire(&doc);
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none(), "should return None when lock is held");
+        assert!(elapsed.as_millis() < 100, "should not block — took {}ms", elapsed.as_millis());
+
+        // Clean up
+        held.unlock().unwrap();
     }
 }

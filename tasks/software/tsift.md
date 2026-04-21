@@ -808,7 +808,29 @@ Already implemented — no code changes needed.
 - `walk_assigns_correct_language` — verifies `.rs` → rust, `.py` → python, `.tsx` → tsx in the walker
 
 Marking as done — this was completed as part of the initial multi-language tree-sitter implementation.
-<!-- agent:boundary:52856c01 -->
+
+Can we begin to use tsift for agent-doc, tsift, and session-share?
+### Re: indexing agent-doc, tsift, session-share — opus-4-6
+
+All three indexed and working. Ran `tsift index .` in each submodule:
+
+| Submodule | Files | Symbols | Call Edges |
+|-----------|-------|---------|------------|
+| **tsift** | 8 | 241 | 1,884 |
+| **agent-doc** | 184 | 3,521 | 24,576 |
+| **session-share** | 481 | 3,868 | 4,954 |
+
+**Verified queries work:**
+
+- `tsift search "preflight"` in agent-doc finds the function, tests, spec headings, and file-level BM25 matches
+- `tsift graph run --callees` in agent-doc returns detailed callee chains across modules (annotate, audit_docs, autoclaim, boundary, etc.)
+- `tsift sql .tsift/index.db -q "SELECT ..."` works for direct SQL introspection
+
+**Note:** session-share's 481 files includes `node_modules` JS (gitignored content isn't excluded by the `ignore` crate walker when git history tracks it). If that's noisy, a `.tsiftignore` or config-based exclusion could help — not implemented yet.
+
+Each submodule's index lives at `<submodule>/.tsift/index.db`. The workspace-mode indexing (`tsift index --workspace` from agent-loop root) would use the config tier system to index all submodules into `.tsift/indexes/<name>/index.db` for federated search.
+<!-- agent:boundary:79f7a49b -->
+<!-- agent:boundary:bf1df3fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1009,7 +1009,26 @@ Added 3 tests to `component.rs` covering the #cfdy scenario (literal HTML commen
 3. **exchange_and_pending_both_with_html_comments_in_content** — sibling components both containing non-agent HTML comments parse correctly without crossing boundaries
 
 All 3 pass. Full suite: 1215 passed, 6 ignored, 0 failures. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
-<!-- agent:boundary:925d43d5 -->
+release + publish
+### Re: release + publish — sonnet-4-6
+
+Note: running on sonnet-4-6 (med tier) while effective_tier is high — advisory only.
+
+v0.33.10 released. Full changelog:
+
+- **Fix**: Component parser peek guard — non-agent `<!-- ` in content no longer eats close markers (5 tests)
+- **Fix**: CRDT stale-base detection uses prefix+suffix — prevents false-stale classification on short exchanges
+- **Fix**: `ffi_git_commit` unsets `GIT_DIR`/`GIT_INDEX_FILE`/`GIT_WORK_TREE` — correct behavior from git hook contexts
+- **Fix**: `Makefile test` target unsets git hook env vars — 24+ tests were failing in pre-commit hook due to inherited `GIT_DIR`
+- **Cleanup**: Remove IPC degraded mode (obsolete since ack-content sidecar)
+- **JB plugin 0.2.71**: `writeAckContent` fires on all three patch-apply paths
+- **Cargo.toml exclude list** — crate was 300MB+ (editors/build/ included); now 920KB
+
+Two bugs found and fixed during the release process: (1) `git init` in the `ffi_git_commit` test was inheriting `GIT_DIR` from the hook context, corrupting the submodule's `core.worktree` config to a temp path. Fixed by adding `env_remove` + macro in the test. (2) The `core.worktree` got set to `/tmp/.tmpY9lu0u` and had to be manually repaired.
+
+**Links**: [crates.io](https://crates.io/crates/agent-doc/0.33.10) · [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.33.10)
+<!-- agent:boundary:b88838c2 -->
+<!-- agent:boundary:d529a96f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

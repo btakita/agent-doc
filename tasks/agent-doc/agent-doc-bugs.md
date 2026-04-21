@@ -899,8 +899,7 @@ The `❯ ` is a **manual convention** — agent-doc doesn't auto-add it. The `�
 In this document, 11 user prompts have `❯ ` and at least 4 don't (e.g., "In src/session-share/tasks/claudescore.md...", "I moved tasks/tsift.md...", "The response did eventually appear..."). Whether a prompt has `❯ ` depends entirely on whether the user typed it in the editor.
 
 **Design question this surfaces:** should agent-doc auto-prepend `❯ ` to new user content detected in the diff? This would make user/agent attribution unambiguous in the exchange, especially after compaction removes structural cues. It could be a preflight or write-time normalization: if the diff introduces new lines before the boundary that don't start with `###` (agent heading) or `❯`, auto-prepend `❯ ` to the first line of each contiguous user block.
-<!-- agent:boundary:e6e2f1db -->
-<!-- agent:boundary:97b8573f -->
+<!-- agent:boundary:cf5bcfc0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

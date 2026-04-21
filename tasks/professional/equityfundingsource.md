@@ -151,7 +151,22 @@ Dev workflow: clone → `bash bin/assets-download.sh` → images appear locally 
 **R2 status:** The bucket already has all images (via the upload script), but production Pages serves from its own static output, not R2. The R2 copies are a staging ground / backup.
 
 **Risk:** The download script pulls from `equityfundingnow.com`. If that domain goes down or the WordPress hosting changes, new devs can't get images. Worth updating the script to pull from R2 as a fallback (requires `wrangler` auth). Want me to add that?
-<!-- agent:boundary:ebf1553c -->
+
+I don't see equityfundingsource-assets on my CF page. Did you associate the bucket with the brian.takita@gmail.com account?
+### Re: R2 bucket visibility — opus-4-6
+
+The bucket **does exist** on your `brian.takita@gmail.com` account. I just verified:
+
+- **Bucket name:** `equityfundingsource-assets`
+- **Created:** 2026-04-02
+- **Account:** Brian.takita@gmail.com's Account (`1e7e194ff8da4ad9e40ce041aea84f76`)
+- **Has objects:** Yes — confirmed `assets/images/deals/malibu-500k.jpg` is present
+
+It's listed alongside your other R2 buckets (assets-briantakita-me, assets-brookebrodack, etc.).
+
+**To find it in the dashboard:** Go to Cloudflare Dashboard → select your account → R2 Object Storage (left sidebar). It should appear as `equityfundingsource-assets`. If you're on the wrong account in the dashboard (e.g., the Monsterrodholder account), you won't see it — make sure you're viewing the `Brian.takita@gmail.com` account.
+<!-- agent:boundary:007f7a00 -->
+<!-- agent:boundary:5ae6c5ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

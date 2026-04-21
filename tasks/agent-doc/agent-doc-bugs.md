@@ -1061,8 +1061,7 @@ The commit failures don't prevent the IPC write from updating the file, but they
 - 16:17 → 16:41 (24 min): full release cycle — version bump, cargo publish, GitHub Release creation, pyproject sync, build verification, changelog generation
 
 These are genuine work time, not idle. A `compact exchange` would reduce the 70KB document and speed up cold-start reloads.
-<!-- agent:boundary:9ba31a20 -->
-<!-- agent:boundary:18f0b586 -->
+<!-- agent:boundary:cb6a784b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

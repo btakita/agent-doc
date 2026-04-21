@@ -151,8 +151,7 @@ Dev workflow: clone → `bash bin/assets-download.sh` → images appear locally 
 **R2 status:** The bucket already has all images (via the upload script), but production Pages serves from its own static output, not R2. The R2 copies are a staging ground / backup.
 
 **Risk:** The download script pulls from `equityfundingnow.com`. If that domain goes down or the WordPress hosting changes, new devs can't get images. Worth updating the script to pull from R2 as a fallback (requires `wrangler` auth). Want me to add that?
-<!-- agent:boundary:ee315e41 -->
-<!-- agent:boundary:6399760d -->
+<!-- agent:boundary:ebf1553c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

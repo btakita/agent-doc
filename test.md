@@ -1,6 +1,3 @@
----
-title: Test
----
 <!-- agent:exchange -->
-First exchange
+Old exchange content
 <!-- /agent:exchange -->

@@ -2,9 +2,7 @@
 agent_doc_session: test
 ---
 
-## Assistant
-
-Response
-
-## User
-
+<!-- agent:exchange -->
+### Re: older
+old body
+<!-- /agent:exchange -->

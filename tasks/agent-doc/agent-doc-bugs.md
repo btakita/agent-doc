@@ -774,7 +774,22 @@ publish
 - GitHub Release created with prebuilt `agent-doc-v0.33.9-x86_64-unknown-linux-gnu` binary
 
 **crates.io:** Token not found in password store (`crates.io/token` not in passage). Please run `cargo publish` manually once you have the token available, or point me to the correct passage path.
-<!-- agent:boundary:47c1d464 -->
+The patchback for the last agent-doc run was delayed on src/session-share/tasks/claudescore.md did not happen. Why?
+### Re: claudescore patchback investigation — opus-4-6
+
+The patchback **did succeed** — commit `7771b85a` contains the full #pt2p response and it's present in the current file (line 177). The perceived delay has a clear timeline:
+
+| Timestamp | Event |
+|-----------|-------|
+| 1776738745 | preflight_diff_start — your "do #pt2p" edit detected |
+| 1776739404 | intermediate commit attempts on `claudescore.com/bootstrap/superpowers/` — 2x commit_failed (RELEASE-NOTES.md, README.md) |
+| 1776739571 | write_origin + commit_success — response patched back |
+
+**~14 minute gap** between preflight and write. The delay was the Claude session executing the #pt2p task (modifying scoring code, running benchmarks, writing tests). The two failed commits in the bootstrap/superpowers submodule may have contributed to time spent.
+
+**Open question:** Did the response eventually appear in your editor, or did the IDE buffer never refresh? If the latter, that's an IPC issue (the write-to-disk succeeded but the editor notification was lost).
+<!-- agent:boundary:686959c1 -->
+<!-- agent:boundary:45601806 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

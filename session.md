@@ -1,10 +1,7 @@
 ---
-agent_doc_session: test
+session: test
 ---
-
-## Assistant
-
-Response
 
 ## User
 
+Hello

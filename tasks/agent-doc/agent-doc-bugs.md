@@ -994,7 +994,12 @@ Fix: peek after `<!--` — only consume the comment span if it starts with `agen
 Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment_like_text_in_exchange.
 
 **Full suite: 1215 passed (5 new tests), 0 regressions.** Binary rebuilt and installed.
-<!-- agent:boundary:185319d0 -->
+❯ Does the test resync::return_stashed_panes_skips_idle_shells need to be fixed?
+### Re: return_stashed_panes_skips_idle_shells — opus-4-6
+
+No — the test passes cleanly (ran it just now: 1 passed, 0 failures). It's in `resync.rs` and tests tmux pane management (idle shells in stash should stay in stash, not be returned). It's unrelated to the HTML comment parser fix — no component parsing involved. Nothing to fix here.
+<!-- agent:boundary:45118da4 -->
+<!-- agent:boundary:7c29614c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

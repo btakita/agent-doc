@@ -808,14 +808,12 @@ Already implemented — no code changes needed.
 - `walk_assigns_correct_language` — verifies `.rs` → rust, `.py` → python, `.tsx` → tsx in the walker
 
 Marking as done — this was completed as part of the initial multi-language tree-sitter implementation.
-<!-- agent:boundary:ca70bc63 -->
-<!-- agent:boundary:537d3a16 -->
+<!-- agent:boundary:52856c01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)

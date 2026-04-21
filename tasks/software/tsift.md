@@ -793,14 +793,12 @@ Done in commit `77b8fd8`, pushed. Parent submodule updated (`6ebc02eb`).
 - `test_jsx_arrow_component` — arrow + function components
 
 Clippy clean, all 122 tests pass.
-<!-- agent:boundary:fbf500e6 -->
-<!-- agent:boundary:ea0b6e7a -->
+<!-- agent:boundary:7ab96fe8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)

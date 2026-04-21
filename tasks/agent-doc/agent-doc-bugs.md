@@ -629,7 +629,34 @@ Implemented and pushed. Inserts a structured `&lt;!-- agent:referral --&gt;` blo
 **Test results:** 1209 passed, clippy clean, both binaries installed.
 
 **Future:** Preflight can resolve `&lt;!-- agent:referral --&gt;` tags and inject referenced content as agent context. That's a separate item.
-<!-- agent:boundary:0945a5da -->
+
+This process hung...the write back to claudescore.md was successful. Why?
+`agent-doc write tasks/claudescore.md --baseline-file /home/brian/work/btakita/agent-loop/src/session-share/.agent-doc/baselines/dffaf6f39bd8b7f498d760f528d559cac6fbf6133c2cd725448955b82c24048e.md --stream --origin skill --pending-done jqgv`
+### Re: write hang on claudescore.md — opus-4-6
+
+**Root cause: `CommitLock` flock in the IPC-sidecar-timeout fallback path.**
+
+The ops log for session-share shows the pattern clearly:
+```
+ipc_socket_sidecar_timeout file=tasks/claudescore.md — falling back to disk write
+```
+
+Here's what happened in `write::run_stream`:
+
+1. IPC socket connected, message sent, plugin ACKed — but the ack-content sidecar file never appeared within 1000ms
+2. `try_ipc` returned `IpcResult { success: false }` (sidecar timeout + file-based IPC also timed out after 2s)
+3. Entered the IPC timeout fallback path (write.rs:1220–1316):
+   - `atomic_write(file, &final_content)` — **succeeded** (this is why "the write was successful")
+   - `git::commit(file)` — called at line 1313
+   - `std::process::exit(75)` — **never reached**
+
+4. Inside `git::commit`, `CommitLock::acquire` calls `fs2::FileExt::lock_exclusive()` (git.rs:92) — this is a **blocking flock with no timeout**. If another process (concurrent preflight, watch daemon, another agent-doc session for the same document) already holds that lock, the process blocks indefinitely.
+
+**The fix:** `CommitLock::acquire` should use `try_lock_exclusive()` instead of `lock_exclusive()`, or add a timeout. The commit lock exists to serialize concurrent commits, but indefinite blocking is worse than proceeding unlocked or failing fast — especially in the `exit(75)` path where the write already succeeded.
+
+**Alternatively:** The IPC-timeout fallback path (lines 1312–1315) could skip `git::commit()` entirely, since `exit(75)` signals to the caller (the skill) that a manual commit step is needed anyway. The snapshot is already saved; the next `preflight` will commit it.
+<!-- agent:boundary:9e904625 -->
+<!-- agent:boundary:601aa4b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

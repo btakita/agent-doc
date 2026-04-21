@@ -788,7 +788,37 @@ The patchback **did succeed** — commit `7771b85a` contains the full #pt2p resp
 **~14 minute gap** between preflight and write. The delay was the Claude session executing the #pt2p task (modifying scoring code, running benchmarks, writing tests). The two failed commits in the bootstrap/superpowers submodule may have contributed to time spent.
 
 **Open question:** Did the response eventually appear in your editor, or did the IDE buffer never refresh? If the latter, that's an IPC issue (the write-to-disk succeeded but the editor notification was lost).
-<!-- agent:boundary:9a457646 -->
+The response did eventually appear in the editor. It took >30s-60s however. Please plan on how to tighten this latency.
+### Re: tighten patchback latency — plan — opus-4-6
+
+**Root cause identified.** The ops log shows a consistent pattern across every recent write:
+
+```
+ipc_socket_sidecar_timeout file=tasks/agent-doc/agent-doc-bugs.md — falling back to disk write
+```
+
+Socket delivery **succeeds** (message reaches plugin), but the JB plugin **never writes the ack-content sidecar**. This triggers `mark_ipc_degraded()`, which blocks all future IPC attempts for 1 hour, forcing every write to disk-only. The editor then takes 30-60s to pick up disk changes via its general VFS refresh cycle.
+
+Evidence: `.agent-doc/ipc-degraded` marker exists (0 bytes); 4 stale patch files sitting in `.agent-doc/patches/` that the plugin never consumed; every write since timestamp 1776614634 has sidecar-timed-out.
+
+#### Plan
+
+1. **Fix ack-content sidecar in JB plugin** (root cause)
+   - Trace the socket message receipt path in the plugin — confirm the patch is being applied to the Document
+   - After `setText()`, the plugin should write `ack-content-<patch_id>.txt` to `.agent-doc/patches/`
+   - Likely bug: sidecar write path was never implemented, or the ack is being written to the wrong directory, or it's gated behind a condition that's not met
+
+2. **Add VFS refresh signal on disk fallback** (mitigation for degraded mode)
+   - When IPC degrades and the CLI writes to disk, it already writes `vcs-refresh.signal` during commit — but the plugin's PatchWatcher needs to react to it by refreshing the specific document's VirtualFile, not just triggering `git.refresh`
+   - This would bring degraded-mode latency from 30-60s down to <2s
+
+3. **Reduce degraded marker stickiness** (recovery)
+   - Current TTL: 1 hour. Consider reducing to 5 minutes, or clearing the marker on every successful preflight (proof the project is still active)
+   - Clear the marker when a new socket connection succeeds, even without sidecar confirmation
+
+Filed as **#bk47** in pending.
+<!-- agent:boundary:e441cbeb -->
+<!-- agent:boundary:bcc6ea6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -796,5 +826,6 @@ The patchback **did succeed** — commit `7771b85a` contains the full #pt2p resp
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#beea] [#bk47] Fix JB plugin ack-content sidecar — socket delivery succeeds but sidecar never written, causing every write to degrade to disk (30-60s editor latency)
 <!-- /agent:pending -->
 ## Assistant

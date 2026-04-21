@@ -770,13 +770,37 @@ The skill is already live in the available skills list (`/tsift`).
 **Also committed:**
 - Bug fix (`end_line` in `extract_symbols`) + CLAUDE.md update pushed to tsift submodule (`e0c37f1`)
 - Parent submodule pointer updated (`528d91b3`)
-<!-- agent:boundary:64dce2ab -->
+
+do #0m97. add spec + test. run tests. commit + push
+### Re: #0m97 multi-language query patterns — opus-4-6
+
+Done in commit `77b8fd8`, pushed. Parent submodule updated (`6ebc02eb`).
+
+**What was already working (no changes needed):**
+- Python `async def` — tree-sitter-python uses `function_definition` for both sync and async, so the existing query captures them
+- Python decorated functions (`@staticmethod`, `@property`) — the `function_definition` inside `decorated_definition` is still matched
+
+**What was added:**
+- **TypeScript/TSX:** `(variable_declarator name: (identifier) @function.name value: (arrow_function))` — captures `export const Foo = () => {}`, `const Bar = (x: number) => x + 1`, and TSX arrow components like `const MyComponent = () => <div/>`
+- **JavaScript/JSX:** same `variable_declarator` + `arrow_function` pattern
+
+**Tests added (6 new, 122 total):**
+- `test_python_async_def` — async def + sync def
+- `test_python_decorated_function` — `@staticmethod`, `@property`
+- `test_typescript_arrow_exports` — exported + local arrow functions
+- `test_tsx_arrow_component` — arrow component + function component
+- `test_javascript_arrow_exports` — exported + local arrows
+- `test_jsx_arrow_component` — arrow + function components
+
+Clippy clean, all 122 tests pass.
+<!-- agent:boundary:fbf500e6 -->
+<!-- agent:boundary:ea0b6e7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
+- [x] [#0m97] Multi-language query patterns: Python (def, class, async def, decorators), TypeScript (function, class, arrow exports, interfaces, type aliases), TSX (component detection via jsx_element)
 - [ ] [#6xwr] Language auto-detection from file extension (.rs, .py, .ts, .tsx, .js, .jsx) in indexer
 - [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)

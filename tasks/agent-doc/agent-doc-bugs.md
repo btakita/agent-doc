@@ -1141,7 +1141,48 @@ Applied in two locations:
 **Full suite: 1219 passed, 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
 In src/session-share, I ran `agent-doc tasks/claudescore.md`. When I navigated the editor to this document then back to claudescore.md, the running tmux pane with the running turn was swapped out for a new tmux pane. Why?
 Can we reassociate the old claiming tmux pane with claudescore.md?
-<!-- agent:boundary:755d8807 -->
+❯ You missed the following. Why? Please run the prompts:
+❯ > In src/session-share, I ran `agent-doc tasks/claudescore.md`. When I navigated the editor to this document then back to claudescore.md, the running tmux pane with the running turn was swapped out for a new tmux pane. Why?
+❯ > Can we reassociate the old claiming tmux pane with claudescore.md?
+### Re: pane swap on editor navigation — opus-4-6
+
+#### Why the running pane was swapped out
+
+The sync reconciler (`sync.rs`) runs when you switch documents in the editor. It determines which documents are "visible" and which pane should be in the active `agent-doc` window. When you navigated away from claudescore.md to agent-doc-bugs.md:
+
+1. Sync determined claudescore.md was no longer the focused document
+2. The claudescore.md pane (`%107`) was moved to the **stash** window — sync stashes panes for non-visible documents to keep the active window clean
+3. When you navigated back to claudescore.md, instead of rescuing `%107` from stash, a new pane was provisioned
+
+The registry (`sessions.json`) still correctly points claudescore.md → `%107`, and `%107` was recorded in window `@48`. But the actual pane lives in the stash window now, so when sync checks for an "alive pane in the correct window," it doesn't find one and auto-starts.
+
+This is a gap in the stash-rescue logic: `route::rescue_from_stash()` should rescue the pane when the user navigates back, but either (a) it's not being called in the sync auto-start path, or (b) the window mismatch (`@48` in registry vs stash window in reality) prevents the rescue.
+
+#### The pane is still alive
+
+```
+pstree output for %107 (stash):
+zsh → agent-doc → claude (21 threads)
+```
+
+The original Claude session is fully intact — running in the stash with all its context. PID 1827412 (claude) under PID 1827408 (agent-doc).
+
+#### Reassociation
+
+The registry already points claudescore.md → `%107`. The fix is to move the pane out of stash back to the agent-doc window. You can rescue it manually:
+
+```bash
+# Move %107 from stash to the agent-doc window
+tmux join-pane -s %107 -t %58 -h
+```
+
+Or I can run `agent-doc resync --fix` which should detect the stashed pane and offer to return it.
+
+#### Bug to file
+
+The sync reconciler should call `rescue_from_stash()` before auto-starting a new pane. Currently the auto-start path in `sync.rs` (lines 944-1014) checks `has_alive_pane` against the registry, finds the pane in the wrong window, and provisions a new one — rather than rescuing the stashed pane first.
+<!-- agent:boundary:e7e72e1b -->
+<!-- agent:boundary:40e67959 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

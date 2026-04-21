@@ -765,7 +765,17 @@ release
 **Manual testing gate:** Per release process — please confirm the CommitLock fix works in a live session before I publish to crates.io + GitHub Releases. Specifically: trigger the IPC-sidecar-timeout scenario (or any scenario that previously hung) and verify the process exits cleanly.
 
 When you confirm, I'll commit the version bump, tag `v0.33.9`, push, and publish.
-<!-- agent:boundary:b60f86db -->
+publish
+### Re: v0.33.9 released — sonnet-4-6
+
+**Released.** https://github.com/btakita/agent-doc/releases/tag/v0.33.9
+
+- Committed version bump, tagged `v0.33.9`, pushed
+- GitHub Release created with prebuilt `agent-doc-v0.33.9-x86_64-unknown-linux-gnu` binary
+
+**crates.io:** Token not found in password store (`crates.io/token` not in passage). Please run `cargo publish` manually once you have the token available, or point me to the correct passage path.
+<!-- agent:boundary:d9ac165c -->
+<!-- agent:boundary:dc606679 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -899,7 +899,45 @@ The `❯ ` is a **manual convention** — agent-doc doesn't auto-add it. The `�
 In this document, 11 user prompts have `❯ ` and at least 4 don't (e.g., "In src/session-share/tasks/claudescore.md...", "I moved tasks/tsift.md...", "The response did eventually appear..."). Whether a prompt has `❯ ` depends entirely on whether the user typed it in the editor.
 
 **Design question this surfaces:** should agent-doc auto-prepend `❯ ` to new user content detected in the diff? This would make user/agent attribution unambiguous in the exchange, especially after compaction removes structural cues. It could be a preflight or write-time normalization: if the diff introduces new lines before the boundary that don't start with `###` (agent heading) or `❯`, auto-prepend `❯ ` to the first line of each contiguous user block.
-<!-- agent:boundary:cf5bcfc0 -->
+❯ Yes...auto-prepend `❯ `.
+### Re: auto-prepend ❯ — implementation plan — opus-4-6
+
+Confirmed. Here's where it should live and how:
+
+#### Where: `preflight` commit normalization (git.rs)
+
+The commit step already normalizes the snapshot (boundary reposition, `(HEAD)` suffix). Adding `❯ ` prefix normalization here is the right fit:
+
+1. **Timing**: after the user's diff is computed (so the diff shows raw user text), but before the snapshot is saved (so subsequent cycles see normalized content)
+2. **Scope**: only the exchange component, only lines in the user region (before the boundary)
+3. **No working-tree modification**: the normalization writes to the snapshot, not the user's file — the user sees their raw edits as gutter changes, and the next cycle's diff is clean
+
+#### Rules
+
+| Line starts with | Action |
+|---|---|
+| `###` (response heading) | Skip — agent content |
+| `❯` | Skip — already prefixed |
+| `<!--` | Skip — structural marker |
+| Empty line | Skip — whitespace |
+| Anything else (first line of contiguous block) | Prepend `❯ ` |
+| Continuation lines in same block | Leave as-is |
+
+"Contiguous block" = lines between empty lines or structural markers. Only the first non-empty, non-structural line of each block gets `❯ `.
+
+#### Edge cases
+
+- **Multi-line prompts**: `❯ ` on first line only. Continuation lines (indented, `-` list items, code blocks) stay untouched. This matches how this document already reads — `❯ do #bk47...` followed by continuation text.
+- **Inline annotations**: blockquotes (`>`) and HTML comments (`<!--`) are structural, not user prompts — skip them.
+- **Code blocks**: lines inside fenced code blocks must be skipped entirely.
+- **Retroactive**: only new user content in the current diff gets prefixed. Historical content stays as-is (compaction already froze it).
+
+#### Also fix: claude-code-action.md duplication
+
+The empty-baseline CRDT merge bug (#1 from last cycle) should also be filed. It's a separate issue from the `❯ ` feature.
+<!-- agent:boundary:37b48942 -->
+Yes...auto-prepend `❯ `
+<!-- agent:boundary:13d2f24c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -907,5 +945,6 @@ In this document, 11 user prompts have `❯ ` and at least 4 don't (e.g., "In sr
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#r7hw] Auto-prepend ❯ to user prompts in exchange — normalize during preflight commit (after diff is computed but before snapshot update). Rules: first line of each contiguous user block (not starting with ### or ❯ or <!-- ) gets ❯ prefix. Preserve continuation lines as-is. Implement in git.rs commit normalization path.
 <!-- /agent:pending -->
 ## Assistant

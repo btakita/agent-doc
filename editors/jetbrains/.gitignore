@@ -1,8 +1,0 @@
-.gradle/
-.intellijPlatform/
-build/
-.idea/
-*.iml
-out/
-certificate/
-.env

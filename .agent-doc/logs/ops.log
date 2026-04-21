@@ -1,5 +1,1 @@
-[1775348726] snapshot_save file=src/agent-doc/CLAUDE.md len=14934
-[1775348726] commit_staging file=src/agent-doc/CLAUDE.md snap_len=14934 file_len=14934
-[1775740440] commit_staging file=/home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml snap_len=0 file_len=1231
-[1775740440] snapshot_save file=/home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml len=1231
-[1775740440] commit_success file=/home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml
+[1776803262] snapshot_save file=/tmp/.tmpFdQlr0/plan.md len=166

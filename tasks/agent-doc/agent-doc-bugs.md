@@ -756,8 +756,7 @@ do the fix. add spec + test. run tests. commit + push. build + install for testi
 - `target/release/agent-doc` (via `.bin/agent-doc` symlink)
 
 Ready for live testing. The next time you hit the IPC-sidecar-timeout scenario, `git::commit` should return in milliseconds rather than hanging.
-<!-- agent:boundary:ddf0e608 -->
-<!-- agent:boundary:c2bdff83 -->
+<!-- agent:boundary:78270f30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

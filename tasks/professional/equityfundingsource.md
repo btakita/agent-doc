@@ -134,8 +134,7 @@ assets/images/
 **Recommendation:** Option 2 (Worker-proxied) — keeps URLs on the main domain (better for SEO, no CORS), and you already have the `R2_ASSETS` binding wired up. The Worker route is ~20 lines.
 
 Which approach do you want, or should I just implement option 2?
-<!-- agent:boundary:102ff8c3 -->
-<!-- agent:boundary:0dfd1bce -->
+<!-- agent:boundary:90dd2d41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

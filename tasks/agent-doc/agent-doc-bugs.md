@@ -1112,8 +1112,7 @@ I have a background agent reading the actual commit code to pinpoint the exact l
 #### Trailing dash on point 1
 
 Noticed the trailing `-` on the document size paragraph — looks like an accidental edit artifact. No action needed unless intentional.
-<!-- agent:boundary:d9368271 -->
-<!-- agent:boundary:2176ef6a -->
+<!-- agent:boundary:14669dfc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

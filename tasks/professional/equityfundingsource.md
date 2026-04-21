@@ -226,8 +226,7 @@ AWS_ENDPOINT_URL_S3="https://<account_id>.fedramp.r2.cloudflarestorage.com"
 ```
 
 **Note:** `AWS_ENDPOINT_URL_S3` is the newer standard (used by AWS SDK v3, boto3). Some older tools use `AWS_ENDPOINT_URL` or require `--endpoint-url` flag. The R2 Access Key ID and Secret Access Key are separate from Cloudflare API tokens — they're created specifically for S3-compatible access under R2 → Manage R2 API Tokens in the dashboard.
-<!-- agent:boundary:45504e70 -->
-<!-- agent:boundary:ab61a86c -->
+<!-- agent:boundary:22d05711 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -756,7 +756,17 @@ do the fix. add spec + test. run tests. commit + push. build + install for testi
 - `target/release/agent-doc` (via `.bin/agent-doc` symlink)
 
 Ready for live testing. The next time you hit the IPC-sidecar-timeout scenario, `git::commit` should return in milliseconds rather than hanging.
-<!-- agent:boundary:78270f30 -->
+
+release
+### Re: release prep — sonnet-4-6
+
+**v0.33.9 staged for release.** Bumped `Cargo.toml` + `pyproject.toml`, updated `VERSIONS.md`. Binary built and installed (`agent-doc --version` → `0.33.9`).
+
+**Manual testing gate:** Per release process — please confirm the CommitLock fix works in a live session before I publish to crates.io + GitHub Releases. Specifically: trigger the IPC-sidecar-timeout scenario (or any scenario that previously hung) and verify the process exits cleanly.
+
+When you confirm, I'll commit the version bump, tag `v0.33.9`, push, and publish.
+<!-- agent:boundary:cc893525 -->
+<!-- agent:boundary:1e62f1de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

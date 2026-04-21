@@ -756,8 +756,7 @@ $ tsift graph cmd_graph --callees
 **Docs updated:** `src/tsift/CLAUDE.md` now documents `index`, `search`, `graph` commands with workspace flags, the graph module architecture, tree-sitter dependency, and updated test count (116).
 
 **Skill missing:** The `/tsift` skill (`.claude/skills/tsift/`) doesn't exist — session doc mentions it was installed previously but it's gone from the repo. Want me to recreate it?
-<!-- agent:boundary:94263370 -->
-<!-- agent:boundary:c83c0a27 -->
+<!-- agent:boundary:7dadec98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

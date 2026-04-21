@@ -655,8 +655,7 @@ Here's what happened in `write::run_stream`:
 **The fix:** `CommitLock::acquire` should use `try_lock_exclusive()` instead of `lock_exclusive()`, or add a timeout. The commit lock exists to serialize concurrent commits, but indefinite blocking is worse than proceeding unlocked or failing fast — especially in the `exit(75)` path where the write already succeeded.
 
 **Alternatively:** The IPC-timeout fallback path (lines 1312–1315) could skip `git::commit()` entirely, since `exit(75)` signals to the caller (the skill) that a manual commit step is needed anyway. The snapshot is already saved; the next `preflight` will commit it.
-<!-- agent:boundary:9e904625 -->
-<!-- agent:boundary:601aa4b7 -->
+<!-- agent:boundary:0c1ba00c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

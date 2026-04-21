@@ -1392,16 +1392,32 @@ mod ack_content_tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
 
+        // Helper: run git command isolated from any parent git hook env vars.
+        // Pre-commit hooks set GIT_DIR/GIT_INDEX_FILE which would confuse
+        // git commands targeting the temp repo.
+        macro_rules! git {
+            ($($arg:expr),+) => {
+                Command::new("git")
+                    .current_dir(root)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_INDEX_FILE")
+                    .env_remove("GIT_WORK_TREE")
+                    .args([$($arg),+])
+                    .output()
+                    .unwrap()
+            };
+        }
+
         // Set up minimal git repo
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        git!["init"];
+        git!["config", "user.email", "test@test.com"];
+        git!["config", "user.name", "Test"];
 
         // Commit initial file so HEAD exists
         let readme = root.join("README.md");
         std::fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        git!["add", "README.md"];
+        git!["commit", "-m", "initial", "--no-verify"];
 
         // Create a document file (not yet committed)
         let doc = root.join("session.md");
@@ -1412,11 +1428,7 @@ mod ack_content_tests {
         assert!(ok, "ffi_git_commit should succeed for a valid git repo");
 
         // Verify git log contains the commit
-        let log = Command::new("git")
-            .current_dir(root)
-            .args(["log", "--oneline", "-2"])
-            .output()
-            .unwrap();
+        let log = git!["log", "--oneline", "-2"];
         let log_str = String::from_utf8_lossy(&log.stdout);
         assert!(
             log_str.contains("agent-doc(session):"),

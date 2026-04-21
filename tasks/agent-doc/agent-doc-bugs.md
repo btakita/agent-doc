@@ -932,10 +932,40 @@ The commit step already normalizes the snapshot (boundary reposition, `(HEAD)` s
 - **Code blocks**: lines inside fenced code blocks must be skipped entirely.
 - **Retroactive**: only new user content in the current diff gets prefixed. Historical content stays as-is (compaction already froze it).
 
+Also skip fenced code blocks: \`\`\`
+
 #### Also fix: claude-code-action.md duplication
 
 The empty-baseline CRDT merge bug (#1 from last cycle) should also be filed. It's a separate issue from the `❯ ` feature.
 Yes...auto-prepend `❯ `
+Add tests. Is #r7hw done?
+Fix "The empty-baseline CRDT merge bug". add tests
+### Re: #r7hw status + CRDT merge fix — opus-4-6
+
+#### #r7hw: already implemented
+
+normalize_user_prompts_in_exchange() (write.rs:375-554) is live and called from both write paths (IPC at line 1175, disk at line 1388). It diffs snapshot to baseline to find user-added lines, then prepends the prompt prefix to each one. Code-fenced content, structural markers, and response headings are skipped. 18 unit tests cover it. This feature is what added the prefix to your latest prompts in this document.
+
+Fenced code blocks are already handled — fence_open() / fence_close() at lines 444-460 track both backtick and tilde fences, and the prefix is never applied inside them.
+
+#### Empty-baseline CRDT merge bug: fixed
+
+Two changes in crdt.rs:
+
+**1. Stale base detection false positive** — the old check used only common_prefix_len(base, side) / base_len. For template documents with an empty exchange, the divergence starts mid-document (at the exchange content), so the prefix is only 45% of the base — triggering false stale detection. The base would be replaced with ours, and then theirs content (the response) was lost entirely.
+
+Fix: use (common_prefix + common_suffix) / base_len. The common suffix captures the closing markers + pending section, giving 82% shared content — correctly identified as non-stale.
+
+**2. Prefix advancement condition too strict** — the old condition required mutual_prefix > base_text.len(). When the base has trailing structure (closing markers, pending section) past the exchange content, the mutual prefix of ours/theirs cannot exceed base_text.len() even though it extends well past the divergence point.
+
+Fix: compute base_diverge = max(common_prefix_len(base, ours), common_prefix_len(base, theirs)) and advance when mutual_prefix > base_diverge. This promotes shared user content (the prompt) into the base, so the CRDT does not duplicate it.
+
+**Tests added:** merge_empty_exchange_no_duplicate_user_line and merge_empty_exchange_prefixed_prompts_no_duplicate. Both failed before the fix, pass after. Full suite: 1210 passed, 0 failures.
+
+Binary rebuilt and installed (both target/release/ and ~/.cargo/bin/).
+
+**Parser bug discovered:** The pending item for #r7hw contains a literal `<!-- ` which starts an HTML comment that eats the `<!-- /agent:pending -->` close marker. The pending ops flags fail with "unclosed component." Will need to fix the pending item text first — escaping the `<!-- ` as `&lt;!-- ` or rewriting the rule to avoid raw HTML comment starters.
+<!-- agent:boundary:6bdf19eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

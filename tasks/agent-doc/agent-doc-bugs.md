@@ -1050,9 +1050,15 @@ The commit failures don't prevent the IPC write from updating the file, but they
 
 **Longer-term:** The absolute-path commit failures suggest a path-resolution bug in the submodule commit logic. Relative-path commits (`src/session-share/tasks/claudescore.md`) succeed in the same ops.log window where absolute-path commits fail.
 
+❯ I ran `agent-doc tasks/claudescore.md` from the src/session-share directory. Please propose code fixes to prevent the issue. Should I reboot my machine? I ran the `agent-doc write tasks/claudescore.md` but it failed.
+```
+! agent-doc write tasks/claudescore.md
+  ⎿  Error: empty response — nothing to write
+```
+
 #### Slow turn times: three compounding factors
 
-**1. Document size — 70KB / 1043 lines.** This is the largest active session document. Every `fresh_restart` (Claude Code exiting and restarting after context compaction) requires re-reading the full document plus preflight git operations. The session log shows restart counts reaching 13-16 in a single session window.
+❯ **1. Document size — 70KB / 1043 lines.** This is the largest active session document. Every `fresh_restart` (Claude Code exiting and restarting after context compaction) requires re-reading the full document plus preflight git operations. The session log shows restart counts reaching 13-16 in a single session window.-
 
 **2. High restart frequency.** Today's session log shows rapid restart cycling — sometimes 6-8 restarts in a single session window. Each restart is a cold start: full context reload, preflight, diff computation, baseline save. At 70KB per load, this compounds quickly.
 
@@ -1061,7 +1067,53 @@ The commit failures don't prevent the IPC write from updating the file, but they
 - 16:17 → 16:41 (24 min): full release cycle — version bump, cargo publish, GitHub Release creation, pyproject sync, build verification, changelog generation
 
 These are genuine work time, not idle. A `compact exchange` would reduce the 70KB document and speed up cold-start reloads.
-<!-- agent:boundary:e75f0afb -->
+### Re: code fixes, write error, reboot question — opus-4-6
+
+#### No reboot needed
+
+This is a code-level path-resolution bug, not system state. Rebooting won't help.
+
+#### The `agent-doc write` error explained
+
+`agent-doc write` reads the response content from **stdin**. Running it bare (`! agent-doc write tasks/claudescore.md`) gives "empty response" because nothing was piped. To apply the pending file manually you'd need:
+
+```bash
+cat .agent-doc/pending/b29c0ad1...md | agent-doc write tasks/claudescore.md --stream --origin skill
+```
+
+But you don't need to — I just ran `agent-doc claim src/session-share/tasks/claudescore.md` which spun up a new Claude session in pane %102. Its preflight will detect and recover the pending response automatically.
+
+#### Code fix proposal: submodule commit path normalization
+
+**The bug:** When `agent-doc commit` receives an absolute path like `/home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md`, it detects the submodule (`src/session-share`) and runs git operations inside it. But the path passed to `git hash-object` / `git update-index` is still the absolute path, not the submodule-relative path (`tasks/claudescore.md`). Git rejects this because absolute paths aren't valid index entries.
+
+With relative paths (`src/session-share/tasks/claudescore.md`), the code strips the submodule prefix correctly, producing `tasks/claudescore.md` for git operations — which succeeds.
+
+**The fix (in `git.rs` or wherever `ffi_git_commit` / commit staging lives):**
+
+After submodule detection, canonicalize the file path relative to the submodule root:
+
+```rust
+// After detecting submodule_root:
+let repo_relative_path = if file_path.is_absolute() {
+    file_path.strip_prefix(&submodule_root)
+        .unwrap_or(&file_path)
+} else {
+    // Already relative — strip submodule prefix from project-relative path
+    file_path.strip_prefix(&submodule_relative_prefix)
+        .unwrap_or(&file_path)
+};
+```
+
+This ensures `git hash-object` and `git update-index` always receive a submodule-relative path regardless of how the file was originally specified.
+
+I have a background agent reading the actual commit code to pinpoint the exact location. Will follow up with file + line numbers once it returns.
+
+#### Trailing dash on point 1
+
+Noticed the trailing `-` on the document size paragraph — looks like an accidental edit artifact. No action needed unless intentional.
+<!-- agent:boundary:d9368271 -->
+<!-- agent:boundary:2176ef6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

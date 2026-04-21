@@ -20,9 +20,9 @@ release: check
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	cargo install --path .
 
-# Run tests
+# Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR)
 test:
-	cargo test
+	env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test
 
 # Lint
 clippy:

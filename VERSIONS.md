@@ -4,6 +4,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.10
+
+- **Fix: Component parser peek guard for non-agent HTML comments.** `parse()` in `component.rs` previously consumed any `<!-- ... -->` sequence in document content, causing the close-comment search to eat the next `<!-- /agent:name -->` marker. Now peeks 20 bytes after `<!--` and skips non-agent sequences (advances 1 byte) rather than consuming them. Fixes "unclosed component" errors when pending items contain literal `<!-- ` in their text. 5 new tests.
+
+- **Fix: CRDT stale-base detection uses prefix+suffix.** `merge()` in `crdt.rs` previously only checked `common_prefix_len` to decide if the base was stale. Template documents have structural content (frontmatter, component markers, pending sections) at both ends — a short exchange meant only the prefix went uncounted, causing valid bases to be classified as stale and triggering duplicate-user-prompt bugs. Now computes `ours_shared = (prefix + suffix).min(base_len)` and uses that ratio for the 50% threshold.
+
+- **Cleanup: Remove IPC degraded mode.** `is_ipc_degraded`, `mark_ipc_degraded`, and `clear_ipc_degraded` removed from `write.rs`. The ack-content sidecar mechanism (v0.33.x) made the degraded marker obsolete — sidecar ACK is authoritative; disk fallback handles the timeout path. Replaced with `cleanup_legacy_ipc_degraded` that removes any stale `.agent-doc/ipc-degraded` marker left by older installs.
+
+- **JB plugin 0.2.71: writeAckContent fires on all patch paths.** Previously `writeAckContent` was only called from the VFS patch path; the two exchange-level patch paths omitted it. Now all three paths (WriteCommandAction exchange, VFS exchange, boundary-reposition) call `writeAckContent`, ensuring the ack-content sidecar always fires regardless of which code path processes the patch.
+
+- **Fix: Makefile `test` target unsets git hook env vars.** `make test` now runs `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test`. When the pre-commit hook calls `make precommit`, git sets `GIT_DIR` to the outer repo — all temp-repo tests in the suite inherited this and routed their git subcommands to the wrong repo, causing 24+ test failures during commit. The `env -u` strips the hook vars before cargo test, restoring correct isolation.
+
 ## 0.33.9
 
 - **Fix: CommitLock uses try_lock_exclusive to prevent indefinite hang.** `CommitLock::acquire` (git.rs) previously called `fs2::lock_exclusive()` which blocks indefinitely when another process holds the lock. In the IPC-sidecar-timeout fallback path (exit 75), the write to disk succeeded but `git::commit` blocked at the flock — causing the skill process to hang. Changed to `try_lock_exclusive()`: returns `None` immediately when contended, proceeding unlocked. Git's own `index.lock` retry loop (3 attempts with exponential backoff) handles serialization at the git layer.

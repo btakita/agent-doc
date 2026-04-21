@@ -66,7 +66,7 @@ src/
   crdt.rs           # CRDT foundation (yrs-based conflict-free merge)
   merge.rs          # 3-way merge + CRDT merge path
   stream.rs         # Stream command: real-time CRDT write-back loop
-  ffi.rs            # C ABI exports for editor plugins (JNA/FFI)
+  ffi.rs            # C ABI exports for editor plugins (JNA/FFI); ffi_git_commit unsets GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE so it works correctly when called from git hook contexts
   ipc_socket.rs     # Socket-based IPC (Unix domain sockets via interprocess crate)
   lib.rs            # Library target re-exports
   recover.rs        # Orphaned pending response detection + recovery

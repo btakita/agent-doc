@@ -1181,8 +1181,7 @@ Or I can run `agent-doc resync --fix` which should detect the stashed pane and o
 #### Bug to file
 
 The sync reconciler should call `rescue_from_stash()` before auto-starting a new pane. Currently the auto-start path in `sync.rs` (lines 944-1014) checks `has_alive_pane` against the registry, finds the pane in the wrong window, and provisions a new one — rather than rescuing the stashed pane first.
-<!-- agent:boundary:e7e72e1b -->
-<!-- agent:boundary:40e67959 -->
+<!-- agent:boundary:34606978 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

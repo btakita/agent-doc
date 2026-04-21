@@ -134,7 +134,25 @@ assets/images/
 **Recommendation:** Option 2 (Worker-proxied) — keeps URLs on the main domain (better for SEO, no CORS), and you already have the `R2_ASSETS` binding wired up. The Worker route is ~20 lines.
 
 Which approach do you want, or should I just implement option 2?
-<!-- agent:boundary:90dd2d41 -->
+How are the public images served right now? I have another dev who will be working on the project. I want him to have access to the images on his dev machine.
+### Re: current image serving + dev access — opus-4-6
+
+**How images are served now:**
+
+Images live in `public/assets/images/` (gitignored). The Pages build copies them into the output directory, and Cloudflare Pages serves them as static files at `/assets/images/*`. App code references them as relative paths (e.g., `/assets/images/deals/malibu-500k.jpg`).
+
+**Dev access — scripts already exist:**
+
+- **`bin/assets-download.sh`** — curls all 32 images from `equityfundingnow.com/storage/2026/03/`. A new dev runs this once after cloning. No R2 or Cloudflare auth needed.
+- **`bin/assets-upload.sh`** — pushes the local images to the `equityfundingsource-assets` R2 bucket via `wrangler r2 object put`. Only needed when updating R2.
+
+Dev workflow: clone → `bash bin/assets-download.sh` → images appear locally → `bun dev` serves them.
+
+**R2 status:** The bucket already has all images (via the upload script), but production Pages serves from its own static output, not R2. The R2 copies are a staging ground / backup.
+
+**Risk:** The download script pulls from `equityfundingnow.com`. If that domain goes down or the WordPress hosting changes, new devs can't get images. Worth updating the script to pull from R2 as a fallback (requires `wrangler` auth). Want me to add that?
+<!-- agent:boundary:ee315e41 -->
+<!-- agent:boundary:6399760d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

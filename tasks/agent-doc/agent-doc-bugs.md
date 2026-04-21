@@ -655,7 +655,60 @@ Here's what happened in `write::run_stream`:
 **The fix:** `CommitLock::acquire` should use `try_lock_exclusive()` instead of `lock_exclusive()`, or add a timeout. The commit lock exists to serialize concurrent commits, but indefinite blocking is worse than proceeding unlocked or failing fast — especially in the `exit(75)` path where the write already succeeded.
 
 **Alternatively:** The IPC-timeout fallback path (lines 1312–1315) could skip `git::commit()` entirely, since `exit(75)` signals to the caller (the skill) that a manual commit step is needed anyway. The snapshot is already saved; the next `preflight` will commit it.
-<!-- agent:boundary:0c1ba00c -->
+
+What changes or combination of changes do you recommend. `try_lock_exclusive()` with a timeout seems like a good solution. But please recommend a course of action.
+### Re: recommended fix — opus-4-6
+
+Do both:
+
+**1. Skip commit in the exit(75) path (write.rs:1312–1315) — immediate fix**
+
+Remove `git::commit(file)` from the IPC-timeout fallback entirely. Rationale: the snapshot is already saved, exit(75) already signals a degraded write, and preflight's step 2 will commit on the very next cycle. There's zero data loss risk — just a deferred commit. This eliminates the specific hang you hit with zero behavioral change to the happy path.
+
+```rust
+// Before:
+if crate::git::is_in_git_repo(file)
+    && let Err(e) = crate::git::commit(file) {
+        eprintln!("[commit] warning: commit before exit(75) failed: {}", e);
+    }
+std::process::exit(75);
+
+// After:
+eprintln!("[write] skipping commit in exit(75) path — preflight will commit next cycle");
+std::process::exit(75);
+```
+
+**2. Make `CommitLock::acquire` non-blocking (git.rs:70–97) — systemic fix**
+
+Change from blocking `lock_exclusive()` to a timed poll of `try_lock_exclusive()`. If the lock can't be acquired within ~500ms, proceed unlocked (with a warning). This prevents hangs from any code path that hits `CommitLock`, not just exit(75).
+
+```rust
+fn acquire(doc: &Path) -> Option<Self> {
+    // ... existing setup ...
+    let file = match OpenOptions::new().create(true).write(true).truncate(false).open(&lock_path) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("[commit] commit-lock open failed: {} (proceeding unlocked)", e); return None; }
+    };
+    // Timed lock: try for 500ms, then proceed unlocked
+    let start = std::time::Instant::now();
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Some(Self { _file: file }),
+            Err(_) if start.elapsed() < std::time::Duration::from_millis(500) => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(_) => {
+                eprintln!("[commit] commit-lock timed out after 500ms (proceeding unlocked)");
+                return None;
+            }
+        }
+    }
+}
+```
+
+**Why both:** Fix (1) is surgical — zero risk, solves the exact scenario you hit. Fix (2) is defense-in-depth — any future caller of `git::commit` can't hang. Doing just (2) would still leave a ~500ms wait in the exit(75) path for no benefit.
+<!-- agent:boundary:247aa769 -->
+<!-- agent:boundary:bde96ef7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

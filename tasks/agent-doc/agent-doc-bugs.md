@@ -707,8 +707,7 @@ fn acquire(doc: &Path) -> Option<Self> {
 ```
 
 **Why both:** Fix (1) is surgical — zero risk, solves the exact scenario you hit. Fix (2) is defense-in-depth — any future caller of `git::commit` can't hang. Doing just (2) would still leave a ~500ms wait in the exit(75) path for no benefit.
-<!-- agent:boundary:247aa769 -->
-<!-- agent:boundary:bde96ef7 -->
+<!-- agent:boundary:689a098a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

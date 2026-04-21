@@ -935,9 +935,7 @@ The commit step already normalizes the snapshot (boundary reposition, `(HEAD)` s
 #### Also fix: claude-code-action.md duplication
 
 The empty-baseline CRDT merge bug (#1 from last cycle) should also be filed. It's a separate issue from the `❯ ` feature.
-<!-- agent:boundary:37b48942 -->
 Yes...auto-prepend `❯ `
-<!-- agent:boundary:13d2f24c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

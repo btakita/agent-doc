@@ -328,6 +328,18 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             continue;
         }
 
+        // Quick peek: only consume `<!-- ... -->` if the text after `<!--`
+        // starts with ` agent:` or ` /agent:` (with optional whitespace).
+        // Non-agent `<!--` sequences (e.g., `<!-- )` in prose) must NOT be
+        // consumed — their `-->` search would eat real component close markers.
+        let peek_start = pos + 4;
+        let peek = &doc[peek_start..doc.len().min(peek_start + 20)];
+        let peek_trimmed = peek.trim_start();
+        if !peek_trimmed.starts_with("agent:") && !peek_trimmed.starts_with("/agent:") {
+            pos += 1;
+            continue;
+        }
+
         let marker_start = pos;
 
         // Find closing `-->`
@@ -1090,5 +1102,90 @@ actual content
     fn strip_comments_removes_link_ref() {
         let result = strip_comments("[//]: # (hidden note)\nvisible\n");
         assert_eq!(result, "visible\n");
+    }
+
+    #[test]
+    fn html_comment_in_content_does_not_eat_close_marker() {
+        let doc = "\
+<!-- agent:pending patch=replace -->
+- [ ] [#abc] Rule: first line (not starting with ### or ❯ or <!-- ) gets prefix
+<!-- /agent:pending -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "pending");
+        assert!(comps[0].content(doc).contains("<!-- )"));
+    }
+
+    #[test]
+    fn nested_html_comment_like_text_in_exchange() {
+        let doc = "\
+<!-- agent:exchange -->
+User typed <!-- some note --> in the text.
+<!-- /agent:exchange -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "exchange");
+    }
+
+    #[test]
+    fn pending_item_with_literal_html_comment_opener() {
+        // Regression: a pending item containing `<!-- ` (literal HTML comment start)
+        // must not consume the `<!-- /agent:pending -->` close marker.
+        let doc = "\
+<!-- agent:pending patch=replace -->
+- [ ] [#r7hw] Component parser: non-agent `<!-- ` in content ate close markers
+- [ ] [#xyz] Another item
+<!-- /agent:pending -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "pending");
+        let content = comps[0].content(doc);
+        assert!(content.contains("#r7hw"));
+        assert!(content.contains("#xyz"));
+    }
+
+    #[test]
+    fn multiple_non_agent_html_comments_in_pending() {
+        // Multiple `<!-- ... -->` fragments that are NOT agent markers.
+        let doc = "\
+<!-- agent:pending patch=replace -->
+- [ ] [#a] Fix rule: skip lines starting with <!-- or -->
+- [ ] [#b] Handle <!-- partial comment
+- [ ] [#c] Normal item
+<!-- /agent:pending -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "pending");
+        let content = comps[0].content(doc);
+        assert!(content.contains("#a"));
+        assert!(content.contains("#b"));
+        assert!(content.contains("#c"));
+    }
+
+    #[test]
+    fn exchange_and_pending_both_with_html_comments_in_content() {
+        // Both components contain non-agent HTML comments — parser must handle
+        // siblings correctly without eating across component boundaries.
+        let doc = "\
+<!-- agent:exchange -->
+The rule checks for <!-- prefix before deciding.
+### Re: topic — opus
+Fix applied to skip non-agent <!-- sequences.
+<!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+- [ ] [#cfdy] Verify <!-- in pending items
+<!-- /agent:pending -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 2);
+        assert_eq!(comps[0].name, "exchange");
+        assert_eq!(comps[1].name, "pending");
+        assert!(comps[0].content(doc).contains("<!-- prefix"));
+        assert!(comps[1].content(doc).contains("#cfdy"));
     }
 }

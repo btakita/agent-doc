@@ -984,8 +984,13 @@ pub unsafe extern "C" fn agent_doc_commit(file_path: *const c_char) -> bool {
 /// live in the binary's git::commit. This is a best-effort backstop only.
 fn ffi_git_commit(file: &std::path::Path) -> bool {
     let parent = file.parent().unwrap_or(file);
+    // Unset git env vars inherited from parent hooks (GIT_DIR etc.) so git
+    // discovers the correct repo from current_dir rather than the outer repo.
     let git_root_out = std::process::Command::new("git")
         .current_dir(parent)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
         .args(["rev-parse", "--show-toplevel"])
         .output();
     let git_root = match git_root_out {
@@ -1006,6 +1011,9 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
     // Stage the document file
     let add_ok = std::process::Command::new("git")
         .current_dir(&git_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
         .args(["add", &file.to_string_lossy()])
         .status()
         .map(|s| s.success())
@@ -1017,6 +1025,9 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
 
     std::process::Command::new("git")
         .current_dir(&git_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
         .args(["commit", "-m", &msg, "--no-verify"])
         .output()
         .map(|o| o.status.success())

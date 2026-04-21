@@ -528,6 +528,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
             if (patch.fullContent == content) {
                 LOG.warn("Patch produced no changes for ${patch.file}")
+                writeAckContent(patch.patchId, document.text, patch.file)
                 return true
             }
             WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
@@ -578,6 +579,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
+            writeAckContent(patch.patchId, document.text, patch.file)
             return true
         }
 
@@ -658,10 +660,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                     targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
                 }
                 LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
-                writeAckContent(patch.patchId, result, patch.file)
             } else {
                 LOG.warn("VFS patch produced no changes for ${patch.file}")
             }
+            writeAckContent(patch.patchId, result, patch.file)
             return true
         } catch (e: Exception) {
             LOG.warn("Failed to apply patch via VFS for ${patch.file}", e)

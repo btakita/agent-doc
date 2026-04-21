@@ -817,8 +817,7 @@ Evidence: `.agent-doc/ipc-degraded` marker exists (0 bytes); 4 stale patch files
    - Clear the marker when a new socket connection succeeds, even without sidecar confirmation
 
 Filed as **#bk47** in pending.
-<!-- agent:boundary:e441cbeb -->
-<!-- agent:boundary:bcc6ea6b -->
+<!-- agent:boundary:09ac7629 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

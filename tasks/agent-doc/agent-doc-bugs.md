@@ -965,7 +965,36 @@ Fix: compute base_diverge = max(common_prefix_len(base, ours), common_prefix_len
 Binary rebuilt and installed (both target/release/ and ~/.cargo/bin/).
 
 **Parser bug discovered:** The pending item for #r7hw contains a literal `<!-- ` which starts an HTML comment that eats the `<!-- /agent:pending -->` close marker. The pending ops flags fail with "unclosed component." Will need to fix the pending item text first — escaping the `<!-- ` as `&lt;!-- ` or rewriting the rule to avoid raw HTML comment starters.
-<!-- agent:boundary:6bdf19eb -->
+### Re: #r7hw status + CRDT merge fix + parser fix — opus-4-6
+
+#### #r7hw: already implemented
+
+normalize_user_prompts_in_exchange() (write.rs:375-554) is live and called from both write paths (IPC at line 1175, disk at line 1388). It diffs snapshot to baseline to find user-added lines, then prepends the prompt prefix to each one. Code-fenced content, structural markers, and response headings are skipped. 18 unit tests cover it. This feature is what added the prefix to your latest prompts in this document.
+
+Fenced code blocks are already handled — fence_open() / fence_close() at lines 444-460 track both backtick and tilde fences, and the prefix is never applied inside them.
+
+#### Empty-baseline CRDT merge bug: fixed (crdt.rs)
+
+Two changes:
+
+**1. Stale base detection false positive** — the old check used only common_prefix_len / base_len. For template documents with an empty exchange, the prefix is only 45% of the base — triggering false stale detection. Fix: use (common_prefix + common_suffix) / base_len. The suffix captures closing markers + pending, giving 82% shared content.
+
+**2. Prefix advancement condition too strict** — the old condition required mutual_prefix > base_text.len(). With trailing structure past the exchange, this never triggers. Fix: compute base_diverge = max(common_prefix_len(base, ours), common_prefix_len(base, theirs)) and advance when mutual_prefix > base_diverge.
+
+Tests: merge_empty_exchange_no_duplicate_user_line and merge_empty_exchange_prefixed_prompts_no_duplicate.
+
+#### Component parser bug: fixed (component.rs)
+
+Discovered while writing back to this document. The #r7hw pending item text contained literal HTML comment syntax which started a comment that consumed the close marker.
+
+Root cause: the parser scanned for `<!--` then `-->`, consuming everything between them. If `<!--` appeared in component content (e.g., pending item text), the `-->` of the close marker got eaten.
+
+Fix: peek after `<!--` — only consume the comment span if it starts with `agent:` or `/agent:`. All other `<!--` sequences are skipped (advance 1 byte, not to `-->`).
+
+Tests: html_comment_in_content_does_not_eat_close_marker and nested_html_comment_like_text_in_exchange.
+
+**Full suite: 1215 passed (5 new tests), 0 regressions.** Binary rebuilt and installed.
+<!-- agent:boundary:3dd8d837 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -973,6 +1002,8 @@ Binary rebuilt and installed (both target/release/ and ~/.cargo/bin/).
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#r7hw] Auto-prepend ❯ to user prompts in exchange — normalize during preflight commit (after diff is computed but before snapshot update). Rules: first line of each contiguous user block (not starting with ### or ❯ or <!-- ) gets ❯ prefix. Preserve continuation lines as-is. Implement in git.rs commit normalization path.
+- [x] [#r7hw] Auto-prepend ❯ to user prompts in exchange — normalize during preflight commit (after diff is computed but before snapshot update). Rules: first line of each contiguous user block (not starting with ### or ❯ or <!-- ) gets ❯ prefix. Preserve continuation lines as-is. Implement in git.rs commit normalization path.
+- [ ] [#1n7f] Empty-baseline CRDT merge duplication — fixed in crdt.rs (stale detection + prefix advancement). Verify live behavior on next IPC-timeout write.
+- [ ] [#cfdy] Component parser: non-agent HTML comments in content ate close markers — fixed with peek guard in component.rs. Verify with documents containing literal HTML comments in pending items.
 <!-- /agent:pending -->
 ## Assistant

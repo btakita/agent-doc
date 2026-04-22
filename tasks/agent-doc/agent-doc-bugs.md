@@ -218,14 +218,48 @@ Defined in `main.rs:937` (`SkillCommands::Install`). The `--harness` flag accept
 For Phase 5, the implementation work is:
 1. Unify the *content* (single AGENTS.md with harness preamble + runbooks/harness-invocation.md)
 2. The install plumbing (`install_for`, `install_all`, `--harness`, `--all`) is already done
-<!-- agent:boundary:0a5d0396 -->
+
+do #stk1. add tests. add to spec. build + install for local testing
+### Re: do #stk1 — opus-4-6
+
+Implemented Phase 5: Unified skill file.
+
+**SKILL.md changes:**
+
+- Added "Harness Compatibility" section with `runbooks/harness-invocation.md` reference
+- Slash commands section (0b) now dispatches per harness — Claude uses `Skill` tool, others skip
+- Auto-update prompt abstracted away from `AskUserQuestion` (harness-specific)
+- Success criteria: "agent console" not "Claude console"
+- Added note that `/agent-doc` slash syntax is Claude Code-specific
+
+**New runbook: `runbooks/harness-invocation.md`:**
+
+- Harness detection table (env vars + tool availability signals)
+- Claude Code: `Skill` tool dispatch, `AskUserQuestion`, heredoc write-back
+- Codex: direct execution, no slash commands, `codex resume --last`
+- Cursor/Generic: direct execution fallback
+
+**Environment-aware runbook installation:**
+
+- `install_runbooks_for(env, root)` resolves per-environment path:
+  - Claude: `.claude/skills/agent-doc/runbooks/`
+  - Codex: `.codex/runbooks/`
+  - OpenCode: `.opencode/skills/agent-doc/runbooks/`
+  - Cursor: `.cursor/rules/runbooks/`
+- `install_all` and `install_for` now use env-aware paths
+- Fixes: previously all runbooks went to `.claude/` only, breaking relative references from `.codex/AGENTS.md`
+
+**7 new tests:** runbooks per-environment (claude, codex, all envs), harness preamble in bundled content, harness-invocation runbook bundled + content check.
+
+Build: both binaries rebuilt and installed. Pausing for local testing.
+<!-- agent:boundary:f9a34321 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [ ] [#stk1] Phase 5: Unified skill file — single AGENTS.md with harness-detection preamble + runbooks/harness-invocation.md for dispatch. install_all() writes same content to .claude/ and .codex/ targets.
+- [x] [#stk1] Phase 5: Unified skill file — single AGENTS.md with harness-detection preamble + runbooks/harness-invocation.md for dispatch. install_all() writes same content to .claude/ and .codex/ targets.
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

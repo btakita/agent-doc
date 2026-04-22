@@ -445,7 +445,7 @@ I added a recommended pending item for this follow-up:
 - `[#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended`
 
 I also recorded your pending-ordering rule in local memory so I apply it consistently on future agent-doc turns.
-<!-- agent:boundary:41ca1e00 -->
+<!-- agent:boundary:c5a10469 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

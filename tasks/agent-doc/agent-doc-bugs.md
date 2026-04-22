@@ -624,11 +624,33 @@ So the answer is:
 - If you want historical docs to be fully consistent, that needs a **binary backfill / repair path** (for example, a normalization command or a one-time exchange migration), not just better Codex instructions.
 
 A refined Codex note could still be useful as documentation hygiene: Codex patchbacks should continue to rely on `agent-doc write`, because direct file edits bypass the binary normalization path. But that would only prevent new drift; it would not retroactively fix existing bare user prompts.
-<!-- agent:boundary:ccf8ce26 -->
+
+New prompts do not have a `❯ ` prefix in the patchback. Why?
+### Re: new prompt missing `❯ ` in the patchback — gpt-5.4
+
+This one is different from the historical-content explanation above. For the **new** prompt, the missing prefix looks like a real binary bug.
+
+Root cause:
+- `normalize_user_prompts_in_exchange()` walks the `snapshot -> baseline` diff.
+- It enters `in_agent_block = true` when it sees an **inserted heading** line.
+- It stays in that agent block until it hits a line starting with `❯` or `<!--`.
+
+That interacts badly with synthetic heading churn like the ` (HEAD)` suffix update on the previous `### Re:` line.
+
+In this cycle, the previous response heading was treated as an inserted heading in the normalization diff, so the function considered the following lines part of an agent block. Your new prompt came after that heading and before the boundary marker, so it was incorrectly suppressed from `❯ ` prefixing.
+
+So the answer is:
+- this is **not** mainly a Codex skill/runbook issue
+- this is **not** just old historical content
+- this is a **write.rs normalization bug** in how agent-block detection handles synthetic heading churn before a new user prompt
+
+I added it to `agent:pending` for follow-up.
+<!-- agent:boundary:49bbd31b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#vedj] normalize_user_prompts_in_exchange should not treat synthetic heading churn (for example `(HEAD)` suffix updates) as a fresh agent block that suppresses `❯ ` prefixing for the following user prompt
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -624,7 +624,7 @@ So the answer is:
 - If you want historical docs to be fully consistent, that needs a **binary backfill / repair path** (for example, a normalization command or a one-time exchange migration), not just better Codex instructions.
 
 A refined Codex note could still be useful as documentation hygiene: Codex patchbacks should continue to rely on `agent-doc write`, because direct file edits bypass the binary normalization path. But that would only prevent new drift; it would not retroactively fix existing bare user prompts.
-<!-- agent:boundary:bf4a98e0 -->
+<!-- agent:boundary:ccf8ce26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

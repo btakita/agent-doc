@@ -1342,8 +1342,7 @@ The bool→i32 fix is in the binary (rebuilt at 21:39) but the IPC listener thre
 **Verification after restart:**
 - `ops.log` should show `ipc_socket_delivered` instead of `ipc_socket_sidecar_timeout`
 - Responses should appear in the editor via Document API (no "externally modified" dialog)
-<!-- agent:boundary:4dcb558d -->
-<!-- agent:boundary:e4063189 -->
+<!-- agent:boundary:65f6cd3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

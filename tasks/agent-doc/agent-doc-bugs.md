@@ -385,7 +385,31 @@ Verified:
 - `agent-doc skill install --harness codex` is now up to date and preserves the Codex-specific invocation text.
 
 Current limitation: `/agent-doc` remains Claude Code syntax only. For Codex, invoke it as plain text: `agent-doc <file>`.
-<!-- agent:boundary:4c3daede -->
+### Re: JetBrains/Codex route root cause — gpt-5.4
+
+The slash was not coming from the JetBrains action or the FFI layer. JetBrains was already calling `agent-doc route <relative-path>`, and the FFI only resolved `(projectRoot, relativePath)`.
+
+The wrong trigger was being introduced inside the Rust CLI route path:
+
+1. `agent-doc route` called `route.rs`.
+2. `route.rs` asked the active harness for its trigger text.
+3. `HarnessConfig::codex()` was still configured with `/agent-doc {file}`.
+4. `route.rs` also hardcoded slash-based acceptance polling, so the route flow stayed Claude-shaped even under Codex.
+
+Fixed locally in `agent-doc` by:
+- changing the Codex trigger template to `agent-doc {file}`
+- making route acceptance polling compare against the resolved harness trigger instead of `/agent-doc`
+- tightening the matcher so plain `agent-doc ...` does not false-match inside `/agent-doc ...`
+- updating stale JetBrains comments that incorrectly implied the plugin itself sent `/agent-doc ...`
+
+Verified:
+- targeted harness and route regression tests passed for both Claude and Codex trigger paths
+- `cargo check --manifest-path src/agent-doc/Cargo.toml` passed
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed
+- `cargo install --path .` replaced the local `agent-doc` binary
+
+After reinstall, `Run Agent Doc` should route plain `agent-doc <file>` for Codex-backed sessions. Literal `/agent-doc ...` remains unsupported by the Codex CLI itself.
+<!-- agent:boundary:48a4be00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

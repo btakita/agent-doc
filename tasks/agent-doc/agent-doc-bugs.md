@@ -466,15 +466,13 @@ Verification:
 - Installed `.codex/AGENTS.md` and `.codex/runbooks/pending-ops.md` now contain the new pending rules.
 
 I also applied your default ordering rule to local memory so future agent-doc turns use front insertion as the default pending behavior.
-<!-- agent:boundary:779ef277 -->
+<!-- agent:boundary:ea8fda95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
-- [x] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

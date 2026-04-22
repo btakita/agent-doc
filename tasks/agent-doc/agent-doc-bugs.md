@@ -1485,7 +1485,45 @@ Added to pending for implementation.
 **Full suite: 1225 passed, 6 ignored. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
 
 Ready for manual testing. To verify: create a test document with pending nested inside exchange, run `agent-doc write` on it, and confirm the pending block moves outside.
-<!-- agent:boundary:3d58fc28 -->
+
+❯ Idea crashed. Why? When I restart Idea, monsterrodholders.md has its tmux pane close with a new pane opening...in the middle of an agent-doc run. Did we lose the agent-doc run? Why is monsterrodholders.md losing its tmux pane when Idea restarts?
+### Re: IDEA crash + pane cycling — opus-4-6
+
+#### Why IDEA crashed
+
+The IDEA log at 22:23:31 confirms the crash:
+
+```
+FSRecords: Records storage was in use by process [pid: 771143]
+which is not exist now (wasn't closed properly/crashed?) -> re-acquiring forcibly
+```
+
+**Root cause: `agent-doc lib-install` overwrote `libagent_doc-0.33.10.so` while IDEA had it memory-mapped.** JNA loads the .so via `dlopen()` which mmaps the file. When lib-install wrote new content over the same filename, the running process's code pages became corrupted. Three IDEA startups visible in the log:
+
+| Time | Event |
+|------|-------|
+| 21:49 | First start |
+| 22:02 | Manual restart (for the bool→i32 fix) |
+| 22:23 | Crash recovery — lib-install corrupted mmap |
+
+**Fix needed**: `lib-install` should write to a temp file and atomic-rename, never overwrite in place. The versioned filename (`libagent_doc-0.33.10.so`) stays the same but the inode changes — the old mmap keeps working on the old inode until IDEA is restarted. Added to pending.
+
+#### Why monsterrodholders.md lost its pane
+
+The session log shows:
+
+1. Pane %12 started at 1776823401 — running a Claude session
+2. **No `claude_exit` or `user_quit` logged** — pane %12 died with the IDEA crash (no clean shutdown)
+3. Pane %13 started at 1776824624 — sync reconciler auto-started after IDEA restart
+
+When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the open files. The sync reconciler found monsterrodholders.md open in the editor but with a dead pane — so it auto-started a fresh one. The old Claude session in pane %12 was lost.
+
+**Did we lose the run?** Yes, the mid-flight Claude session was killed without completing. However, `agent-doc preflight` on the next cycle would have detected any orphaned response (via the recover step) — if the Claude session had produced partial output before dying, recover would apply it. Looking at the ops.log, the last successful write for monsterrodholders.md was `ipc_socket_delivered` at 1776823446, and there's a `preflight_diff_start` at 1776824184 — so the recover cycle did run and the document is in a consistent state.
+
+#### The chain
+
+`lib-install` in-place overwrite → IDEA mmap corruption → IDEA crash → sync reconciler kills orphaned pane → auto-starts fresh pane. The fix is purely in `lib-install`: use atomic rename so the old file stays valid until the next clean restart.
+<!-- agent:boundary:347c392f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1493,5 +1531,6 @@ Ready for manual testing. To verify: create a test document with pending nested 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#3vk0] lib-install must use atomic rename (write to temp, rename) instead of overwriting the versioned .so file in place — prevents IDEA crash from corrupted mmap
 <!-- /agent:pending -->
 ## Assistant

@@ -1203,7 +1203,38 @@ Two gaps in the stash rescue logic in `sync.rs`:
 **stash_rescue_discovers_agent_doc_window_when_window_arg_is_none** — creates a session with an agent-doc window, stashes a pane, then verifies that the discovery logic finds the agent-doc window from the session name and that swap-pane rescue moves the pane out of stash.
 
 **Full suite: 1220 passed (1 new), 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
-<!-- agent:boundary:b5cbb769 -->
+
+Please investigate why the response did not patchback into /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md.
+### Re: monsterrodholders patchback investigation — opus-4-6
+
+#### The response IS in the file
+
+Both "Re: patchback confirmation" and "Re: fix status verification" are present at the end of the exchange in `src/boost-client/tasks/monsterrodholders.md`. The write succeeded.
+
+#### What happened (from boost-client's ops.log)
+
+1. **`zero_patches_warning`** — the skill piped content without `<!-- patch:exchange -->` wrappers. The binary logged a warning but fell back to boundary synthesis, which inserted the 1805 chars of unmatched content at the exchange boundary. File grew from 76.5KB to 78.6KB.
+
+2. **`ipc_socket_sidecar_timeout`** — the IDE plugin's socket IPC timed out. The write fell back to disk write + CRDT merge, which succeeded. But the editor never got the live update notification — the new content appeared on disk but the IDE didn't refresh its buffer.
+
+3. **Two `commit_failed exit_code=1`** events — these are the submodule commit absolute-path bug we just fixed in `git.rs` (the `relative_to()` fix). The commits that used relative paths succeeded; the ones with absolute paths failed. With the fix installed, this should no longer happen.
+
+#### Why the user saw "no patchback"
+
+The editor didn't refresh. The IPC socket timed out, so the IDE plugin never received the patch — it only shows up as a file change on disk. If the IDE's file watcher didn't pick it up (or if the watcher was delayed), the editor buffer would still show the old content.
+
+The fix for the submodule commit bug should resolve the commit failures. The `zero_patches_warning` is a skill-side issue (the skill should always wrap responses in `<!-- patch:exchange -->`).
+<!-- agent:boundary:4e5fb058 -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+<!-- /agent:pending -->
+## Assistant
+<!-- agent:boundary:3e279c1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

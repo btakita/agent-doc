@@ -201,7 +201,24 @@ Please update the text in #stk1 to follow the new design.
 ### Re: update #stk1 — opus-4-6
 
 Updated pending item #stk1 to reflect the unified design: single `AGENTS.md` with harness-detection preamble instead of separate per-harness files.
-<!-- agent:boundary:2b81a9b6 -->
+
+You are proposing install_all. Would install have a platform/harness option(s) (claude, codes, etc) along with an `--all` flag?
+### Re: install harness options — opus-4-6
+
+This already exists. The CLI already has both flags:
+
+```
+agent-doc skill install                    # auto-detect harness
+agent-doc skill install --harness codex    # install for specific harness
+agent-doc skill install --all              # install for all harnesses
+```
+
+Defined in `main.rs:937` (`SkillCommands::Install`). The `--harness` flag accepts: `claude`, `opencode`, `codex`, `cursor`, `generic`. The `--all` flag calls `skill::install_all()` which iterates all environments via `agent_kit`. Auto-detection (no flags) uses `Environment::detect()` to pick the current harness.
+
+For Phase 5, the implementation work is:
+1. Unify the *content* (single AGENTS.md with harness preamble + runbooks/harness-invocation.md)
+2. The install plumbing (`install_for`, `install_all`, `--harness`, `--all`) is already done
+<!-- agent:boundary:70b5f89c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

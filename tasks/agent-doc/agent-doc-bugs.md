@@ -252,7 +252,45 @@ Implemented Phase 5: Unified skill file.
 **7 new tests:** runbooks per-environment (claude, codex, all envs), harness preamble in bundled content, harness-invocation runbook bundled + content check.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-<!-- agent:boundary:0cfdeec8 -->
+Is agent-doc ready to use Codex? What do I need to do to use Codex with agent-doc? Can I run both Codex and Claude Code at the same time for different documents?
+### Re: Codex readiness — opus-4-6
+
+**Is agent-doc ready to use Codex?**
+
+Yes, locally. All 5 phases are implemented and built into v0.33.12 (the binary you're running now). The code is on the `20260422/codex-agent-backend` branch in the submodule — working tree changes, not yet committed or released upstream. Codex CLI v0.121.0 is installed on your system.
+
+What's implemented:
+- Phase 1: `agent/codex.rs` — Codex agent backend (JSONL parser, `codex exec --json`, session resume)
+- Phase 2: `agent_args` frontmatter field (generalized from `claude_args`)
+- Phase 3: `harness.rs` — HarnessConfig abstraction (binary, restart, prompt, trigger, env)
+- Phase 4: `route.rs` + `sync.rs` — parameterized for any harness (no hardcoded "Claude")
+- Phase 5: Unified SKILL.md with harness-detection preamble + `runbooks/harness-invocation.md`
+
+1,271 tests passing, including 11 Codex-specific unit tests.
+
+**What do you need to do?**
+
+To run a document session with Codex instead of Claude Code:
+
+1. Set `agent: codex` in the document frontmatter:
+   ```yaml
+   ---
+   agent: codex
+   agent_args: --model o3
+   ---
+   ```
+   Or set `default_agent = "codex"` in `.agent-doc/config.toml` for all sessions.
+
+2. Start normally: `agent-doc start <file>`. The supervisor detects the agent field, resolves the Codex harness, and spawns `codex exec` instead of `claude`.
+
+3. Codex-specific behaviors: no slash commands (direct prompt injection), `codex resume --last` for restarts, JSONL event streaming, `-s workspace-write` sandbox by default.
+
+**Can you run both simultaneously?**
+
+Yes — that was a core design goal. Each document session resolves its own harness independently from frontmatter (`agent: claude` vs `agent: codex`). They use separate tmux session fallbacks (`claude` vs `codex`), separate process detection, and separate restart strategies. You can have `tasks/bugs.md` running on Claude Code and `tasks/feature.md` running on Codex at the same time.
+
+The one caveat: this hasn't been tested in a live multi-harness session yet. The unit tests cover each harness in isolation, but end-to-end with both tmux sessions running simultaneously is untested territory. I'd recommend starting with a single Codex session on a low-stakes document first.
+<!-- agent:boundary:0d369e25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -179,8 +179,25 @@ Implemented Phase 4: Route + Sync generalization.
 **10 new harness tests** + 1 new route integration test (codex `>` prompt detection). All existing tests updated.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-s
-<!-- agent:boundary:4547c4b5 -->
+re #stk1: Would it be possible and a good idea to have a single AGENTS.md file that dispatches claude/codex differences to another file or a runbook?
+### Re: #stk1 unified AGENTS.md — opus-4-6
+
+Yes — a single `AGENTS.md` with dispatch is the better design. ~90% of the skill content is shared (preflight → respond → write → commit cycle, document format, pending protocol, streaming checkpoints). The harness-specific differences are narrow:
+
+1. **Invocation** — Claude uses `Skill` tool + slash commands; Codex uses direct prompt injection
+2. **Tool conventions** — heredoc syntax, `Bash` tool specifics
+3. **Feature flags** — Claude has `--no-mcp`/`ENABLE_TOOL_SEARCH`; Codex doesn't
+
+**Recommended structure:**
+
+- **`AGENTS.md`** (single file) — harness-detection preamble at the top ("if you are Claude Code, follow the Claude invocation pattern; if you are Codex, follow the Codex pattern"), then the shared core workflow referencing existing runbooks.
+- **`runbooks/harness-invocation.md`** (new) — side-by-side invocation patterns for each harness. The preamble dispatches here for tool-specific steps (how to invoke preflight, how to pipe write-back, how to handle slash commands vs direct prompts).
+- **Existing runbooks** stay shared — document-format, pending-ops, streaming-checkpoints, model-tier-gate all apply regardless of harness.
+
+**Why not separate files:** Drift. A bugfix to the commit cycle or a new runbook reference added to one file but missed in the other is the #1 maintenance hazard. With one file, changes propagate automatically.
+
+`skill.rs::install_all()` would write the same `AGENTS.md` content to both `.claude/skills/agent-doc/SKILL.md` and `.codex/AGENTS.md` (or a symlink). The harness preamble makes it self-routing.
+<!-- agent:boundary:3077744b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

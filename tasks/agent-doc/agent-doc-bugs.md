@@ -1536,7 +1536,19 @@ When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the 
 **All 5 lib_install tests pass. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
 
 Ready for manual testing. To verify: reinstall the same version twice with IDEA running and confirm no crash.
-<!-- agent:boundary:eb35fe4b -->
+release + publish
+### Re: release + publish — v0.33.11 — sonnet-4-6
+
+Bumped to v0.33.11 (v0.33.10 was already on crates.io). Fixed two additional pre-existing test races found during commit:
+
+- `resync` tests: bumped flaky sleeps 500ms→1500ms and 300ms→1000ms under parallel load
+- `route` tests: `AGENT_DOC_NO_AUTOSTART` `set_var`/`remove_var` without a mutex caused inter-thread bleed — guarded with `static ENV_MUTEX`
+
+**Release complete:**
+- crates.io: `agent-doc v0.33.11` published
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.33.11 with prebuilt `agent-doc-v0.33.11-x86_64-linux`
+- `~/.cargo/bin/agent-doc` → v0.33.11 installed
+<!-- agent:boundary:4ae4241f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -543,6 +543,8 @@ To make it always one row, the plugin needs a layout change, not a tmux/agent-do
 - truncate or drop overflow text instead of wrapping
 - keep full text in tooltips or move secondary text (for example the hotkey hint / pending-count suffix) out of the main row
 
+Please add all 4 countermeasures into pending.
+
 If you want the strongest invariant, the row should contain only compact controls, for example:
 - short question text with ellipsis
 - compact option chips like `[1] Yes` `[2] No`
@@ -563,12 +565,26 @@ So the practical mapping is:
 - if you mean both with no sandbox: use `--dangerously-bypass-approvals-and-sandbox`
 
 For `agent-doc` Codex sessions, the safer explicit replacement is usually `agent_args: -s danger-full-access` or `agent_args: -s danger-full-access -a never`, depending on whether you also want approval prompts disabled.
-<!-- agent:boundary:31715890 -->
+### Re: pending split for the 4 JetBrains prompt countermeasures — gpt-5.4
+
+Added.
+
+I split the earlier aggregate recommendation into four explicit pending items so each countermeasure can be tracked independently:
+- non-wrapping horizontal layout
+- fixed single-row panel height
+- truncate/overflow secondary text instead of wrapping
+- move overflow detail to tooltips or secondary UI
+
+I reused `#9kqp` for the first item and added three new pending items ahead of the older multi-user follow-up entry.
+<!-- agent:boundary:974b8bc8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#9kqp] [recommended] JetBrains PromptPanel single-row mode: replace WrapLayout with a non-wrapping row, keep fixed one-row height, and truncate or overflow secondary prompt text instead of wrapping
+- [ ] [#n6dj] JetBrains PromptPanel: enforce a fixed single-row panel height instead of growing with wrapped content
+- [ ] [#p9h7] JetBrains PromptPanel: truncate or overflow secondary text instead of allowing line wrapping in the prompt row
+- [ ] [#7g66] JetBrains PromptPanel: move overflow detail to tooltips or secondary UI instead of the main prompt row
+- [ ] [#9kqp] JetBrains PromptPanel: replace WrapLayout with a non-wrapping horizontal layout so the prompt row never wraps
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

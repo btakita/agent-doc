@@ -1181,7 +1181,30 @@ Or I can run `agent-doc resync --fix` which should detect the stashed pane and o
 #### Bug to file
 
 The sync reconciler should call `rescue_from_stash()` before auto-starting a new pane. Currently the auto-start path in `sync.rs` (lines 944-1014) checks `has_alive_pane` against the registry, finds the pane in the wrong window, and provisions a new one — rather than rescuing the stashed pane first.
-<!-- agent:boundary:34606978 -->
+❯ Please fix the bug under "#### Bug to file". Add tests. build + install for local testing
+### Re: stash rescue fix — opus-4-6
+
+#### Root cause
+
+Two gaps in the stash rescue logic in `sync.rs`:
+
+**1. Window discovery fails when `window` arg is None** (line 886). The `has_alive_pane` closure detects a stashed pane correctly but the rescue block is guarded by `if let Some(target_win) = window`. When sync is called without a `--window` argument, the entire rescue is skipped and the pane is treated as dead — triggering auto-start of a new pane.
+
+**2. `find_alive_pane_for_file` fallback re-registers but doesn't rescue.** When the has_alive_pane check fails and the fallback finds the stashed pane by scanning process trees (line 983), it re-registers the pane in sessions.json but leaves it in stash. The subsequent tmux_router::sync may not move it back.
+
+#### Fix (sync.rs)
+
+**1. Dynamic window discovery.** When `window` is None, derive the agent-doc window from the context session name (`format!("{}:agent-doc", target_sess)`). Check that the window exists and has panes before using it. This lets rescue work even when the sync caller doesn't specify a window.
+
+**2. Stash rescue in the fallback path.** After `find_alive_pane_for_file` re-registers a stashed pane, check if it's in a stash window and attempt the same swap/join rescue before continuing. This ensures the pane is actually moved back to the agent-doc window, not just re-registered in place.
+
+#### Test added
+
+**stash_rescue_discovers_agent_doc_window_when_window_arg_is_none** — creates a session with an agent-doc window, stashes a pane, then verifies that the discovery logic finds the agent-doc window from the session name and that swap-pane rescue moves the pane out of stash.
+
+**Full suite: 1220 passed (1 new), 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
+<!-- agent:boundary:e6ec74a2 -->
+<!-- agent:boundary:35757ff4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

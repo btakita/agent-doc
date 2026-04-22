@@ -601,15 +601,11 @@ Verification:
 - `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.72` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
 
 Restart IntelliJ to activate the rebuilt plugin.
-<!-- agent:boundary:be56cbf4 -->
+<!-- agent:boundary:74812972 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#n6dj] JetBrains PromptPanel: enforce a fixed single-row panel height instead of growing with wrapped content
-- [x] [#p9h7] JetBrains PromptPanel: truncate or overflow secondary text instead of allowing line wrapping in the prompt row
-- [x] [#7g66] JetBrains PromptPanel: move overflow detail to tooltips or secondary UI instead of the main prompt row
-- [x] [#9kqp] JetBrains PromptPanel: replace WrapLayout with a non-wrapping horizontal layout so the prompt row never wraps
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -662,7 +662,31 @@ Verification:
 - `cargo check` passed.
 - `cargo build --release` passed.
 - `cargo install --path .` replaced the local `agent-doc` binary.
-<!-- agent:boundary:4d91328f -->
+
+❯ Release + Publish
+### Re: Release + Publish — gpt-5.4
+
+Release work executed.
+
+What shipped:
+- Fixed the local prerelease blockers in `src/agent-doc`: added scoped `#[allow(clippy::too_many_arguments)]` on the two route orchestration helpers, made `run::tests::flock_prevents_partial_read_during_write` deterministic with an explicit lock-held signal, and updated the tracked README / CLAUDE / SPEC / installed skill docs so `audit-docs` reflects the harness-aware routing reality.
+- Built and installed locally: `make check`, `cargo run --quiet -- audit-docs`, `make build-release`, and `cargo install --path .` all succeeded.
+- Created the release commit in the submodule: `7939103` (`chore: release v0.33.12`).
+- Pushed branch `20260422/codex-agent-backend` to `origin`.
+- Created and pushed tag `v0.33.12`.
+- Published `agent-doc v0.33.12` to crates.io successfully.
+- Updated the parent repo submodule pointer to `7939103` in commit `dc4154f7` (`chore: update agent-doc to v0.33.12`).
+
+Verification:
+- `cargo publish --dry-run` passed: packaged 223 files, 3.1 MiB unpacked / 809.6 KiB compressed.
+- `cargo publish` succeeded and crates.io confirmed `Published agent-doc v0.33.12`.
+- GitHub Actions release workflow is running for the pushed tag: `Release` run `24808128390`, status `in_progress`, triggered by `v0.33.12` push at `2026-04-22T23:33:13Z`.
+
+Current state:
+- crates.io publish is complete.
+- GitHub Release asset build/publish is in progress in CI.
+- The PyPI workflow is wired off the GitHub release publication event in `.github/workflows/pypi.yml`, so its execution depends on that release workflow finishing.
+<!-- agent:boundary:88eb149f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -362,7 +362,30 @@ Verified:
 Remaining issue:
 
 `claude_args: --dangerously-skip-permissions` is being forwarded while `agent: codex` is active. That should be fixed in binary logic so `claude_args` only applies to Claude. Codex should use `agent_args`, for example `agent_args: -s danger-full-access`.
-<!-- agent:boundary:3fe01d15 -->
+### Re: Codex invocation path — gpt-5.4
+
+`/agent-doc ...` will not work in Codex CLI right now. Codex intercepts leading `/` as a built-in slash-command before project/plugin instructions run, and this CLI build does not expose a way for local plugins to register new slash commands.
+
+Use this in Codex as a normal message instead:
+
+```text
+agent-doc tasks/agent-doc/agent-doc-bugs.md
+```
+
+I updated the Codex install output so it no longer presents `/agent-doc` as the Codex invocation path:
+
+- Changed `src/agent-doc/src/skill.rs` to generate Codex-specific `.codex/AGENTS.md` content.
+- Reinstalled `.codex/AGENTS.md`; it now says: “Do not type `/agent-doc`; the Codex CLI will reject it.”
+- Reinstalled the local `agent-doc` binary with `cargo install --path .`.
+
+Verified:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml skill::tests -- --nocapture` passed.
+- `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
+- `agent-doc skill install --harness codex` is now up to date and preserves the Codex-specific invocation text.
+
+Current limitation: `/agent-doc` remains Claude Code syntax only. For Codex, invoke it as plain text: `agent-doc <file>`.
+<!-- agent:boundary:135cb51f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

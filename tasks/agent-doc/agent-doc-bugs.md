@@ -150,13 +150,12 @@ Implemented Phase 3: Supervisor harness abstraction.
 **14 unit tests** covering all HarnessConfig behavior.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-<!-- agent:boundary:56a5968f -->
+<!-- agent:boundary:d1eb9768 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()

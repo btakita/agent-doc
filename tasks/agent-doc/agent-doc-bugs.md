@@ -317,7 +317,7 @@ Added 19 new tests across two modules:
 - `multi_harness_resolve_with_env_isolation` — each backend gets its own env var list
 
 Full suite: 1,290 tests passing. Both binaries rebuilt and installed.
-<!-- agent:boundary:afa4d84d -->
+<!-- agent:boundary:33a34854 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

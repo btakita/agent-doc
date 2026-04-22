@@ -701,7 +701,7 @@ What likely happened is different:
 - so the document was updated, but the surrounding turn likely felt incomplete from the terminal side
 
 This response is the additional patchback you asked for, so the document now explicitly records that explanation.
-<!-- agent:boundary:5486f313 -->
+<!-- agent:boundary:0c9f5ec1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -829,7 +829,24 @@ All three indexed and working. Ran `tsift index .` in each submodule:
 **Note:** session-share's 481 files includes `node_modules` JS (gitignored content isn't excluded by the `ignore` crate walker when git history tracks it). If that's noisy, a `.tsiftignore` or config-based exclusion could help — not implemented yet.
 
 Each submodule's index lives at `<submodule>/.tsift/index.db`. The workspace-mode indexing (`tsift index --workspace` from agent-loop root) would use the config tier system to index all submodules into `.tsift/indexes/<name>/index.db` for federated search.
-<!-- agent:boundary:69da6433 -->
+❯ I notice that agent-doc tasks/agent-doc/agent-doc-bugs.md turns are taking a long time and using much context. Is this due to tsift?
+### Re: slow agent-doc-bugs turns — opus-4-6
+
+No — tsift isn't the cause. The tsift skill file is only **1.9KB**.
+
+The context cost in agent-doc-bugs sessions comes from:
+
+| Source | Size |
+|--------|------|
+| `agent-doc-bugs.md` (the document itself) | **85KB** |
+| agent-doc skill + runbooks | **42KB** |
+| CLAUDE.md + MEMORY.md + session-start hook | ~20-30KB |
+
+The document's own size is the dominant factor. Each agent-doc cycle loads, diffs, and processes the full document. At 85KB, that's a lot of tokens before the model even starts thinking.
+
+**To reclaim context:** run `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` — this trims resolved exchanges while preserving pending items and active context.
+<!-- agent:boundary:44e247d7 -->
+<!-- agent:boundary:02cf78bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1269,7 +1269,16 @@ Changed the lookup order in `write.rs` to check `find_project_root` (nearest `.a
 - `try_ipc_routes_to_submodule_root_not_superproject` — socket send goes to boost-client's socket, not agent-loop's
 
 **All 1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.**
-<!-- agent:boundary:9ba49b98 -->
+❯ Are there JB Plugin updates that I need to install?
+### Re: JB Plugin — no install needed — sonnet-4-6
+
+No. The IPC path mismatch fix was **Rust-only** — the Kotlin plugin was already correct.
+
+`resolveRootFor(filePath)` in the Kotlin plugin walks up and returns the nearest `.agent-doc/` (submodule root for boost-client). That behavior was right all along. The bug was on the binary side: `resolve_ipc_project_root` in `write.rs` was using `git_superproject_at` first, which returned `agent-loop/` instead of `boost-client/` — causing a path mismatch on the ack polling side.
+
+The fix changed the lookup order to match Kotlin's existing `resolveRootFor`. No Kotlin code changed. Your installed plugin at **v0.2.71** is current.
+<!-- agent:boundary:f47ab518 -->
+<!-- agent:boundary:e2bea1a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

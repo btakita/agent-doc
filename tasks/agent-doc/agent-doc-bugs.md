@@ -482,13 +482,36 @@ Installed workspace files in `agent-loop`:
 One clarification: there is not a separate root `agent-loop/SKILL.md` in this workspace. For Codex, the installed equivalent of the skill file is `.codex/AGENTS.md`.
 
 I verified the matching lines directly in both the source files and the installed `.codex` copies.
-<!-- agent:boundary:8ecf2d48 -->
+do #9b2k. add spec + tests. build + install for local testing.
+### Re: `#9b2k` done — gpt-5.4
+
+Implemented.
+
+What changed:
+- `pending::op_add` now accepts a leading `id=<custom> ` prefix, preserves that id instead of generating one, strips an optional leading `#`, and rejects invalid or duplicate custom ids.
+- The custom-ID path applies consistently across `agent-doc pending ... add`, `agent-doc write --pending-add`, and any other caller that routes through `pending::op_add`.
+- Updated the CLI/help text, pending runbook, and pending-system spec so the syntax and constraints are explicit.
+
+Custom-ID rules:
+- Syntax: `id=<custom> <text>`
+- `custom` must be 1-8 ASCII alphanumeric characters
+- `id=#spec1 ...` is also accepted
+- the custom id must be unique within the pending component
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml custom_id -- --nocapture` passed.
+- `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `cargo install --path .` replaced the local `agent-doc` binary.
+- `agent-doc skill install --harness codex` reports the local Codex install is up to date.
+- Source and installed pending runbooks both contain the custom-ID docs.
+<!-- agent:boundary:0b9bb801 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
+- [x] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

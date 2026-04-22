@@ -1,4 +1,5 @@
 ---
+agent: codex
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
@@ -317,7 +318,51 @@ Added 19 new tests across two modules:
 - `multi_harness_resolve_with_env_isolation` — each backend gets its own env var list
 
 Full suite: 1,290 tests passing. Both binaries rebuilt and installed.
-<!-- agent:boundary:33a34854 -->
+I'm using codex now.
+
+When codes starts...I have `claude_args: --dangerously-skip-permissions` in the frontmatter. I saw an error:
+```
+                 error: unexpected argument '--dangerously-skip-permissions' found
+```
+### Re: agent-doc local Codex plugin installed — gpt-5.4
+
+Installed `agent-doc` as a local Codex plugin.
+
+Changed:
+- Added plugin manifest at `src/agent-doc/.codex-plugin/plugin.json`.
+- Added local marketplace entry at `.agents/plugins/marketplace.json`, pointing to `./src/agent-doc` with `INSTALLED_BY_DEFAULT`.
+- Updated `src/agent-doc/SKILL.md` to `agent-doc-version: "0.33.12"` to match the local cargo binary.
+- Registered the marketplace with Codex via `codex marketplace add /home/brian/work/btakita/agent-loop`, which added `[marketplaces.agent-loop-local]` in `/home/brian/.codex/config.toml`.
+- Recorded the completed checklist in `tasks/plan.md`.
+
+Verified:
+- `agent-doc --version` reports `0.33.12`.
+- Plugin manifest and marketplace JSON parse cleanly.
+- Marketplace source path resolves to `/home/brian/work/btakita/agent-loop/src/agent-doc`.
+- `SKILL.md`, `assets/logo.svg`, and `assets/logo-512.png` all resolve from the plugin root.
+
+### Re: remaining Codex install steps completed — gpt-5.4
+
+Installed the remaining Codex-side pieces and appended the status response to `tasks/agent-doc/agent-doc-bugs.md`.
+
+What changed:
+- Registered and verified the local Codex marketplace from `/home/brian/work/btakita/agent-loop`.
+- Installed Codex-facing agent-doc instructions at `.codex/AGENTS.md`.
+- Installed 8 runbooks under `.codex/runbooks/`.
+- Replaced the tracked empty `.codex` placeholder file with the required `.codex/` directory.
+- Rebuilt and reinstalled local `agent-doc` from `src/agent-doc` using `cargo install --path .`.
+- Updated `tasks/plan.md` with the completed install notes.
+
+Verified:
+- `agent-doc --version` returns `agent-doc 0.33.12`.
+- `agent-doc skill install --harness codex` returns `[Codex] already up to date (v0.33.12).`
+- `codex marketplace add /home/brian/work/btakita/agent-loop` reports the marketplace is already added.
+- Plugin manifest, marketplace source, `.codex/AGENTS.md`, and 8 runbooks all resolve.
+
+Remaining issue:
+
+`claude_args: --dangerously-skip-permissions` is being forwarded while `agent: codex` is active. That should be fixed in binary logic so `claude_args` only applies to Claude. Codex should use `agent_args`, for example `agent_args: -s danger-full-access`.
+<!-- agent:boundary:21f83441 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -328,4 +373,3 @@ Full suite: 1,290 tests passing. Both binaries rebuilt and installed.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
-## Assistant

@@ -82,7 +82,11 @@ Mirror the existing `--pending-edit "id=text"` pattern:
 Considered it — but `[#id]` is a rendering convention (how items look in markdown), not an input format. Mixing input and output formats creates fragile parsing and could conflict with legitimate text containing `[#...]`. The `id=` prefix is unambiguous and consistent with `--pending-edit`.
 
 ~15 lines of Rust + 3-4 tests. Want me to implement it?
-<!-- agent:boundary:bbe17bc5 -->
+❯ Add to pending
+### Re: Add to pending — opus-4-6
+
+Done — added the custom ID feature as a pending item.
+<!-- agent:boundary:fbef4a42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -95,5 +99,6 @@ Considered it — but `[#id]` is a rendering convention (how items look in markd
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 <!-- /agent:pending -->
 ## Assistant

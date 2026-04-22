@@ -1,0 +1,16 @@
+.env
+.idea/
+*.iml
+.agent-doc/
+.junie/
+.tsift/
+CLAUDE.local.md
+AGENTS.local.md
+plan.md
+research.md
+tmp/
+
+# Rust
+target/
+.bin/
+.cargo/

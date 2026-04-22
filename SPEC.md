@@ -18,3 +18,4 @@ Individual specs are in `specs/`. This file is the index.
 | 9 | [Git Integration](specs/09-git-integration.md) | Commit/branch/squash and hook system |
 | 10 | [Security](specs/10-security.md) | Threat model, known risks, recommendations |
 | 11 | [Debounce](specs/11-debounce.md) | Debounce system gaps, limitations, and improvements |
+| 12 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |

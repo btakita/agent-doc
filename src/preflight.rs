@@ -1,0 +1,2160 @@
+//! # Module: preflight
+//!
+//! ## Spec
+//! - `run(file)`: executes the full pre-agent preparation sequence for a
+//!   session document and emits a single JSON object to stdout.
+//! - Bails immediately if the file does not exist.
+//! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
+//!   problems (window index, session drift); issues are
+//!   included in output but do not abort the run.
+//! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
+//!   orphaned pending agent responses from a previous interrupted cycle.
+//! - Step 2 — commit: calls `git::commit(file)` to record the previous
+//!   exchange cycle; failure is downgraded to a warning, not a hard error.
+//! - Step 3 — claims: reads `.agent-doc/claims.log` line-by-line via
+//!   `read_and_truncate_claims`, then truncates the log to empty; claims are
+//!   returned to the caller in the JSON output.
+//! - Step 3b — debounce: waits up to 3 seconds (polling every 100 ms) for
+//!   both the file mtime to be at least 500 ms old and the cross-process
+//!   typing indicator to be inactive before proceeding to the diff step.
+//! - Step 3c — linked docs: calls `check_linked_docs(file)` to inspect
+//!   `links` from frontmatter. For local file links, compares git commit
+//!   times against the snapshot mtime. For URL links (`http://`/`https://`),
+//!   fetches content via `ureq`, converts HTML to markdown via `htmd`
+//!   (stripping script/style/nav/footer/noscript/svg), caches in
+//!   `.agent-doc/links_cache/<sha256(url)>.txt`, and reports changes by
+//!   comparing against the cached content.
+//! - Step 4 — diff: calls `diff::compute(file)` to compare the current
+//!   document against the last snapshot; `no_changes=true` when they match.
+//! - Serializes `PreflightOutput` as pretty JSON to stdout; all diagnostic
+//!   messages go to stderr.
+//! - `check_layout()`: inspects the current tmux session for structural issues:
+//!   missing window index 0 (base-index compliance) and session drift. Stash
+//!   windows may have non-idle panes (backgrounded sessions). Read-only; no mutations.
+//!   Returns an empty vec when not inside tmux (silent).
+//! - `read_and_truncate_claims(file)`: locates `.agent-doc/claims.log` relative
+//!   to the project root, collects non-empty lines, truncates the file to empty,
+//!   and returns the lines. Returns empty vec if the log is absent or unreadable.
+//!
+//! ## Agentic Contracts
+//! - All output intended for the SKILL workflow is on stdout as valid JSON;
+//!   callers must not parse stderr.
+//! - `no_changes=true` in the output means the SKILL workflow should skip
+//!   sending to the agent; `diff` will be `null` in this case.
+//! - `layout_issues` is informational: the SKILL workflow may surface issues
+//!   to the user but `run` always completes the remaining steps regardless.
+//! - The claims log is consumed (truncated) exactly once per `preflight` call;
+//!   a second call in the same cycle will return empty claims.
+//! - Recovery (`recovered=true`) means the document was modified before the
+//!   diff step; the `diff` and `document` fields reflect post-recovery state.
+//! - Debounce waits for user typing to settle before computing the diff;
+//!   if the 3-second timeout expires, `run` proceeds and logs a warning to
+//!   stderr — it never blocks indefinitely.
+//! - `check_layout` is always safe to call outside tmux; it returns `[]`.
+//!
+//! ## Evals
+//! - `preflight_produces_valid_json`: document with matching snapshot →
+//!   `run` returns `Ok(())` and emits parseable JSON with `no_changes=true`.
+//! - `preflight_file_not_found`: missing path → `Err` containing "file not found".
+//! - `preflight_detects_diff`: snapshot saved at original content, document
+//!   updated with new content → `diff::compute` returns `Some(_)` (non-null diff).
+//! - `preflight_claims_read_and_truncated`: claims.log with two entries →
+//!   `read_and_truncate_claims` returns both lines and the log is empty afterwards.
+//! - `preflight_no_claims_log_returns_empty`: no claims.log present →
+//!   `read_and_truncate_claims` returns an empty vec without error.
+//! - `preflight_output_serializes_correctly`: `PreflightOutput` with known
+//!   values serializes to JSON with correct field names and types.
+//! - `preflight_output_null_diff_when_no_changes`: `diff=None` + `no_changes=true`
+//!   → JSON has `"diff": null` and `"no_changes": true`.
+//! - `check_layout_returns_empty_outside_tmux`: `TMUX` env var unset →
+//!   `check_layout()` returns empty vec without invoking tmux.
+//! - `check_layout_detects_session_drift`: two alive registered panes in
+//!   different sessions → `layout_issues` contains a "session drift" entry.
+//! - `preflight_output_includes_layout_issues`: `PreflightOutput` with one
+//!   layout issue → JSON `layout_issues` array has length 1 with correct text.
+//! - `preflight_output_slash_commands_from_diff`: diff containing `+/clear` →
+//!   `builtin_commands` array has one entry `"/clear"` (built-in, not in `slash_commands`).
+//! - `is_url_detects_http`: `http://` and `https://` prefixes → true;
+//!   relative paths and empty strings → false.
+//! - `is_html_content_detects_html`: `text/html` and `application/xhtml` → true;
+//!   `application/json` and `text/plain` → false.
+//! - `html_to_markdown_converts_basic_html`: `<h1>` and `<strong>` → markdown
+//!   heading and bold syntax.
+//! - `html_to_markdown_strips_script_and_style`: script/style content removed
+//!   from output, visible content preserved.
+//! - `html_to_markdown_strips_nav_and_footer`: nav/footer content removed,
+//!   main content preserved.
+//! - `url_cache_path_is_deterministic`: same URL → same path; different URL →
+//!   different path; extension is `.txt`.
+//! - `links_cache_dir_creates_directory`: creates `.agent-doc/links_cache/` and
+//!   returns `Some(path)` when `.agent-doc/` exists.
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::process::Command;
+
+use crate::{config, diff, frontmatter, git, recover, resync, sessions, snapshot};
+
+/// A change detected in a related document since the last cycle.
+#[derive(Serialize)]
+pub struct RelatedDocChange {
+    /// Path to the related document (as declared in frontmatter).
+    pub path: String,
+    /// Human-readable summary of what changed.
+    pub summary: String,
+    /// Whether the related document exists on disk.
+    pub exists: bool,
+}
+
+#[derive(Serialize, Default)]
+pub struct PreflightOutput {
+    /// Tmux layout issues found (empty = healthy).
+    pub layout_issues: Vec<String>,
+    /// Whether an orphaned pending response was recovered and applied.
+    pub recovered: bool,
+    /// Whether a git commit was made for the previous cycle.
+    pub committed: bool,
+    /// Lines from `.agent-doc/claims.log` (truncated after read).
+    pub claims: Vec<String>,
+    /// Unified diff text, or `null` if there are no changes.
+    pub diff: Option<String>,
+    /// True when the snapshot matches the document (no new user input).
+    pub no_changes: bool,
+    /// Changes detected in linked documents since last cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_changes: Vec<RelatedDocChange>,
+    /// Path to the baseline file saved after commit (for `--baseline-file` in write).
+    /// Saved after step 2 (commit + boundary reposition) so it matches the snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_file: Option<String>,
+    /// Classification of the diff for skill routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type: Option<String>,
+    /// Reason for the diff classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type_reason: Option<String>,
+    /// Annotated diff with content-source markers (`[agent]`, `[user+]`, `[user-]`, `[user~]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotated_diff: Option<String>,
+    /// Skill slash commands found in user-added diff lines (non-built-ins, e.g. `["/agent-doc foo.md", "/caveman"]`).
+    /// Guards applied: code fences, blockquotes, non-added lines.
+    /// Built-in Claude Code commands are excluded here — see `builtin_commands`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slash_commands: Vec<String>,
+    /// Claude Code built-in commands found in user-added diff lines (e.g. `["/compact", "/clear"]`).
+    /// These affect Claude Code session state and cannot be invoked via the Skill tool.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builtin_commands: Vec<String>,
+    /// Resolved model tier the skill should use to gate this cycle.
+    /// Computed from (in precedence order): inline `/model` command,
+    /// `<!-- agent:model -->` component, `agent_doc_model_tier` frontmatter,
+    /// diff heuristic. Single field for skill consumption — gating is a simple
+    /// `>` comparison against the running model's tier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_tier: Option<String>,
+    /// Hard-gate tier from `<!-- agent:model -->` component or `agent_doc_model_tier`
+    /// frontmatter. The skill should refuse to proceed if the running model's tier is
+    /// below this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_tier: Option<String>,
+    /// Advisory tier computed from diff structural signals (diff type, lines added,
+    /// document path). The skill may surface this as a suggestion but should not gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_tier: Option<String>,
+    /// Concrete model name from an inline `/model <x>` command in the diff
+    /// (e.g., `"opus"`). Set when the user wrote `/model opus` (or `/model high`,
+    /// resolved via the harness's tier map). The corresponding diff line is
+    /// stripped from `diff` and `annotated_diff` so it does not propagate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch: Option<String>,
+    /// Resolved tier for `model_switch` (e.g., `"high"` for `opus`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch_tier: Option<String>,
+    /// Pending callback requests from `agent-doc cleanup` or other IPC callers.
+    /// Non-empty when another process wrote a request and is waiting for this
+    /// session to respond.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_callbacks: Vec<crate::callback::PendingCallback>,
+    /// Environment variables from frontmatter `env` field (unexpanded).
+    /// Values may contain shell expressions like `$(passage ...)` or `$VAR`.
+    /// A `null` value means "unset this key" — the skill should emit
+    /// `unset KEY` instead of `export KEY=...`.
+    /// Order is preserved from the document for sequential evaluation.
+    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
+    pub env: indexmap::IndexMap<String, Option<String>>,
+    /// True when the pending component's id order changed between snapshot and current.
+    /// When set, the skill MUST NOT reorder pending this cycle — user intent wins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending_reordered: bool,
+    /// Count of pending items currently in `[/]` gated state.
+    /// Surfaced so the skill can highlight blocked items in its response and
+    /// decide whether to address gated work this cycle. Zero is omitted from
+    /// JSON to keep the common case quiet.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub pending_gated_count: usize,
+    /// User additions found inside agent response blocks (inline annotations).
+    /// These are `[user+]`/`[user~]` lines from the annotated diff that have
+    /// `[agent]` lines after them — corrections or questions the user inserted
+    /// into a previous agent response rather than appending at the end.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline_annotations: Vec<String>,
+    /// Short model name for attribution in `### Re:` response headers.
+    ///
+    /// Resolved from (in priority order): `ANTHROPIC_MODEL` env var → frontmatter
+    /// `model` field. Full model IDs are shortened to their human-readable suffix
+    /// (e.g. `claude-sonnet-4-6` → `sonnet-4-6`). `None` when no model is known.
+    /// The skill appends this to `### Re: topic` as `### Re: topic — <model>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
+
+/// Extract a human-readable short model name from a full model ID.
+///
+/// Strips well-known provider prefixes so the response header stays compact:
+/// - `claude-sonnet-4-6` → `sonnet-4-6`
+/// - `claude-opus-4` → `opus-4`
+/// - `claude-haiku-4-5` → `haiku-4-5`
+/// - Short names (no prefix) are returned as-is.
+fn short_model_name(model_id: &str) -> &str {
+    // Strip leading "claude-" prefix if present
+    if let Some(suffix) = model_id.strip_prefix("claude-") {
+        return suffix;
+    }
+    model_id
+}
+
+/// Resolve the agent model short name for attribution in `### Re:` headers.
+///
+/// Source: frontmatter `model` field only. `ANTHROPIC_MODEL` env var is
+/// deliberately ignored — it reflects the user's shell, not the model
+/// Claude Code is actually running with (Claude Code does not export
+/// `ANTHROPIC_MODEL` to child shells). The SKILL running inside Claude
+/// Code always knows its own model identity and stamps attribution
+/// directly when `agent_model` is null.
+///
+/// Full model IDs are shortened via `short_model_name`.
+fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
+    frontmatter_model.map(|m| short_model_name(m).to_string())
+}
+
+/// Trigger an automatic `resync --fix` when session-drift has been detected
+/// on two consecutive preflights.
+///
+/// The drift counter lives at `.agent-doc/state/drift.count`. Each call either
+/// increments it (drift present) or deletes it (drift absent). When the counter
+/// reaches >= 2 we invoke `resync::run(true, None)` and reset it to 0 so we do
+/// not loop on every cycle.
+fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) {
+    let has_drift = layout_issues
+        .iter()
+        .any(|i| i.starts_with("session drift:"));
+
+    let Ok(canonical) = file.canonicalize() else { return; };
+    let Some(project_root) = snapshot::find_project_root(&canonical) else { return; };
+    let state_dir = project_root.join(".agent-doc/state");
+    let counter_path = state_dir.join("drift.count");
+
+    if !has_drift {
+        // Drift cleared — reset the counter.
+        if counter_path.exists() {
+            let _ = std::fs::remove_file(&counter_path);
+        }
+        return;
+    }
+
+    let current: u32 = std::fs::read_to_string(&counter_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    let next = current + 1;
+
+    if let Err(e) = std::fs::create_dir_all(&state_dir) {
+        eprintln!("[preflight] drift state dir create failed: {}", e);
+        return;
+    }
+    if let Err(e) = std::fs::write(&counter_path, next.to_string()) {
+        eprintln!("[preflight] drift counter write failed: {}", e);
+    }
+
+    if next >= 2 {
+        eprintln!(
+            "[preflight] session drift detected {}x consecutively — running `resync --fix`",
+            next
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!("auto_resync_on_drift consecutive={}", next),
+        );
+        if let Err(e) = resync::run(true, None) {
+            eprintln!("[preflight] auto-resync failed: {}", e);
+        } else {
+            // Reset after successful fix — next cycle re-evaluates.
+            let _ = std::fs::remove_file(&counter_path);
+        }
+    } else {
+        eprintln!(
+            "[preflight] session drift detected (count={}) — will auto-resync on next detection",
+            next
+        );
+    }
+}
+
+/// Check tmux layout health for the current session.
+///
+/// Returns a list of human-readable issue strings. An empty vec means the
+/// layout is healthy. This is read-only — no mutations are performed.
+///
+/// If not running inside tmux, returns an empty vec silently.
+pub fn check_layout() -> Vec<String> {
+    if !sessions::in_tmux() {
+        return vec![];
+    }
+
+    let mut issues = Vec::new();
+
+    // Get current session name.
+    let session_name = match Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        _ => return issues, // Can't determine session — skip silently.
+    };
+
+    if session_name.is_empty() {
+        return issues;
+    }
+
+    // List windows: index, name, pane count.
+    let window_output = match Command::new("tmux")
+        .args([
+            "list-windows",
+            "-t",
+            &format!("{}:", session_name),
+            "-F",
+            "#{window_index}\t#{window_name}\t#{window_panes}",
+        ])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).to_string()
+        }
+        _ => return issues,
+    };
+
+    let windows: Vec<u32> = window_output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let index: u32 = parts.next()?.parse().ok()?;
+            Some(index)
+        })
+        .collect();
+
+    // Check 1: Window 0 should exist (base-index compliance).
+    if !windows.contains(&0) {
+        issues.push(format!(
+            "window index 0 missing in session '{}' (base-index compliance)",
+            session_name,
+        ));
+    }
+
+    // Check 3: Session-drift — registered panes spanning multiple tmux sessions.
+    // Check 4: Duplicate claims — multiple sessions claiming the same document file.
+    let registry_path = sessions::registry_path();
+    let registry: Option<tmux_router::Registry> = std::fs::read_to_string(&registry_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    if let Some(registry) = registry {
+        let mut pane_sessions: HashSet<String> = HashSet::new();
+        for entry in registry.values() {
+            let pane = &entry.pane;
+            // Only check alive panes.
+            let pane_sess = Command::new("tmux")
+                .args(["display-message", "-t", pane, "-p", "#{session_name}"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if !pane_sess.is_empty() {
+                pane_sessions.insert(pane_sess);
+            }
+        }
+        if pane_sessions.len() > 1 {
+            let mut sessions_vec: Vec<&str> = pane_sessions.iter().map(|s| s.as_str()).collect();
+            sessions_vec.sort();
+            issues.push(format!(
+                "session drift: registered panes span {} tmux sessions: {}",
+                pane_sessions.len(),
+                sessions_vec.join(", "),
+            ));
+        }
+
+        // Check 4: duplicate file claims — two sessions pointing to the same document.
+        issues.extend(detect_duplicate_claims(&registry));
+    }
+
+    issues
+}
+
+/// Detect duplicate file claims in a registry snapshot.
+///
+/// Returns one issue string per file that has two or more sessions claiming it.
+/// Entries with an empty `file` field are skipped (legacy entries).
+fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
+    let mut file_sessions: HashMap<String, Vec<String>> = HashMap::new();
+    for (session_id, entry) in registry {
+        if entry.file.is_empty() {
+            continue;
+        }
+        file_sessions
+            .entry(entry.file.clone())
+            .or_default()
+            .push(session_id.clone());
+    }
+    let mut issues = Vec::new();
+    for (file, session_ids) in &file_sessions {
+        if session_ids.len() > 1 {
+            let mut sorted = session_ids.clone();
+            sorted.sort();
+            issues.push(format!(
+                "duplicate claims: {} sessions claim '{}': {}",
+                session_ids.len(),
+                file,
+                sorted.join(", "),
+            ));
+        }
+    }
+    issues
+}
+
+/// Run the preflight sequence for a session document.
+///
+/// Steps (in order):
+/// 0. Check tmux layout health (`check_layout`)
+/// 1. Recover orphaned pending response (`recover::run`)
+/// 2. Commit previous cycle (`git::commit`)
+/// 3. Check claims log (read + truncate `.agent-doc/claims.log`)
+/// 4. Compute diff (`diff::compute`)
+/// 5. Read document HEAD from disk
+///
+/// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
+pub fn run(file: &Path) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Step 0a: Auto-GC (at most once per day).
+    // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Some(root) = snapshot::find_project_root(&canonical) {
+            let stamp = root.join(".agent-doc/gc.stamp");
+            let needs_gc = match std::fs::metadata(&stamp) {
+                Ok(meta) => meta.modified().ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|age| age > std::time::Duration::from_secs(86400))
+                    .unwrap_or(true),
+                Err(_) => true,
+            };
+            if needs_gc {
+                eprintln!("[preflight] step 0a: auto-gc");
+                match crate::gc::run(Some(&root), false) {
+                    Ok(result) => {
+                        if result.deleted > 0 {
+                            eprintln!("[preflight] gc: {} files cleaned", result.deleted);
+                        }
+                        let _ = std::fs::write(&stamp, "");
+                    }
+                    Err(e) => eprintln!("[preflight] gc warning: {}", e),
+                }
+            }
+        }
+    }
+
+    // Step 0-pre: Invariant check (#a011) — if the last ops.log event was a
+    // `preflight_diff_start` without any subsequent write/commit event, the
+    // previous cycle was interrupted (crash, killed agent, IPC timeout that
+    // never recovered). Warn loudly so the operator can investigate.
+    if let Ok(Some(last)) = crate::session_check::last_ops_event(file)
+        && last.starts_with(crate::session_check::PREFLIGHT_START_EVENT)
+    {
+        eprintln!(
+            "[preflight] WARNING: previous cycle ended at `preflight_diff_start` without a write — interrupted cycle detected"
+        );
+        crate::ops_log::log_op(file, "interrupted_cycle_detected file=");
+    }
+
+    // Step 0: Check tmux layout health.
+    eprintln!("[preflight] step 0: layout check");
+    let layout_issues = check_layout();
+    for issue in &layout_issues {
+        eprintln!("[preflight] layout issue: {}", issue);
+    }
+
+    // Step 0b (#a014): Session drift auto-resync — when drift is detected on
+    // consecutive preflights, auto-run `resync --fix` to clean the registry.
+    // State lives in `.agent-doc/state/drift.count` so we only auto-fix after
+    // the second consecutive detection (one false positive is tolerated).
+    maybe_auto_resync_on_drift(file, &layout_issues);
+
+    // Step 1: Recover orphaned pending responses.
+    eprintln!("[preflight] step 1: recover");
+    let recovered = recover::run(file).unwrap_or_else(|e| {
+        eprintln!("[preflight] recover warning: {}", e);
+        false
+    });
+
+    // Step 1b: Ensure document is initialized (snapshot + git baseline).
+    // If no snapshot exists, creates one and commits the file.
+    if let Err(e) = snapshot::ensure_initialized(file) {
+        eprintln!("[preflight] warning: auto-init failed: {}", e);
+    }
+
+    // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
+    // reorder detection. MUST run BEFORE step 2 commit so the single step-2
+    // commit bundles the pending mutations with the previous-cycle response,
+    // producing exactly one HEAD advance per preflight. Running after step 2
+    // caused #64mb (double commit_staging: step 2 committed, then maintenance
+    // mutated and committed again).
+    //
+    // Maintenance applies its mutations to BOTH the working tree file AND the
+    // snapshot (surgically, via component replace), so the upcoming step-2
+    // commit which stages from snapshot picks them up atomically.
+    let (pending_reordered, pending_gated_count) =
+        run_pending_maintenance(file).unwrap_or_else(|e| {
+            eprintln!("[preflight] pending maintenance warning: {}", e);
+            (false, 0)
+        });
+
+    // Step 2: Commit previous cycle.
+    eprintln!("[preflight] step 2: commit");
+    let committed = match git::commit(file) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("[preflight] commit warning: {}", e);
+            false
+        }
+    };
+
+    // Step 2b: Save baseline after commit (post-boundary-reposition).
+    // This baseline matches the snapshot exactly, eliminating staleness.
+    let baseline_file = {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
+        let baseline_dir = snapshot::find_project_root(&canonical)
+            .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
+            .join(".agent-doc/baselines");
+        let _ = std::fs::create_dir_all(&baseline_dir);
+        let baseline_path = baseline_dir.join(format!("{}.md", hash));
+        match std::fs::read_to_string(file) {
+            Ok(content) => {
+                let _ = std::fs::write(&baseline_path, &content);
+                eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+                Some(baseline_path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                eprintln!("[preflight] failed to save baseline: {}", e);
+                None
+            }
+        }
+    };
+
+    // Step 2c: Auto-compact if exchange component exceeds threshold.
+    {
+        if let Ok(content) = std::fs::read_to_string(file)
+            && let Ok((fm, _)) = frontmatter::parse(&content)
+            && let Some(threshold) = fm.auto_compact
+            && threshold > 0
+            && fm.resolve_mode().is_template()
+            && let Some(comp) = crate::component::parse(&content).ok().and_then(|comps| comps.into_iter().find(|c| c.name == "exchange"))
+        {
+                                let comp_content = &content[comp.open_end..comp.close_start];
+                                let line_count = comp_content.lines().count();
+                                if line_count > threshold {
+                                    eprintln!(
+                                        "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
+                                        line_count, threshold
+                                    );
+                                    if let Err(e) = crate::compact::run(file, None, Some("exchange"), None, None) {
+                                        eprintln!("[preflight] auto-compact warning: {}", e);
+                                    }
+                }
+        }
+    }
+
+    // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
+    // project that have uncommitted snapshot content. Turns preflight into a catch-all
+    // backstop: even if a previous session's commit was skipped, the next preflight
+    // from any document in the project will pick it up.
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Some(root) = snapshot::find_project_root(&canonical) {
+            let sessions_path = root.join(".agent-doc/sessions.json");
+            if let Ok(content) = std::fs::read_to_string(&sessions_path)
+                && let Ok(registry) = serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&content)
+            {
+                for entry in registry.values() {
+                    let tracked_file = entry.get("file").and_then(|v| v.as_str()).unwrap_or("");
+                    if tracked_file.is_empty() { continue; }
+                    let doc_path = root.join(tracked_file);
+                    if doc_path == canonical { continue; } // already committed in step 2
+                    if !doc_path.exists() { continue; }
+                    // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
+                    let snap_rel = match snapshot::path_for(&doc_path) {
+                        Ok(rel) => rel,
+                        Err(_) => continue,
+                    };
+                    let snap_abs = root.join(&snap_rel);
+                    let snap_is_newer = (|| {
+                        let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
+                        let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
+                        // Proxy: snap newer than doc means an agent write landed without commit
+                        Some(snap_mtime > doc_mtime)
+                    })()
+                    .unwrap_or(true); // if uncertain, try commit anyway
+                    if snap_is_newer {
+                        // Guard: don't sweep-commit if the document has user additions
+                        // that the agent hasn't responded to yet. For inline mode this
+                        // checks ## User / ## Assistant blocks; for template mode it
+                        // falls through to a content-equality check.
+                        if let (Ok(snap_content), Ok(doc_content)) =
+                            (std::fs::read_to_string(&snap_abs), std::fs::read_to_string(&doc_path))
+                            && !crate::diff::is_stale_snapshot(&snap_content, &doc_content)
+                        {
+                            // Not a stale inline snapshot — check content equality
+                            // (covers template mode where is_stale_snapshot always returns false)
+                            let snap_stripped = crate::diff::strip_comments(&snap_content);
+                            let doc_stripped = crate::diff::strip_comments(&doc_content);
+                            if snap_stripped.trim() != doc_stripped.trim() {
+                                eprintln!(
+                                    "[preflight] sweep: skipping {} (unresponded user content)",
+                                    doc_path.display()
+                                );
+                                continue;
+                            }
+                        }
+                        // Freshness gate: skip if another session committed this doc
+                        // within the last 5s. Inside the CommitLock critical section
+                        // this is a valid fast-path — a concurrent commit that just
+                        // ran will have advanced HEAD's commit time, so we avoid
+                        // re-spawning git (~10ms) for nothing. The gate only closes
+                        // races when paired with the per-file commit flock in git::commit.
+                        let fresh = git::last_commit_mtime(&doc_path)
+                            .ok()
+                            .flatten()
+                            .and_then(|t| t.elapsed().ok())
+                            .is_some_and(|e| e.as_secs() < 5);
+                        if fresh {
+                            eprintln!("[preflight] sweep: skipping {} (committed <5s ago)", doc_path.display());
+                            continue;
+                        }
+                        match git::commit(&doc_path) {
+                            Ok(()) => eprintln!("[preflight] sweep: committed {}", doc_path.display()),
+                            Err(e) => eprintln!("[preflight] sweep: warning for {}: {}", doc_path.display(), e),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 3: Read and truncate the claims log.
+    eprintln!("[preflight] step 3: claims");
+    let claims = read_and_truncate_claims(file);
+
+    // Step 3b: Wait for file to settle (mtime + typing indicator debounce).
+    // Check both file mtime (disk-level) and cross-process typing indicator
+    // (buffer-level) to avoid picking up mid-typing edits.
+    // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
+    {
+        let debounce_ms = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|content| {
+                frontmatter::parse(&content).ok().and_then(|(fm, _)| fm.debounce_ms)
+            })
+            .unwrap_or(2000);
+        let debounce = std::time::Duration::from_millis(debounce_ms);
+        let max_wait = std::time::Duration::from_secs(if debounce_ms > 3000 { (debounce_ms / 1000) + 1 } else { 3 });
+        let poll = std::time::Duration::from_millis(100);
+        let start = std::time::Instant::now();
+        let file_str = file.to_string_lossy();
+        tracing::debug!(debounce_ms, file = %file.display(), "preflight debounce starting");
+
+        loop {
+            let idle_for = std::fs::metadata(file)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .unwrap_or(debounce);
+
+            let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, 1500);
+            tracing::trace!(
+                idle_ms = idle_for.as_millis() as u64,
+                typing_active,
+                elapsed_ms = start.elapsed().as_millis() as u64,
+                "preflight debounce poll"
+            );
+
+            if idle_for >= debounce && !typing_active {
+                tracing::debug!(
+                    idle_ms = idle_for.as_millis() as u64,
+                    waited_ms = start.elapsed().as_millis() as u64,
+                    "preflight debounce settled"
+                );
+                break;
+            }
+            if start.elapsed() >= max_wait {
+                if typing_active {
+                    tracing::warn!(waited_ms = start.elapsed().as_millis() as u64, "preflight debounce timeout (typing still active)");
+                    eprintln!("[preflight] typing indicator active but timeout after {:.1}s — proceeding", start.elapsed().as_secs_f64());
+                } else {
+                    tracing::warn!(waited_ms = start.elapsed().as_millis() as u64, "preflight debounce timeout (mtime not settled)");
+                    eprintln!("[preflight] mtime debounce timeout after {:.1}s — proceeding", start.elapsed().as_secs_f64());
+                }
+                break;
+            }
+            std::thread::sleep(poll);
+        }
+    }
+
+    // Step 3c: Check related documents for changes.
+    eprintln!("[preflight] step 3c: related docs");
+    let linked_changes = check_linked_docs(file);
+    for change in &linked_changes {
+        eprintln!("[preflight] related doc change: {} — {}", change.path, change.summary);
+    }
+
+    // Step 4: Compute diff between snapshot and current document.
+    eprintln!("[preflight] step 4: diff");
+    {
+        let snap_len = crate::snapshot::load(file).unwrap_or(None).map(|s| s.len()).unwrap_or(0);
+        let file_len = std::fs::metadata(file).map(|m| m.len() as usize).unwrap_or(0);
+        crate::ops_log::log_op(file, &format!(
+            "preflight_diff_start file={} snap_len={} file_len={}",
+            file.display(), snap_len, file_len
+        ));
+    }
+    let raw_diff = diff::compute(file)?;
+    let no_changes = raw_diff.is_none();
+
+    // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
+    // line(s) before downstream classification. The strip prevents `/model` from
+    // double-emitting in `builtin_commands`.
+    let global_config = config::load().unwrap_or_default();
+    let harness = agent_doc::model_tier::detect_harness();
+    let model_scan = raw_diff.as_ref().map(|d| {
+        agent_doc::model_tier::scan_model_switch(d, &harness, &global_config.model)
+    });
+    let diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
+        // Use the stripped diff for downstream consumers.
+        Some(scan.stripped_diff.clone())
+    } else {
+        raw_diff.clone()
+    };
+
+    // Step 4b: Classify the diff for skill routing.
+    let classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+
+    // Step 4c: Annotate the diff with content-source markers.
+    let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
+
+    // Step 4c2: Extract inline annotations (user edits inside agent response blocks).
+    let inline_annotations = annotated_diff
+        .as_ref()
+        .map(|a| diff::extract_inline_annotations(a))
+        .unwrap_or_default();
+
+    // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
+    let parsed_commands = diff_result
+        .as_ref()
+        .map(|d| diff::parse_slash_commands_classified(d))
+        .unwrap_or_else(|| diff::ParsedSlashCommands {
+            skill_commands: vec![],
+            builtin_commands: vec![],
+        });
+    let slash_commands = parsed_commands.skill_commands;
+    let builtin_commands = parsed_commands.builtin_commands;
+
+    // Step 4e: Resolve model tier sources and compose effective_tier.
+    // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
+    // agent_doc_model_tier frontmatter, diff heuristic.
+    let (frontmatter_tier, component_tier_value, frontmatter_env, frontmatter_model) = match std::fs::read_to_string(file) {
+        Ok(content) => {
+            let (fm_tier, env_map, fm_model) = frontmatter::parse(&content)
+                .ok()
+                .map(|(fm, _)| (fm.model_tier, fm.env, fm.model))
+                .unwrap_or_default();
+            let comp_value = agent_doc::model_tier::extract_model_component(&content);
+            (fm_tier, comp_value, env_map, fm_model)
+        }
+        Err(_) => (None, None, Default::default(), None),
+    };
+    let component_tier = component_tier_value.as_deref().and_then(|v| {
+        agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
+    });
+
+    // Diff heuristic — counts user-added lines (excluding +++ headers).
+    let lines_added = diff_result
+        .as_ref()
+        .map(|d| {
+            d.lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count()
+        })
+        .unwrap_or(0);
+    let diff_type_str: Option<String> = classification.as_ref().and_then(|c| {
+        serde_json::to_value(&c.diff_type)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
+    let suggested = agent_doc::model_tier::suggested_tier(
+        diff_type_str.as_deref(),
+        lines_added,
+        file,
+    );
+
+    let model_switch_name = model_scan.as_ref().and_then(|s| s.model_switch.clone());
+    let model_switch_tier = model_scan.as_ref().and_then(|s| s.model_switch_tier);
+    let required_tier_value = component_tier.or(frontmatter_tier);
+    let effective_tier_value = agent_doc::model_tier::compose_effective_tier(
+        model_switch_tier,
+        component_tier,
+        frontmatter_tier,
+        suggested,
+    );
+
+    // Step 5: Scan for pending callback requests from other processes.
+    let pending_callbacks = crate::callback::scan_pending_callbacks(None)
+        .unwrap_or_default();
+    if !pending_callbacks.is_empty() {
+        eprintln!("[preflight] found {} pending callback(s)", pending_callbacks.len());
+    }
+
+    let agent_model = resolve_agent_model(frontmatter_model.as_deref());
+    let output = PreflightOutput {
+        layout_issues,
+        recovered,
+        committed,
+        claims,
+        diff: diff_result,
+        no_changes,
+        linked_changes,
+        baseline_file,
+        diff_type: diff_type_str.clone(),
+        diff_type_reason: classification.map(|c| c.diff_type_reason),
+        annotated_diff,
+        inline_annotations,
+        slash_commands,
+        builtin_commands,
+        effective_tier: Some(effective_tier_value.to_string()),
+        required_tier: required_tier_value.map(|t| t.to_string()),
+        suggested_tier: Some(suggested.to_string()),
+        model_switch: model_switch_name,
+        model_switch_tier: model_switch_tier.map(|t| t.to_string()),
+        pending_callbacks,
+        env: frontmatter_env,
+        pending_reordered,
+        pending_gated_count,
+        agent_model,
+    };
+
+    let json = serde_json::to_string_pretty(&output)
+        .context("failed to serialize preflight output")?;
+    println!("{}", json);
+
+    Ok(())
+}
+
+/// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
+///
+/// Returns `(reordered, gated_count)`:
+/// - `reordered` is `true` when a reorder was detected (same ids, different order).
+/// - `gated_count` is the number of items currently in `[/]` state after backfill+reap.
+///
+/// Any write-through (backfill / reap) is persisted and committed in the same pass.
+/// Silent no-op when the document has no `agent:pending` component.
+fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok((false, 0)),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(cs) => cs,
+        Err(_) => return Ok((false, 0)),
+    };
+    let comp = match components.into_iter().find(|c| c.name == "pending") {
+        Some(c) => c,
+        None => return Ok((false, 0)),
+    };
+    let body = &content[comp.open_end..comp.close_start];
+
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let doc_id = snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string());
+
+    let mut current_body = body.to_string();
+    let mut mutated = false;
+
+    // 1. Lazy backfill: assign missing hash ids and normalize checkboxes.
+    let (after_backfill, changed) =
+        crate::pending::backfill(&current_body, &doc_id, &std::collections::HashSet::new());
+    if changed {
+        eprintln!("[preflight] pending: backfilled missing hash ids / checkboxes");
+        current_body = after_backfill;
+        mutated = true;
+    }
+
+    // 2. Reap `[x]` items. Collect full items (not just ids) so we can
+    //    archive them to `agent:pending-done` in step 2b below.
+    let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body);
+    if !removed_items.is_empty() {
+        let removed_ids: Vec<String> =
+            removed_items.iter().map(|i| i.id.clone()).collect();
+        eprintln!(
+            "[preflight] pending: reaped {} item(s): {}",
+            removed_items.len(),
+            removed_ids.join(", ")
+        );
+        current_body = after_reap;
+        mutated = true;
+    }
+
+    // 3. Persist any mutations to BOTH the working tree file and the snapshot.
+    //    Writing to both (surgically, via component replace) keeps the two in
+    //    sync so the upcoming step-2 `git::commit` stages the reaped+archived
+    //    snapshot in a single commit. We no longer call `git::commit` here —
+    //    see #64mb: calling commit inside maintenance produced a second commit
+    //    per preflight whenever anything mutated.
+    if mutated {
+        // 3a. Working tree — preserves user edits outside the pending region.
+        let mut new_file_content = comp.replace_content(&content, &current_body);
+        if !removed_items.is_empty()
+            && let Some(archived) =
+                archive_pending_done(&new_file_content, &removed_items)
+        {
+            new_file_content = archived;
+        }
+        std::fs::write(file, &new_file_content)
+            .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
+
+        // 3b. Snapshot — surgical replace of the pending (and optionally
+        //     pending-done) component in the snapshot content. User edits
+        //     elsewhere don't exist in the snapshot, so there's nothing to
+        //     preserve beyond the existing snapshot body.
+        if let Ok(Some(snap_content)) = snapshot::load(file) {
+            let snap_comps = crate::component::parse(&snap_content).ok();
+            if let Some(snap_pending) = snap_comps
+                .and_then(|cs| cs.into_iter().find(|c| c.name == "pending"))
+            {
+                let mut new_snap = snap_pending.replace_content(&snap_content, &current_body);
+                if !removed_items.is_empty()
+                    && let Some(archived) = archive_pending_done(&new_snap, &removed_items)
+                {
+                    new_snap = archived;
+                }
+                if let Err(e) = snapshot::save(file, &new_snap) {
+                    eprintln!("[preflight] pending: snapshot sync warning: {}", e);
+                }
+            }
+        }
+    }
+
+    // 4. Reorder detection: compare the snapshot's pending component to the current body.
+    let reordered = match snapshot::load(file).unwrap_or(None) {
+        Some(snap) => {
+            let snap_comp = crate::component::parse(&snap)
+                .ok()
+                .and_then(|comps| comps.into_iter().find(|c| c.name == "pending"));
+            if let Some(sc) = snap_comp {
+                let snap_body = &snap[sc.open_end..sc.close_start];
+                crate::pending::detect_reorder(snap_body, &current_body).is_some()
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+    if reordered {
+        eprintln!("[preflight] pending: reorder detected (skill must not reorder this cycle)");
+    }
+
+    // 5. Count gated items in the post-maintenance body.
+    let (_, items, _) = crate::pending::parse_items(&current_body);
+    let gated_count = items
+        .iter()
+        .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
+        .count();
+    if gated_count > 0 {
+        eprintln!("[preflight] pending: {} gated item(s)", gated_count);
+    }
+
+    Ok((reordered, gated_count))
+}
+
+/// Archive reaped pending items to `agent:pending-done` if the component
+/// exists. Returns `Some(new_content)` when archival happened, `None` when
+/// the archive component is absent (silent no-op per spec §3 step 3).
+///
+/// Entry format: `- YYYY-MM-DD [#id] text` — ISO date prefix for chronology,
+/// hash preserved so the archive is grep-compatible with the live list, text
+/// verbatim from the reaped item so context survives.
+///
+/// New entries are appended AFTER any existing archive body. The component
+/// is always rendered with a trailing blank line so successive turns don't
+/// pack entries onto one line.
+fn archive_pending_done(
+    content: &str,
+    removed: &[crate::pending::PendingItem],
+) -> Option<String> {
+    if removed.is_empty() {
+        return None;
+    }
+    let components = crate::component::parse(content).ok()?;
+    let archive = components.into_iter().find(|c| c.name == "pending-done")?;
+    let existing_body = &content[archive.open_end..archive.close_start];
+
+    // Use the `date` command so we stay on agent-doc's no-chrono policy
+    // (see git.rs::chrono_timestamp). Fallback to "unknown-date" if the
+    // command fails — archival still succeeds with a legible placeholder.
+    let today = std::process::Command::new("date")
+        .args(["+%Y-%m-%d"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown-date".to_string());
+
+    let mut new_body = existing_body.to_string();
+    if !new_body.is_empty() && !new_body.ends_with('\n') {
+        new_body.push('\n');
+    }
+    for item in removed {
+        new_body.push_str(&format!("- {} [#{}] {}\n", today, item.id, item.text));
+    }
+
+    Some(archive.replace_content(content, &new_body))
+}
+
+/// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
+/// Returns an empty vec if the log doesn't exist or can't be read.
+fn read_and_truncate_claims(file: &Path) -> Vec<String> {
+    // Canonicalize to find project root reliably.
+    let canonical = match file.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let root = match snapshot::find_project_root(&canonical) {
+        Some(r) => r,
+        None => return vec![],
+    };
+
+    let log_path = root.join(".agent-doc/claims.log");
+
+    let contents = match std::fs::read_to_string(&log_path) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    if contents.is_empty() {
+        return vec![];
+    }
+
+    // Collect non-empty lines.
+    let claims: Vec<String> = contents
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    // Truncate the log.
+    if let Err(e) = std::fs::write(&log_path, "") {
+        eprintln!("[preflight] failed to truncate claims log: {}", e);
+    }
+
+    claims
+}
+
+/// Check related documents for changes since our last snapshot.
+///
+/// Parses `links` from the document's frontmatter, then for each path:
+/// - Resolves relative to the document's parent directory
+/// - Checks if the file exists
+/// - Compares the related doc's last git commit time against our snapshot mtime
+/// - If newer, summarizes the recent commits
+fn is_url(link: &str) -> bool {
+    link.starts_with("http://") || link.starts_with("https://")
+}
+
+/// Resolve the links cache directory, creating it if needed.
+fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
+    let mut search = file.parent();
+    while let Some(d) = search {
+        let candidate = d.join(".agent-doc");
+        if candidate.is_dir() {
+            let cache = candidate.join("links_cache");
+            std::fs::create_dir_all(&cache).ok()?;
+            return Some(cache);
+        }
+        search = d.parent();
+    }
+    None
+}
+
+/// Compute a cache filename for a URL.
+fn url_cache_path(cache_dir: &Path, url: &str) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    cache_dir.join(format!("{}.txt", hash))
+}
+
+/// Fetch a URL and compare against cached content. Returns a change entry if content differs.
+/// Convert HTML content to markdown, stripping boilerplate elements.
+fn html_to_markdown(html: &str) -> String {
+    use htmd::HtmlToMarkdown;
+    let converter = HtmlToMarkdown::builder()
+        .skip_tags(vec!["script", "style", "nav", "footer", "noscript", "svg"])
+        .build();
+    converter.convert(html).unwrap_or_else(|_| html.to_string())
+}
+
+/// Returns true if the response content-type indicates HTML.
+fn is_html_content(content_type: &str) -> bool {
+    content_type.contains("text/html") || content_type.contains("application/xhtml")
+}
+
+fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
+    let cache_path = url_cache_path(cache_dir, url);
+    let cached = std::fs::read_to_string(&cache_path).ok();
+
+    // Fetch with a reasonable timeout
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10))
+        .build();
+    let response = agent.get(url).call();
+
+    match response {
+        Ok(resp) => {
+            let content_type = resp
+                .header("content-type")
+                .unwrap_or("")
+                .to_string();
+            let body = match resp.into_string() {
+                Ok(b) => b,
+                Err(e) => {
+                    return RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("fetch error: {}", e),
+                        exists: false,
+                    };
+                }
+            };
+
+            // Convert HTML to markdown for cleaner agent context
+            let content = if is_html_content(&content_type) {
+                html_to_markdown(&body)
+            } else {
+                body
+            };
+
+            match cached {
+                Some(ref old) if old == &content => {
+                    // No change — don't include in output
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: String::new(), // empty = no change
+                        exists: true,
+                    }
+                }
+                Some(_) => {
+                    // Content changed — update cache and report
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("content changed ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+                None => {
+                    // First fetch — cache it and report as new
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("initial fetch ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+            }
+        }
+        Err(e) => RelatedDocChange {
+            path: url.to_string(),
+            summary: format!("fetch failed: {}", e),
+            exists: false,
+        },
+    }
+}
+
+fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let fm = match frontmatter::parse(&content) {
+        Ok((fm, _)) => fm,
+        Err(_) => return vec![],
+    };
+    if fm.links.is_empty() {
+        return vec![];
+    }
+
+    // Get our snapshot mtime as the baseline for comparison.
+    let our_snapshot_mtime = snapshot::path_for(file)
+        .ok()
+        .and_then(|p| std::fs::metadata(&p).ok())
+        .and_then(|m| m.modified().ok());
+
+    let doc_dir = match file.parent() {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    let cache_dir = links_cache_dir(file);
+
+    let mut changes = Vec::new();
+    for link in &fm.links {
+        if is_url(link) {
+            // URL link — fetch and compare against cache
+            if let Some(ref cache) = cache_dir {
+                let change = check_url_link(link, cache);
+                // Only include if there's an actual change or error
+                if !change.summary.is_empty() {
+                    changes.push(change);
+                }
+            } else {
+                eprintln!("[preflight] warning: cannot resolve links cache for URL: {}", link);
+            }
+            continue;
+        }
+
+        // File link — existing behavior
+        let resolved = doc_dir.join(link);
+        if !resolved.exists() {
+            changes.push(RelatedDocChange {
+                path: link.clone(),
+                summary: "file not found".to_string(),
+                exists: false,
+            });
+            continue;
+        }
+
+        // Compare last commit time of related doc against our snapshot mtime.
+        let related_mtime = match git::last_commit_mtime(&resolved) {
+            Ok(Some(t)) => t,
+            _ => continue, // Not tracked or no commits — skip silently.
+        };
+
+        let is_newer = match our_snapshot_mtime {
+            Some(snap_time) => related_mtime > snap_time,
+            None => true, // No snapshot yet — treat everything as new.
+        };
+
+        if !is_newer {
+            continue;
+        }
+
+        // Get recent commit summaries.
+        let summary = recent_commit_summary(&resolved, our_snapshot_mtime);
+        changes.push(RelatedDocChange {
+            path: link.clone(),
+            summary,
+            exists: true,
+        });
+    }
+
+    changes
+}
+
+/// Get a human-readable summary of recent commits for a file.
+fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> String {
+    let since_arg = since.and_then(|t| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| format!("--since={}", d.as_secs()))
+    });
+
+    let (git_root, resolved) = match git::resolve_to_git_root(file) {
+        Ok(pair) => pair,
+        Err(_) => return "changed (git unavailable)".to_string(),
+    };
+    let rel_path = resolved
+        .strip_prefix(&git_root)
+        .unwrap_or(&resolved);
+
+    let mut args = vec!["log", "--oneline", "-5"];
+    let since_str;
+    if let Some(ref s) = since_arg {
+        since_str = s.clone();
+        args.push(&since_str);
+    }
+    args.push("--");
+    let rel_str = rel_path.to_string_lossy().to_string();
+    args.push(&rel_str);
+
+    let output = std::process::Command::new("git")
+        .current_dir(&git_root)
+        .args(&args)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            let lines: Vec<&str> = text.lines().take(5).collect();
+            if lines.is_empty() {
+                "changed".to_string()
+            } else {
+                lines.join("; ")
+            }
+        }
+        _ => "changed (git log failed)".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Set up a minimal project directory with .agent-doc/ structure and a git repo.
+    fn setup_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+
+        // Initialize a bare git repo so `git commit` doesn't fail fatally.
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .ok();
+
+        dir
+    }
+
+    #[test]
+    fn preflight_produces_valid_json() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n## User\n\nHello\n",
+        )
+        .unwrap();
+
+        // Snapshot matches document → no_changes = true.
+        snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
+
+        run(&doc).unwrap();
+        // If run() returns Ok(()), the JSON was printed to stdout without error.
+        // The test verifies no panic and no error return.
+    }
+
+    #[test]
+    fn preflight_file_not_found() {
+        let err = run(Path::new("/nonexistent/missing.md")).unwrap_err();
+        assert!(err.to_string().contains("file not found"));
+    }
+
+    #[test]
+    fn preflight_detects_diff() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
+
+        // Save snapshot of original, then add new content.
+        snapshot::save(&doc, original).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
+        )
+        .unwrap();
+
+        // diff::compute should detect changes → no_changes = false.
+        let diff_result = diff::compute(&doc).unwrap();
+        assert!(diff_result.is_some(), "diff should detect new content");
+    }
+
+    #[test]
+    fn preflight_claims_read_and_truncated() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+        snapshot::save(&doc, "# Doc\n").unwrap();
+
+        // Write a claims log.
+        let log_path = dir.path().join(".agent-doc/claims.log");
+        std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert_eq!(claims, vec!["claim A", "claim B"]);
+
+        // Log should be truncated.
+        let after = std::fs::read_to_string(&log_path).unwrap();
+        assert!(after.is_empty(), "claims log should be empty after read");
+    }
+
+    #[test]
+    fn preflight_no_claims_log_returns_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        // No claims.log exists.
+        let claims = read_and_truncate_claims(&doc);
+        assert!(claims.is_empty());
+    }
+
+    #[test]
+    fn preflight_output_serializes_correctly() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec!["foo".to_string()],
+            diff: Some("+new line\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["recovered"], false);
+        assert_eq!(parsed["committed"], true);
+        assert_eq!(parsed["claims"][0], "foo");
+        assert_eq!(parsed["no_changes"], false);
+        assert!(parsed["diff"].as_str().is_some());
+        assert!(parsed.get("document").is_none(), "document field must be absent");
+    }
+
+    #[test]
+    fn preflight_output_null_diff_when_no_changes() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["diff"].is_null());
+        assert_eq!(parsed["no_changes"], true);
+    }
+
+    #[test]
+    fn check_layout_returns_empty_outside_tmux() {
+        // When TMUX env var is not set (typical in CI / test), check_layout
+        // should return an empty vec silently.
+        let saved = std::env::var("TMUX").ok();
+        // SAFETY: test is single-threaded; we restore the value immediately after.
+        unsafe { std::env::remove_var("TMUX") };
+        let issues = check_layout();
+        // Restore if it was set.
+        if let Some(val) = saved {
+            unsafe { std::env::set_var("TMUX", val) };
+        }
+        assert!(issues.is_empty(), "expected no issues outside tmux, got: {:?}", issues);
+    }
+
+    #[test]
+    fn preflight_output_includes_layout_issues() {
+        let output = PreflightOutput {
+            layout_issues: vec!["window index 0 missing".to_string()],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
+    }
+
+    #[test]
+    fn detect_duplicate_claims_empty_registry() {
+        let registry = tmux_router::Registry::new();
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+
+    #[test]
+    fn detect_duplicate_claims_no_duplicates() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/foo.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/bar.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+
+    #[test]
+    fn detect_duplicate_claims_two_sessions_same_file() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        let issues = detect_duplicate_claims(&registry);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("duplicate claims"));
+        assert!(issues[0].contains("tasks/shared.md"));
+        assert!(issues[0].contains("session-a"));
+        assert!(issues[0].contains("session-b"));
+    }
+
+    #[test]
+    fn detect_duplicate_claims_skips_empty_file_entries() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: String::new(), // legacy entry — no file
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: String::new(),
+                window: "@1".to_string(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+
+    #[test]
+    fn is_url_detects_http() {
+        assert!(is_url("http://example.com"));
+        assert!(is_url("https://example.com/path"));
+        assert!(!is_url("../relative/path.md"));
+        assert!(!is_url("tasks/software/agent-doc.md"));
+        assert!(!is_url(""));
+    }
+
+    #[test]
+    fn is_html_content_detects_html() {
+        assert!(is_html_content("text/html; charset=utf-8"));
+        assert!(is_html_content("text/html"));
+        assert!(is_html_content("application/xhtml+xml"));
+        assert!(!is_html_content("application/json"));
+        assert!(!is_html_content("text/plain"));
+    }
+
+    #[test]
+    fn html_to_markdown_converts_basic_html() {
+        let html = "<h1>Title</h1><p>Hello <strong>world</strong>.</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Title"), "should contain heading text");
+        assert!(md.contains("**world**"), "should convert bold");
+    }
+
+    #[test]
+    fn html_to_markdown_strips_script_and_style() {
+        let html = "<p>Visible</p><script>alert('xss')</script><style>.foo{}</style><p>Also visible</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Visible"));
+        assert!(md.contains("Also visible"));
+        assert!(!md.contains("alert"), "script content should be stripped");
+        assert!(!md.contains(".foo"), "style content should be stripped");
+    }
+
+    #[test]
+    fn html_to_markdown_strips_nav_and_footer() {
+        let html = "<nav><a href='/'>Home</a></nav><main><p>Content</p></main><footer>Copyright</footer>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Content"));
+        assert!(!md.contains("Home"), "nav content should be stripped");
+        assert!(!md.contains("Copyright"), "footer content should be stripped");
+    }
+
+    #[test]
+    fn url_cache_path_is_deterministic() {
+        let dir = TempDir::new().unwrap();
+        let p1 = url_cache_path(dir.path(), "https://example.com");
+        let p2 = url_cache_path(dir.path(), "https://example.com");
+        assert_eq!(p1, p2, "same URL should produce same cache path");
+
+        let p3 = url_cache_path(dir.path(), "https://other.com");
+        assert_ne!(p1, p3, "different URLs should produce different cache paths");
+        assert!(p1.extension().unwrap() == "txt");
+    }
+
+    #[test]
+    fn links_cache_dir_creates_directory() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let cache = links_cache_dir(&doc);
+        assert!(cache.is_some());
+        let cache_path = cache.unwrap();
+        assert!(cache_path.exists());
+        assert!(cache_path.ends_with("links_cache"));
+    }
+
+    #[test]
+    fn preflight_output_includes_baseline_file() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["baseline_file"], "/tmp/baseline.md");
+    }
+
+    #[test]
+    fn preflight_output_omits_baseline_file_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("baseline_file").is_none(), "baseline_file should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_diff_type_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+go\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: Some("approval".to_string()),
+            diff_type_reason: Some("single approval word: \"go\"".to_string()),
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["diff_type"], "approval");
+        assert!(parsed["diff_type_reason"].as_str().unwrap().contains("go"));
+    }
+
+    #[test]
+    fn preflight_output_omits_diff_type_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("diff_type").is_none(), "diff_type should be omitted when None");
+        assert!(parsed.get("diff_type_reason").is_none(), "diff_type_reason should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_annotated_diff_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+line\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: Some("[user+] line".to_string()),
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["annotated_diff"], "[user+] line");
+    }
+
+    #[test]
+    fn preflight_output_omits_annotated_diff_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("annotated_diff").is_none(), "annotated_diff should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_inline_annotations() {
+        let output = PreflightOutput {
+            inline_annotations: vec![
+                "This is wrong, fix it".to_string(),
+                "Broaden the gate".to_string(),
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let anns = parsed["inline_annotations"].as_array().unwrap();
+        assert_eq!(anns.len(), 2);
+        assert_eq!(anns[0], "This is wrong, fix it");
+        assert_eq!(anns[1], "Broaden the gate");
+    }
+
+    #[test]
+    fn preflight_output_omits_inline_annotations_when_empty() {
+        let output = PreflightOutput {
+            inline_annotations: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("inline_annotations").is_none(),
+            "inline_annotations should be omitted when empty"
+        );
+    }
+
+    #[test]
+    fn preflight_output_slash_commands_from_diff() {
+        // /clear is a built-in command — goes to builtin_commands, not slash_commands
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
+        let parsed_cmds = crate::diff::parse_slash_commands_classified(diff);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(diff.to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: parsed_cmds.skill_commands,
+            builtin_commands: parsed_cmds.builtin_commands,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // /clear is a built-in — appears in builtin_commands, not slash_commands
+        assert_eq!(parsed["builtin_commands"][0], "/clear");
+        assert!(parsed["slash_commands"].is_null() || parsed["slash_commands"].as_array().map_or(true, |a| a.is_empty()));
+    }
+
+    #[test]
+    fn preflight_output_no_document_field() {
+        // The `document` field was removed — it must not appear in serialized JSON.
+        // Having it would send full document content to the agent every cycle,
+        // wasting tokens on every invocation.
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("document").is_none(),
+            "document key must be absent from preflight JSON — it would waste tokens on every cycle"
+        );
+    }
+
+    #[test]
+    fn preflight_output_no_large_content() {
+        // Regression: preflight JSON must not embed document content.
+        // Any field containing the full file body would be sent to the agent
+        // on every cycle, burning tokens proportional to document size.
+        let large_content = "x".repeat(10_000);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(format!("+{large_content}")), // diff can include content
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Only `diff` may contain the large content (it's the actual user change).
+        // No OTHER field should contain it.
+        let diff_str = parsed["diff"].as_str().unwrap_or("");
+        for (key, val) in parsed.as_object().unwrap() {
+            if key == "diff" {
+                continue;
+            }
+            let val_str = val.to_string();
+            assert!(
+                !val_str.contains(&large_content),
+                "field `{key}` contains large content — this would waste tokens on every preflight cycle"
+            );
+            assert!(
+                val_str.len() < 1_000 || key == "annotated_diff",
+                "field `{key}` is suspiciously large ({} bytes) — preflight should not embed document content",
+                val_str.len()
+            );
+        }
+        // Diff itself is allowed to contain the content
+        assert!(diff_str.contains(&large_content));
+    }
+
+    // --- Fix 5: cross-document sweep ---
+
+    #[test]
+    fn preflight_sweep_commits_other_tracked_docs() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+
+        // Create initial commit so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# project\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Primary doc (the one preflight runs on)
+        let primary = root.join("primary.md");
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        fs::write(&primary, primary_content).unwrap();
+        snapshot::save(&primary, primary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "primary.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add primary", "--no-verify"]).output().unwrap();
+
+        // Secondary doc (tracked in sessions.json, snapshot newer than file — needs sweep)
+        let secondary = root.join("secondary.md");
+        let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&secondary, secondary_content).unwrap();
+        snapshot::save(&secondary, secondary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "secondary.md"]).output().unwrap();
+        // Backdate the commit so the <5s freshness gate in sweep doesn't skip it.
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "add secondary", "--no-verify"])
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .output().unwrap();
+
+        // Touch snapshot to make it newer than the file (simulates agent write without commit)
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        let new_snap = format!("{}\n<!-- agent updated -->", secondary_content);
+        fs::write(&snap_abs, &new_snap).unwrap();
+
+        // Write sessions.json with secondary tracked
+        let sessions_path = root.join(".agent-doc/sessions.json");
+        let sessions = serde_json::json!({
+            "secondary-session": {
+                "pane": "%1",
+                "pid": 9999,
+                "cwd": root.to_string_lossy(),
+                "started": "2026-01-01",
+                "file": "secondary.md",
+                "window": "@1"
+            }
+        });
+        fs::write(&sessions_path, serde_json::to_string_pretty(&sessions).unwrap()).unwrap();
+
+        // Run preflight on primary — sweep should commit secondary
+        run(&primary).unwrap();
+
+        // Verify secondary was committed by the sweep
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-4"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(secondary):"),
+            "preflight sweep should have committed secondary.md, got:\n{log_str}"
+        );
+    }
+
+    #[test]
+    fn preflight_sweep_skips_doc_with_unresponded_user_content() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+
+        // Create initial commit so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# project\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Primary doc (the one preflight runs on)
+        let primary = root.join("primary.md");
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        fs::write(&primary, primary_content).unwrap();
+        snapshot::save(&primary, primary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "primary.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add primary", "--no-verify"]).output().unwrap();
+
+        // Secondary doc with agent response in snapshot but user added new content in document
+        let secondary = root.join("secondary.md");
+        let snap_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        // Document has user additions not in the snapshot
+        let doc_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\nNew question from user\n";
+        fs::write(&secondary, doc_content).unwrap();
+        snapshot::save(&secondary, snap_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "secondary.md"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "add secondary", "--no-verify"])
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .output().unwrap();
+
+        // Touch snapshot to make it newer than the file
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(&snap_abs, snap_content).unwrap();
+
+        // Write sessions.json with secondary tracked
+        let sessions_path = root.join(".agent-doc/sessions.json");
+        let sessions = serde_json::json!({
+            "secondary-session": {
+                "pane": "%1",
+                "pid": 9999,
+                "cwd": root.to_string_lossy(),
+                "started": "2026-01-01",
+                "file": "secondary.md",
+                "window": "@1"
+            }
+        });
+        fs::write(&sessions_path, serde_json::to_string_pretty(&sessions).unwrap()).unwrap();
+
+        // Count commits before sweep
+        let log_before = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline"])
+            .output()
+            .unwrap();
+        let count_before = String::from_utf8_lossy(&log_before.stdout).lines().count();
+
+        // Run preflight on primary — sweep should SKIP secondary due to user additions
+        run(&primary).unwrap();
+
+        // Verify secondary was NOT committed
+        let log_after = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log_after.stdout);
+        assert!(
+            !log_str.contains("agent-doc(secondary):"),
+            "preflight sweep should NOT have committed secondary.md (has unresponded user content), got:\n{log_str}"
+        );
+        // Only primary should have been committed (by step 2, not sweep)
+        let count_after = log_str.lines().count();
+        assert!(
+            count_after <= count_before + 1,
+            "expected at most one new commit (primary), got {} new commits",
+            count_after - count_before
+        );
+    }
+
+    // --- #cce5: resolve_agent_model / short_model_name tests ---
+
+    #[test]
+    fn short_model_name_strips_claude_prefix() {
+        assert_eq!(short_model_name("claude-sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("claude-opus-4"), "opus-4");
+        assert_eq!(short_model_name("claude-haiku-4-5"), "haiku-4-5");
+    }
+
+    #[test]
+    fn short_model_name_returns_as_is_without_prefix() {
+        assert_eq!(short_model_name("sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("gpt-4o"), "gpt-4o");
+        assert_eq!(short_model_name(""), "");
+    }
+
+    #[test]
+    fn resolve_agent_model_uses_frontmatter_only() {
+        // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
+        let result = resolve_agent_model(Some("claude-opus-4"));
+        assert_eq!(result, Some("opus-4".to_string()));
+    }
+
+    #[test]
+    fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
+        let result = resolve_agent_model(Some("claude-haiku-4-5"));
+        assert_eq!(result, Some("haiku-4-5".to_string()));
+    }
+
+    #[test]
+    fn resolve_agent_model_none_when_no_frontmatter() {
+        // No frontmatter → None, regardless of env var state.
+        let result = resolve_agent_model(None);
+        assert_eq!(result, None);
+    }
+}

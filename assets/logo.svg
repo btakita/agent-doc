@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 320" width="256" height="320">
+  <defs>
+    <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a3a"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+    <linearGradient id="hatHighlight" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4a4a4a"/>
+      <stop offset="50%" stop-color="#3a3a3a"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+    <linearGradient id="doc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="2" dy="3" stdDeviation="4" flood-opacity="0.25"/>
+    </filter>
+    <filter id="hatShadow" x="-5%" y="-10%" width="115%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Fedora crown (behind document) -->
+  <!-- Crown shape — pinched/tapered top, wider at base -->
+  <path d="M 60 92
+           C 60 70, 75 38, 100 30
+           C 112 27, 118 28, 128 32
+           C 138 28, 144 27, 156 30
+           C 181 38, 196 70, 196 92"
+        fill="url(#hatHighlight)" stroke="#111" stroke-width="1"/>
+  <!-- Crown center crease (pinch) -->
+  <path d="M 100 30 C 110 38, 118 40, 128 32 C 138 40, 146 38, 156 30"
+        fill="none" stroke="#222" stroke-width="1.5" opacity="0.6"/>
+  <!-- Crown side dents -->
+  <path d="M 68 75 C 72 60, 85 48, 100 38" fill="none" stroke="#555" stroke-width="0.8" opacity="0.3"/>
+  <path d="M 188 75 C 184 60, 171 48, 156 38" fill="none" stroke="#555" stroke-width="0.8" opacity="0.3"/>
+  <!-- Hat band — dark grosgrain ribbon -->
+  <rect x="60" y="80" width="136" height="12" rx="1" fill="#111"/>
+  <!-- Band highlight -->
+  <rect x="60" y="80" width="136" height="3" rx="1" fill="#333" opacity="0.4"/>
+
+  <!-- Document body -->
+  <g filter="url(#shadow)">
+    <path d="M 48 98 L 48 300 L 208 300 L 208 138 L 168 98 Z" fill="url(#doc)" stroke="#cccccc" stroke-width="1.5"/>
+    <path d="M 168 98 L 168 138 L 208 138" fill="#e0e0e0" stroke="#cccccc" stroke-width="1.5"/>
+  </g>
+
+  <!-- Fedora brim (in front of document) — asymmetric, slightly angled -->
+  <g filter="url(#hatShadow)">
+    <ellipse cx="128" cy="93" rx="118" ry="20" fill="url(#hat)" stroke="#111" stroke-width="1"/>
+    <!-- Brim edge highlight -->
+    <ellipse cx="128" cy="91" rx="114" ry="16" fill="none" stroke="#555" stroke-width="0.5" opacity="0.3"/>
+    <!-- Slight upturn on left side of brim -->
+    <path d="M 10 93 Q 30 85, 60 90" fill="url(#hat)" stroke="none"/>
+  </g>
+
+  <!-- Markdown symbol (M with down arrow) — centered in document -->
+  <g transform="translate(128, 200)" fill="#333333">
+    <!-- M shape -->
+    <path d="M -48 -35 L -48 35 L -36 35 L -36 -5 L -18 20 L 0 -5 L 0 35 L 12 35 L 12 -35 L 0 -35 L -18 -5 L -36 -35 Z"/>
+    <!-- Down arrow -->
+    <path d="M 24 -35 L 24 10 L 14 10 L 30 35 L 46 10 L 36 10 L 36 -35 Z"/>
+  </g>
+</svg>

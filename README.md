@@ -47,14 +47,14 @@ agent-doc route session.md
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route <file>` via a hotkey, the agent responds in the same document.
+The typical edit cycle: write in your editor, trigger `agent-doc route <file>` via a hotkey, and agent-doc injects the correct harness-specific trigger into the owning pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`.
 
 ## Key Features
 
 - **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attrs (`patch=`, `max_lines=`) > `components.toml` > built-in defaults
 - **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
 - **IPC-first writes** — socket IPC (Unix domain sockets); editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
-- **Tmux routing** — persistent Claude Code sessions per document; `route` dispatches to the correct pane or auto-starts one; reconciler always runs (no early exits) handling 0/1/2+ panes uniformly
+- **Tmux routing** — persistent per-document agent sessions; `route` dispatches to the correct pane or auto-starts one using the active harness's trigger shape (`/agent-doc` for Claude Code, plain `agent-doc` for Codex); reconciler always runs (no early exits) handling 0/1/2+ panes uniformly
 - **Streaming** — real-time CRDT write-back loop (`agent-doc stream`) with optional chain-of-thought routing
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session (`agent-doc parallel`)
 - **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
@@ -73,7 +73,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 
 ## Architecture
 
-The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The SKILL.md Claude Code skill is the non-deterministic orchestrator — it reads the diff, generates responses, and decides what to write.
+The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The bundled skill / AGENTS instructions are the non-deterministic orchestrator layer — they read the diff, generate responses, and decide what to write.
 
 **Binary vs. Agent Responsibility:**
 
@@ -139,7 +139,7 @@ agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/e
 |------|-----------|
 | **Binding** | The document→pane association stored in `sessions.json`. Created by `claim` (explicit) or `auto_start` (automatic). One document per pane. |
 | **Reconciliation** | The process of matching editor layout to tmux layout. Performed by `sync`. Stashes unwanted panes, provisions missing ones. |
-| **Provisioning** | Creating a new tmux pane and starting a Claude session for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
+| **Provisioning** | Creating a new tmux pane and starting the configured agent harness for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
 | **Initialization** | Assigning a session UUID, creating a snapshot, and committing to git. Performed by `ensure_initialized()`. Called from claim, preflight, and sync's resolve_file. |
 
 ### Integration Layer

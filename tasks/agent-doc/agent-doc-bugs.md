@@ -645,12 +645,29 @@ So the answer is:
 - this is a **write.rs normalization bug** in how agent-block detection handles synthetic heading churn before a new user prompt
 
 I added it to `agent:pending` for follow-up.
-<!-- agent:boundary:4dba9f93 -->
+❯ fix #vedj. add spec + tests. build + install for local testing
+### Re: `#vedj` done — gpt-5.4
+
+Implemented.
+
+What changed:
+- Updated `src/agent-doc/src/write.rs` so `normalize_user_prompts_in_exchange()` treats delete+insert heading churn as a replacement of existing agent content instead of a fresh agent block. That keeps synthetic heading edits such as ` (HEAD)` suffix updates from swallowing the next user prompt.
+- Added a focused regression test for the exact `(HEAD)`-suffix case and kept adjacent normalization coverage green.
+- Updated `src/agent-doc/specs/07-commands.md` so the write-path spec explicitly says exchange prompt normalization must ignore synthetic heading-only churn while still prefixing the next real user line.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml normalize_user_prompts_heading_replacement_does_not_swallow_next_prompt -- --nocapture` passed.
+- `cargo test --manifest-path src/agent-doc/Cargo.toml normalize_user_prompts_agent_subheadings_not_prefixed -- --nocapture` passed.
+- `cargo test --manifest-path src/agent-doc/Cargo.toml normalize_user_prompts_user_text_after_equal_heading -- --nocapture` passed.
+- `cargo check` passed.
+- `cargo build --release` passed.
+- `cargo install --path .` replaced the local `agent-doc` binary.
+<!-- agent:boundary:17979516 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#vedj] normalize_user_prompts_in_exchange should not treat synthetic heading churn (for example `(HEAD)` suffix updates) as a fresh agent block that suppresses `❯ ` prefixing for the following user prompt
+- [x] [#vedj] normalize_user_prompts_in_exchange should not treat synthetic heading churn (for example `(HEAD)` suffix updates) as a fresh agent block that suppresses `❯ ` prefixing for the following user prompt
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

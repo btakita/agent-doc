@@ -201,7 +201,7 @@ Please update the text in #stk1 to follow the new design.
 ### Re: update #stk1 — opus-4-6
 
 Updated pending item #stk1 to reflect the unified design: single `AGENTS.md` with harness-detection preamble instead of separate per-harness files.
-<!-- agent:boundary:6cd6f683 -->
+<!-- agent:boundary:2b81a9b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

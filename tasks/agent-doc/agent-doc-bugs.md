@@ -47,18 +47,24 @@ Add phases to agent:pending
 ### Re: Add phases to pending — opus-4-6
 
 Added 5 Codex support phases (#cx01–#cx05) to pending. They map 1:1 to the phases in `specs/codex-support.md`. Existing items (#ha3h, #066r) kept as-is.
-<!-- agent:boundary:27c6c5b7 -->
+Why did 2 ids get created for each pending item?
+### Re: Why 2 IDs per pending item — opus-4-6
+
+My fault. `--pending-add` auto-generates a 4-char hash ID (e.g., `#kne3`), and I included `[#cx01]` as literal text in the item body — so the binary treated it as content, not as an ID override. Result: `[#kne3] [#cx01]` — two bracketed IDs per item.
+
+Fixed: edited all 5 items via `--pending-edit` to strip the redundant `[#cxNN]` tags. The canonical IDs are now `#kne3`–`#stk1` (the auto-generated ones).
+<!-- agent:boundary:fff7dbe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#kne3] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
+- [ ] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
+- [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
+- [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
+- [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#kne3] [#cx01] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
-- [ ] [#t46w] [#cx02] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
-- [ ] [#3jh0] [#cx03] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [ ] [#g37s] [#cx04] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
-- [ ] [#stk1] [#cx05] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 <!-- /agent:pending -->
 ## Assistant

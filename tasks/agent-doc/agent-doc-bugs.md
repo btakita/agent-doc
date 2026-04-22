@@ -409,7 +409,21 @@ Verified:
 - `cargo install --path .` replaced the local `agent-doc` binary
 
 After reinstall, `Run Agent Doc` should route plain `agent-doc <file>` for Codex-backed sessions. Literal `/agent-doc ...` remains unsupported by the Codex CLI itself.
-<!-- agent:boundary:2a9bd81a -->
+
+The `--dangerously-skip-permissions` codex issue was not added to agent:pending. Why?
+### Re: missing pending item for Codex `claude_args` bug — gpt-5.4
+
+Because I missed a required step.
+
+`agent-doc write` only patches the response back into `agent:exchange`. It does not infer new `agent:pending` items from the prose of the response, and `agent-doc commit` only commits the current document state. The bug was mentioned in the exchange, but I never followed that with an explicit `agent-doc pending <FILE> add ...` operation.
+
+So this was not an automatic-system limitation. It was a workflow omission on my side.
+
+I added it now to `agent:pending` as:
+- `[#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests`
+
+That is the item that should have been created when I first identified the bug.
+<!-- agent:boundary:fdecd82e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -419,4 +433,5 @@ After reinstall, `Run Agent Doc` should route plain `agent-doc <file>` for Codex
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
 <!-- /agent:pending -->

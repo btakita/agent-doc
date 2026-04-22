@@ -256,7 +256,27 @@ Covers: mise install, bun install, `bash bin/assets-download.sh` to pull images 
 **Clarification on your note:** You wrote "call `bin/assets-upload.sh` to get the assets" — the **download** script (`bin/assets-download.sh`) is what pulls images from R2 to local `public/`. The upload script pushes local images *to* R2. The README uses the download script in the setup flow.
 
 **Dev asset flow confirmed:** Local dev serves from `public/assets/images/` (populated by download script). The R2 proxy Function only applies in production (deployed Pages). No changes needed to how Hono serves locally.
-<!-- agent:boundary:407d547a -->
+
+Please read /home/brian/work/btakita/agent-loop/mail/conversations/efs-website-redesign-branding-layout-copy-handoff.md. Convert attachments to markdown using `uvx markitdown`. Read attachments. Please draft a project plan in a separate md file.
+### Re: EFS redesign handoff — project plan — opus-4-6
+
+Read Robert Waldman's email (Apr 21). He's handing off 6 attachments for the redesign:
+
+1. **Brand Design System** — color tokens, typography, CSS variables, button styles, form specs, component guidelines
+2. **Site Layout Designs** — section-by-section wireframes for full homepage + detailed UI specs for Investor, Broker, and Borrower portals (sidebar nav mockups, all key views, TMO LOS integration annotations)
+3. **Website Copy v2.0** — complete copy for all 12 homepage sections, voice/tone guide, master corrections checklist
+
+Key notes from Robert:
+- Funded deal cards will use real property photos from the old site
+- May want more than 3 deals displayed
+- Judith/staff need ability to add new closed deals over time
+
+**Problem: Attachments not available locally.** Corky syncs email text but doesn't download attachments. The 6 files need to be saved from Gmail before I can convert them with `uvx markitdown` and build the project plan.
+
+**Action needed:** Download the 6 attachments from Robert's email (subject: "EFS Website Redesign — Branding, Layout & Copy Handoff", Apr 21) to a local directory — e.g., `tmp/efs-redesign/`. Then re-run `/agent-doc` and I'll convert them to markdown and draft the project plan.
+
+Alternatively, if you forward the email to yourself with attachments saved to Google Drive, I can access them via the Drive MCP if configured.
+<!-- agent:boundary:fb19dbb6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

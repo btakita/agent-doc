@@ -1461,7 +1461,32 @@ fn validate_component_order(doc: &str) -> Result<String> {
 This would run as a normalization pass in the write pipeline, same place as normalize_user_prompts — after patch application, before snapshot save. Logged as component_nesting_repaired in ops.log so we can track how often it triggers.
 
 Added to pending for implementation.
-<!-- agent:boundary:adfde52f -->
+❯ do #qjc8. add tests. build + install for manual testing.
+### Re: #qjc8 implemented — opus-4-6
+
+#### What was added
+
+`lift_pending_from_exchange()` in `write.rs` — a structural repair pass that runs after normalization, before the shrink guard, on every write cycle (both IPC and disk paths).
+
+**Logic:** Parses components, checks if pending's `open_start` is between exchange's `open_end` and `close_end`. If nested, extracts the entire pending block and reinserts it as a sibling after exchange's close tag. Logs `lift_pending_from_exchange` to ops.log when repair triggers. Returns `None` (no-op) when components are correctly ordered.
+
+**Inserted at both write paths:**
+- IPC path (line ~1229): after `normalize_user_prompts`, before `check_exchange_shrink_guard`
+- Disk path (line ~1443): same position
+
+#### Tests added (5 new, all pass)
+
+1. `lift_pending_nested_inside_exchange` — core case: pending inside exchange gets moved out
+2. `lift_pending_already_sibling_returns_none` — no-op when correctly ordered
+3. `lift_pending_no_exchange_returns_none` — no-op without exchange
+4. `lift_pending_no_pending_returns_none` — no-op without pending
+5. `lift_pending_preserves_surrounding_content` — frontmatter, exchange content, and footer survive the lift
+
+**Full suite: 1225 passed, 6 ignored. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
+
+Ready for manual testing. To verify: create a test document with pending nested inside exchange, run `agent-doc write` on it, and confirm the pending block moves outside.
+<!-- agent:boundary:21fc2dbb -->
+<!-- agent:boundary:8629ae0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1469,6 +1494,6 @@ Added to pending for implementation.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#qjc8] Self-correcting component nesting: add post-write validation that detects agent:pending nested inside agent:exchange and lifts it to sibling position after exchange close
+- [x] [#qjc8] Self-correcting component nesting: add post-write validation that detects agent:pending nested inside agent:exchange and lifts it to sibling position after exchange close
 <!-- /agent:pending -->
 ## Assistant

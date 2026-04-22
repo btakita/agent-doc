@@ -385,7 +385,7 @@ Verified:
 - `agent-doc skill install --harness codex` is now up to date and preserves the Codex-specific invocation text.
 
 Current limitation: `/agent-doc` remains Claude Code syntax only. For Codex, invoke it as plain text: `agent-doc <file>`.
-<!-- agent:boundary:135cb51f -->
+<!-- agent:boundary:4c3daede -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

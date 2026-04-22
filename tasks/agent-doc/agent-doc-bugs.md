@@ -290,7 +290,7 @@ To run a document session with Codex instead of Claude Code:
 Yes — that was a core design goal. Each document session resolves its own harness independently from frontmatter (`agent: claude` vs `agent: codex`). They use separate tmux session fallbacks (`claude` vs `codex`), separate process detection, and separate restart strategies. You can have `tasks/bugs.md` running on Claude Code and `tasks/feature.md` running on Codex at the same time.
 
 The one caveat: this hasn't been tested in a live multi-harness session yet. The unit tests cover each harness in isolation, but end-to-end with both tmux sessions running simultaneously is untested territory. I'd recommend starting with a single Codex session on a low-stakes document first.
-<!-- agent:boundary:0d369e25 -->
+<!-- agent:boundary:aeeb9ff7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

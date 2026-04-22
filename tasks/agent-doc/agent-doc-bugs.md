@@ -109,7 +109,7 @@ Implemented Phase 1: Codex agent backend.
 **Build:** `cargo install --path .` + `cargo build --release` ... both binaries live
 
 Pausing for your local testing before proceeding further.
-<!-- agent:boundary:ad15eaf2 -->
+<!-- agent:boundary:738ae93f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

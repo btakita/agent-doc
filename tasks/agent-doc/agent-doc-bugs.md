@@ -126,14 +126,13 @@ Implemented Phase 2: Frontmatter generalization.
 Build: both binaries rebuilt and installed.
 
 Pausing for your local testing.
-<!-- agent:boundary:108a2c76 -->
+<!-- agent:boundary:e3e56ab1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#kne3] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
-- [ ] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
+- [/] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()

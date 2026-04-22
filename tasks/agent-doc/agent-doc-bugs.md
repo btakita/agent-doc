@@ -362,7 +362,7 @@ Verified:
 Remaining issue:
 
 `claude_args: --dangerously-skip-permissions` is being forwarded while `agent: codex` is active. That should be fixed in binary logic so `claude_args` only applies to Claude. Codex should use `agent_args`, for example `agent_args: -s danger-full-access`.
-<!-- agent:boundary:21f83441 -->
+<!-- agent:boundary:972415bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

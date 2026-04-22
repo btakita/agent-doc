@@ -829,8 +829,7 @@ All three indexed and working. Ran `tsift index .` in each submodule:
 **Note:** session-share's 481 files includes `node_modules` JS (gitignored content isn't excluded by the `ignore` crate walker when git history tracks it). If that's noisy, a `.tsiftignore` or config-based exclusion could help — not implemented yet.
 
 Each submodule's index lives at `<submodule>/.tsift/index.db`. The workspace-mode indexing (`tsift index --workspace` from agent-loop root) would use the config tier system to index all submodules into `.tsift/indexes/<name>/index.db` for federated search.
-<!-- agent:boundary:79f7a49b -->
-<!-- agent:boundary:bf1df3fd -->
+<!-- agent:boundary:69da6433 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

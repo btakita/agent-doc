@@ -43,7 +43,11 @@ Wrote dedicated spec: `src/agent-doc/specs/codex-support.md`.
 **Open questions** in the spec: Codex JSONL event schema (need to test `codex exec --json` output), Codex TUI prompt character, system prompt injection strategy, concurrent harness support (Claude for some docs, Codex for others).
 
 **Recommended order:** Phase 1 first (unblocks non-interactive use), then 2+3 (interactive sessions), then 4+5 (full routing + self-install).
-<!-- agent:boundary:bd44a632 -->
+Add phases to agent:pending
+### Re: Add phases to pending — opus-4-6
+
+Added 5 Codex support phases (#cx01–#cx05) to pending. They map 1:1 to the phases in `specs/codex-support.md`. Existing items (#ha3h, #066r) kept as-is.
+<!-- agent:boundary:d94bd23e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -51,5 +55,10 @@ Wrote dedicated spec: `src/agent-doc/specs/codex-support.md`.
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#kne3] [#cx01] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
+- [ ] [#t46w] [#cx02] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
+- [ ] [#3jh0] [#cx03] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
+- [ ] [#g37s] [#cx04] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
+- [ ] [#stk1] [#cx05] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 <!-- /agent:pending -->
 ## Assistant

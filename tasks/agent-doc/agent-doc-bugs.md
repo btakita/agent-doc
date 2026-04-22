@@ -1485,8 +1485,7 @@ Added to pending for implementation.
 **Full suite: 1225 passed, 6 ignored. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
 
 Ready for manual testing. To verify: create a test document with pending nested inside exchange, run `agent-doc write` on it, and confirm the pending block moves outside.
-<!-- agent:boundary:21fc2dbb -->
-<!-- agent:boundary:8629ae0f -->
+<!-- agent:boundary:3d58fc28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1494,6 +1493,5 @@ Ready for manual testing. To verify: create a test document with pending nested 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#qjc8] Self-correcting component nesting: add post-write validation that detects agent:pending nested inside agent:exchange and lifts it to sibling position after exchange close
 <!-- /agent:pending -->
 ## Assistant

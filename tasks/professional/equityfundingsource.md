@@ -276,7 +276,42 @@ Key notes from Robert:
 **Action needed:** Download the 6 attachments from Robert's email (subject: "EFS Website Redesign — Branding, Layout & Copy Handoff", Apr 21) to a local directory — e.g., `tmp/efs-redesign/`. Then re-run `/agent-doc` and I'll convert them to markdown and draft the project plan.
 
 Alternatively, if you forward the email to yourself with attachments saved to Google Drive, I can access them via the Drive MCP if configured.
-<!-- agent:boundary:2a98feb8 -->
+
+I downloaded the attachments to /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/
+
+Please use `uvy markdown` to convert /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/EFS_Website_Copy_v2.docx to md in the directory.
+
+add *.docx to .gitignore in equityfundingsource-dev
+### Re: attachment conversion + project plan — opus-4-6
+
+Converted all 6 attachments to markdown in `src/equityfundingsource-dev/docs/`:
+- `efs_brand_design_system.md` — color tokens, typography, CSS custom properties, button/badge/form specs
+- `efs_homepage_layout_copy.md` — 10-section wireframe with design specs
+- `EFS_Website_Copy_v2.md` — 12-section copy, voice guide, corrections checklist (27KB)
+- `efs_borrower_portal_full.md` — 5 views + TMO LOS integration map
+- `efs_broker_portal_full.md` — 5 views + TMO LOS integration map
+- `efs_investor_portal_full.md` — 5 views, 100% EFS-owned data architecture
+
+Added `*.docx` to `.gitignore`.
+
+**Drafted project plan:** `src/equityfundingsource-dev/docs/project-plan.md`
+
+**Major findings from v2.0 copy:**
+- Founded year: 2009 -> **2007**, volume: $75M+ -> **$750M+**, rate cap: 12.99% -> **12%**
+- Audience priority flipped: **Investors (45%) > Brokers (35%) > Borrowers (20%)**. Nav and hero CTAs need reordering.
+- Language correction: "direct lender"/"we fund" -> **"loan arranger"/"we arrange"** throughout
+- **New Section 05** (Investor Protection) with lien position details for 1st, 2nd, and junior
+- Email changed to **info@equityfundingsource.com** (never use judithkrug@gmail.com)
+- Three full portals to build: Investor (EFS-owned, no TMO dependency), Borrower + Broker (TMO LOS integration required)
+
+**Recommended implementation order:**
+1. Brand system + nav (foundation)
+2. Homepage sections top-to-bottom (12 sections)
+3. TMO LOS integration layer
+4. Investor portal first (highest priority, no TMO dependency)
+5. Borrower + broker portals (TMO-dependent)
+6. Legal review + DNS cutover
+<!-- agent:boundary:16eb6f0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

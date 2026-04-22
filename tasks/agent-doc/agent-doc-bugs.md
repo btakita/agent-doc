@@ -423,7 +423,29 @@ I added it now to `agent:pending` as:
 - `[#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests`
 
 That is the item that should have been created when I first identified the bug.
-<!-- agent:boundary:87b919ea -->
+Do we need to update the skill/runbook to ensure that all items that should go to pending are added?
+Such as next steps and recommended suggestions? If you add a recommended suggestion, please annotate the pending item with recommended since I have not yet made the decision to use the recommended steps.
+
+If I ask to place items to the top, front, or beginning of pending or agent:pending, please place the items at the beginning of the pending list.
+### Re: pending capture rules for skill/runbook — gpt-5.4
+
+Yes. The skill/runbook should be updated, but the rule should be explicit and narrow.
+
+It should not blindly turn every suggestion in `agent:exchange` into pending work. That would collapse the distinction between:
+- accepted work to track
+- provisional recommendations
+- explanatory commentary
+
+The better rule is:
+- if the response identifies concrete follow-up work that should be tracked, explicitly add it to `agent:pending`
+- if the item is only a recommendation and you have not accepted it yet, mark it `recommended`
+- if you ask for top/front/beginning placement, reorder the pending list so the new item is first
+
+I added a recommended pending item for this follow-up:
+- `[#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended`
+
+I also recorded your pending-ordering rule in local memory so I apply it consistently on future agent-doc turns.
+<!-- agent:boundary:41ca1e00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -434,4 +456,5 @@ That is the item that should have been created when I first identified the bug.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
+- [ ] [#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended
 <!-- /agent:pending -->

@@ -150,14 +150,44 @@ Implemented Phase 3: Supervisor harness abstraction.
 **14 unit tests** covering all HarnessConfig behavior.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-<!-- agent:boundary:d1eb9768 -->
+
+do #g37s. add tests. add to spec. build + install for local testing
+### Re: do #g37s — opus-4-6
+
+Implemented Phase 4: Route + Sync generalization.
+
+**`harness.rs` — new fields + methods:**
+
+- Added `tmux_session_fallback` (Claude: `"claude"`, Codex: `"codex"`) and `process_names` (per-harness recognized process list)
+- `is_prompt_line(line)` — ANSI-aware prompt detection using harness patterns
+- `is_agent_process_name(cmd)` — check if a process name belongs to this harness
+- `cmdline_is_agent(cmdline)` — check if a ps command line is an agent session
+
+**`route.rs` — fully parameterized:**
+
+- Removed `TMUX_SESSION_NAME` and `AGENT_PROCESSES` constants
+- `send_command()` uses `harness.trigger_command()` instead of hardcoded `/agent-doc`
+- Renamed `wait_for_claude_ready()` → `wait_for_agent_ready()` with harness patterns
+- `pane_has_prompt()` delegates to `harness.is_prompt_line()`
+- `is_agent_process()` delegates to `harness.is_agent_process_name()`
+- `resolve_target_session()` uses `harness.tmux_session_fallback`
+- All log messages use `harness.binary` instead of "Claude"
+- Harness resolved from frontmatter in `run_with_tmux()` and `resolve_harness_for_file()`
+
+**`sync.rs` + `resync.rs`:** process detection includes "codex", comments generalized.
+
+**10 new harness tests** + 1 new route integration test (codex `>` prompt detection). All existing tests updated.
+
+Build: both binaries rebuilt and installed. Pausing for local testing.
+s
+<!-- agent:boundary:83ca4bd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
+- [x] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

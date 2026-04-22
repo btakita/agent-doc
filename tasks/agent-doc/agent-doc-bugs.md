@@ -686,7 +686,22 @@ Current state:
 - crates.io publish is complete.
 - GitHub Release asset build/publish is in progress in CI.
 - The PyPI workflow is wired off the GitHub release publication event in `.github/workflows/pypi.yml`, so its execution depends on that release workflow finishing.
-<!-- agent:boundary:4940cf14 -->
+❯ The response patchback did got reach this document. Why? Add the response patchback.
+### Re: patchback missing? — gpt-5.4
+
+The response patchback **did** reach this document.
+
+Evidence in the exchange:
+- the `### Re: Release + Publish — gpt-5.4` block is already present here
+- preflight showed it as existing agent content, with only the `(HEAD)` commit marker churn on that heading
+
+What likely happened is different:
+- the previous turn was interrupted after the document patchback had already succeeded
+- the interruption affected the console turn flow, not the earlier `agent-doc write` result
+- so the document was updated, but the surrounding turn likely felt incomplete from the terminal side
+
+This response is the additional patchback you asked for, so the document now explicitly records that explanation.
+<!-- agent:boundary:5486f313 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

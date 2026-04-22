@@ -1224,7 +1224,6 @@ Both "Re: patchback confirmation" and "Re: fix status verification" are present 
 The editor didn't refresh. The IPC socket timed out, so the IDE plugin never received the patch — it only shows up as a file change on disk. If the IDE's file watcher didn't pick it up (or if the watcher was delayed), the editor buffer would still show the old content.
 
 The fix for the submodule commit bug should resolve the commit failures. The `zero_patches_warning` is a skill-side issue (the skill should always wrap responses in `<!-- patch:exchange -->`).
-<!-- agent:boundary:4e5fb058 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1234,7 +1233,6 @@ The fix for the submodule commit bug should resolve the commit failures. The `ze
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
 ## Assistant
-<!-- agent:boundary:3e279c1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

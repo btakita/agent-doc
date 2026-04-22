@@ -1548,7 +1548,7 @@ Bumped to v0.33.11 (v0.33.10 was already on crates.io). Fixed two additional pre
 - crates.io: `agent-doc v0.33.11` published
 - GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.33.11 with prebuilt `agent-doc-v0.33.11-x86_64-linux`
 - `~/.cargo/bin/agent-doc` → v0.33.11 installed
-<!-- agent:boundary:4ae4241f -->
+<!-- agent:boundary:c348a07c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

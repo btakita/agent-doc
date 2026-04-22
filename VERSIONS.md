@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.11
+
+- **Fix: lib-install uses atomic rename to prevent mmap corruption.** `install_versioned()` in `lib_install.rs` previously used `std::fs::copy(source, &dst)` which overwrites the versioned `.so` in place (same inode). On same-version reinstall during development, this corrupted IDEA's live mmap of the `.so`, triggering a crash. Now copies to a temp file then calls `rename()` — atomic on POSIX, creates a new inode so existing mmaps stay valid. 1 new test: `same_version_reinstall_creates_new_inode`.
+
 ## 0.33.10
 
 - **Fix: Component parser peek guard for non-agent HTML comments.** `parse()` in `component.rs` previously consumed any `<!-- ... -->` sequence in document content, causing the close-comment search to eat the next `<!-- /agent:name -->` marker. Now peeks 20 bytes after `<!--` and skips non-agent sequences (advances 1 byte) rather than consuming them. Fixes "unclosed component" errors when pending items contain literal `<!-- ` in their text. 5 new tests.

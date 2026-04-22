@@ -845,7 +845,29 @@ The context cost in agent-doc-bugs sessions comes from:
 The document's own size is the dominant factor. Each agent-doc cycle loads, diffs, and processes the full document. At 85KB, that's a lot of tokens before the model even starts thinking.
 
 **To reclaim context:** run `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` — this trims resolved exchanges while preserving pending items and active context.
-<!-- agent:boundary:275cade1 -->
+I'm talking about how long it takes to update code and how many tokens are used. agent-doc-bugs.md recently started taking much longer and using more tokens. Could you look in the claude session logs to see why the current turn is taking so long and using so many tokens?
+### Re: agent-doc-bugs turn duration and token cost — opus-4-6
+
+Investigated session `eed08692` (the active agent-doc-bugs session). Not caused by tsift.
+
+**Root cause: accumulated conversation context from heavy in-session debugging.**
+
+The session had **25 `/agent-doc` invocations** and **193 assistant turns** in a single conversation, with context growing from 12K → 153K tokens. The breakdown:
+
+| Factor | Impact |
+|--------|--------|
+| 69 Bash calls (grepping ops.log, debugging patch/IPC issues) | Each tool result stays in context forever |
+| 24 Read calls (reading source files for bug investigation) | Large file contents accumulate |
+| 25× SKILL.md injection (~8KB each) | ~200KB raw text (compacted somewhat by cache) |
+| agent-doc-bugs.md at 85KB | Read on first cycle, diffs each subsequent cycle |
+
+The session wasn't just doing document exchange — it was doing deep debugging of agent-doc itself (investigating monsterrodholders patch delivery, ops.log analysis, IPC timeouts). That investigation work accumulated tool results that never get purged until compaction.
+
+**Compare:** session `7b749dfa` (also agent-doc-bugs) hit 165K tokens by turn 161, then got compacted down to 39K. After compaction it was fast again, growing slowly from 39K → 57K over 60 more turns.
+
+**Remediation:** `/clear` + restart the session, or let Claude Code's auto-compaction kick in. For sessions with lots of code investigation, compaction events are the natural relief valve.
+<!-- agent:boundary:3cd465f3 -->
+<!-- agent:boundary:e2fc4bc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

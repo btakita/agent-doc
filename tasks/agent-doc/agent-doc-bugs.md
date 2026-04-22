@@ -687,7 +687,7 @@ Current state:
 - GitHub Release asset build/publish is in progress in CI.
 - The PyPI workflow is wired off the GitHub release publication event in `.github/workflows/pypi.yml`, so its execution depends on that release workflow finishing.
 ❯ The response patchback did got reach this document. Why? Add the response patchback.
-### Re: patchback missing? — gpt-5.4
+### Re: patchback missing? — gpt-5.4 (HEAD)
 
 The response patchback **did** reach this document.
 
@@ -701,7 +701,61 @@ What likely happened is different:
 - so the document was updated, but the surrounding turn likely felt incomplete from the terminal side
 
 This response is the additional patchback you asked for, so the document now explicitly records that explanation.
-<!-- agent:boundary:0c9f5ec1 -->
+The response patchback in src/session-share to agent-doc tasks/claudescore.md did not get committed. Why?
+### Re: session-share patchback commit miss — codex (HEAD)
+
+This was **not** a submodule commit-routing failure. The `src/session-share` commit path was working; the later response blocks were simply never staged into the snapshot that `agent-doc commit` uses.
+
+Concrete evidence:
+- `git -C src/session-share log -- tasks/claudescore.md` stops at commit `1987d68` on `2026-04-22 19:31:33 -0400`.
+- The working tree for `src/session-share/tasks/claudescore.md` now contains later response blocks (`#sz4a`, `#jf7f`, `#avce`, `#ptsm`) that are not in `HEAD`.
+- In `src/session-share/.agent-doc/logs/ops.log`, the last real patchback cycle for that file is the `write_origin` / `ipc_socket_delivered` / `commit_success` sequence at `2026-04-22 11:37:23` through `11:37:27 -0400`.
+- After that, the log shows only repeated `out_of_band_write` drift warnings plus `commit_success` with `snap_len` stuck at the older snapshot (`18223`/`18230`) while `file_len` keeps growing.
+
+That means the later `tasks/claudescore.md` edits landed as **out-of-band working-tree edits** rather than through `agent-doc write` / IPC snapshot save. `git::commit()` in `src/agent-doc/src/git.rs` intentionally stages the saved snapshot, not the live file, so it preserves concurrent user/editor edits instead of force-committing them. In this case that design left the newer response blocks uncommitted.
+
+So the root cause is:
+- the later patchback content bypassed the normal `agent-doc write` snapshot-update path
+- `agent-doc commit` then kept committing the older snapshot by design
+- result: commit succeeded, but it committed only the pre-existing snapshot and left the newer response text dirty in the working tree
+
+So the right class of fix is snapshot/out-of-band-write handling, not submodule git routing.
+
+❯ The same thing happened to this document. Also, a pending item was not added. Why?. Fix snapshot/out-of-band-write
+handling. add spec + tests. build + install for local testing
+### Re: snapshot / out-of-band-write handling fixed — codex (HEAD)
+
+Yes — the missing pending item was the same underlying snapshot bug.
+
+Why the pending item was not added:
+- the pending mutation reached the working tree only
+- the saved snapshot still held the older `agent:pending` body
+- `agent-doc commit` staged that older snapshot, so the new pending item stayed uncommitted even though the commit itself succeeded
+
+Implemented in `src/agent-doc/src/git.rs`:
+- added a narrow pre-staging absorb path for safe out-of-band agent-doc mutations
+- `commit()` now refreshes the snapshot from the live file when the redacted component structure is unchanged and the drift looks like:
+  - an appended `agent:exchange` `### Re:` block
+  - and/or a compatible `agent:pending` stable-ID superset mutation
+- plain user-prompt drift is still rejected from this absorb path, so normal selective-commit behavior remains intact
+
+Spec updates:
+- `src/agent-doc/specs/03-snapshot-system.md`
+- `src/agent-doc/specs/07-commands.md`
+
+Tests added:
+- classifier accepts exchange+pending out-of-band drift
+- classifier rejects a plain appended user prompt
+- commit absorbs a missed response + pending mutation into the staged snapshot
+- commit still leaves an out-of-band user prompt uncommitted
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml git::tests -- --nocapture` passed
+- `cargo check` passed
+- `cargo build --release` passed
+- `cargo install --path .` replaced the local binary
+- `agent-doc --version` reports `0.33.12`
+<!-- agent:boundary:2c3548f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

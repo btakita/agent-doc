@@ -86,7 +86,7 @@ Considered it — but `[#id]` is a rendering convention (how items look in markd
 ### Re: Add to pending — opus-4-6
 
 Done — added the custom ID feature as a pending item.
-<!-- agent:boundary:fbef4a42 -->
+<!-- agent:boundary:399c4fc9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1523,7 +1523,20 @@ When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the 
 #### The chain
 
 `lib-install` in-place overwrite → IDEA mmap corruption → IDEA crash → sync reconciler kills orphaned pane → auto-starts fresh pane. The fix is purely in `lib-install`: use atomic rename so the old file stays valid until the next clean restart.
-<!-- agent:boundary:496c571e -->
+
+❯ do #3vk0. write tests. build + install so we can test locally
+### Re: do #3vk0 — atomic lib-install — opus-4-6
+
+**Root cause:** `std::fs::copy(source, &dst)` in `install_versioned()` overwrites the versioned `.so` in place (same inode). When reinstalling the same version during development, IDEA's mmap of the old `.so` gets corrupted mid-flight.
+
+**Fix (lib_install.rs:37-40):** Copy to a temp file (`.libagent_doc-0.33.10.so.tmp`), then `rename()` to the versioned name. `rename()` is atomic on POSIX — creates a new inode, so any existing mmap stays valid on the old inode until the process closes its fd.
+
+**Test added:** `same_version_reinstall_creates_new_inode` — reinstalls the same version and asserts the inode changed. This is the core invariant: atomic rename must produce a new inode so old mmaps aren't corrupted.
+
+**All 5 lib_install tests pass. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
+
+Ready for manual testing. To verify: reinstall the same version twice with IDEA running and confirm no crash.
+<!-- agent:boundary:71888919 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1531,6 +1544,6 @@ When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#3vk0] lib-install must use atomic rename (write to temp, rename) instead of overwriting the versioned .so file in place — prevents IDEA crash from corrupted mmap
+- [x] [#3vk0] lib-install must use atomic rename (write to temp, rename) instead of overwriting the versioned .so file in place — prevents IDEA crash from corrupted mmap
 <!-- /agent:pending -->
 ## Assistant

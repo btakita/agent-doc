@@ -505,12 +505,31 @@ Verification:
 - `cargo install --path .` replaced the local `agent-doc` binary.
 - `agent-doc skill install --harness codex` reports the local Codex install is up to date.
 - Source and installed pending runbooks both contain the custom-ID docs.
-<!-- agent:boundary:688ada5c -->
+
+do #mmgb. add spec + tests. build + install for local testing.
+### Re: `#mmgb` done — gpt-5.4
+
+Implemented.
+
+What changed:
+- `start.rs` now resolves startup args through the active harness instead of always inheriting the Claude alias chain.
+- Claude keeps the backward-compatible resolution order: `agent_args > claude_args > config.agent_args > config.claude_args > AGENT_DOC_CLAUDE_ARGS`.
+- Codex now uses only `agent_args` (`frontmatter > config`) and ignores `claude_args` plus `AGENT_DOC_CLAUDE_ARGS`.
+
+Spec/docs:
+- Updated `specs/codex-support.md`, `specs/02-document-format.md`, and `specs/06-config.md` so `agent_args` and the harness-specific precedence rules are explicit.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_agent_args -- --nocapture` passed.
+- `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `cargo install --path .` replaced the local `agent-doc` binary.
+<!-- agent:boundary:6b4691a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
+- [x] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

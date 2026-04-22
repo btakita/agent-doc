@@ -43,7 +43,7 @@ Wrote dedicated spec: `src/agent-doc/specs/codex-support.md`.
 **Open questions** in the spec: Codex JSONL event schema (need to test `codex exec --json` output), Codex TUI prompt character, system prompt injection strategy, concurrent harness support (Claude for some docs, Codex for others).
 
 **Recommended order:** Phase 1 first (unblocks non-interactive use), then 2+3 (interactive sessions), then 4+5 (full routing + self-install).
-<!-- agent:boundary:45dcfa1f -->
+<!-- agent:boundary:bd44a632 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

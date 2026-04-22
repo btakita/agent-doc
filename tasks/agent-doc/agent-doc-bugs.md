@@ -252,14 +252,13 @@ Implemented Phase 5: Unified skill file.
 **7 new tests:** runbooks per-environment (claude, codex, all envs), harness preamble in bundled content, harness-invocation runbook bundled + content check.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-<!-- agent:boundary:f9a34321 -->
+<!-- agent:boundary:0cfdeec8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [x] [#stk1] Phase 5: Unified skill file — single AGENTS.md with harness-detection preamble + runbooks/harness-invocation.md for dispatch. install_all() writes same content to .claude/ and .codex/ targets.
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

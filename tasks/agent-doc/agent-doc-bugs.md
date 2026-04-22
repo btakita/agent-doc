@@ -1269,7 +1269,7 @@ Changed the lookup order in `write.rs` to check `find_project_root` (nearest `.a
 - `try_ipc_routes_to_submodule_root_not_superproject` — socket send goes to boost-client's socket, not agent-loop's
 
 **All 1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.**
-<!-- agent:boundary:a063f744 -->
+<!-- agent:boundary:9ba49b98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1523,7 +1523,7 @@ When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the 
 #### The chain
 
 `lib-install` in-place overwrite → IDEA mmap corruption → IDEA crash → sync reconciler kills orphaned pane → auto-starts fresh pane. The fix is purely in `lib-install`: use atomic rename so the old file stays valid until the next clean restart.
-<!-- agent:boundary:347c392f -->
+<!-- agent:boundary:496c571e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

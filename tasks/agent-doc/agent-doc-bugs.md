@@ -1461,7 +1461,7 @@ fn validate_component_order(doc: &str) -> Result<String> {
 This would run as a normalization pass in the write pipeline, same place as normalize_user_prompts — after patch application, before snapshot save. Logged as component_nesting_repaired in ops.log so we can track how often it triggers.
 
 Added to pending for implementation.
-<!-- agent:boundary:9f3c5507 -->
+<!-- agent:boundary:adfde52f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

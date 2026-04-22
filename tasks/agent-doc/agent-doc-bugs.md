@@ -197,7 +197,7 @@ Yes — a single `AGENTS.md` with dispatch is the better design. ~90% of the ski
 **Why not separate files:** Drift. A bugfix to the commit cycle or a new runbook reference added to one file but missed in the other is the #1 maintenance hazard. With one file, changes propagate automatically.
 
 `skill.rs::install_all()` would write the same `AGENTS.md` content to both `.claude/skills/agent-doc/SKILL.md` and `.codex/AGENTS.md` (or a symlink). The harness preamble makes it self-routing.
-<!-- agent:boundary:3077744b -->
+<!-- agent:boundary:47172bea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -601,7 +601,30 @@ Verification:
 - `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.72` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
 
 Restart IntelliJ to activate the rebuilt plugin.
-<!-- agent:boundary:74812972 -->
+
+In this document and src/sesion-share/tasks/claudescore.md, the user prompts do not have a `❯ ` prefix. Why? Does the skill/runbook need to be refined for codex?
+### Re: missing `❯ ` prefixes on user prompts — gpt-5.4
+
+This is not primarily a Codex skill/runbook problem.
+
+The `❯ ` prefix is a **binary-side write normalization** in `write.rs`, added in `agent-doc` v0.31.20. The rule is:
+- only `patch=append` exchange components are normalized
+- only **user-added lines detected in the current cycle** are prefixed
+- the detection is based on `snapshot -> baseline` diffing during `agent-doc write`
+
+So if a prompt line is already historical content, or it entered the file outside that normalization path, the binary does **not** retroactively sweep the whole exchange and backfill `❯ ` onto old user prompts.
+
+That explains both files:
+- this document has older exchange history that predates or bypassed the current normalization cycle
+- `src/session-share/tasks/claudescore.md` is also long-lived historical session content, so older bare user lines can remain as-is unless a later write cycle specifically normalizes them
+
+So the answer is:
+- **No, the main fix is not to refine the Codex skill/runbook.**
+- The skill already should avoid echoing user input; the binary is responsible for `❯ ` normalization.
+- If you want historical docs to be fully consistent, that needs a **binary backfill / repair path** (for example, a normalization command or a one-time exchange migration), not just better Codex instructions.
+
+A refined Codex note could still be useful as documentation hygiene: Codex patchbacks should continue to rely on `agent-doc write`, because direct file edits bypass the binary normalization path. But that would only prevent new drift; it would not retroactively fix existing bare user prompts.
+<!-- agent:boundary:bf4a98e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

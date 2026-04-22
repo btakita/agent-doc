@@ -1368,8 +1368,7 @@ Installed `libagent_doc-0.33.10.so` with atomic symlink swap. The mtime-based ho
 #### Missing from release checklist
 
 `cargo install --path .` must be followed by `agent-doc lib-install` (or the Makefile target should do both). The shared library is a separate artifact. Without it, the JB plugin runs stale FFI code even when the binary is current.
-<!-- agent:boundary:a50b656a -->
-<!-- agent:boundary:5f49ffae -->
+<!-- agent:boundary:b812c78b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

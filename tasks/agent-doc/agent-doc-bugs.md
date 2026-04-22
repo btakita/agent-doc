@@ -252,7 +252,7 @@ Implemented Phase 5: Unified skill file.
 **7 new tests:** runbooks per-environment (claude, codex, all envs), harness preamble in bundled content, harness-invocation runbook bundled + content check.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
-Is agent-doc ready to use Codex? What do I need to do to use Codex with agent-doc? Can I run both Codex and Claude Code at the same time for different documents?
+❯ Is agent-doc ready to use Codex? What do I need to do to use Codex with agent-doc? Can I run both Codex and Claude Code at the same time for different documents? 
 ### Re: Codex readiness — opus-4-6
 
 **Is agent-doc ready to use Codex?**
@@ -290,7 +290,34 @@ To run a document session with Codex instead of Claude Code:
 Yes — that was a core design goal. Each document session resolves its own harness independently from frontmatter (`agent: claude` vs `agent: codex`). They use separate tmux session fallbacks (`claude` vs `codex`), separate process detection, and separate restart strategies. You can have `tasks/bugs.md` running on Claude Code and `tasks/feature.md` running on Codex at the same time.
 
 The one caveat: this hasn't been tested in a live multi-harness session yet. The unit tests cover each harness in isolation, but end-to-end with both tmux sessions running simultaneously is untested territory. I'd recommend starting with a single Codex session on a low-stakes document first.
-<!-- agent:boundary:aeeb9ff7 -->
+Please add multi harness automated tests.
+### Re: Multi-harness automated tests — opus-4-6
+
+Added 19 new tests across two modules:
+
+**`harness.rs` — 14 multi-harness isolation tests:**
+- `harness_isolation_no_shared_binary` — binary names are distinct
+- `harness_isolation_no_shared_tmux_session` — tmux session fallbacks are distinct
+- `harness_isolation_env_remove_disjoint` — env var removal lists don't overlap
+- `harness_isolation_process_names_no_cross_claim` — claude can't claim codex processes and vice versa
+- `harness_isolation_shared_agent_doc_process` — both harnesses recognize `agent-doc` as shared
+- `harness_isolation_trigger_commands_both_route_file` — both trigger commands include the file path
+- `harness_isolation_restart_behavior_types_differ` — claude appends to base args, codex replaces
+- `harness_isolation_cmdline_cross_rejection` — cmdline detection rejects the other harness's command lines
+- `multi_harness_from_context_independent_resolution` — two frontmatters resolve to different harnesses independently
+- `multi_harness_config_default_overridden_by_frontmatter` — fm.agent beats config.default_agent
+- `multi_harness_prompt_pattern_overlap_is_intentional` — shared `❯`, codex-only `>`, claude-only `⏵`
+- `multi_harness_feature_flags_exclusive` — `--no-mcp` and `ENABLE_TOOL_SEARCH` are claude-only
+
+**`agent/mod.rs` — 7 resolution tests (new test module):**
+- `resolve_claude`, `resolve_codex`, `resolve_junie` — each backend resolves independently
+- `resolve_unknown_no_config` — unknown name without config returns error
+- `resolve_unknown_with_config_falls_back` — unknown name with config falls back to claude
+- `multi_harness_resolve_all_backends_independently` — all three resolve in one test
+- `multi_harness_resolve_with_env_isolation` — each backend gets its own env var list
+
+Full suite: 1,290 tests passing. Both binaries rebuilt and installed.
+<!-- agent:boundary:afa4d84d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

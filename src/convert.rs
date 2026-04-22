@@ -1,0 +1,415 @@
+//! # Module: convert
+//!
+//! ## Spec
+//! - Performs bidirectional conversion between `inline` (append) and `template` document formats,
+//!   and independently updates the `write` strategy (`crdt` / `inline`).
+//! - Target format resolution precedence: explicit `--format` flag > legacy positional `MODE`
+//!   argument > current frontmatter value > default (`template`).
+//! - Target write resolution precedence: explicit `--write` flag > legacy `stream` mode alias >
+//!   default (`crdt`).
+//! - If neither format nor write strategy would change, returns `Err` with an "already in …"
+//!   message rather than writing a no-op file.
+//! - **Append → Template:** finds the first `## User` heading outside a code block; preserves
+//!   preceding content verbatim; wraps from that line to EOF in
+//!   `## Exchange\n\n<!-- agent:exchange -->\n…\n<!-- /agent:exchange -->`.
+//!   If no `## User` block exists, adds an empty `<!-- agent:exchange -->` component.
+//! - **Template → Append:** strips all `<!-- agent:… -->` / `<!-- /agent:… -->` marker lines and
+//!   the `## Exchange` heading (plus its following blank line) from the body; preserves all other
+//!   content including non-exchange components.
+//! - Frontmatter field `mode` (deprecated) is cleared on conversion; `agent_doc_format` and
+//!   `agent_doc_write_mode` are set to the resolved target values.
+//! - All writes are atomic; snapshot is updated after each successful write.
+//!
+//! ## Agentic Contracts
+//! - `run(file, legacy_mode, explicit_format, explicit_write) -> Result<()>` — sole public entry
+//!   point; reads file, resolves targets, dispatches to `convert_to_template` or
+//!   `convert_to_append` (or frontmatter-only update), then atomically writes and saves snapshot.
+//! - Returns `Err` if the file does not exist, is already in the target mode, or any I/O fails.
+//! - Conversion is content-preserving: all user text survives a round-trip
+//!   append → template → append.
+//!
+//! ## Evals
+//! - user_blocks: body with `## User` → exchange markers wrap from first User block; preceding
+//!   content remains outside markers
+//! - no_user_blocks: body with no `## User` → empty `<!-- agent:exchange -->` component added
+//! - code_block_skip: `## User` inside fenced block → not treated as section start
+//! - already_template: file already in template mode → `Err` containing "already in template"
+//! - already_append: file already in append mode → `Err` containing "already in append/inline"
+//! - strip_markers: template body → append body has no `<!-- agent:… -->` lines, `## Exchange`
+//!   removed, all content preserved
+//! - roundtrip: append → template → append preserves all User/Assistant content
+//! - frontmatter_updated: after conversion, `agent_doc_format` reflects target format
+
+use anyhow::{Context, Result};
+use std::path::Path;
+
+use crate::{frontmatter::{self, AgentDocFormat, AgentDocWrite}, snapshot, write, AgentDocMode};
+
+pub fn run(
+    file: &Path,
+    legacy_mode: Option<&AgentDocMode>,
+    explicit_format: Option<AgentDocFormat>,
+    explicit_write: Option<AgentDocWrite>,
+) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let (fm, body) = frontmatter::parse(&content)?;
+    let current = fm.resolve_mode();
+
+    // Resolve target format: explicit flag > legacy positional > existing > default (template)
+    let target_format = explicit_format
+        .or_else(|| legacy_mode.map(|m| match m {
+            AgentDocMode::Append => AgentDocFormat::Append,
+            AgentDocMode::Template | AgentDocMode::Stream => AgentDocFormat::Template,
+        }))
+        .unwrap_or(AgentDocFormat::Template);
+
+    // Resolve target write: explicit flag > legacy positional > existing > default (crdt)
+    let target_write = explicit_write
+        .or_else(|| legacy_mode.and_then(|m| match m {
+            AgentDocMode::Stream => Some(AgentDocWrite::Crdt),
+            _ => None,
+        }))
+        .unwrap_or(AgentDocWrite::Crdt);
+
+    // Determine what conversions are needed
+    let format_change = target_format != current.format;
+    let write_change = target_write != current.write;
+
+    if !format_change && !write_change {
+        anyhow::bail!(
+            "{} is already in {} format with {} write strategy",
+            file.display(), current.format, current.write
+        );
+    }
+
+    if format_change {
+        match target_format {
+            AgentDocFormat::Template => {
+                convert_to_template(file, &content, fm, body, &current, target_write)?;
+            }
+            AgentDocFormat::Append => {
+                convert_to_append(file, fm, body, &current, target_write)?;
+            }
+        }
+    } else {
+        // Only write strategy changed — update frontmatter
+        let updated = frontmatter::set_format_and_write(&content, target_format, target_write)?;
+        write::atomic_write_pub(file, &updated)?;
+        snapshot::save(file, &updated)?;
+        eprintln!(
+            "Updated {} write strategy: {} → {}",
+            file.display(), current.write, target_write
+        );
+    }
+
+    Ok(())
+}
+
+fn convert_to_template(
+    file: &Path,
+    content: &str,
+    fm: frontmatter::Frontmatter,
+    body: &str,
+    resolved: &frontmatter::ResolvedMode,
+    target_write: AgentDocWrite,
+) -> Result<()> {
+    if resolved.is_template() {
+        let components = crate::component::parse(content).unwrap_or_default();
+        if !components.is_empty() {
+            anyhow::bail!("{} is already in template mode with components", file.display());
+        }
+        eprintln!("Mode is template but no component markers found, adding exchange component");
+    }
+
+    let mut fm = fm;
+    fm.format = Some(AgentDocFormat::Template);
+    fm.write_mode = Some(target_write);
+    fm.mode = None; // clear deprecated field
+
+    let exchange_content = append_to_template_body(body);
+    let new_doc = frontmatter::write(&fm, &exchange_content)?;
+
+    write::atomic_write_pub(file, &new_doc)?;
+    snapshot::save(file, &new_doc)?;
+
+    eprintln!("Converted {} to template mode", file.display());
+    Ok(())
+}
+
+fn convert_to_append(
+    file: &Path,
+    fm: frontmatter::Frontmatter,
+    body: &str,
+    resolved: &frontmatter::ResolvedMode,
+    target_write: AgentDocWrite,
+) -> Result<()> {
+    if resolved.is_append() {
+        anyhow::bail!("{} is already in append mode", file.display());
+    }
+
+    let mut fm = fm;
+    fm.format = Some(AgentDocFormat::Append);
+    fm.write_mode = Some(target_write);
+    fm.mode = None; // clear deprecated field
+
+    let append_content = template_to_append_body(body);
+    let new_doc = frontmatter::write(&fm, &append_content)?;
+
+    write::atomic_write_pub(file, &new_doc)?;
+    snapshot::save(file, &new_doc)?;
+
+    eprintln!("Converted {} to append mode", file.display());
+    Ok(())
+}
+
+/// Convert append-mode body to template-mode body.
+/// Finds the first ## User heading and wraps from there to end in <!-- agent:exchange -->.
+/// Content before the first ## User is preserved as-is.
+fn append_to_template_body(body: &str) -> String {
+    // Find first ## User heading (not inside code blocks)
+    let lines: Vec<&str> = body.lines().collect();
+    let mut in_code_block = false;
+    let mut first_user_line = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+        if line.starts_with("## User") {
+            first_user_line = Some(i);
+            break;
+        }
+    }
+
+    match first_user_line {
+        Some(idx) => {
+            let before = lines[..idx].join("\n");
+            let exchange = lines[idx..].join("\n");
+            let mut result = before;
+            if !result.is_empty() && !result.ends_with('\n') {
+                result.push('\n');
+            }
+            // Add exchange component with ## Exchange heading
+            result.push_str("\n## Exchange\n\n<!-- agent:exchange -->\n");
+            result.push_str(&exchange);
+            if !result.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str("<!-- /agent:exchange -->\n");
+            result
+        }
+        None => {
+            // No User blocks found — just add empty exchange component
+            let mut result = body.to_string();
+            if !result.is_empty() && !result.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str("\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n");
+            result
+        }
+    }
+}
+
+/// Convert template-mode body to append-mode body.
+/// Strips component markers and ## Exchange heading, preserving content.
+fn template_to_append_body(body: &str) -> String {
+    let mut result = String::new();
+    let lines: Vec<&str> = body.lines().collect();
+    let mut in_code_block = false;
+    let mut skip_exchange_heading = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_code_block = !in_code_block;
+        }
+
+        if in_code_block {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Skip component markers (<!-- agent:name --> and <!-- /agent:name -->)
+        let trimmed = line.trim();
+        if (trimmed.starts_with("<!-- agent:") && trimmed.ends_with("-->"))
+            || (trimmed.starts_with("<!-- /agent:") && trimmed.ends_with("-->"))
+        {
+            // If the next non-empty line after an opening marker starts content,
+            // we just skip the marker line itself
+            continue;
+        }
+
+        // Skip ## Exchange heading (and its trailing blank line)
+        if trimmed == "## Exchange" {
+            skip_exchange_heading = true;
+            continue;
+        }
+        if skip_exchange_heading && trimmed.is_empty() {
+            skip_exchange_heading = false;
+            // Skip the blank line after ## Exchange only if the next content
+            // isn't also blank (avoid eating real content spacing)
+            if i + 1 < lines.len() {
+                continue;
+            }
+        }
+        skip_exchange_heading = false;
+
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    // Trim trailing excess newlines but keep one
+    let trimmed = result.trim_end_matches('\n');
+    let mut final_result = trimmed.to_string();
+    final_result.push('\n');
+    final_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn setup_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn convert_body_with_user_blocks() {
+        let body = "\n# Session: Test\n\n## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
+        let result = append_to_template_body(body);
+        assert!(result.contains("<!-- agent:exchange -->"));
+        assert!(result.contains("<!-- /agent:exchange -->"));
+        assert!(result.contains("## User"));
+        assert!(result.contains("# Session: Test"));
+        // Title should be outside exchange
+        let exchange_start = result.find("<!-- agent:exchange -->").unwrap();
+        let title_pos = result.find("# Session: Test").unwrap();
+        assert!(title_pos < exchange_start);
+    }
+
+    #[test]
+    fn convert_body_no_user_blocks() {
+        let body = "\n# Just a doc\n\nSome content.\n";
+        let result = append_to_template_body(body);
+        assert!(result.contains("<!-- agent:exchange -->"));
+        assert!(result.contains("<!-- /agent:exchange -->"));
+    }
+
+    #[test]
+    fn convert_rejects_already_template_crdt() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
+        let result = run(&file, Some(&AgentDocMode::Template), None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already in template format"));
+    }
+
+    #[test]
+    fn convert_append_to_template_adds_markers() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_format: append\n---\n\n# Doc\n\n## User\n\nHello\n").unwrap();
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(result.contains("<!-- agent:exchange -->"));
+        assert!(result.contains("Hello"));
+    }
+
+    #[test]
+    fn convert_updates_frontmatter() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_session: abc-123\nagent: claude\nagent_doc_format: append\n---\n\n# Session: Test\n\n## User\n\nHello\n").unwrap();
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(result.contains("agent_doc_format: template"));
+        assert!(result.contains("<!-- agent:exchange -->"));
+        assert!(result.contains("Hello"));
+    }
+
+    #[test]
+    fn convert_body_preserves_code_blocks() {
+        let body = "\n# Doc\n\n```\n## User\n```\n\n## User\n\nReal user block\n";
+        let result = append_to_template_body(body);
+        // The exchange should start at the REAL ## User, not the one inside code block
+        let exchange_start = result.find("<!-- agent:exchange -->").unwrap();
+        let code_block_pos = result.find("```\n## User\n```").unwrap();
+        // Code block should be before exchange
+        assert!(code_block_pos < exchange_start);
+    }
+
+    #[test]
+    fn convert_to_append_strips_markers() {
+        let body = "\n# Doc\n\n## Exchange\n\n<!-- agent:exchange -->\n## User\n\nHello\n\n## Assistant\n\nHi\n<!-- /agent:exchange -->\n";
+        let result = template_to_append_body(body);
+        assert!(!result.contains("<!-- agent:exchange -->"));
+        assert!(!result.contains("<!-- /agent:exchange -->"));
+        assert!(!result.contains("## Exchange"));
+        assert!(result.contains("## User"));
+        assert!(result.contains("Hello"));
+        assert!(result.contains("## Assistant"));
+        assert!(result.contains("Hi"));
+    }
+
+    #[test]
+    fn convert_to_append_rejects_already_append() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_format: append\n---\n\n## User\n\nHello\n").unwrap();
+        let result = run(&file, Some(&AgentDocMode::Append), None, None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("already in append format") || err_msg.contains("already in inline format"),
+            "expected 'already in append/inline format' error, got: {}", err_msg);
+    }
+
+    #[test]
+    fn convert_roundtrip_append_to_template_to_append() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let original = "---\nagent_doc_session: abc-123\nagent_doc_format: append\n---\n\n# Session\n\n## User\n\nHello\n\n## Assistant\n\nWorld\n";
+        std::fs::write(&file, original).unwrap();
+
+        // append -> template
+        run(&file, Some(&AgentDocMode::Template), None, None).unwrap();
+        let template = std::fs::read_to_string(&file).unwrap();
+        assert!(template.contains("agent_doc_format: template"));
+        assert!(template.contains("<!-- agent:exchange -->"));
+
+        // template -> append
+        run(&file, Some(&AgentDocMode::Append), None, None).unwrap();
+        let append = std::fs::read_to_string(&file).unwrap();
+        assert!(append.contains("agent_doc_format: inline"));
+        assert!(!append.contains("<!-- agent:exchange -->"));
+        assert!(append.contains("## User"));
+        assert!(append.contains("Hello"));
+        assert!(append.contains("## Assistant"));
+        assert!(append.contains("World"));
+    }
+
+    #[test]
+    fn template_to_append_preserves_non_exchange_content() {
+        let body = "\n# Doc\n\n<!-- agent:status -->\nStatus line\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange -->\nConversation\n<!-- /agent:exchange -->\n";
+        let result = template_to_append_body(body);
+        // All markers should be stripped
+        assert!(!result.contains("<!-- agent:"));
+        assert!(!result.contains("<!-- /agent:"));
+        // Content preserved
+        assert!(result.contains("Status line"));
+        assert!(result.contains("Conversation"));
+    }
+}

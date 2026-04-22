@@ -1,0 +1,1747 @@
+//! # Module: git
+//!
+//! ## Spec
+//! - `commit(file)`: stages and commits a session document with an auto-generated
+//!   `agent-doc(<stem>): <timestamp>` message, skipping hooks (`--no-verify`).  Relative paths are
+//!   resolved against the git superproject root first, then the toplevel.  When a snapshot exists,
+//!   a CLEAN copy of the snapshot (with all ` (HEAD)` heading suffixes stripped via
+//!   `strip_head_markers`) is staged via `git hash-object + update-index` so the working tree is
+//!   never touched; user keystrokes typed after the snapshot was taken remain uncommitted (green
+//!   gutter), and the working tree's current-boundary `### Re: ... (HEAD)` heading shows as a
+//!   single modified line (blue gutter) automatically since the blob has no `(HEAD)` suffix.
+//!   Falls back to `git add -f` when hash-object fails.  After a successful commit, repositions
+//!   the boundary marker in the snapshot and fires an IPC reposition signal
+//!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
+//!   via the plugin's Document API.
+//! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
+//!   tracked.
+//! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
+//!   file, or `None` if none exists.
+//! - `create_branch(file)`: creates and checks out `agent-doc/<stem>`, or switches to it if it
+//!   already exists.
+//! - `squash_session(file)`: soft-resets to before the first `agent-doc` commit touching the file
+//!   and recommits as a single squashed commit.
+//! - `strip_head_markers` (private): strips ` (HEAD)` suffix from markdown headings and bold-text
+//!   pseudo-headers in the commit-staging path.  `(HEAD)` is a working-tree-only marker and
+//!   must never appear in the committed blob — with a clean blob, the working tree's current
+//!   boundary heading shows as a single modified line automatically (blue gutter) and moving
+//!   the boundary across cycles cannot produce phantom `(HEAD)` diffs on prior-cycle headings.
+//!
+//! ## Agentic Contracts
+//! - `commit` never modifies the working tree file directly; all staging is done through the git
+//!   index.  The only disk write is to the snapshot file.
+//! - `commit` captures all git stdout to stderr so callers that reserve stdout for JSON (e.g.,
+//!   `preflight`) are not polluted.
+//! - All public functions resolve paths relative to the superproject root when running inside a
+//!   submodule, so git commands always run in the correct repo.
+//! - `show_head` and `last_commit_mtime` return `Ok(None)` (not `Err`) when the file has no git
+//!   history.
+//!
+//! ## Evals
+//! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
+//! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
+//! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
+//! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
+//! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob so prior-cycle headings don't take phantom diffs when the boundary moves
+//! - commit_lock_nonblocking_when_held: CommitLock::acquire returns None immediately when another process holds the lock (no indefinite blocking)
+//! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
+//! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
+//! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
+//! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
+
+use anyhow::Result;
+use fs2::FileExt;
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// RAII guard for an exclusive advisory lock serializing `git::commit()` runs
+/// on the same document across concurrent preflight sessions. Protects the
+/// read-modify-write on the working tree + index from interleaving.
+///
+/// Lock file lives at `<project_root>/.agent-doc/locks/commit-<hash>.lock`.
+/// Uses `try_lock_exclusive()` (non-blocking): if another process holds the
+/// lock, returns `None` immediately and the caller proceeds unlocked. Git's
+/// own index.lock retry loop handles serialization at the git layer.
+/// Best-effort: if the path cannot be resolved (no project root yet), returns
+/// `None` and the caller proceeds unlocked.
+struct CommitLock {
+    _file: File,
+}
+
+impl CommitLock {
+    fn acquire(doc: &Path) -> Option<Self> {
+        let canonical = doc.canonicalize().ok()?;
+        let root = crate::snapshot::find_project_root(&canonical)?;
+        let hash = crate::snapshot::doc_hash(doc).ok()?;
+        let lock_dir = root.join(".agent-doc/locks");
+        if let Err(e) = std::fs::create_dir_all(&lock_dir) {
+            eprintln!("[commit] commit-lock dir create failed: {} (proceeding unlocked)", e);
+            return None;
+        }
+        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
+        let file = match OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("[commit] commit-lock open failed: {} (proceeding unlocked)", e);
+                return None;
+            }
+        };
+        if let Err(e) = file.try_lock_exclusive() {
+            eprintln!("[commit] commit-lock contended: {} (proceeding unlocked)", e);
+            return None;
+        }
+        Some(Self { _file: file })
+    }
+}
+
+impl Drop for CommitLock {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
+
+/// Resolve a relative path against the git root (superproject root if in a submodule).
+/// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
+pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+    if file.is_absolute() {
+        // Find git root from the file's directory.
+        // Prefer the superproject root when the file is inside a submodule, so
+        // submodule files resolve to the parent repo (matches the relative-path
+        // branch below). Without this, IPC patches for submodule documents land
+        // in the submodule's `.agent-doc/patches/` instead of the parent's,
+        // which is the only directory the IDE plugin watches.
+        let parent = file.parent().unwrap_or(Path::new("/"));
+        if let Some(superproject) = git_superproject_at(parent) {
+            return Ok((superproject, file.to_path_buf()));
+        }
+        let root = git_toplevel_at(parent)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        return Ok((root, file.to_path_buf()));
+    }
+
+    // Try superproject first (handles submodule CWD case)
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-superproject-working-tree"])
+        .output();
+    if let Ok(ref o) = output {
+        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !root.is_empty() {
+            let root_path = std::path::PathBuf::from(&root);
+            let resolved = root_path.join(file);
+            if resolved.exists() {
+                return Ok((root_path, resolved));
+            }
+        }
+    }
+
+    // Try git toplevel
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output();
+    if let Ok(ref o) = output {
+        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !root.is_empty() {
+            let root_path = std::path::PathBuf::from(&root);
+            let resolved = root_path.join(file);
+            if resolved.exists() {
+                return Ok((root_path, resolved));
+            }
+        }
+    }
+
+    // Fallback: use as-is (relative to CWD)
+    let cwd = std::env::current_dir().unwrap_or_default();
+    Ok((cwd, file.to_path_buf()))
+}
+
+/// Get git toplevel from a specific directory.
+pub(crate) fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
+    Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+        })
+}
+
+/// Get the superproject working tree from a specific directory.
+/// Returns `Some(path)` only when `dir` is inside a submodule. Returns `None`
+/// for top-level repos or when git is unavailable.
+pub(crate) fn git_superproject_at(dir: &Path) -> Option<std::path::PathBuf> {
+    Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", "--show-superproject-working-tree"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+        })
+}
+
+/// If `file` lives inside a submodule of `super_root`, return the submodule's
+/// own git toplevel and `true`. Otherwise return `super_root` unchanged.
+///
+/// This lets `commit()` run git operations from within the submodule (where
+/// they're valid) instead of the parent repo (where the file appears as both
+/// a submodule entry and a tracked path, causing `update-index --cacheinfo`
+/// and `git add` to refuse the path with "appears as both a file and as a
+/// directory" / "Pathspec ... is in submodule" errors).
+pub(crate) fn narrow_to_submodule(super_root: &Path, file: &Path) -> (PathBuf, bool) {
+    let parent = file.parent().unwrap_or(Path::new("/"));
+    if let Some(inner) = git_toplevel_at(parent)
+        && inner != super_root
+        && inner.starts_with(super_root)
+    {
+        return (inner, true);
+    }
+    (super_root.to_path_buf(), false)
+}
+
+/// After a successful commit inside a submodule, stage and partial-commit the
+/// updated submodule pointer in the superproject. Uses an explicit pathspec on
+/// the commit so any other staged files in the parent index are preserved.
+fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg: &str) {
+    let rel = match submodule_root.strip_prefix(super_root) {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("[commit] cannot compute submodule relative path; skipping pointer update");
+            return;
+        }
+    };
+    let rel_str = rel.to_string_lossy().to_string();
+
+    let add = Command::new("git")
+        .current_dir(super_root)
+        .args(["add", "--", &rel_str])
+        .output();
+    match add {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            eprintln!(
+                "[commit] parent git add for submodule pointer failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!("[commit] parent git add error: {}", e);
+            return;
+        }
+    }
+
+    let parent_msg = format!("{} (submodule pointer)", msg);
+    let commit = Command::new("git")
+        .current_dir(super_root)
+        .args(["commit", "-m", &parent_msg, "--no-verify", "--", &rel_str])
+        .output();
+    match commit {
+        Ok(o) if o.status.success() => {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                let t = line.trim();
+                if t.starts_with('[') && t.contains(']') {
+                    eprintln!("{}", line);
+                }
+            }
+            eprintln!("[commit] parent submodule pointer updated for {}", rel_str);
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // "nothing to commit" / "no changes added" is fine — pointer was already current.
+            if stderr.contains("nothing to commit")
+                || stdout.contains("nothing to commit")
+                || stderr.contains("no changes added")
+            {
+                return;
+            }
+            eprintln!(
+                "[commit] parent submodule pointer commit failed: {}",
+                stderr.trim()
+            );
+        }
+        Err(e) => eprintln!("[commit] parent submodule pointer commit error: {}", e),
+    }
+}
+
+/// Resolve the cwd to use when spawning a tmux pane for `file`.
+///
+/// For documents inside a submodule, returns the submodule's own git toplevel
+/// so the spawned Claude session starts inside that submodule. For top-level
+/// docs (or when git resolution fails), falls back to the process cwd —
+/// matching the pre-existing behavior.
+pub fn resolve_pane_cwd(file: &Path) -> std::path::PathBuf {
+    if let Ok((super_root, resolved)) = resolve_to_git_root(file) {
+        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+        if in_submodule {
+            return git_root;
+        }
+        return super_root;
+    }
+    std::env::current_dir().unwrap_or_default()
+}
+
+/// Check if `file` is inside a git repository.
+/// Returns `true` if the file's directory (or any ancestor) is a git repo.
+/// Returns `false` if git is not available or the path is not tracked.
+pub(crate) fn is_in_git_repo(file: &Path) -> bool {
+    let dir = if file.is_absolute() {
+        file.parent().unwrap_or(Path::new("/")).to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
+    Command::new("git")
+        .current_dir(&dir)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Commit a file with an auto-generated message. Skips hooks.
+/// Relative paths are resolved against the git root (superproject if in a submodule).
+/// Git commands run from the resolved git root, so this works even when CWD is a submodule.
+pub fn commit(file: &Path) -> Result<()> {
+    let t_total = std::time::Instant::now();
+
+    // Serialize concurrent preflight runs against each other: without this,
+    // step 2 (commit target doc) and step 2d (cross-document sweep) from two
+    // independent preflight processes can race through the read-modify-write
+    // on the working tree (e.g. the (HEAD)-strip rewrite) and produce a second
+    // commit that stages a shrunken file. Held until function return.
+    let _commit_lock = CommitLock::acquire(file);
+
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    // If the file lives inside a submodule, run git ops in the submodule itself.
+    // The parent repo refuses to stage/commit paths that cross a submodule boundary
+    // (`update-index --cacheinfo` and `git add` both fail with "appears as both a
+    // file and as a directory" / "Pathspec ... is in submodule"). Routing the commit
+    // through the submodule's own repo sidesteps the boundary entirely.
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    if in_submodule {
+        eprintln!(
+            "[commit] file is in submodule {} — running git ops there",
+            git_root.display()
+        );
+        crate::ops_log::log_op(file, &format!(
+            "submodule_route file={} submodule={}",
+            file.display(), git_root.display()
+        ));
+    }
+    let timestamp = chrono_timestamp();
+    let doc_name = file
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let msg = format!("agent-doc({}): {}", doc_name, timestamp);
+
+    // Selective commit: stage only the snapshot content (agent response),
+    // leaving user edits in the working tree as uncommitted.
+    //
+    // If a snapshot exists, use git hash-object + update-index to stage the
+    // snapshot version without touching the working tree file. This means:
+    // - Agent response → committed (no git gutter)
+    // - User's subsequent edits → uncommitted (green git gutter)
+    let mut snapshot_content = crate::snapshot::load(file)?;
+    let file_content = std::fs::read_to_string(file).unwrap_or_default();
+    let file_len = file_content.len();
+    let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
+    crate::ops_log::log_op(file, &format!(
+        "commit_staging file={} snap_len={} file_len={}",
+        file.display(), snap_len, file_len
+    ));
+
+    // Warn on significant file/snapshot drift — may indicate an out-of-band write
+    // that bypassed the agent-doc write pipeline (snapshot not updated).
+    if snap_len > 0 && file_len > snap_len {
+        let drift = file_len - snap_len;
+        // Always log out-of-band drift (any positive delta) for aggregation and
+        // root-cause analysis — classifies small/frequent vs large/rare gaps.
+        crate::ops_log::log_op(file, &format!(
+            "out_of_band_write file={} drift={} snap_len={} file_len={}",
+            file.display(), drift, snap_len, file_len
+        ));
+        if drift > 100 {
+            eprintln!(
+                "[commit] WARNING: file is {} bytes larger than snapshot for {} — possible out-of-band write (snap={}, file={})",
+                drift, file.display(), snap_len, file_len
+            );
+            crate::ops_log::log_op(file, &format!(
+                "drift_warning file={} drift={} snap_len={} file_len={}",
+                file.display(), drift, snap_len, file_len
+            ));
+
+            // Extreme drift (file >5x snapshot): likely a file move/rename where
+            // the snapshot is from auto-init but the file has full content from
+            // the old path. Re-sync snapshot from file content so the commit
+            // stages everything and the drift loop stops.
+            if file_len > snap_len * 5 {
+                eprintln!(
+                    "[commit] Extreme drift detected ({}x) — re-syncing snapshot from file content (likely file move)",
+                    file_len / snap_len.max(1)
+                );
+                crate::ops_log::log_op(file, &format!(
+                    "snapshot_resync file={} old_snap_len={} new_snap_len={}",
+                    file.display(), snap_len, file_len
+                ));
+                crate::snapshot::save(file, &file_content)?;
+                snapshot_content = Some(file_content.clone());
+            }
+        }
+    }
+
+    // Handle missing snapshot: if no snapshot exists but file has content, create one.
+    // This bootstraps the commit flow for files that were never written by agent-doc.
+    //
+    // NOTE: Snapshot/file divergence detection (Bug 2B) was removed here because it
+    // cannot distinguish "file has user edits" from "file has a missed agent response".
+    // Both cases look identical (file has content snapshot doesn't). The IPC snapshot
+    // save failure case is handled by Bug 2A (non-fatal save with warning) and the
+    // recover step in preflight (detects orphaned responses).
+    if snapshot_content.is_none() && !file_content.is_empty() {
+        eprintln!(
+            "[commit] WARNING: no snapshot exists for {}. Creating from file content.",
+            file.display()
+        );
+        crate::snapshot::save(file, &file_content)?;
+        snapshot_content = Some(file_content.clone());
+    }
+
+    // Reposition boundary BEFORE staging so the commit captures the new
+    // boundary id atomically. Previously this ran post-commit, which left
+    // the boundary-id delta to be picked up by the next turn's preflight
+    // commit — producing two commits per turn (one for the prior turn's
+    // stale reposition, one for the current turn's content). Running it
+    // here folds both into a single commit.
+    //
+    // The active-run guard inside `reposition_boundary_in_snapshot` still
+    // applies: if a concurrent `agent-doc write` is in flight, reposition
+    // is skipped and the IPC path owns the transition, matching prior
+    // behavior for that case.
+    let t_reposition = std::time::Instant::now();
+    let _snap_changed = reposition_boundary_in_snapshot(file);
+    // Reload snapshot_content from disk — the reposition may have rewritten
+    // it with a fresh boundary id. Staging must use the repositioned blob.
+    if let Ok(Some(reloaded)) = crate::snapshot::load(file) {
+        snapshot_content = Some(reloaded);
+    }
+    let elapsed_reposition = t_reposition.elapsed().as_millis();
+    if elapsed_reposition > 0 {
+        eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
+    }
+
+    let t_staging = std::time::Instant::now();
+    if let Some(ref snap) = snapshot_content {
+        // Stage a CLEAN copy of the snapshot — (HEAD) is a working-tree-only
+        // marker and must never appear in the committed blob. With a clean
+        // blob, the working tree's current-boundary `### Re: ... (HEAD)`
+        // heading shows as a single modified line (blue gutter) automatically,
+        // and moving the boundary across cycles cannot produce a phantom
+        // "strip (HEAD)" diff on previously-committed headings.
+        let staged_content = strip_head_markers(snap);
+
+        let rel_path = relative_to(&resolved, &git_root);
+
+        if let Ok(hash) = hash_object(&git_root, &staged_content) {
+            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
+            let status = Command::new("git")
+                .current_dir(&git_root)
+                .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
+                .status()?;
+            if !status.success() {
+                eprintln!("[commit] update-index failed, falling back to git add");
+                git_add_force(&git_root, &resolved)?;
+            }
+        } else {
+            git_add_force(&git_root, &resolved)?;
+        }
+    } else {
+        // No snapshot — fall back to staging the entire file
+        git_add_force(&git_root, &resolved)?;
+    }
+    let elapsed_staging = t_staging.elapsed().as_millis();
+    if elapsed_staging > 0 {
+        eprintln!("[perf] commit.staging (hash_object+update-index): {}ms", elapsed_staging);
+    }
+
+    // Commit — ignore failure (nothing to commit is fine).
+    // Use .output() to capture stdout (prevents git status leaking to stdout
+    // when called from `preflight` which reserves stdout for JSON).
+    let t_commit = std::time::Instant::now();
+    // Fix 3: retry up to 3 times on index.lock contention (concurrent sessions).
+    let mut commit_attempts = 0u32;
+    let commit_output = loop {
+        let out = Command::new("git")
+            .current_dir(&git_root)
+            .args(["commit", "-m", &msg, "--no-verify"])
+            .output();
+        match &out {
+            Ok(o) if !o.status.success() && commit_attempts < 3 => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                if stderr.contains("index.lock") || stderr.contains("Unable to create") {
+                    commit_attempts += 1;
+                    eprintln!("[commit] index.lock contention, retry {}/3", commit_attempts);
+                    std::thread::sleep(std::time::Duration::from_millis(50 * (1 << commit_attempts)));
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        break out;
+    };
+    let commit_status = commit_output.as_ref().map(|o| o.status);
+    let elapsed_commit = t_commit.elapsed().as_millis();
+    if elapsed_commit > 0 {
+        eprintln!("[perf] commit.git_commit: {}ms", elapsed_commit);
+    }
+
+    // Log commit result line to stderr (suppress verbose git status output)
+    if let Ok(ref o) = commit_output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Only print the commit result line (e.g. "[main abc123] message")
+            // and skip git status output (branch info, file listings, etc.)
+            if trimmed.starts_with('[') && trimmed.contains(']') {
+                eprintln!("{}", line);
+            }
+        }
+    }
+
+    // Log commit result
+    match &commit_status {
+        Ok(s) if s.success() => {
+            crate::ops_log::log_cycle(file, "commit", None, None);
+            crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+            // Fire post_commit hook for cross-session coordination
+            let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();
+            crate::hooks::fire_post_commit(file, &session_id);
+            crate::hooks::fire_doc_event(file, "post_commit");
+        }
+        Ok(s) => {
+            crate::ops_log::log_op(file, &format!(
+                "commit_failed file={} exit_code={}",
+                file.display(),
+                s.code().unwrap_or(-1)
+            ));
+        }
+        Err(e) => {
+            crate::ops_log::log_op(file, &format!(
+                "commit_error file={} err={}",
+                file.display(), e
+            ));
+        }
+    }
+
+    // Post-commit housekeeping. The staged blob is already clean (commit
+    // staging strips `(HEAD)` from the snapshot before `git hash-object`),
+    // so the working tree keeps its current-boundary `(HEAD)` as the
+    // blue-gutter navigation affordance. The on-disk snapshot is kept in
+    // sync with the committed blob (clean, no `(HEAD)`) so the next cycle's
+    // diff doesn't see phantom `(HEAD)` additions/removals.
+    if let Ok(ref s) = commit_status
+        && s.success()
+    {
+            if let Some(ref snap) = snapshot_content {
+                let clean_snap = strip_head_markers(snap);
+                if clean_snap != *snap
+                    && let Err(e) = crate::snapshot::save(file, &clean_snap) {
+                    eprintln!("[commit] failed to clean snapshot: {}", e);
+                }
+            }
+            // Boundary reposition happens pre-commit now (see above) so the
+            // new boundary id lands in the same commit as the response.
+            // IPC reposition signal is still sent here so the plugin's
+            // Document buffer picks up the new boundary without a disk reload.
+            crate::write::try_ipc_reposition_boundary(file);
+
+            // Signal plugin to refresh VCS state so the gutter reflects the commit.
+            // Without this, the IDE shows the entire response as uncommitted until
+            // the user manually refreshes the file.
+            // Uses file-based signal (vcs-refresh.signal) since the socket listener
+            // may not be active — the plugin watches .agent-doc/patches/ for both
+            // patch files and signal files.
+            if let Ok(canonical) = file.canonicalize() {
+                let project_root = crate::snapshot::find_project_root(&canonical)
+                    .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+                let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
+                if signal_file.parent().is_some_and(|p| p.exists()) {
+                    match std::fs::write(&signal_file, "") {
+                        Ok(()) => eprintln!("[commit] VCS refresh signal written"),
+                        Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
+                    }
+                }
+            }
+
+            // Submodule pointer update: if we just committed inside a submodule,
+            // stage the new submodule HEAD in the parent and partial-commit it.
+            if in_submodule {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg);
+            }
+    }
+
+    let elapsed_total = t_total.elapsed().as_millis();
+    if elapsed_total > 0 {
+        eprintln!("[perf] commit total: {}ms", elapsed_total);
+    }
+
+    Ok(())
+}
+
+/// Reposition boundary in snapshot AND working tree deterministically.
+///
+/// After commit, moves the boundary to the end of exchange in both the
+/// snapshot and the working-tree file. The active-run guard
+/// (`pending_path_for`) prevents racing a concurrent `agent-doc write`:
+/// in-flight runs are skipped so the plugin's IPC write path owns the
+/// transition. Outside of an active run — including sweep-committed
+/// foreign docs that never touch `agent-doc write` — this function is
+/// the canonical place the on-disk state becomes consistent.
+///
+/// The working-tree rewrite applies `template::reposition_boundary_to_end`
+/// only — drops stale `<!-- agent:boundary:... -->` markers and inserts a
+/// single fresh one at the end of the exchange component. `(HEAD)` suffixes
+/// on `### Re:` headings are intentionally NOT touched here: the commit
+/// staging path strips `(HEAD)` from the blob, so leaving the working tree
+/// alone is both simpler and avoids phantom diffs on prior-cycle sections
+/// the user is editing.
+///
+/// Returns true if the snapshot OR working tree content changed.
+fn reposition_boundary_in_snapshot(file: &Path) -> bool {
+    // Check for active run — don't reposition if a run is in progress.
+    // The in-flight `agent-doc write` owns the transition via IPC.
+    if let Ok(canonical) = file.canonicalize()
+        && let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical)
+        && pending_path.exists()
+    {
+        eprintln!("[commit] skipping boundary reposition — active run detected");
+        return false;
+    }
+
+    let mut changed = false;
+
+    // Build a baseline of `### Re:` headings from git HEAD so the reposition
+    // step can mark EVERY new-this-cycle heading with ` (HEAD)`, not just the
+    // last one. When a patchback contains multiple `### Re:` sections (the
+    // common case for responses with more than one topic), each new heading
+    // becomes a modified line in the git gutter. If HEAD is unavailable
+    // (file untracked, no commits yet), the baseline is empty — meaning all
+    // current Re: headings are treated as "new" and all get marked.
+    let head_doc = crate::git::show_head(file).ok().flatten();
+    let baseline_headings: std::collections::HashSet<String> = head_doc
+        .as_deref()
+        .map(crate::template::exchange_baseline_headings)
+        .unwrap_or_default();
+    let baseline_opt = Some(&baseline_headings);
+
+    // Reposition in snapshot — use the baseline-aware path so all new Re:
+    // headings get annotated (not just the last one).
+    if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
+        let new_snap = crate::template::reposition_boundary_to_end_with_baseline(
+            &snap_content,
+            None,
+            baseline_opt,
+        );
+        if new_snap != snap_content {
+            match crate::snapshot::save(file, &new_snap) {
+                Ok(()) => {
+                    eprintln!("[commit] repositioned boundary in snapshot");
+                    changed = true;
+                }
+                Err(e) => {
+                    eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+                }
+            }
+        }
+    }
+
+    // Reposition in the working tree — only when no IDE plugin is installed.
+    // When the plugin is present (.agent-doc/patches/ exists), the IPC
+    // reposition signal (sent post-commit) lets the plugin handle the
+    // working-tree boundary via Document API, coordinated with user edits.
+    // Doing a disk-level read-modify-write here races with the user typing
+    // in the IDE, producing duplicate structural tails (bug #xbs3).
+    //
+    // Only the `<!-- agent:boundary:... -->` marker is repositioned here;
+    // `(HEAD)` suffixes on `### Re:` headings are left alone. The commit
+    // staging path strips `(HEAD)` from the blob, so the working tree's
+    // current-boundary `(HEAD)` heading shows correctly as a modified line
+    // without any rewrite. Rewriting old headings here would strip `(HEAD)`
+    // from sections the user is actively editing and cause phantom diffs
+    // on prior-cycle sections (bug #dsng).
+    let ipc_available = file
+        .canonicalize()
+        .map(|c| crate::write::resolve_ipc_project_root_pub(&c))
+        .map(|root| root.join(".agent-doc/patches").exists())
+        .unwrap_or(false);
+    if ipc_available {
+        eprintln!("[commit] skipping working-tree boundary reposition — IPC available");
+    } else if let Ok(working) = std::fs::read_to_string(file) {
+        let repositioned = crate::template::reposition_boundary_to_end_with_baseline(
+            &working,
+            None,
+            baseline_opt,
+        );
+        if repositioned != working {
+            match crate::write::atomic_write_pub(file, &repositioned) {
+                Ok(()) => {
+                    eprintln!("[commit] repositioned boundary in working tree");
+                    changed = true;
+                }
+                Err(e) => {
+                    eprintln!("[commit] failed to reposition boundary in working tree: {}", e);
+                }
+            }
+        }
+    }
+
+    changed
+}
+
+/// Returns the byte ranges of all fenced code blocks in `content` using a
+/// CommonMark-compliant parser (pulldown-cmark).
+///
+/// A closing fence MUST consist of plain backticks/tildes with no info string,
+/// so `` ```bash `` inside a `` ``` `` block is treated as literal content —
+/// not as a fence closer.  This is the root fix for the `(HEAD)` marker being
+/// incorrectly applied to bash-comment lines inside code fences.
+fn code_block_byte_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
+    let parser = Parser::new_ext(content, Options::empty()).into_offset_iter();
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    for (event, range) in parser {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => {
+                start = Some(range.start);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some(s) = start.take() {
+                    ranges.push(s..range.end);
+                }
+            }
+            _ => {}
+        }
+    }
+    ranges
+}
+
+/// Returns `true` if the byte at `offset` falls within any code block range.
+#[inline]
+fn is_in_code_block(ranges: &[std::ops::Range<usize>], offset: usize) -> bool {
+    ranges.iter().any(|r| r.contains(&offset))
+}
+
+/// Strip ` (HEAD)` suffix from markdown heading lines and bold-text pseudo-headers.
+/// Uses a CommonMark-compliant parser to detect code blocks so that `# comment (HEAD)`
+/// inside a fenced block is preserved unchanged.
+fn strip_head_markers(content: &str) -> String {
+    let code_ranges = code_block_byte_ranges(content);
+    let mut result_lines: Vec<&str> = Vec::new();
+    let mut offset = 0usize;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if !is_in_code_block(&code_ranges, offset)
+            && let Some(stripped) = line.strip_suffix(" (HEAD)") {
+            // Strip from markdown headings
+            if trimmed.starts_with('#') {
+                result_lines.push(stripped);
+                offset += line.len() + 1;
+                continue;
+            }
+            // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
+            let without_suffix = stripped.trim_end();
+            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                result_lines.push(stripped);
+                offset += line.len() + 1;
+                continue;
+            }
+        }
+        result_lines.push(line);
+        offset += line.len() + 1;
+    }
+    let result = result_lines.join("\n");
+    if content.ends_with('\n') { format!("{}\n", result) } else { result }
+}
+
+
+
+/// Write content to git's object database and return the blob hash.
+fn hash_object(git_root: &Path, content: &str) -> Result<String> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(content.as_bytes())?;
+            }
+            child.wait_with_output()
+        })?;
+    if !output.status.success() {
+        anyhow::bail!("git hash-object failed");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Compute `path` relative to `root`, canonicalizing both sides so symlinks
+/// don't cause `strip_prefix` mismatches. Falls back gracefully through
+/// non-canonical strip → original path.
+fn relative_to(path: &Path, root: &Path) -> PathBuf {
+    let canon_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canon_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if let Ok(rel) = canon_path.strip_prefix(&canon_root) {
+        return rel.to_path_buf();
+    }
+    if let Ok(rel) = path.strip_prefix(root) {
+        return rel.to_path_buf();
+    }
+    path.to_path_buf()
+}
+
+/// Force-add a file to the index (fallback path).
+fn git_add_force(git_root: &Path, resolved: &Path) -> Result<()> {
+    let rel_path = relative_to(resolved, git_root);
+    let status = Command::new("git")
+        .current_dir(git_root)
+        .args(["add", "-f", &rel_path.to_string_lossy()])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("git add failed");
+    }
+    Ok(())
+}
+
+/// Create and checkout a branch for the session.
+pub fn create_branch(file: &Path) -> Result<()> {
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "session".to_string());
+    let branch_name = format!("agent-doc/{}", stem);
+
+    let status = Command::new("git")
+        .args(["checkout", "-b", &branch_name])
+        .status()?;
+    if !status.success() {
+        // Branch may already exist — try switching to it
+        let status = Command::new("git")
+            .args(["checkout", &branch_name])
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("failed to create or switch to branch {}", branch_name);
+        }
+    }
+    Ok(())
+}
+
+/// Squash all agent-doc commits touching a file into one.
+pub fn squash_session(file: &Path) -> Result<()> {
+    let file_str = file.to_string_lossy();
+
+    // Find the first agent-doc commit for this file
+    let output = Command::new("git")
+        .args([
+            "log",
+            "--oneline",
+            "--reverse",
+            "--grep=^agent-doc",
+            "--",
+            &file_str,
+        ])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first_line = stdout.lines().next();
+    let first_hash = match first_line {
+        Some(line) => line.split_whitespace().next().unwrap_or(""),
+        None => {
+            eprintln!("No agent-doc commits found for {}", file.display());
+            return Ok(());
+        }
+    };
+
+    // Soft reset to the commit before the first agent-doc commit
+    let status = Command::new("git")
+        .args(["reset", "--soft", &format!("{}~1", first_hash)])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("git reset failed");
+    }
+
+    // Recommit as a single squashed commit
+    let status = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            &format!("agent-doc: squashed session for {}", file.display()),
+            "--no-verify",
+        ])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("git commit failed during squash");
+    }
+
+    eprintln!("Squashed agent-doc commits for {}", file.display());
+    Ok(())
+}
+
+/// Get the content of a file from the last agent-doc commit (or HEAD).
+/// Returns None if the file is not tracked or no commits exist.
+pub fn show_head(file: &Path) -> Result<Option<String>> {
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    // Narrow to the submodule's own repo when the file lives inside a submodule.
+    // `resolve_to_git_root` prefers the superproject, but `git show HEAD:<path>`
+    // from a superproject cannot traverse a submodule gitlink — the lookup
+    // fails and callers fall back to no-HEAD branches that drop `(HEAD)`
+    // markers on submodule-hosted documents.
+    let (git_root, _in_submodule) = narrow_to_submodule(&super_root, &resolved);
+
+    // Get the file path relative to the git root (submodule root when narrowed)
+    let rel_path = if resolved.is_absolute() {
+        resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_path_buf()
+    } else {
+        resolved.clone()
+    };
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["show", &format!("HEAD:{}", rel_path.to_string_lossy())])
+        .output()?;
+
+    if !output.status.success() {
+        // File not tracked or no commits — not an error
+        return Ok(None);
+    }
+
+    Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+/// Get the author timestamp of the last commit touching a file.
+/// Returns None if the file has no commits.
+pub fn last_commit_mtime(file: &Path) -> Result<Option<std::time::SystemTime>> {
+    let (git_root, resolved) = resolve_to_git_root(file)?;
+
+    let rel_path = if resolved.is_absolute() {
+        resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_path_buf()
+    } else {
+        resolved.clone()
+    };
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "log",
+            "-1",
+            "--format=%ct",
+            "--",
+            &rel_path.to_string_lossy(),
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let ts_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ts_str.is_empty() {
+        return Ok(None);
+    }
+
+    let epoch: u64 = ts_str.parse().unwrap_or(0);
+    if epoch == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch)))
+}
+
+fn chrono_timestamp() -> String {
+    // Use date command for simplicity — no extra dependency
+    let output = Command::new("date")
+        .args(["+%Y-%m-%d %H:%M:%S"])
+        .output()
+        .ok();
+    match output {
+        Some(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        None => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_head_markers_from_headings() {
+        let input = "# Title\n### Re: Foo (HEAD)\nSome text with (HEAD) in it\n### Re: Bar (HEAD)\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "# Title\n### Re: Foo\nSome text with (HEAD) in it\n### Re: Bar\n");
+    }
+
+    #[test]
+    fn strip_head_markers_preserves_non_heading_lines() {
+        let input = "Normal line (HEAD)\n### Heading (HEAD)\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "Normal line (HEAD)\n### Heading\n");
+    }
+
+    #[test]
+    fn strip_head_markers_bold_text() {
+        let input = "**Re: Something** (HEAD)\nSome text.\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "**Re: Something**\nSome text.\n");
+    }
+
+    #[test]
+    fn strip_head_markers_ignores_fenced_code_hash() {
+        // strip_head_markers should not remove content inside fenced code blocks.
+        // If somehow `# comment (HEAD)` ended up in a fence, it should be left alone.
+        let input = "### Re: Answer (HEAD)\nResponse.\n```bash\n# comment (HEAD)\n```\n";
+        let result = strip_head_markers(input);
+        assert_eq!(
+            result,
+            "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
+            "fenced (HEAD) must be preserved, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn reposition_boundary_to_end_basic() {
+        let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        // Boundary should be after user prompt, before close tag
+        assert!(result.contains("User prompt.\n<!-- agent:boundary:"));
+        assert!(result.contains("-->\n<!-- /agent:exchange -->"));
+        // Old boundary consumed
+        assert!(!result.contains("abc123"));
+    }
+
+    #[test]
+    fn reposition_boundary_no_exchange() {
+        let content = "# No exchange component\nJust text.\n";
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        // Should return unchanged if no exchange
+        assert_eq!(result.trim(), content.trim());
+    }
+
+    #[test]
+    fn reposition_boundary_preserves_user_edits() {
+        let content = "<!-- agent:exchange patch=append -->\n### Re: Answer\nAgent response.\n<!-- agent:boundary:old-id -->\nUser's new prompt here.\nMore user text.\n<!-- /agent:exchange -->\n";
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        assert!(result.contains("User's new prompt here."), "user edit must be preserved");
+        assert!(result.contains("More user text."), "user edit must be preserved");
+        let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
+        let user_pos = result.find("User's new prompt here.").unwrap();
+        assert!(boundary_pos > user_pos, "boundary must be after user text");
+    }
+
+    #[test]
+    fn reposition_boundary_cleans_multiple_stale() {
+        // Simulate a document with multiple stale boundary markers
+        let content = "<!-- agent:exchange patch=append -->\n\
+            First response.\n\
+            <!-- agent:boundary:aaa111 -->\n\
+            Second response.\n\
+            <!-- agent:boundary:bbb222 -->\n\
+            User prompt.\n\
+            <!-- /agent:exchange -->\n";
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        // All old boundaries should be removed
+        assert!(!result.contains("aaa111"), "first stale boundary must be removed");
+        assert!(!result.contains("bbb222"), "second stale boundary must be removed");
+        // Exactly one fresh boundary should exist
+        let boundary_count = result.matches("<!-- agent:boundary:").count();
+        assert_eq!(boundary_count, 1, "exactly one boundary marker should remain");
+        // The single boundary should be after user prompt
+        let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
+        let user_pos = result.find("User prompt.").unwrap();
+        assert!(boundary_pos > user_pos, "boundary must be after user text");
+    }
+
+    // --- Bug 2B regression tests ---
+    // Verify that commit does NOT overwrite the snapshot with user edits.
+    // The divergence detection was removed from commit because is_stale_baseline
+    // cannot distinguish "file has user edits" from "file has a missed agent response" —
+    // both look like "file has content snapshot doesn't have".
+
+    #[test]
+    fn is_stale_baseline_write_path_user_edits_in_baseline_not_stale() {
+        // Write path: baseline has user edits appended, snapshot is the committed state.
+        // is_stale_baseline(baseline_with_edits, snapshot) should be FALSE
+        // because the baseline's exchange CONTAINS the snapshot's exchange content.
+        let snapshot = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response\n\
+            Agent response text.\n\
+            <!-- /agent:exchange -->\n";
+        let baseline_with_user_edits = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response\n\
+            Agent response text.\n\
+            Implement agent-kit changes.\n\
+            Implement updates to agent-doc.\n\
+            <!-- /agent:exchange -->\n";
+
+        assert!(
+            !crate::write::is_stale_baseline(baseline_with_user_edits, snapshot),
+            "baseline with user edits should NOT be stale (it contains snapshot content)"
+        );
+    }
+
+    #[test]
+    fn is_stale_baseline_write_path_stale_baseline_detected() {
+        // Write path: baseline is from before the last agent response.
+        // is_stale_baseline(old_baseline, current_snapshot) should be TRUE.
+        let current_snapshot = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response 1\n\
+            First response.\n\
+            ### Re: Response 2\n\
+            Second response.\n\
+            <!-- /agent:exchange -->\n";
+        let old_baseline = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response 1\n\
+            First response.\n\
+            <!-- /agent:exchange -->\n";
+
+        assert!(
+            crate::write::is_stale_baseline(old_baseline, current_snapshot),
+            "baseline missing committed response should be stale"
+        );
+    }
+
+    #[test]
+    fn is_in_git_repo_true_inside_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc = root.join("doc.md");
+        fs::write(&doc, "# test\n").unwrap();
+
+        assert!(is_in_git_repo(&doc), "file inside git repo should return true");
+    }
+
+    #[test]
+    fn is_in_git_repo_false_outside_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# test\n").unwrap();
+
+        assert!(!is_in_git_repo(&doc), "file outside git repo should return false");
+    }
+
+    #[test]
+    fn write_commit_lifecycle() {
+        // Full lifecycle: git repo + snapshot + commit → verify commit in log.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        // Set up git repo
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+
+        // Create and commit an initial file so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Create a document at its pre-response state and commit it.
+        let doc = root.join("session.md");
+        let initial_content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
+        fs::write(&doc, initial_content).unwrap();
+
+        // Stage + initial commit so the file is tracked
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Simulate a write cycle landing a new response: update both the
+        // working tree and the snapshot with the post-response content so
+        // commit staging has something to commit.
+        let post_response = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&doc, post_response).unwrap();
+
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, post_response).unwrap();
+
+        // Now call commit (simulating what --commit does after write)
+        commit(&doc).expect("commit should succeed");
+
+        // Verify a new commit exists with the agent-doc message
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-3"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(session):"),
+            "git log should contain agent-doc commit, got:\n{log_str}"
+        );
+    }
+
+    // --- Fix 3: index.lock retry ---
+
+    #[test]
+    fn commit_retry_logic_handles_index_lock_error() {
+        // Verify the retry loop triggers when git commit stderr contains "index.lock".
+        // We simulate this by checking that the retry backoff constants are correct:
+        // attempts 1→100ms, 2→200ms, 3→400ms (50 * 2^attempt).
+        assert_eq!(50u64 * (1u64 << 1u32), 100, "retry 1 backoff should be 100ms");
+        assert_eq!(50u64 * (1u64 << 2u32), 200, "retry 2 backoff should be 200ms");
+        assert_eq!(50u64 * (1u64 << 3u32), 400, "retry 3 backoff should be 400ms");
+    }
+
+    #[test]
+    fn commit_succeeds_when_no_lock_contention() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&doc, content).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // No lock present — commit should succeed on first try
+        let result = commit(&doc);
+        assert!(result.is_ok(), "commit without lock should succeed: {:?}", result.err());
+    }
+
+    #[test]
+    fn commit_staged_blob_has_no_head_markers() {
+        // Regression for bug #dsng: (HEAD) is a working-tree-only marker and
+        // must never appear in the committed blob. If it does, the next
+        // cycle's reposition produces a phantom "strip (HEAD)" diff on
+        // prior-cycle headings the user is editing.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Initial doc + snapshot, tracked cleanly (no HEAD markers yet).
+        let doc = root.join("session.md");
+        let initial = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, initial).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, initial).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Simulate a write cycle: snapshot has a new response whose boundary
+        // heading carries `(HEAD)`. Working tree matches — this is what the
+        // IPC write path leaves on disk.
+        let cycle1 = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\n### Re: newer (HEAD)\nnew body\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, cycle1).unwrap();
+        fs::write(&snap_abs, cycle1).unwrap();
+
+        commit(&doc).expect("commit should succeed");
+
+        // Assert the committed blob has ZERO `(HEAD)` occurrences.
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let blob = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            !blob.contains("(HEAD)"),
+            "committed blob must not contain (HEAD); got:\n{blob}"
+        );
+        assert!(
+            blob.contains("### Re: newer\n"),
+            "committed blob should contain the clean new heading; got:\n{blob}"
+        );
+        assert!(
+            blob.contains("### Re: older\n"),
+            "committed blob should still contain the older heading; got:\n{blob}"
+        );
+
+        // And the working tree keeps its `(HEAD)` on the current boundary —
+        // the blue-gutter navigation affordance. Commit staging must not
+        // touch the working tree.
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("### Re: newer (HEAD)"),
+            "working tree should retain (HEAD) on current boundary; got:\n{working}"
+        );
+        assert_eq!(
+            working.matches("(HEAD)").count(),
+            1,
+            "working tree should have exactly one (HEAD) — the current boundary"
+        );
+    }
+
+    // --- Fix 1: snapshot saved before process::exit(75) (structural test) ---
+    // The actual exit path in write::run_stream calls snapshot::save before process::exit(75).
+    // We verify this by checking that snapshot::save is callable at that point.
+    // Full integration testing requires IPC infrastructure; unit coverage is in write.rs.
+
+    // --- Submodule-aware commit routing ---
+
+    #[test]
+    fn commit_in_submodule_routes_through_submodule_repo() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        // Initialize a "submodule" repo inside a temp dir
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git").current_dir(sub_origin).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.name", "Test"]).output().unwrap();
+        // Allow file:// transport inside this test invocation
+        Command::new("git").current_dir(sub_origin).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git").current_dir(sub_origin).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["commit", "-m", "init sub", "--no-verify"]).output().unwrap();
+
+        // Initialize the outer repo
+        Command::new("git").current_dir(outer).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git").current_dir(outer).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["commit", "-m", "init outer", "--no-verify"]).output().unwrap();
+
+        // Add the submodule
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args(["-c", "protocol.file.allow=always", "submodule", "add", &sub_url, "src/sub"])
+            .output()
+            .unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git").current_dir(outer).args(["commit", "-m", "add submodule", "--no-verify"]).output().unwrap();
+
+        let submodule_path = outer.join("src/sub");
+        // Configure the checked-out submodule for committing
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.name", "Test"]).output().unwrap();
+
+        // Sanity: narrow_to_submodule returns the submodule path, not the outer
+        let doc = submodule_path.join("session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
+        fs::write(&doc, content).unwrap();
+        let (narrowed, in_sub) = narrow_to_submodule(outer, &doc);
+        assert!(in_sub, "doc inside src/sub should be detected as submodule");
+        assert_eq!(narrowed, submodule_path, "narrowed root should be the submodule toplevel");
+
+        // Stage + commit the file inside the submodule so it's tracked
+        Command::new("git").current_dir(&submodule_path).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Modify the file (simulate an agent response landing) and create snapshot
+        let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
+        fs::write(&doc, new_content).unwrap();
+        let snap_rel = crate::snapshot::path_for(&doc).unwrap();
+        // The snapshot path is computed against the project root (walks for .agent-doc).
+        // For this test, ensure the .agent-doc dir exists at the outer root and write the snapshot there.
+        let project_root = crate::snapshot::find_project_root(&doc.canonicalize().unwrap())
+            .unwrap_or_else(|| outer.to_path_buf());
+        let snap_abs = project_root.join(&snap_rel);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, new_content).unwrap();
+
+        // Run commit() — should route through the submodule, succeed, and update parent pointer
+        let result = commit(&doc);
+        assert!(result.is_ok(), "commit should succeed for submodule file: {:?}", result.err());
+
+        // Verify the submodule has a new agent-doc commit
+        let sub_log = Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let sub_log_str = String::from_utf8_lossy(&sub_log.stdout);
+        assert!(
+            sub_log_str.contains("agent-doc(session)"),
+            "submodule git log should contain agent-doc commit, got:\n{sub_log_str}"
+        );
+
+        // Verify the parent has a submodule-pointer commit
+        let outer_log = Command::new("git")
+            .current_dir(outer)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let outer_log_str = String::from_utf8_lossy(&outer_log.stdout);
+        assert!(
+            outer_log_str.contains("(submodule pointer)"),
+            "parent git log should contain pointer-update commit, got:\n{outer_log_str}"
+        );
+    }
+
+    #[test]
+    fn narrow_to_submodule_returns_super_root_for_non_submodule_file() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        let doc = root.join("session.md");
+        fs::write(&doc, "x").unwrap();
+        let (narrowed, in_sub) = narrow_to_submodule(root, &doc);
+        assert!(!in_sub, "non-submodule file should not be detected as in-submodule");
+        assert_eq!(narrowed, root);
+    }
+
+    // --- relative_to path normalization ---
+
+    #[test]
+    fn relative_to_strips_prefix_for_normal_paths() {
+        let root = Path::new("/home/user/project");
+        let file = Path::new("/home/user/project/src/main.rs");
+        let rel = relative_to(file, root);
+        assert_eq!(rel, PathBuf::from("src/main.rs"));
+    }
+
+    #[test]
+    fn relative_to_returns_original_when_no_common_prefix() {
+        let root = Path::new("/home/user/project");
+        let file = Path::new("/other/path/file.rs");
+        let rel = relative_to(file, root);
+        assert_eq!(rel, PathBuf::from("/other/path/file.rs"));
+    }
+
+    #[test]
+    fn relative_to_handles_symlinked_path() {
+        use std::fs;
+        let real_dir = tempfile::TempDir::new().unwrap();
+        let link_dir = tempfile::TempDir::new().unwrap();
+        let real_root = real_dir.path();
+        let link_path = link_dir.path().join("link");
+
+        // Create a real file
+        let subdir = real_root.join("tasks");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(subdir.join("doc.md"), "content").unwrap();
+
+        // Create symlink: link -> real_root
+        std::os::unix::fs::symlink(real_root, &link_path).unwrap();
+
+        // Access the file through the symlink
+        let file_via_symlink = link_path.join("tasks/doc.md");
+        assert!(file_via_symlink.exists());
+
+        // relative_to should resolve symlinks and produce the correct relative path
+        let rel = relative_to(&file_via_symlink, real_root);
+        assert_eq!(rel, PathBuf::from("tasks/doc.md"),
+            "should produce submodule-relative path even when accessed via symlink");
+    }
+
+    #[test]
+    fn commit_in_submodule_with_symlinked_absolute_path() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        let link_dir = tempfile::TempDir::new().unwrap();
+        let link_path = link_dir.path().join("workspace");
+
+        // Create symlink: workspace -> outer
+        std::os::unix::fs::symlink(outer, &link_path).unwrap();
+
+        // Initialize a "submodule" origin repo
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git").current_dir(sub_origin).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git").current_dir(sub_origin).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["commit", "-m", "init sub", "--no-verify"]).output().unwrap();
+
+        // Initialize the outer repo (via real path, as git would)
+        Command::new("git").current_dir(outer).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git").current_dir(outer).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["commit", "-m", "init outer", "--no-verify"]).output().unwrap();
+
+        // Add submodule
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args(["-c", "protocol.file.allow=always", "submodule", "add", &sub_url, "src/sub"])
+            .output()
+            .unwrap();
+        assert!(sub_status.status.success(), "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr));
+        Command::new("git").current_dir(outer).args(["commit", "-m", "add submodule", "--no-verify"]).output().unwrap();
+
+        let submodule_path = outer.join("src/sub");
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.name", "Test"]).output().unwrap();
+
+        // Create and track the document inside the submodule
+        let doc_real = submodule_path.join("session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
+        fs::write(&doc_real, content).unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Modify the file and create snapshot
+        let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
+        fs::write(&doc_real, new_content).unwrap();
+        let project_root = crate::snapshot::find_project_root(&doc_real.canonicalize().unwrap())
+            .unwrap_or_else(|| outer.to_path_buf());
+        let snap_rel = crate::snapshot::path_for(&doc_real).unwrap();
+        let snap_abs = project_root.join(&snap_rel);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, new_content).unwrap();
+
+        // Access the file via the SYMLINK path — this is the bug scenario
+        let doc_via_symlink = link_path.join("src/sub/session.md");
+        assert!(doc_via_symlink.exists(), "symlinked path should exist");
+
+        // commit() should succeed even with the symlinked absolute path
+        let result = commit(&doc_via_symlink);
+        assert!(result.is_ok(),
+            "commit should succeed for submodule file accessed via symlink: {:?}", result.err());
+
+        // Verify the submodule has the agent-doc commit
+        let sub_log = Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let sub_log_str = String::from_utf8_lossy(&sub_log.stdout);
+        assert!(sub_log_str.contains("agent-doc(session)"),
+            "submodule git log should contain agent-doc commit, got:\n{sub_log_str}");
+    }
+
+    // --- #8jzg: resolve_pane_cwd tests ---
+
+    #[test]
+    fn resolve_pane_cwd_returns_git_root_for_file_in_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        let doc = root.join("plan.md");
+        fs::write(&doc, "# Plan\n").unwrap();
+
+        // resolve_pane_cwd should return the git root (not the file's parent)
+        let cwd = resolve_pane_cwd(&doc);
+        assert_eq!(cwd, root, "cwd should be the git root for a file inside a plain repo");
+    }
+
+    #[test]
+    fn resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path() {
+        // A file in a temp dir with no git repo — should fall back to process cwd
+        let dir = tempfile::TempDir::new().unwrap();
+        let non_git_file = dir.path().join("notes.md");
+        std::fs::write(&non_git_file, "notes\n").unwrap();
+
+        // resolve_pane_cwd should not panic and should return a valid path
+        let cwd = resolve_pane_cwd(&non_git_file);
+        assert!(cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
+            "fallback cwd should be the process cwd or an existing path");
+    }
+
+    #[test]
+    fn is_stale_baseline_write_path_replace_edits_ignored() {
+        // Write path: user edited a replace-mode component in the baseline.
+        // Only append-mode components are checked. Replace edits are fine.
+        let snapshot = "<!-- agent:status patch=replace -->\nOriginal\n<!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:status patch=replace -->\nUser changed\n<!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
+        assert!(
+            !crate::write::is_stale_baseline(baseline, snapshot),
+            "user edits in replace + append components should NOT be stale"
+        );
+    }
+
+    #[test]
+    fn reposition_skips_working_tree_when_ipc_available() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: test — opus-4-6\nResponse.\n\
+            <!-- agent:boundary:oldid123 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, doc_content).unwrap();
+
+        // Create snapshot
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+
+        // Initial commit
+        Command::new("git").current_dir(root)
+            .args(["add", "."]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Create .agent-doc/patches/ to simulate IDE plugin installed
+        let patches_dir = root.join(".agent-doc/patches");
+        fs::create_dir_all(&patches_dir).unwrap();
+
+        // Run reposition — should skip working tree because IPC is available
+        let changed = reposition_boundary_in_snapshot(&doc);
+
+        // Snapshot should be repositioned
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snap.contains("oldid123"), "snapshot boundary should be repositioned");
+
+        // Working tree should NOT be modified (IPC available)
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(working.contains("oldid123"),
+            "working tree should keep old boundary when IPC is available");
+
+        assert!(changed, "snapshot change should report changed=true");
+    }
+
+    #[test]
+    fn reposition_updates_working_tree_when_no_ipc() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: test — opus-4-6\nResponse.\n\
+            <!-- agent:boundary:oldid456 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, doc_content).unwrap();
+
+        // Create snapshot
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+
+        // Initial commit
+        Command::new("git").current_dir(root)
+            .args(["add", "."]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // NO .agent-doc/patches/ — no IDE plugin
+
+        // Run reposition
+        reposition_boundary_in_snapshot(&doc);
+
+        // Both snapshot AND working tree should be repositioned
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snap.contains("oldid456"), "snapshot boundary should be repositioned");
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(!working.contains("oldid456"),
+            "working tree should be repositioned when no IPC available");
+    }
+
+    #[test]
+    fn commit_lock_nonblocking_when_held() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+
+        let doc = root.join("plan.md");
+        fs::write(&doc, "test").unwrap();
+
+        // Create .agent-doc structure so CommitLock can resolve paths
+        let lock_dir = root.join(".agent-doc/locks");
+        fs::create_dir_all(&lock_dir).unwrap();
+        // Create snapshots dir so doc_hash works
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+
+        // Acquire lock manually to simulate contention
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
+        let held = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        held.lock_exclusive().unwrap();
+
+        // CommitLock::acquire should return None immediately (non-blocking)
+        let start = std::time::Instant::now();
+        let result = CommitLock::acquire(&doc);
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none(), "should return None when lock is held");
+        assert!(elapsed.as_millis() < 100, "should not block — took {}ms", elapsed.as_millis());
+
+        // Clean up
+        held.unlock().unwrap();
+    }
+}

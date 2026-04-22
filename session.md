@@ -1,7 +1,0 @@
----
-session: test
----
-
-## User
-
-Hello

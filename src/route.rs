@@ -1,8 +1,8 @@
 //! # Module: route
 //!
-//! Routes `/agent-doc <file>` commands to the correct tmux pane. This is the
+//! Routes harness-specific document trigger commands to the correct tmux pane. This is the
 //! process-level coordinator between file-save events (editor plugin / watch daemon)
-//! and running Claude Code sessions inside tmux.
+//! and running agent sessions inside tmux.
 //!
 //! ## Spec
 //!
@@ -16,7 +16,7 @@
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
 //!   5. Looks up the registered pane in `sessions.json`.
-//!   6. If pane is alive: unconditionally sends `/agent-doc <path>` via `send_command`.
+//!   6. If pane is alive: unconditionally sends the trigger command via `send_command`.
 //!      Pane IDs (`%N`) are globally unique per tmux server, so `target_session` matching
 //!      is not required for routing. `rescue_from_stash` is attempted (it self-gates on
 //!      session match) so panes stashed within the target session get rescued, but panes
@@ -24,14 +24,14 @@
 //!   7. If pane is dead and was previously registered: lazy-claims to an active pane via
 //!      `find_target_pane` (skipped if the candidate is running a non-agent process), sends
 //!      the command, then calls `sync_after_claim` to re-sync layout.
-//!   8. If no registered pane or no claimable pane: auto-starts a new Claude session.
+//!   8. If no registered pane or no claimable pane: auto-starts a new agent session.
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
-//!   new Claude pane and sends `/agent-doc start`. Waits for Claude's idle prompt before
+//!   new agent pane and sends `agent-doc start`. Waits for the agent's idle prompt before
 //!   sending the initial command. Called by `sync.rs` for unresolved files.
 //! - **`provision_pane(tmux, file, session_id, file_path, context_session, col_args)`**: Like
-//!   `auto_start` but skips waiting for Claude to be ready. Used by sync when only pane
-//!   existence is needed (Claude will start asynchronously). Computes `split_before` via
+//!   `auto_start` but skips waiting for the agent to be ready. Used by sync when only pane
+//!   existence is needed (agent will start asynchronously). Computes `split_before` via
 //!   `is_first_column(file, col_args)` so new panes split in the correct direction for
 //!   their column position.
 //! - **`is_first_column(file, col_args)`**: Returns true when `file` appears in the first
@@ -42,14 +42,14 @@
 //!   the agent-doc window for left-column files (`split_before`), last pane for right-column
 //!   files. This places the new pane adjacent to its column neighbors instead of always splitting
 //!   beside an arbitrary registered pane.
-//! - **`send_command(tmux, pane, file_path)`**: Flashes a tmux display-message on the target
-//!   pane, sends `/agent-doc <file_path>` via send-keys, focuses the pane, then polls up to
-//!   5 seconds verifying the command was accepted (retrying Enter if still visible in input).
+//! - **`send_command(tmux, pane, file_path, harness)`**: Flashes a tmux display-message on the
+//!   target pane, sends the harness trigger command via send-keys, focuses the pane, then polls
+//!   up to 5 seconds verifying the command was accepted (retrying Enter if still visible in input).
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
-//! - **`wait_for_claude_ready(tmux, pane_id, timeout)`**: Polls pane content every 500ms
-//!   looking for Claude's idle prompt (`❯` / `>`). Returns true when prompt found, false on
-//!   timeout. Logs progress every 10 polls.
+//! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
+//!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when
+//!   prompt found, false on timeout. Logs progress every 10 polls.
 //! - **`sync_after_claim(tmux, pane_id)`**: After a lazy claim, re-runs `sync::run` for all
 //!   registered files in the same window to keep the tmux layout mirroring the editor split.
 //!   Skipped when fewer than 2 files share the window.
@@ -60,7 +60,7 @@
 //!   in frontmatter before any registry lookup. Callers never see a file without a UUID.
 //! - **Stale-registry hygiene**: `resync::prune` is called at the start of every `run_with_tmux`
 //!   invocation; the registry is always pruned before a lookup is attempted.
-//! - **One pane per document**: Each document gets its own Claude pane. Unregistered files
+//! - **One pane per document**: Each document gets its own agent pane. Unregistered files
 //!   (no prior session) skip lazy-claim and always get a fresh pane via auto-start.
 //! - **Globally-unique pane IDs**: tmux `%N` pane IDs are unique per server. A registered
 //!   alive pane is always routable by ID — routing does not depend on which session it
@@ -87,15 +87,15 @@
 //! - `is_first_column_in_first_col`: file matches first col arg → returns true
 //! - `is_first_column_in_second_col`: file matches second col arg → returns false
 //! - `is_first_column_comma_separated`: file matches comma-separated first col arg → returns true
-//! - `detects_unicode_prompt`: `❯`, `❯ `, `  ❯  ` → all detected as Claude idle prompt
-//! - `detects_ascii_prompt`: `>`, `> `, `  >  ` → all detected as Claude idle prompt
+//! - `detects_unicode_prompt`: `❯`, `❯ `, `  ❯  ` → all detected as agent idle prompt
+//! - `detects_ascii_prompt`: `>`, `> `, `  >  ` → all detected as agent idle prompt
 //! - `rejects_non_prompt_lines`: status text, empty lines, markdown headers → not matched as prompt
 //! - `handles_ansi_prompt`: ANSI-colored `❯`/`>` → detected after strip_ansi
 //! - `unregistered_file_skips_lazy_claim`: `registered = None` → lazy-claim step is skipped
 //! - `dead_registered_pane_allows_lazy_claim`: `registered = Some(pane)` with dead pane → lazy-claim attempted
 //! - (aspirational) `stash_rescue`: pane in stash window → rescued to agent-doc window before send
 //! - `wrong_session_pane_still_receives_send`: alive pane in a session different from
-//!   `target_session` → `/agent-doc` command is sent to that pane (no new pane created)
+//!   `target_session` → trigger command is sent to that pane (no new pane created)
 //! - (aspirational) `debounce_idle`: file written rapidly → routing waits for mtime to settle
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
@@ -103,17 +103,13 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
+use crate::harness::HarnessConfig;
 use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
-const TMUX_SESSION_NAME: &str = "claude";
-
-/// Valid process names for agent-doc panes (mirrors resync::AGENT_PROCESSES).
-const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "node"];
-
-/// Returns true if the pane is running an agent process (agent-doc / claude / node).
+/// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
-fn is_agent_process(tmux: &Tmux, pane_id: &str) -> bool {
+fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
     let output = tmux
         .cmd()
         .args(["display-message", "-t", pane_id, "-p", "#{pane_current_command}"])
@@ -121,7 +117,7 @@ fn is_agent_process(tmux: &Tmux, pane_id: &str) -> bool {
     match output {
         Ok(o) if o.status.success() => {
             let cmd = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            cmd.is_empty() || AGENT_PROCESSES.contains(&cmd.as_str())
+            harness.is_agent_process_name(&cmd)
         }
         _ => true, // can't inspect → treat conservatively
     }
@@ -169,7 +165,13 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    let target_session = resolve_target_session(tmux, None);
+    let fm = frontmatter::parse(&updated_content)
+        .map(|(f, _)| f)
+        .unwrap_or_default();
+    let global_config = crate::config::load().unwrap_or_default();
+    let harness = HarnessConfig::from_context(&fm, &global_config);
+
+    let target_session = resolve_target_session(tmux, None, &harness);
     eprintln!("[route] target tmux session: {}", target_session);
 
     let file_path = file.to_string_lossy();
@@ -192,7 +194,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
 
     let pane_id = resolve_or_create_pane(
         tmux, file, pane, col_args,
-        &session_id, &file_path, &target_session,
+        &session_id, &file_path, &target_session, &harness,
     );
 
     match pane_id {
@@ -228,7 +230,8 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
 /// 1. Alive registered pane → unconditionally send command. Pane IDs are
 ///    globally unique per tmux server, so session matching is not required.
 /// 2. Lazy claim to an active pane (when registered pane is dead)
-/// 3. Auto-start a new Claude session
+/// 3. Auto-start a new agent session
+#[allow(clippy::too_many_arguments)]
 fn resolve_or_create_pane(
     tmux: &Tmux,
     file: &Path,
@@ -237,6 +240,7 @@ fn resolve_or_create_pane(
     session_id: &str,
     file_path: &str,
     target_session: &str,
+    harness: &HarnessConfig,
 ) -> Result<String> {
     tracing::debug!(
         session_id = &session_id[..8.min(session_id.len())],
@@ -257,7 +261,7 @@ fn resolve_or_create_pane(
         if tmux.pane_alive(registered_pane) {
             rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
             eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-            send_command(tmux, registered_pane, file_path)?;
+            send_command(tmux, registered_pane, file_path, harness)?;
             return Ok(registered_pane.clone());
         }
         eprintln!("[route] Pane {} is dead", registered_pane);
@@ -279,11 +283,11 @@ fn resolve_or_create_pane(
         .collect();
     if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
-        && is_agent_process(tmux, &new_pane)
+        && is_agent_process(tmux, &new_pane, harness)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         sessions::register(session_id, &new_pane, file_path)?;
-        send_command(tmux, &new_pane, file_path)?;
+        send_command(tmux, &new_pane, file_path, harness)?;
         return Ok(new_pane);
     }
 
@@ -293,7 +297,7 @@ fn resolve_or_create_pane(
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
     let split_before = is_first_column(file, col_args);
-    auto_start_in_session(tmux, file, session_id, file_path, target_session, false, split_before)?;
+    auto_start_in_session(tmux, file, session_id, file_path, target_session, false, split_before, harness)?;
 
     // Look up the pane that was just created
     sessions::lookup(session_id)?
@@ -358,15 +362,15 @@ fn rescue_from_stash(
     }
 }
 
-/// Send `/agent-doc <file>` to a pane and focus it.
+/// Send the trigger command to a pane and focus it.
 /// Shows a brief tmux display-message on the target pane for immediate feedback.
-fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
-    // Flash notification on target pane — immediate feedback before Claude picks up input
+fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfig) -> Result<()> {
     let short_name = std::path::Path::new(file_path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
-    let flash_msg = format!("⏳ /agent-doc {}", short_name);
+    let trigger = harness.trigger_command(file_path);
+    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
     if let Err(e) = tmux
         .cmd()
         .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
@@ -375,17 +379,16 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    let command = format!("/agent-doc {}", file_path);
-    tmux.send_keys(pane, &command)?;
+    tmux.send_keys(pane, &trigger)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }
-    eprintln!("[route] Sent /agent-doc {} → pane {}", file_path, pane);
+    eprintln!("[route] Sent {} → pane {}", trigger, pane);
 
     // Poll-based Enter confirmation: check if the command text is still visible
-    // in the pane. Claude Code always shows ❯, so we can't check for prompt
-    // disappearance. Instead, we check if "/agent-doc" is still in the last
-    // few lines (meaning it's still in the input, not yet submitted).
+    // in the pane. Prompts vary by harness, so instead of watching for prompt
+    // disappearance we check whether the exact trigger command is still in the
+    // last few lines (meaning it is still sitting in the input, not submitted).
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);
     let poll_interval = std::time::Duration::from_millis(300);
@@ -396,14 +399,7 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
         if let Ok(content) = sessions::capture_pane(tmux, pane) {
             // Check if the command text is still in the last 5 lines
             // (i.e., still sitting in the input prompt, not yet submitted)
-            let cmd_still_in_input = content
-                .lines()
-                .rev()
-                .take(5)
-                .any(|l| {
-                    let stripped = prompt::strip_ansi(l);
-                    stripped.contains("/agent-doc") && stripped.contains(file_path)
-                });
+            let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
 
             if !cmd_still_in_input {
                 eprintln!(
@@ -429,6 +425,37 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str) -> Result<()> {
     Ok(())
 }
 
+fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
+    content
+        .lines()
+        .rev()
+        .take(5)
+        .any(|line| line_contains_trigger(&prompt::strip_ansi(line), trigger))
+}
+
+fn line_contains_trigger(line: &str, trigger: &str) -> bool {
+    let mut offset = 0usize;
+    while let Some(found) = line[offset..].find(trigger) {
+        let start = offset + found;
+        let end = start + trigger.len();
+        let prev_ok = line[..start]
+            .chars()
+            .next_back()
+            .map(|ch| ch.is_whitespace() || matches!(ch, '>' | '❯' | '⏵'))
+            .unwrap_or(true);
+        let next_ok = line[end..]
+            .chars()
+            .next()
+            .map(|ch| ch.is_whitespace())
+            .unwrap_or(true);
+        if prev_ok && next_ok {
+            return true;
+        }
+        offset = start + 1;
+    }
+    false
+}
+
 /// Get the current tmux session name (the session the caller is attached to).
 fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     // If we're inside tmux, query the current session name
@@ -451,13 +478,14 @@ fn current_tmux_session(tmux: &Tmux) -> Option<String> {
 /// Priority:
 /// 1. `context_session` if provided (from sync --window)
 /// 2. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
-/// 3. Fallback to current tmux session or "claude" constant (auto-detect)
+/// 3. Fallback to current tmux session or harness-specific fallback name (auto-detect)
 ///
 /// Session config is never auto-written. Only `agent-doc session set <name>` pins a session.
 /// `agent-doc session clear` returns to auto-detect mode.
 fn resolve_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
+    harness: &HarnessConfig,
 ) -> String {
     if let Some(ctx) = context_session {
         return ctx.to_string();
@@ -469,7 +497,7 @@ fn resolve_target_session(
     }
 
     let resolved = current_tmux_session(tmux)
-        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+        .unwrap_or_else(|| harness.tmux_session_fallback.clone());
 
     // Auto-update config.toml when the configured session is stale.
     // This prevents resync from killing panes in the actual session
@@ -548,7 +576,7 @@ fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane
     None
 }
 
-/// Auto-start a new Claude session in tmux using the default session name.
+/// Auto-start a new agent session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 ///
 /// `context_session` is an optional session override from the calling context
@@ -614,11 +642,22 @@ fn auto_start_ext(
     skip_wait: bool,
     split_before: bool,
 ) -> Result<String> {
-    let session_name = resolve_target_session(tmux, context_session);
-    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before)
+    let harness = resolve_harness_for_file(file);
+    let session_name = resolve_target_session(tmux, context_session, &harness);
+    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before, &harness)
 }
 
-/// Auto-start a new Claude session in a specific tmux session.
+/// Resolve HarnessConfig from a file's frontmatter + global config.
+fn resolve_harness_for_file(file: &Path) -> HarnessConfig {
+    let content = std::fs::read_to_string(file).unwrap_or_default();
+    let fm = frontmatter::parse(&content)
+        .map(|(f, _)| f)
+        .unwrap_or_default();
+    let global_config = crate::config::load().unwrap_or_default();
+    HarnessConfig::from_context(&fm, &global_config)
+}
+
+/// Auto-start a new agent session in a specific tmux session.
 ///
 /// Strategy:
 /// 1. Find an existing registered agent-doc pane in the target session
@@ -626,9 +665,10 @@ fn auto_start_ext(
 ///    a throwaway window then failing to join due to minimum pane size)
 /// 3. If not found: create a new window via `auto_start` (session may not exist yet)
 ///
-/// When `skip_wait` is true, skips `wait_for_claude_ready` and `send_command`.
-/// Used by sync which only needs the pane to exist with Claude starting.
-fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool) -> Result<String> {
+/// When `skip_wait` is true, skips `wait_for_agent_ready` and `send_command`.
+/// Used by sync which only needs the pane to exist with the agent starting.
+#[allow(clippy::too_many_arguments)]
+fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool, harness: &HarnessConfig) -> Result<String> {
     // Startup lock: prevent double-spawn when sync fires twice in quick succession.
     // Check for a lock file; if it exists and is < 5s old, skip this auto-start.
     // Best-effort: skip lock entirely if file doesn't exist or hash fails.
@@ -759,26 +799,24 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     tmux.send_keys(&new_pane, &start_cmd)?;
 
     eprintln!(
-        "[route] Started Claude for {} in pane {} (session {})",
+        "[route] Started {} for {} in pane {} (session {})",
+        harness.binary,
         file_path,
         new_pane,
         &session_id[..std::cmp::min(8, session_id.len())]
     );
 
     if skip_wait {
-        eprintln!("[route] skip_wait=true — pane created, Claude starting (sync path)");
+        eprintln!("[route] skip_wait=true — pane created, {} starting (sync path)", harness.binary);
     } else {
-        // Poll until Claude is ready, then send the /agent-doc command
-        eprintln!("[route] Waiting for Claude to initialize...");
-        if wait_for_claude_ready(tmux, &new_pane, std::time::Duration::from_secs(30)) {
-            eprintln!("[route] Claude is ready, sending /agent-doc command");
-            // send_command now includes Enter verification + retry.
-            // Use `start_path` (cwd-relative) for the same reason as `start_cmd`.
-            send_command(tmux, &new_pane, &start_path)?;
+        eprintln!("[route] Waiting for {} to initialize...", harness.binary);
+        if wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness) {
+            eprintln!("[route] {} is ready, sending command", harness.binary);
+            send_command(tmux, &new_pane, &start_path, harness)?;
         } else {
             eprintln!(
-                "[route] Timed out waiting for Claude. Run `agent-doc route {}` to retry.",
-                file_path
+                "[route] Timed out waiting for {}. Run `agent-doc route {}` to retry.",
+                harness.binary, file_path
             );
         }
     }
@@ -787,19 +825,20 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     Ok(new_pane)
 }
 
-/// Poll a tmux pane until Claude Code is ready to accept input.
+/// Poll a tmux pane until the agent is ready to accept input.
 ///
-/// Looks for Claude's idle prompt indicator (`❯` or `>`) in the captured pane content.
+/// Uses the harness's prompt patterns for detection.
 /// Strips ANSI escape codes before matching. Polls every 500ms up to the given timeout.
-fn wait_for_claude_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duration) -> bool {
+fn wait_for_agent_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duration, harness: &HarnessConfig) -> bool {
     let start = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(500);
     let mut poll_count = 0u32;
 
     while start.elapsed() < timeout {
-        if pane_has_prompt(tmux, pane_id) {
+        if pane_has_prompt(tmux, pane_id, harness) {
             eprintln!(
-                "[route] Claude ready after {:.1}s ({} polls)",
+                "[route] {} ready after {:.1}s ({} polls)",
+                harness.binary,
                 start.elapsed().as_secs_f64(),
                 poll_count
             );
@@ -816,7 +855,8 @@ fn wait_for_claude_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duratio
                     .map(prompt::strip_ansi)
                     .unwrap_or_default();
                 eprintln!(
-                    "[route] Still waiting for Claude ({:.0}s)... last line: {}",
+                    "[route] Still waiting for {} ({:.0}s)... last line: {}",
+                    harness.binary,
                     start.elapsed().as_secs_f64(),
                     &last_line[..std::cmp::min(60, last_line.len())]
                 );
@@ -826,19 +866,15 @@ fn wait_for_claude_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duratio
     false
 }
 
-/// Check if pane content shows Claude's idle prompt (❯ or >).
-fn pane_has_prompt(tmux: &Tmux, pane_id: &str) -> bool {
+/// Check if pane content shows the agent's idle prompt.
+fn pane_has_prompt(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
     if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
         content
             .lines()
             .rev()
             .filter(|l| !l.trim().is_empty())
             .take(10)
-            .any(|l| {
-                let t = prompt::strip_ansi(l);
-                let t = t.trim();
-                t == "❯" || t == ">" || t.starts_with("❯ ") || t.starts_with("> ")
-            })
+            .any(|l| harness.is_prompt_line(l))
     } else {
         false
     }
@@ -1036,50 +1072,40 @@ mod tests {
         assert!(is_first_column(file, &cols));
     }
 
-    // --- Prompt detection tests ---
+    // --- Prompt detection tests (via HarnessConfig) ---
 
     #[test]
     fn detects_unicode_prompt() {
-        // Claude Code uses ❯ (U+276F)
-        assert!(is_prompt_line("❯"));
-        assert!(is_prompt_line("❯ "));
-        assert!(is_prompt_line("  ❯  "));
+        let h = HarnessConfig::claude();
+        assert!(h.is_prompt_line("❯"));
+        assert!(h.is_prompt_line("❯ "));
+        assert!(h.is_prompt_line("  ❯  "));
     }
 
     #[test]
     fn detects_ascii_prompt() {
-        assert!(is_prompt_line(">"));
-        assert!(is_prompt_line("> "));
-        assert!(is_prompt_line("  >  "));
+        let h = HarnessConfig::codex();
+        assert!(h.is_prompt_line(">"));
+        assert!(h.is_prompt_line("> "));
+        assert!(h.is_prompt_line("  >  "));
     }
 
     #[test]
     fn rejects_non_prompt_lines() {
-        assert!(!is_prompt_line("Starting claude..."));
-        assert!(!is_prompt_line("test result: ok"));
-        assert!(!is_prompt_line(""));
-        assert!(!is_prompt_line("  "));
-        assert!(!is_prompt_line("## User"));
-        // Blockquote markers should NOT match — they are "> text" with content after
-        // but our check starts_with("> ") would match. This is acceptable since
-        // blockquotes don't appear in Claude Code's TUI output.
+        let h = HarnessConfig::claude();
+        assert!(!h.is_prompt_line("Starting claude..."));
+        assert!(!h.is_prompt_line("test result: ok"));
+        assert!(!h.is_prompt_line(""));
+        assert!(!h.is_prompt_line("  "));
+        assert!(!h.is_prompt_line("## User"));
     }
 
     #[test]
     fn handles_ansi_prompt() {
-        // Prompt with ANSI color codes
-        assert!(is_prompt_line("\x1b[32m❯\x1b[0m"));
-        assert!(is_prompt_line("\x1b[1m>\x1b[0m"));
-    }
-
-    /// Helper to test prompt detection on a single line.
-    fn is_prompt_line(line: &str) -> bool {
-        let stripped = prompt::strip_ansi(line);
-        let trimmed = stripped.trim();
-        trimmed == "❯"
-            || trimmed == ">"
-            || trimmed.starts_with("❯ ")
-            || trimmed.starts_with("> ")
+        let h = HarnessConfig::claude();
+        assert!(h.is_prompt_line("\x1b[32m❯\x1b[0m"));
+        let h_codex = HarnessConfig::codex();
+        assert!(h_codex.is_prompt_line("\x1b[1m>\x1b[0m"));
     }
 
     // --- Routing logic tests ---
@@ -1149,37 +1175,35 @@ mod tests {
 
     use sessions::IsolatedTmux;
 
-    /// Create a mock Claude script: blocks for delay, then prints ❯ prompt on its own line.
+    /// Create a mock agent script: blocks for delay, then prints ❯ prompt on its own line.
     /// Uses `cat` to keep the process alive after showing the prompt.
-    fn mock_claude_script(delay_ms: u64) -> String {
+    fn mock_agent_script(delay_ms: u64) -> String {
         format!(
-            r#"PS1='$ '; echo "Starting claude..."; sleep {}; echo '❯ '; cat"#,
+            r#"PS1='$ '; echo "Starting agent..."; sleep {}; echo '❯ '; cat"#,
             delay_ms as f64 / 1000.0
         )
     }
 
     #[test]
-    fn wait_for_claude_ready_detects_prompt() {
+    fn wait_for_agent_ready_detects_prompt() {
         let iso = IsolatedTmux::new("route-test-ready");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        // Set a non-matching PS1 and run mock Claude that shows ❯ after 500ms
-        iso.send_keys(&pane, &mock_claude_script(500)).unwrap();
+        iso.send_keys(&pane, &mock_agent_script(500)).unwrap();
 
-        // Should detect the prompt within 5s
-        let ready = wait_for_claude_ready(&iso, &pane, std::time::Duration::from_secs(5));
-        assert!(ready, "should detect ❯ prompt from mock Claude");
+        let harness = HarnessConfig::claude();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        assert!(ready, "should detect ❯ prompt from mock agent");
     }
 
     #[test]
-    fn wait_for_claude_ready_times_out_without_prompt() {
+    fn wait_for_agent_ready_times_out_without_prompt() {
         let iso = IsolatedTmux::new("route-test-timeout");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
-        // Create a pane that runs sleep directly (no shell prompt at all)
         let pane_id = iso
             .cmd()
             .args(["new-session", "-d", "-s", session, "-c", &cwd.to_string_lossy(), "-P", "-F", "#{pane_id}", "sleep", "30"])
@@ -1187,13 +1211,55 @@ mod tests {
             .expect("failed to create tmux session");
         let pane = String::from_utf8_lossy(&pane_id.stdout).trim().to_string();
 
-        // Should time out after 2s (sleep never shows ❯)
-        let ready = wait_for_claude_ready(&iso, &pane, std::time::Duration::from_secs(2));
+        let harness = HarnessConfig::claude();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
         assert!(!ready, "should time out when no ❯ prompt appears");
     }
 
     #[test]
-    fn send_keys_delivers_command_with_enter() {
+    fn wait_for_agent_ready_codex_prompt() {
+        let iso = IsolatedTmux::new("route-test-codex-ready");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        // Codex uses > as prompt
+        let script = r#"PS1='$ '; echo "Starting codex..."; sleep 0.5; echo '> '; cat"#;
+        iso.send_keys(&pane, script).unwrap();
+
+        let harness = HarnessConfig::codex();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        assert!(ready, "should detect > prompt for codex harness");
+    }
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_claude_trigger() {
+        let content = "\
+history line
+\x1b[32m❯\x1b[0m /agent-doc test.md
+";
+        assert!(recent_lines_contain_trigger(content, "/agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "agent-doc test.md"));
+    }
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_codex_trigger() {
+        let content = "\
+history line
+> agent-doc test.md
+";
+        assert!(recent_lines_contain_trigger(content, "agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "/agent-doc test.md"));
+    }
+
+    #[test]
+    fn line_contains_trigger_rejects_codex_substring_inside_claude_trigger() {
+        assert!(line_contains_trigger("❯ /agent-doc test.md", "/agent-doc test.md"));
+        assert!(!line_contains_trigger("❯ /agent-doc test.md", "agent-doc test.md"));
+    }
+
+    #[test]
+    fn send_keys_delivers_claude_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
@@ -1203,14 +1269,36 @@ mod tests {
         iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
-        // Send a command (simulates what send_command does)
-        iso.send_keys(&pane, "/agent-doc test.md").unwrap();
+        let trigger = HarnessConfig::claude().trigger_command("test.md");
+        iso.send_keys(&pane, &trigger).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1500));
 
         // Capture and verify the command was received
         let content = sessions::capture_pane(&iso, &pane).unwrap();
         assert!(
-            content.contains("GOT:/agent-doc test.md"),
+            content.contains(&format!("GOT:{}", trigger)),
+            "command should be delivered and echoed back, got: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn send_keys_delivers_codex_command_with_enter() {
+        let iso = IsolatedTmux::new("route-test-send-codex");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let trigger = HarnessConfig::codex().trigger_command("test.md");
+        iso.send_keys(&pane, &trigger).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+
+        let content = sessions::capture_pane(&iso, &pane).unwrap();
+        assert!(
+            content.contains(&format!("GOT:{}", trigger)),
             "command should be delivered and echoed back, got: {}",
             content
         );
@@ -1227,9 +1315,10 @@ mod tests {
         iso.send_keys(&pane, "exec bash -c 'echo ❯; cat'").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2500));
 
+        let harness = HarnessConfig::claude();
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
-            pane_has_prompt(&iso, &pane),
+            pane_has_prompt(&iso, &pane, &harness),
             "should detect ❯ in pane content, got: {}",
             content
         );
@@ -1237,24 +1326,20 @@ mod tests {
 
     #[test]
     fn full_auto_start_flow() {
-        // End-to-end test: create pane → run mock Claude → detect ready → send command
         let iso = IsolatedTmux::new("route-test-e2e");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        // 1. Run mock Claude (shows ❯ after 300ms, then blocks on cat to accept input)
-        iso.send_keys(&pane, &mock_claude_script(300)).unwrap();
+        iso.send_keys(&pane, &mock_agent_script(300)).unwrap();
 
-        // 2. Wait for ready
-        let ready = wait_for_claude_ready(&iso, &pane, std::time::Duration::from_secs(5));
-        assert!(ready, "mock Claude should become ready");
+        let harness = HarnessConfig::claude();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        assert!(ready, "mock agent should become ready");
 
-        // 3. Send a command via send_keys (simulating send_command)
         iso.send_keys(&pane, "HELLO_FROM_TEST").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(500));
 
-        // 4. Verify command appears in pane (cat echoes stdin to stdout)
         let content = sessions::capture_pane(&iso, &pane).unwrap();
         assert!(
             content.contains("HELLO_FROM_TEST"),

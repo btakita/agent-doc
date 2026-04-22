@@ -409,7 +409,7 @@ Verified:
 - `cargo install --path .` replaced the local `agent-doc` binary
 
 After reinstall, `Run Agent Doc` should route plain `agent-doc <file>` for Codex-backed sessions. Literal `/agent-doc ...` remains unsupported by the Codex CLI itself.
-<!-- agent:boundary:48a4be00 -->
+<!-- agent:boundary:2a9bd81a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

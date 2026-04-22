@@ -572,12 +572,12 @@ pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
 ///
 /// `file_path` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> bool {
+pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
-    crate::debounce::is_tracked(path)
+    crate::debounce::is_tracked(path) as i32
 }
 
 /// Return the number of files tracked in the debounce state.
@@ -603,22 +603,22 @@ pub extern "C" fn agent_doc_tracked_count() -> u32 {
 pub unsafe extern "C" fn agent_doc_is_idle(
     file_path: *const c_char,
     debounce_ms: i64,
-) -> bool {
+) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return true, // Invalid path — don't block callers
+        Err(_) => return 1, // Invalid path — don't block callers
     };
     let in_process_idle = crate::debounce::is_idle(path, debounce_ms as u64);
     if !in_process_idle {
-        return false;
+        return 0;
     }
     // In-process says idle. If the file was never tracked in this process (e.g., after
     // plugin restart), also check the file-based indicator so cross-process typing state
     // from another plugin instance isn't silently lost.
     if !crate::debounce::is_tracked(path) {
-        return !crate::debounce::is_typing_via_file(path, debounce_ms as u64);
+        return (!crate::debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
     }
-    true
+    1
 }
 
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
@@ -634,10 +634,10 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     file_path: *const c_char,
     debounce_ms: i64,
     timeout_ms: i64,
-) -> bool {
+) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return true, // Invalid path — don't block
+        Err(_) => return 1, // Invalid path — don't block
     };
     // When the file is untracked in-process (e.g., after plugin restart), bridge to
     // file-based indicator so cross-process typing state isn't silently ignored.
@@ -646,9 +646,9 @@ pub unsafe extern "C" fn agent_doc_await_idle(
             path,
             debounce_ms as u64,
             timeout_ms as u64,
-        );
+        ) as i32;
     }
-    crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
+    crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Check if a plugin in another process has typed recently (cross-process).
@@ -668,12 +668,12 @@ pub unsafe extern "C" fn agent_doc_await_idle(
 pub unsafe extern "C" fn agent_doc_is_typing_via_file(
     file_path: *const c_char,
     debounce_ms: i64,
-) -> bool {
+) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
-    crate::debounce::is_typing_via_file(path, debounce_ms as u64)
+    crate::debounce::is_typing_via_file(path, debounce_ms as u64) as i32
 }
 
 /// Block until the file-based typing indicator shows idle, or timeout expires.
@@ -690,12 +690,12 @@ pub unsafe extern "C" fn agent_doc_await_idle_via_file(
     file_path: *const c_char,
     debounce_ms: i64,
     timeout_ms: i64,
-) -> bool {
+) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return true, // Invalid path — don't block
+        Err(_) => return 1, // Invalid path — don't block
     };
-    crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
+    crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Set the response status for a file (Option B: in-process).
@@ -749,12 +749,12 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
 ///
 /// `file_path` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> bool {
+pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
-    crate::debounce::is_busy(path)
+    crate::debounce::is_busy(path) as i32
 }
 
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
@@ -766,8 +766,8 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> bool {
 /// This is a cross-editor shared lock — prevents concurrent syncs from IntelliJ
 /// and VS Code plugins simultaneously.
 #[unsafe(no_mangle)]
-pub extern "C" fn agent_doc_sync_try_lock() -> bool {
-    SYNC_LOCKED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+pub extern "C" fn agent_doc_sync_try_lock() -> i32 {
+    SYNC_LOCKED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() as i32
 }
 
 /// Release the sync lock acquired by `agent_doc_sync_try_lock()`.
@@ -790,8 +790,8 @@ pub extern "C" fn agent_doc_sync_bump_generation() -> u64 {
 /// Check if a generation is still current. Returns `true` if `generation` matches the
 /// latest generation (no newer events have been scheduled).
 #[unsafe(no_mangle)]
-pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> bool {
-    SYNC_GENERATION.load(Ordering::SeqCst) == generation
+pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> i32 {
+    (SYNC_GENERATION.load(Ordering::SeqCst) == generation) as i32
 }
 
 /// Start the IPC socket listener on a background thread.
@@ -813,11 +813,11 @@ pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_start_ipc_listener(
     project_root: *const c_char,
-    callback: extern "C" fn(message: *const c_char) -> bool,
-) -> bool {
+    callback: extern "C" fn(message: *const c_char) -> i32,
+) -> i32 {
     let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     let root_path = std::path::PathBuf::from(&root_str);
 
@@ -828,7 +828,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
                 Ok(c) => c,
                 Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
             };
-            let success = callback(c_msg.as_ptr());
+            let success = callback(c_msg.as_ptr()) != 0;
             if success {
                 Some(r#"{"type":"ack","status":"ok"}"#.to_string())
             } else {
@@ -840,7 +840,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
         }
     });
 
-    true
+    1
 }
 
 /// Stop the IPC socket listener by removing the socket file.
@@ -883,24 +883,24 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
     project_root: *const c_char,
     patch_id: *const c_char,
     content: *const c_char,
-) -> bool {
+) -> i32 {
     let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     let content_str = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
 
     let ack_dir = std::path::Path::new(root_str).join(".agent-doc/ack-content");
     if let Err(e) = std::fs::create_dir_all(&ack_dir) {
         eprintln!("[ffi] agent_doc_write_ack_content: mkdir error: {e}");
-        return false;
+        return 0;
     }
 
     let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
@@ -908,11 +908,11 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
         Ok(_) => {
             eprintln!("[ffi] ack_content written: {} bytes for patch_id {}",
                 content_str.len(), &patch_id_str[..patch_id_str.len().min(8)]);
-            true
+            1
         }
         Err(e) => {
             eprintln!("[ffi] agent_doc_write_ack_content: write error: {e}");
-            false
+            0
         }
     }
 }
@@ -928,14 +928,14 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
 pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
     project_root: *const c_char,
     patch_id: *const c_char,
-) -> bool {
+) -> i32 {
     let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
 
     let sentinel = std::path::Path::new(root_str)
@@ -946,9 +946,9 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
         eprintln!("[ffi] patch_id {} claimed by force-disk — skipping apply",
             &patch_id_str[..patch_id_str.len().min(8)]);
         let _ = std::fs::remove_file(&sentinel);
-        true
+        1
     } else {
-        false
+        0
     }
 }
 
@@ -966,16 +966,16 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
 ///
 /// `file_path` must be a valid NUL-terminated UTF-8 string, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_commit(file_path: *const c_char) -> bool {
+pub unsafe extern "C" fn agent_doc_commit(file_path: *const c_char) -> i32 {
     if file_path.is_null() {
-        return false;
+        return 0;
     }
     let path_str = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     let path = std::path::Path::new(path_str);
-    ffi_git_commit(path)
+    ffi_git_commit(path) as i32
 }
 
 /// Minimal git commit for the FFI context (no full git module dependency).
@@ -1222,7 +1222,7 @@ mod tests {
     fn is_idle_untracked_returns_true() {
         let path = CString::new("/tmp/ffi-test-untracked-file.md").unwrap();
         let result = unsafe { agent_doc_is_idle(path.as_ptr(), 500) };
-        assert!(result, "untracked file should report idle");
+        assert_eq!(result, 1, "untracked file should report idle");
     }
 
     #[test]
@@ -1230,7 +1230,7 @@ mod tests {
         let path = CString::new("/tmp/ffi-test-just-changed.md").unwrap();
         unsafe { agent_doc_document_changed(path.as_ptr()) };
         let result = unsafe { agent_doc_is_idle(path.as_ptr(), 2000) };
-        assert!(!result, "file changed <2s ago should not be idle with 2000ms window");
+        assert_eq!(result, 0, "file changed <2s ago should not be idle with 2000ms window");
     }
 
     #[test]
@@ -1346,7 +1346,7 @@ mod ack_content_tests {
                 content.as_ptr(),
             )
         };
-        assert!(result, "should return true on success");
+        assert_eq!(result, 1, "should return 1 on success");
 
         let sidecar = tmp.path().join(".agent-doc/ack-content/test-patch-id-123.md");
         assert!(sidecar.exists(), "sidecar file should exist at {:?}", sidecar);
@@ -1364,7 +1364,7 @@ mod ack_content_tests {
         let patch_id = CString::new("test-patch-456").unwrap();
 
         let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
-        assert!(claimed, "should return true when sentinel exists");
+        assert_eq!(claimed, 1, "should return 1 when sentinel exists");
         assert!(!claimed_dir.join("test-patch-456").exists(), "sentinel should be deleted after check");
     }
 
@@ -1375,7 +1375,7 @@ mod ack_content_tests {
         let patch_id = CString::new("nonexistent-patch").unwrap();
 
         let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
-        assert!(!claimed, "should return false when sentinel absent");
+        assert_eq!(claimed, 0, "should return 0 when sentinel absent");
     }
 
     // --- Fix 4: agent_doc_commit FFI export ---
@@ -1383,7 +1383,7 @@ mod ack_content_tests {
     #[test]
     fn agent_doc_commit_returns_false_for_null() {
         let result = unsafe { agent_doc_commit(std::ptr::null()) };
-        assert!(!result, "null path should return false");
+        assert_eq!(result, 0, "null path should return 0");
     }
 
     #[test]

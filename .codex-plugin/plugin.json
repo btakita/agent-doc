@@ -1,0 +1,43 @@
+{
+  "name": "agent-doc",
+  "version": "0.33.12",
+  "description": "Interactive document sessions with AI agents, backed by the local agent-doc CLI.",
+  "author": {
+    "name": "Brian Takita",
+    "url": "https://github.com/btakita"
+  },
+  "homepage": "https://github.com/btakita/agent-doc",
+  "repository": "https://github.com/btakita/agent-doc",
+  "license": "MIT",
+  "keywords": [
+    "agent-doc",
+    "documents",
+    "markdown",
+    "agents",
+    "tmux",
+    "crdt",
+    "workflow"
+  ],
+  "skills": "./",
+  "interface": {
+    "displayName": "agent-doc",
+    "shortDescription": "Run interactive AI sessions from markdown documents",
+    "longDescription": "Use agent-doc to diff markdown session documents, route work to local AI agent sessions, write responses back through the local CLI, and preserve concurrent edits with CRDT-aware document updates.",
+    "developerName": "Brian Takita",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/btakita/agent-doc",
+    "defaultPrompt": [
+      "Use agent-doc with this markdown session document.",
+      "Route this document through the local agent-doc CLI."
+    ],
+    "brandColor": "#1F6FEB",
+    "composerIcon": "./assets/logo.svg",
+    "logo": "./assets/logo-512.png",
+    "screenshots": []
+  }
+}

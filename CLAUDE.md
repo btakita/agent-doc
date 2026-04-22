@@ -46,15 +46,15 @@ src/
   git.rs            # Commit, branch, squash (includes `commit` subcommand)
   config.rs         # Global config (~/.config/agent-doc/config.toml)
   sessions.rs       # Session registry (sessions.json) + Tmux struct
-  route.rs          # Route /agent-doc commands to correct tmux pane (pub auto_start for sync.rs)
-  start.rs          # Start Claude session inside tmux pane
+  route.rs          # Route harness-specific agent-doc triggers to the correct tmux pane (pub auto_start for sync.rs)
+  start.rs          # Start configured agent harness inside tmux pane
   claim.rs          # Claim document for current tmux pane
   focus.rs          # Focus tmux pane for a session document
   layout.rs         # Arrange tmux panes to mirror editor split layout
   outline.rs        # Markdown section structure + token counts
   prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md (install/check)
-  install.rs        # System-level setup: check prerequisites (tmux, claude) and install editor plugins
+  install.rs        # System-level setup: check prerequisites (tmux + agent CLI) and install editor plugins
   resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix [--session <target>])
   session_cmd.rs    # Show/set configured tmux session with pane migration
   history.rs        # Exchange version history from git + restore

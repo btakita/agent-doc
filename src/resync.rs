@@ -29,7 +29,7 @@
 //!   registry can go stale); `purge_orphaned_agent_panes` removes unregistered
 //!   agent-doc/claude/node panes from any window, but only when the window has at
 //!   least one other pane (never orphans the last pane).
-//! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `node`) are
+//! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `codex`, `node`) are
 //!   expected occupants of registered panes. `IDLE_SHELLS` (`zsh`, `bash`, `sh`,
 //!   `fish`) are treated as empty/unused slots.
 //!
@@ -82,7 +82,7 @@ use crate::{config, frontmatter};
 use crate::sessions::{self, PaneMoveOp, Tmux};
 
 /// Valid process names for agent-doc panes.
-const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "node"];
+const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "codex", "node"];
 
 /// Shells considered idle (not running an agent process).
 const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];

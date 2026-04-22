@@ -47,7 +47,7 @@ Add phases to agent:pending
 ### Re: Add phases to pending — opus-4-6
 
 Added 5 Codex support phases (#cx01–#cx05) to pending. They map 1:1 to the phases in `specs/codex-support.md`. Existing items (#ha3h, #066r) kept as-is.
-<!-- agent:boundary:d94bd23e -->
+<!-- agent:boundary:27c6c5b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

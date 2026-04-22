@@ -563,7 +563,7 @@ So the practical mapping is:
 - if you mean both with no sandbox: use `--dangerously-bypass-approvals-and-sandbox`
 
 For `agent-doc` Codex sessions, the safer explicit replacement is usually `agent_args: -s danger-full-access` or `agent_args: -s danger-full-access -a never`, depending on whether you also want approval prompts disabled.
-<!-- agent:boundary:95569cd8 -->
+<!-- agent:boundary:31715890 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

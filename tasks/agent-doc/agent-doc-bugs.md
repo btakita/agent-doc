@@ -524,11 +524,51 @@ Verification:
 - `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
 - `cargo install --path .` replaced the local `agent-doc` binary.
-<!-- agent:boundary:e7c23a74 -->
+
+How can we ensure that the JB Plugin prompt is **always** contained on one row?
+![img_1.png](img_1.png)
+
+What is the codex equivalent of `--dangerously-skip-permissions`?
+### Re: JetBrains prompt one-row containment + Codex permission flag — gpt-5.4
+
+The JetBrains prompt is not guaranteed to stay on one row in the current implementation. The code explicitly allows wrapping:
+- `PromptPanel.kt` uses a custom `WrapLayout` for the options row.
+- `layoutPanel()` then measures the wrapped preferred height and allows the panel to grow up to 30% of the window height.
+
+So the current behavior is: if the buttons + hint text do not fit, the panel becomes multi-row by design.
+
+To make it always one row, the plugin needs a layout change, not a tmux/agent-doc routing change:
+- replace `WrapLayout` with a non-wrapping horizontal layout
+- enforce a fixed single-row panel height
+- truncate or drop overflow text instead of wrapping
+- keep full text in tooltips or move secondary text (for example the hotkey hint / pending-count suffix) out of the main row
+
+If you want the strongest invariant, the row should contain only compact controls, for example:
+- short question text with ellipsis
+- compact option chips like `[1] Yes` `[2] No`
+- no inline long-form hint text on the same row
+
+On the Codex side, there is not a single exact 1:1 flag name for Claude's `--dangerously-skip-permissions`.
+
+Local Codex CLI help shows two separate controls:
+- `-a never` = never ask for approval
+- `-s danger-full-access` = full-access sandbox mode
+
+And the full "skip everything" flag is:
+- `--dangerously-bypass-approvals-and-sandbox`
+
+So the practical mapping is:
+- if you mean "don't ask me for approvals": use `-a never`
+- if you mean "full access": use `-s danger-full-access`
+- if you mean both with no sandbox: use `--dangerously-bypass-approvals-and-sandbox`
+
+For `agent-doc` Codex sessions, the safer explicit replacement is usually `agent_args: -s danger-full-access` or `agent_args: -s danger-full-access -a never`, depending on whether you also want approval prompts disabled.
+<!-- agent:boundary:95569cd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#9kqp] [recommended] JetBrains PromptPanel single-row mode: replace WrapLayout with a non-wrapping row, keep fixed one-row height, and truncate or overflow secondary prompt text instead of wrapping
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

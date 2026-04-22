@@ -1277,7 +1277,46 @@ No. The IPC path mismatch fix was **Rust-only** — the Kotlin plugin was alread
 `resolveRootFor(filePath)` in the Kotlin plugin walks up and returns the nearest `.agent-doc/` (submodule root for boost-client). That behavior was right all along. The bug was on the binary side: `resolve_ipc_project_root` in `write.rs` was using `git_superproject_at` first, which returned `agent-loop/` instead of `boost-client/` — causing a path mismatch on the ack polling side.
 
 The fix changed the lookup order to match Kotlin's existing `resolveRootFor`. No Kotlin code changed. Your installed plugin at **v0.2.71** is current.
-<!-- agent:boundary:2afcf794 -->
+
+In src/boost-client, I tried `agent-doc tasks/monsterrodholders.md` and it failed again...after the install above. Why?
+```
+! agent-doc --version
+⎿  agent-doc 0.33.10
+```
+### Re: patchback still failing — root cause found and fixed — opus-4-6
+
+#### Root cause: JNA `Boolean` ↔ Rust `bool` ABI mismatch
+
+EVERY patch since IDEA started has been rejected by `isClaimedByForceDisk` — 27 rejections, 0 successful applies. The IPC path mismatch was a red herring; the real bug is in the FFI return type.
+
+**The bug:** JNA maps Java `Boolean` to a C `int` (4 bytes). Rust's `extern "C" fn -> bool` returns `_Bool` (1 byte in `%al`). On x86_64, the upper 3 bytes of `rax` are **undefined** for `_Bool` returns. When the function returns `false`:
+- Rust writes `al = 0` (correct)
+- JNA reads all 4 bytes of `eax` → gets garbage in upper bytes (e.g., `901873152`)
+- JNA interprets non-zero `int` as `true` → **wrong**
+
+Confirmed empirically:
+```
+c_bool result (1 byte):  False   ← correct
+c_int result  (4 bytes): 901873152 ← JNA sees this as true
+```
+
+This made `isClaimedByForceDisk` **always return true** from JNA's perspective, blocking every IPC patch apply. Functions returning `true` worked fine (any non-zero is true), which is why `start_ipc_listener` appeared to work.
+
+#### Fix: `bool` → `i32` for all FFI returns
+
+Changed all `extern "C" fn -> bool` in `ffi.rs` to `-> i32`, returning `0`/`1` explicitly. The 4-byte `i32` matches JNA's `Boolean` mapping exactly — no undefined upper bytes.
+
+Affected functions: `is_tracked`, `is_idle`, `await_idle`, `is_typing_via_file`, `await_idle_via_file`, `is_busy`, `sync_try_lock`, `sync_check_generation`, `start_ipc_listener`, `write_ack_content`, `is_claimed_by_force_disk`, `commit`. The callback type (`IpcMessageCallback`) also updated to `-> i32` on the Rust side, with `!= 0` for truth check.
+
+Post-fix verification:
+```
+c_int for false: 0  ← correct
+c_int for true:  1  ← correct
+```
+
+**1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.** The JB plugin needs an IDEA restart to reload the shared library (mtime-based hot reload will trigger on next `AgentDocLib.get()` call, but the listener thread holds the old library).
+<!-- agent:boundary:d5c790d1 -->
+<!-- agent:boundary:84b13b9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

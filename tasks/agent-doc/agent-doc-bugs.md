@@ -109,13 +109,30 @@ Implemented Phase 1: Codex agent backend.
 **Build:** `cargo install --path .` + `cargo build --release` ... both binaries live
 
 Pausing for your local testing before proceeding further.
-<!-- agent:boundary:738ae93f -->
+do #t46w. add tests. add to spec. build + install for local testing
+### Re: do #t46w — opus-4-6
+
+Implemented Phase 2: Frontmatter generalization.
+
+**Changes:**
+
+- **`frontmatter.rs`** — added `agent_args: Option<String>` field to `Frontmatter` struct. Parsed in `merge_fields()`. Serde handles serialization/deserialization. 4 new tests: parse, parse both fields, write roundtrip, merge.
+- **`config.rs`** — added `agent_args: Option<String>` to `Config` struct. 3 new tests: deserialization, precedence, fallback.
+- **`start.rs`** — updated resolution chain: `fm.agent_args > fm.claude_args > config.agent_args > config.claude_args > AGENT_DOC_CLAUDE_ARGS env`. Backward-compatible: existing `claude_args` in frontmatter or config still works.
+- **`specs/codex-support.md`** — Phase 2 section marked complete.
+
+**Precedence chain:** `agent_args` always takes precedence over `claude_args` at each level (frontmatter, config). When only `claude_args` is set, it works exactly as before.
+
+Build: both binaries rebuilt and installed.
+
+Pausing for your local testing.
+<!-- agent:boundary:108a2c76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#kne3] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
+- [x] [#kne3] Phase 1: Codex agent backend (agent/codex.rs) — implement Agent + StreamingAgent for codex exec --json, parse JSONL, session resume/fork. Spec: specs/codex-support.md
 - [ ] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns

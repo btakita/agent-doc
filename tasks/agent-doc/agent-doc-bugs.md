@@ -1402,7 +1402,66 @@ Each fix exposed the next bug underneath. The chain:
 #### Takeaway
 
 The IPC system had 3 bugs stacked on top of each other. Each turn fixed one but couldn't see the next until the previous was resolved. That's a terrible debugging experience but the underlying architecture is now sound: IPC path resolution matches between Rust and Kotlin, FFI types are width-correct, and the library install pipeline covers both binary and `.so`.
-<!-- agent:boundary:ceb5f18b -->
+
+❯ There was another issue with monsterrodholders.md. The agent:pending element was placed inside of the agent:exchange element. Why did this happen? Can we have a self-correcting update to ensure that agent:pending is placed outside of agent:exchange?
+### Re: pending nested inside exchange — opus-4-6
+
+#### Confirmed: it happened
+
+Git history on monsterrodholders.md confirms the bug. In commit 351f969 (and several after):
+
+```
+Line 17:   &lt;!-- agent:exchange patch=append --&gt;
+Line 1059: &lt;!-- agent:pending patch=replace --&gt;   ← INSIDE exchange
+Line 1097: &lt;!-- /agent:pending --&gt;                ← INSIDE exchange
+Line 1182: &lt;!-- /agent:exchange --&gt;               ← closes AFTER pending
+```
+
+The current working tree has the correct ordering (pending at line 1223, after exchange close at line 1219) — it was repaired at some point, likely by a compact or manual edit.
+
+#### Why it happened
+
+The investigation of src/agent-doc/src/ reveals a gap:
+
+1. **notify.rs ensure_pending_component()** places new pending at exchange.close_end — the byte offset after the exchange close tag. This is correct when the document structure is clean.
+
+2. **But there is no post-write validation.** If any operation (boundary synthesis in template.rs, patch application, or CRDT merge in write.rs) corrupts the structure — e.g., by inserting content that pushes pending's marker before exchange's close tag — the parser accepts it as valid nesting.
+
+3. **The component parser deliberately supports nesting.** component.rs uses a stack-based parser that treats pending inside exchange as legitimate nested components. No error, no warning.
+
+4. **No downstream check exists.** After write, no code validates that pending is a sibling of exchange rather than a child.
+
+#### Self-correcting fix design
+
+Add a validate_component_order() step that runs after every agent-doc write:
+
+```rust
+fn validate_component_order(doc: &str) -> Result<String> {
+    let components = component::parse(doc)?;
+    let exchange = components.iter().find(|c| c.name == "exchange");
+    let pending = components.iter().find(|c| c.name == "pending");
+
+    if let (Some(ex), Some(pend)) = (exchange, pending) {
+        if pend.open_start < ex.close_end {
+            // pending is nested inside exchange — lift it out
+            let pending_block = &doc[pend.open_start..pend.close_end];
+            let mut result = String::new();
+            result.push_str(&doc[..pend.open_start]);
+            result.push_str(&doc[pend.close_end..ex.close_end]);
+            result.push_str("\n\n");
+            result.push_str(pending_block);
+            result.push_str(&doc[ex.close_end..]);
+            return Ok(result);
+        }
+    }
+    Ok(doc.to_string())
+}
+```
+
+This would run as a normalization pass in the write pipeline, same place as normalize_user_prompts — after patch application, before snapshot save. Logged as component_nesting_repaired in ops.log so we can track how often it triggers.
+
+Added to pending for implementation.
+<!-- agent:boundary:9f3c5507 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1410,5 +1469,6 @@ The IPC system had 3 bugs stacked on top of each other. Each turn fixed one but 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#qjc8] Self-correcting component nesting: add post-write validation that detects agent:pending nested inside agent:exchange and lifts it to sibling position after exchange close
 <!-- /agent:pending -->
 ## Assistant

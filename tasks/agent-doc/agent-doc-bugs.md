@@ -505,7 +505,7 @@ Verification:
 - `cargo install --path .` replaced the local `agent-doc` binary.
 - `agent-doc skill install --harness codex` reports the local Codex install is up to date.
 - Source and installed pending runbooks both contain the custom-ID docs.
-<!-- agent:boundary:2e880234 -->
+<!-- agent:boundary:688ada5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

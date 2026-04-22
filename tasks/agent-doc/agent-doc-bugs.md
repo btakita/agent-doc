@@ -1402,7 +1402,7 @@ Each fix exposed the next bug underneath. The chain:
 #### Takeaway
 
 The IPC system had 3 bugs stacked on top of each other. Each turn fixed one but couldn't see the next until the previous was resolved. That's a terrible debugging experience but the underlying architecture is now sound: IPC path resolution matches between Rust and Kotlin, FFI types are width-correct, and the library install pipeline covers both binary and `.so`.
-<!-- agent:boundary:74b5c518 -->
+<!-- agent:boundary:ceb5f18b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

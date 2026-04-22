@@ -311,7 +311,7 @@ Added `*.docx` to `.gitignore`.
 4. Investor portal first (highest priority, no TMO dependency)
 5. Borrower + broker portals (TMO-dependent)
 6. Legal review + DNS cutover
-<!-- agent:boundary:16eb6f0b -->
+<!-- agent:boundary:bed92b19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

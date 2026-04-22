@@ -1203,8 +1203,7 @@ Two gaps in the stash rescue logic in `sync.rs`:
 **stash_rescue_discovers_agent_doc_window_when_window_arg_is_none** — creates a session with an agent-doc window, stashes a pane, then verifies that the discovery logic finds the agent-doc window from the session name and that swap-pane rescue moves the pane out of stash.
 
 **Full suite: 1220 passed (1 new), 6 ignored, 0 failures.** Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.
-<!-- agent:boundary:e6ec74a2 -->
-<!-- agent:boundary:35757ff4 -->
+<!-- agent:boundary:b5cbb769 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

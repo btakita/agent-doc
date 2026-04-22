@@ -1342,7 +1342,34 @@ The bool→i32 fix is in the binary (rebuilt at 21:39) but the IPC listener thre
 **Verification after restart:**
 - `ops.log` should show `ipc_socket_delivered` instead of `ipc_socket_sidecar_timeout`
 - Responses should appear in the editor via Document API (no "externally modified" dialog)
-<!-- agent:boundary:65f6cd3f -->
+
+❯ I restarted Idea. But the response still did not patchback to monsterrodholders.md
+### Re: still failing after IDEA restart — stale shared library — opus-4-6
+
+#### Root cause: `~/.cargo/bin/libagent_doc.so` was 2 days old
+
+The JB plugin loads the shared library via `agent-doc lib-path` → `~/.cargo/bin/libagent_doc.so`. This file was last modified **April 19** — before the bool→i32 fix (April 21 21:38). `cargo install --path .` only installs the **binary**, not the **shared library**. The `.so` was never updated.
+
+**Timeline:**
+- `target/release/libagent_doc.so` — April 21 21:38 (has i32 fix)
+- `~/.cargo/bin/libagent_doc.so` — April 19 (still has bool returns)
+- `~/.cargo/bin/agent-doc` — April 21 21:39 (binary is current)
+
+**IDEA log confirms:** After restart, `isClaimedByForceDisk` still returned true for every patch — the plugin loaded the old library with the bool ABI bug, making every claim check return garbage → true → skip apply.
+
+#### Fix applied
+
+```
+agent-doc lib-install
+```
+
+Installed `libagent_doc-0.33.10.so` with atomic symlink swap. The mtime-based hot reload will pick up the new library on next `AgentDocLib.get()` call. However, the IPC listener thread holds the old library — **restart IDEA one more time** to ensure the listener thread also loads the new library.
+
+#### Missing from release checklist
+
+`cargo install --path .` must be followed by `agent-doc lib-install` (or the Makefile target should do both). The shared library is a separate artifact. Without it, the JB plugin runs stale FFI code even when the binary is current.
+<!-- agent:boundary:a50b656a -->
+<!-- agent:boundary:5f49ffae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

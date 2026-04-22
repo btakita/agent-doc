@@ -662,12 +662,11 @@ Verification:
 - `cargo check` passed.
 - `cargo build --release` passed.
 - `cargo install --path .` replaced the local `agent-doc` binary.
-<!-- agent:boundary:17979516 -->
+<!-- agent:boundary:4d91328f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#vedj] normalize_user_prompts_in_exchange should not treat synthetic heading churn (for example `(HEAD)` suffix updates) as a fresh agent block that suppresses `❯ ` prefixing for the following user prompt
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

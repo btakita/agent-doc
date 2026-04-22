@@ -52,8 +52,37 @@ Why did 2 ids get created for each pending item?
 
 My fault. `--pending-add` auto-generates a 4-char hash ID (e.g., `#kne3`), and I included `[#cx01]` as literal text in the item body — so the binary treated it as content, not as an ID override. Result: `[#kne3] [#cx01]` — two bracketed IDs per item.
 
-Fixed: edited all 5 items via `--pending-edit` to strip the redundant `[#cxNN]` tags. The canonical IDs are now `#kne3`–`#stk1` (the auto-generated ones).
-<!-- agent:boundary:3568e829 -->
+Fixed: edited all 5 items via `--pending-edit` to strip the redundant `[#cxNN]` tags. The canonical IDs are now `#kne3`–`#stk1` (the auto-generated ones). 
+Can we fix the skill, runbook, binary logic? Should the agent-doc command have an id option to allow the skill to set the id?
+### Re: Custom ID for pending-add — opus-4-6
+
+Yes, this is worth fixing. The root cause is `op_add()` in `pending.rs:484` — it always auto-generates a hash ID via `assign_unique_hash(text, doc_id, &taken)`. There's no code path for a caller-specified ID.
+
+#### Recommended fix: `id=` prefix syntax on `--pending-add`
+
+Mirror the existing `--pending-edit "id=text"` pattern:
+
+```
+--pending-add "Phase 1: ..."           # auto-generate ID (current behavior)
+--pending-add "cx01=Phase 1: ..."      # use "cx01" as the ID
+```
+
+**Changes needed:**
+
+1. **`pending.rs`**: Add `op_add_with_id(body, id, text, doc_id, gated)` — same as `op_add` but skips `assign_unique_hash`, validates the caller-provided ID isn't already taken.
+
+2. **`main.rs`**: Parse `--pending-add` values — if text contains `=` and the prefix matches `[a-z0-9]{2,8}`, split into `(id, text)` and call `op_add_with_id`. Otherwise fall through to `op_add` (auto-generate). Same for `--pending-add-gated`.
+
+3. **Runbook `pending-ops.md`**: Document the `id=text` syntax.
+
+4. **SKILL.md**: No change needed — the skill just passes the right format.
+
+#### Why not extract `[#id]` from the text?
+
+Considered it — but `[#id]` is a rendering convention (how items look in markdown), not an input format. Mixing input and output formats creates fragile parsing and could conflict with legitimate text containing `[#...]`. The `id=` prefix is unambiguous and consistent with `--pending-edit`.
+
+~15 lines of Rust + 3-4 tests. Want me to implement it?
+<!-- agent:boundary:23478c6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -423,7 +423,7 @@ I added it now to `agent:pending` as:
 - `[#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests`
 
 That is the item that should have been created when I first identified the bug.
-<!-- agent:boundary:fdecd82e -->
+<!-- agent:boundary:87b919ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

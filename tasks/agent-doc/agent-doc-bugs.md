@@ -445,16 +445,36 @@ I added a recommended pending item for this follow-up:
 - `[#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended`
 
 I also recorded your pending-ordering rule in local memory so I apply it consistently on future agent-doc turns.
-<!-- agent:boundary:c5a10469 -->
+By default, please add new pending items to the beginning of the pending list in sequence order.
+do #cs6n. add spec + tests. build + install for local testing.
+### Re: `#cs6n` done — gpt-5.4
+
+Implemented.
+
+What changed:
+- Updated `SKILL.md` and `runbooks/pending-ops.md` so pending-worthy follow-up work must be explicitly captured, unaccepted suggestions are tagged `recommended`, and new items default to the beginning of `agent:pending`.
+- Changed pending add behavior so new items are inserted at the front of the list.
+- Added batch helpers in the CLI paths so when multiple items are added in one cycle, they stay at the front in the same sequence order they were presented.
+- Added regression tests for prepend semantics, batch ordering, notify multi-add ordering, and bundled skill/runbook content.
+
+Verification:
+- Targeted new tests passed for `pending`, `pending_cmd`, `notify`, and `skill`.
+- `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `cargo install --path .` replaced the local `agent-doc` binary.
+- `agent-doc skill install --harness codex` succeeded after reinstalling into the local `.codex` mount.
+- Installed `.codex/AGENTS.md` and `.codex/runbooks/pending-ops.md` now contain the new pending rules.
+
+I also applied your default ordering rule to local memory so future agent-doc turns use front insertion as the default pending behavior.
+<!-- agent:boundary:779ef277 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
+- [x] [#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
-- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
-- [ ] [#cs6n] [recommended] Update skill/runbook so pending-worthy next steps and explicit recommendations are added to agent:pending; keep unaccepted recommendations tagged recommended
+- [x] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

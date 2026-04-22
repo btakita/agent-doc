@@ -82,7 +82,7 @@ Mirror the existing `--pending-edit "id=text"` pattern:
 Considered it — but `[#id]` is a rendering convention (how items look in markdown), not an input format. Mixing input and output formats creates fragile parsing and could conflict with legitimate text containing `[#...]`. The `id=` prefix is unambiguous and consistent with `--pending-edit`.
 
 ~15 lines of Rust + 3-4 tests. Want me to implement it?
-<!-- agent:boundary:23478c6e -->
+<!-- agent:boundary:bbe17bc5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

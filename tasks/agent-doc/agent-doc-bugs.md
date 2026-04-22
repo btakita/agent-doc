@@ -1277,8 +1277,7 @@ No. The IPC path mismatch fix was **Rust-only** — the Kotlin plugin was alread
 `resolveRootFor(filePath)` in the Kotlin plugin walks up and returns the nearest `.agent-doc/` (submodule root for boost-client). That behavior was right all along. The bug was on the binary side: `resolve_ipc_project_root` in `write.rs` was using `git_superproject_at` first, which returned `agent-loop/` instead of `boost-client/` — causing a path mismatch on the ack polling side.
 
 The fix changed the lookup order to match Kotlin's existing `resolveRootFor`. No Kotlin code changed. Your installed plugin at **v0.2.71** is current.
-<!-- agent:boundary:f47ab518 -->
-<!-- agent:boundary:e2bea1a5 -->
+<!-- agent:boundary:2afcf794 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

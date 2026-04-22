@@ -645,7 +645,7 @@ So the answer is:
 - this is a **write.rs normalization bug** in how agent-block detection handles synthetic heading churn before a new user prompt
 
 I added it to `agent:pending` for follow-up.
-<!-- agent:boundary:49bbd31b -->
+<!-- agent:boundary:4dba9f93 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

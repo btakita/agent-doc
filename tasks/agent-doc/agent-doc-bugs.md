@@ -197,14 +197,18 @@ Yes — a single `AGENTS.md` with dispatch is the better design. ~90% of the ski
 **Why not separate files:** Drift. A bugfix to the commit cycle or a new runbook reference added to one file but missed in the other is the #1 maintenance hazard. With one file, changes propagate automatically.
 
 `skill.rs::install_all()` would write the same `AGENTS.md` content to both `.claude/skills/agent-doc/SKILL.md` and `.codex/AGENTS.md` (or a symlink). The harness preamble makes it self-routing.
-<!-- agent:boundary:47172bea -->
+Please update the text in #stk1 to follow the new design.
+### Re: update #stk1 — opus-4-6
+
+Updated pending item #stk1 to reflect the unified design: single `AGENTS.md` with harness-detection preamble instead of separate per-harness files.
+<!-- agent:boundary:6cd6f683 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
+- [ ] [#stk1] Phase 5: Unified skill file — single AGENTS.md with harness-detection preamble + runbooks/harness-invocation.md for dispatch. install_all() writes same content to .claude/ and .codex/ targets.
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

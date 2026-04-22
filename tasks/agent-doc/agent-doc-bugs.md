@@ -1315,8 +1315,7 @@ c_int for true:  1  ← correct
 ```
 
 **1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.** The JB plugin needs an IDEA restart to reload the shared library (mtime-based hot reload will trigger on next `AgentDocLib.get()` call, but the listener thread holds the old library).
-<!-- agent:boundary:d5c790d1 -->
-<!-- agent:boundary:84b13b9c -->
+<!-- agent:boundary:80dc2eeb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

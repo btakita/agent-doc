@@ -256,8 +256,7 @@ Covers: mise install, bun install, `bash bin/assets-download.sh` to pull images 
 **Clarification on your note:** You wrote "call `bin/assets-upload.sh` to get the assets" — the **download** script (`bin/assets-download.sh`) is what pulls images from R2 to local `public/`. The upload script pushes local images *to* R2. The README uses the download script in the setup flow.
 
 **Dev asset flow confirmed:** Local dev serves from `public/assets/images/` (populated by download script). The R2 proxy Function only applies in production (deployed Pages). No changes needed to how Hono serves locally.
-<!-- agent:boundary:fcb9b7f9 -->
-<!-- agent:boundary:09e5ddc1 -->
+<!-- agent:boundary:407d547a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

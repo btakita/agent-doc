@@ -524,12 +524,11 @@ Verification:
 - `cargo check --manifest-path src/agent-doc/Cargo.toml` passed.
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
 - `cargo install --path .` replaced the local `agent-doc` binary.
-<!-- agent:boundary:6b4691a4 -->
+<!-- agent:boundary:e7c23a74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

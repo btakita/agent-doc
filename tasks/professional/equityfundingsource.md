@@ -276,7 +276,7 @@ Key notes from Robert:
 **Action needed:** Download the 6 attachments from Robert's email (subject: "EFS Website Redesign — Branding, Layout & Copy Handoff", Apr 21) to a local directory — e.g., `tmp/efs-redesign/`. Then re-run `/agent-doc` and I'll convert them to markdown and draft the project plan.
 
 Alternatively, if you forward the email to yourself with attachments saved to Google Drive, I can access them via the Drive MCP if configured.
-<!-- agent:boundary:fb19dbb6 -->
+<!-- agent:boundary:2a98feb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

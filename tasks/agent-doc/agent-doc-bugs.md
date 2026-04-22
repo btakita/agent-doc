@@ -126,13 +126,37 @@ Implemented Phase 2: Frontmatter generalization.
 Build: both binaries rebuilt and installed.
 
 Pausing for your local testing.
-<!-- agent:boundary:e3e56ab1 -->
+do #3jh0. add tests. add to spec. build + install for local testing
+### Re: do #3jh0 — opus-4-6
+
+Implemented Phase 3: Supervisor harness abstraction.
+
+**New file: `harness.rs`**
+
+- `HarnessConfig` struct with: `binary`, `restart_behavior`, `prompt_patterns`, `trigger_command_template`, `env_remove`, `supports_no_mcp`, `supports_enable_tool_search`
+- `RestartBehavior` enum: `Append(args)` for Claude (`--continue`), `Replace(args)` for Codex (`resume --last`)
+- Factory methods: `claude()`, `codex()`, `from_agent_name()`, `from_context(fm, config)`
+- Helpers: `restart_args()`, `trigger_command("{file}")`, `matches_prompt(line)`
+
+**Refactored: `start.rs`**
+
+- Binary name parameterized across spawn, error messages, and log events
+- Restart args use `harness.restart_args(&base_args)` instead of hardcoded `--continue`
+- Auto-trigger thread uses `harness.matches_prompt()` instead of hardcoded `"❯"` / `"⏵"`
+- Trigger command uses `harness.trigger_command()` instead of hardcoded `/agent-doc {file}`
+- `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by harness feature flags
+- Resolution chain: `fm.agent > config.default_agent > "claude"`
+
+**14 unit tests** covering all HarnessConfig behavior.
+
+Build: both binaries rebuilt and installed. Pausing for local testing.
+<!-- agent:boundary:56a5968f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
+- [x] [#t46w] Phase 2: Frontmatter generalization — add agent_args field (claude_args compat alias), verify agent: codex + default_agent config end-to-end
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()

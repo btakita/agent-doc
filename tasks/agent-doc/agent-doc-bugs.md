@@ -686,7 +686,7 @@ Current state:
 - crates.io publish is complete.
 - GitHub Release asset build/publish is in progress in CI.
 - The PyPI workflow is wired off the GitHub release publication event in `.github/workflows/pypi.yml`, so its execution depends on that release workflow finishing.
-<!-- agent:boundary:88eb149f -->
+<!-- agent:boundary:4940cf14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

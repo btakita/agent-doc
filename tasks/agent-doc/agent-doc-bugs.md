@@ -1536,7 +1536,7 @@ When IDEA restarted, the `EditorTabSyncListener` fired `agent-doc sync` for the 
 **All 5 lib_install tests pass. Binary rebuilt and installed to `~/.cargo/bin/agent-doc`, `target/release/agent-doc`, and `libagent_doc-0.33.10.so`.**
 
 Ready for manual testing. To verify: reinstall the same version twice with IDEA running and confirm no crash.
-<!-- agent:boundary:71888919 -->
+<!-- agent:boundary:eb35fe4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1544,6 +1544,5 @@ Ready for manual testing. To verify: reinstall the same version twice with IDEA 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#3vk0] lib-install must use atomic rename (write to temp, rename) instead of overwriting the versioned .so file in place — prevents IDEA crash from corrupted mmap
 <!-- /agent:pending -->
 ## Assistant

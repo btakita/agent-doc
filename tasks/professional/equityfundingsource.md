@@ -311,7 +311,11 @@ Added `*.docx` to `.gitignore`.
 4. Investor portal first (highest priority, no TMO dependency)
 5. Borrower + broker portals (TMO-dependent)
 6. Legal review + DNS cutover
-<!-- agent:boundary:bed92b19 -->
+commit + push...including unstaged files
+### Re: commit + push — sonnet-4-6
+
+Committed and pushed `equityfundingsource-dev` (`7aa6f2f`): 13 files — all HTML originals, converted markdown files, and `project-plan.md`. The `.docx` is excluded via `.gitignore`. Parent `agent-loop` submodule pointer updated and pushed (`04f6d801`).
+<!-- agent:boundary:49e702cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

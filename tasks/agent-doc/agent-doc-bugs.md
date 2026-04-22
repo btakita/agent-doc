@@ -53,7 +53,7 @@ Why did 2 ids get created for each pending item?
 My fault. `--pending-add` auto-generates a 4-char hash ID (e.g., `#kne3`), and I included `[#cx01]` as literal text in the item body — so the binary treated it as content, not as an ID override. Result: `[#kne3] [#cx01]` — two bracketed IDs per item.
 
 Fixed: edited all 5 items via `--pending-edit` to strip the redundant `[#cxNN]` tags. The canonical IDs are now `#kne3`–`#stk1` (the auto-generated ones).
-<!-- agent:boundary:fff7dbe7 -->
+<!-- agent:boundary:3568e829 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

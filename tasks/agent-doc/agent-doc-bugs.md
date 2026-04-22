@@ -1224,15 +1224,52 @@ Both "Re: patchback confirmation" and "Re: fix status verification" are present 
 The editor didn't refresh. The IPC socket timed out, so the IDE plugin never received the patch — it only shows up as a file change on disk. If the IDE's file watcher didn't pick it up (or if the watcher was delayed), the editor buffer would still show the old content.
 
 The fix for the submodule commit bug should resolve the commit failures. The `zero_patches_warning` is a skill-side issue (the skill should always wrap responses in `<!-- patch:exchange -->`).
-<!-- /agent:exchange -->
+❯ In src/boost-client/ I ran another `agent-doc tasks/monsterrodholders.md` but for the 3rd time in a row, the response did not patchback. Why? This is a major issue and needs to be fixed.
+### Re: boost-client patchback failure — root cause fixed — sonnet-4-6
 
-## Pending / Not Built
+#### Root cause: IPC path mismatch between Rust and Kotlin
 
-<!-- agent:pending patch=replace -->
-- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-<!-- /agent:pending -->
-## Assistant
+Every `agent-doc write` cycle for boost-client files was hitting `ipc_socket_sidecar_timeout`. The socket connection succeeded (IDEA was listening), but the ack-content file was never found — so every write fell back to disk-only, leaving the editor buffer stale.
+
+**Why the ack was never found:**
+
+`write.rs` → `resolve_ipc_project_root` → `git_superproject_at(boost-client)` → returned `/home/brian/work/btakita/agent-loop` (boost-client is a git submodule).
+
+Rust polled for the ack at:
+```
+agent-loop/.agent-doc/ack-content/<patch_id>.md
+```
+
+Kotlin's `resolveRootFor(filePath)` walks up and returns the **nearest `.agent-doc/`** → `boost-client/.agent-doc/`. It wrote the ack at:
+```
+boost-client/.agent-doc/ack-content/<patch_id>.md
+```
+
+Binary polled one path, plugin wrote the other — never matched. Every cycle: 2-second timeout, disk fallback, no live editor update. This happened 3+ times in a row because it was structural, not transient.
+
+#### Fix: `resolve_ipc_project_root` now mirrors `resolveRootFor`
+
+Changed the lookup order in `write.rs` to check `find_project_root` (nearest `.agent-doc/`) **first**, before `git_superproject_at`. Both sides now agree on submodule root.
+
+```rust
+// Before (wrong for submodule files):
+// 1. git_superproject_at → agent-loop  ← mismatch with Kotlin
+// 2. git_toplevel_at
+// 3. find_project_root
+
+// After (matches Kotlin's resolveRootFor):
+// 1. find_project_root (nearest .agent-doc/) → boost-client  ← correct
+// 2. git_toplevel_at (for repos without .agent-doc)
+// 3. parent dir (last resort)
+```
+
+#### Tests updated
+
+- `resolve_ipc_project_root_uses_nearest_agent_doc_for_submodule_file` — submodule WITH its own `.agent-doc/` resolves to submodule root, not superproject
+- `try_ipc_routes_to_submodule_root_not_superproject` — socket send goes to boost-client's socket, not agent-loop's
+
+**All 1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.**
+<!-- agent:boundary:a063f744 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -86,7 +86,30 @@ Considered it — but `[#id]` is a rendering convention (how items look in markd
 ### Re: Add to pending — opus-4-6
 
 Done — added the custom ID feature as a pending item.
-<!-- agent:boundary:399c4fc9 -->
+do #kne3. add tests. create a feature branch. increment version. build + install for local testing
+### Re: do #kne3 — opus-4-6
+
+Implemented Phase 1: Codex agent backend.
+
+**What shipped (v0.33.12):**
+
+- **`src/agent/codex.rs`** — new file, `Agent` + `StreamingAgent` impl for Codex CLI
+  - Parses Codex JSONL event stream: `thread.started` → session ID, `item.completed` (type=`agent_message`) → response text, `turn.completed` → final signal
+  - Session resume: `codex exec resume <id> --json`
+  - Session fork: `codex exec resume --last --json` (Codex has no non-interactive fork ... resume --last is the closest equivalent)
+  - Model override: `-m <model>`
+  - Default sandbox: `-s workspace-write`
+  - Removes `CODEX_CLI` + `CODEX` env vars from child process
+  - Streaming iterator propagates `thread_id` as `session_id` on the final chunk
+- **`src/agent/mod.rs`** — registered `"codex"` in `resolve()` dispatch
+- **11 unit tests**: 9 event parser tests + 1 stream iterator propagation test + 1 missing-text edge case
+
+**Branch:** `20260422/codex-agent-backend` (inside `src/agent-doc/`)
+**Version:** 0.33.12 (Cargo.toml + pyproject.toml + VERSIONS.md)
+**Build:** `cargo install --path .` + `cargo build --release` ... both binaries live
+
+Pausing for your local testing before proceeding further.
+<!-- agent:boundary:ad15eaf2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -97,8 +120,8 @@ Done — added the custom ID feature as a pending item.
 - [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
+- [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 <!-- /agent:pending -->
 ## Assistant

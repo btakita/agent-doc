@@ -180,14 +180,13 @@ Implemented Phase 4: Route + Sync generalization.
 
 Build: both binaries rebuilt and installed. Pausing for local testing.
 s
-<!-- agent:boundary:83ca4bd8 -->
+<!-- agent:boundary:4547c4b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
-- [x] [#g37s] Phase 4: Route + Sync generalization — parameterize command injection in route.rs, rename wait_for_claude_ready → wait_for_agent_ready with configurable prompt patterns
+- [/] [#3jh0] Phase 3: Supervisor harness abstraction — extract HarnessConfig from start.rs (binary, restart flags, prompt patterns, trigger command, env removal)
 - [ ] [#stk1] Phase 5: Skill file adaptation — bundle AGENTS_CODEX.md for Codex harness, extend skill install_all()
 - [ ] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

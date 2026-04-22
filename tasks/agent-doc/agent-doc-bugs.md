@@ -466,7 +466,23 @@ Verification:
 - Installed `.codex/AGENTS.md` and `.codex/runbooks/pending-ops.md` now contain the new pending rules.
 
 I also applied your default ordering rule to local memory so future agent-doc turns use front insertion as the default pending behavior.
-<!-- agent:boundary:ea8fda95 -->
+Are both agent-doc and agent-loop SKILL.md + runbooks/pending-ops.md updated with the latest change?
+### Re: source vs installed pending-rule docs — gpt-5.4
+
+Yes, both sides are updated.
+
+Source files in `src/agent-doc`:
+- `src/agent-doc/SKILL.md` has the new pending capture / `recommended` / front-order rules.
+- `src/agent-doc/runbooks/pending-ops.md` has the matching pending-op contract.
+
+Installed workspace files in `agent-loop`:
+- `.codex/AGENTS.md` has the same updated skill content.
+- `.codex/runbooks/pending-ops.md` has the same updated runbook content.
+
+One clarification: there is not a separate root `agent-loop/SKILL.md` in this workspace. For Codex, the installed equivalent of the skill file is `.codex/AGENTS.md`.
+
+I verified the matching lines directly in both the source files and the installed `.codex` copies.
+<!-- agent:boundary:f6013dcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

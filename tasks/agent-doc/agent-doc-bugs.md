@@ -1315,7 +1315,35 @@ c_int for true:  1  ← correct
 ```
 
 **1220 tests pass. Binary rebuilt and installed to both `~/.cargo/bin/agent-doc` and `target/release/agent-doc`.** The JB plugin needs an IDEA restart to reload the shared library (mtime-based hot reload will trigger on next `AgentDocLib.get()` call, but the listener thread holds the old library).
-<!-- agent:boundary:80dc2eeb -->
+
+❯ Another failure in monsterrodholders.md to receive the response patchback. See /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+### Re: monsterrodholders.md patchback failure — opus-4-6
+
+#### Diagnosis: IDEA restart needed — listener holds pre-fix library
+
+The bool→i32 fix is in the binary (rebuilt at 21:39) but the IPC listener thread started at 20:23 with the old library. The listener holds that reference — mtime-based hot reload only fires on new `AgentDocLib.get()` calls, not for threads already running.
+
+**What the logs show** (boost-client ops.log):
+
+- **13 consecutive `ipc_socket_sidecar_timeout`** — every single write cycle since the file was created
+- Socket IS alive (connects fine), binary sends patch, plugin returns basic ack
+- But plugin never writes ack-content sidecar → 200ms poll timeout → disk fallback
+- Disk fallback succeeds: file grows, commits land, content IS on disk
+- IDE doesn't refresh because the plugin's file watcher is also using the old library
+
+**Root cause chain:**
+1. `isClaimedByForceDisk` still returns garbage in the running listener (bool ABI bug, pre-fix code)
+2. Plugin receives socket message, sends ack, checks `isClaimedByForceDisk` → evaluates to `true` (undefined upper bytes) → skips apply
+3. Never writes sidecar file → binary times out → falls to disk write
+4. Disk write succeeds but IDEA's VFS refresh is also gated by the bugged plugin
+
+**Fix:** Restart IDEA. After restart, `AgentDocLib.get()` loads the 0.33.10 library with i32 returns. The new listener thread will use the fixed code.
+
+**Verification after restart:**
+- `ops.log` should show `ipc_socket_delivered` instead of `ipc_socket_sidecar_timeout`
+- Responses should appear in the editor via Document API (no "externally modified" dialog)
+<!-- agent:boundary:4dcb558d -->
+<!-- agent:boundary:e4063189 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

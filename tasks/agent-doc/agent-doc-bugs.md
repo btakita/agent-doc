@@ -3,6 +3,7 @@ agent: codex
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
+codex_args: -s danger-full-access
 claude_args: --dangerously-skip-permissions
 ---
 
@@ -576,15 +577,39 @@ I split the earlier aggregate recommendation into four explicit pending items so
 - move overflow detail to tooltips or secondary UI
 
 I reused `#9kqp` for the first item and added three new pending items ahead of the older multi-user follow-up entry.
-<!-- agent:boundary:37f753dd -->
+Do #n6dj, #p9h7, #7g66, #9kqp. add spec + tests. build + install for local testing.
+### Re: `#n6dj #p9h7 #7g66 #9kqp` done — gpt-5.4
+
+Implemented.
+
+What changed:
+- `PromptPanel.kt` no longer uses a wrapping prompt-row layout. The prompt is now rendered as a fixed-height single row.
+- Question text truncates to one line with tooltip fallback for the full text.
+- The option controls stay on a non-wrapping horizontal row.
+- Secondary detail moved out of the main row into a compact `?` tooltip instead of the old inline hint/pending text.
+
+Spec/tests:
+- Updated `editors/jetbrains/SPEC.md` to document the single-row invariant.
+- Added `PromptPanelTest.kt` coverage for truncation, pending-count tooltip preservation, non-wrapping controls, and fixed-height locking.
+- Bumped the JetBrains plugin version to `0.2.72` in `editors/jetbrains/gradle.properties`.
+
+Verification:
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew signPlugin` passed.
+- `cargo build --release` passed.
+- `cargo install --path .` replaced the local `agent-doc` binary.
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.72` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+
+Restart IntelliJ to activate the rebuilt plugin.
+<!-- agent:boundary:be56cbf4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#n6dj] JetBrains PromptPanel: enforce a fixed single-row panel height instead of growing with wrapped content
-- [ ] [#p9h7] JetBrains PromptPanel: truncate or overflow secondary text instead of allowing line wrapping in the prompt row
-- [ ] [#7g66] JetBrains PromptPanel: move overflow detail to tooltips or secondary UI instead of the main prompt row
-- [ ] [#9kqp] JetBrains PromptPanel: replace WrapLayout with a non-wrapping horizontal layout so the prompt row never wraps
+- [x] [#n6dj] JetBrains PromptPanel: enforce a fixed single-row panel height instead of growing with wrapped content
+- [x] [#p9h7] JetBrains PromptPanel: truncate or overflow secondary text instead of allowing line wrapping in the prompt row
+- [x] [#7g66] JetBrains PromptPanel: move overflow detail to tooltips or secondary UI instead of the main prompt row
+- [x] [#9kqp] JetBrains PromptPanel: replace WrapLayout with a non-wrapping horizontal layout so the prompt row never wraps
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

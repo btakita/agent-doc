@@ -845,8 +845,7 @@ The context cost in agent-doc-bugs sessions comes from:
 The document's own size is the dominant factor. Each agent-doc cycle loads, diffs, and processes the full document. At 85KB, that's a lot of tokens before the model even starts thinking.
 
 **To reclaim context:** run `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` — this trims resolved exchanges while preserving pending items and active context.
-<!-- agent:boundary:44e247d7 -->
-<!-- agent:boundary:02cf78bb -->
+<!-- agent:boundary:275cade1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

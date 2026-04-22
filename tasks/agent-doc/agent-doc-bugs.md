@@ -218,7 +218,7 @@ Defined in `main.rs:937` (`SkillCommands::Install`). The `--harness` flag accept
 For Phase 5, the implementation work is:
 1. Unify the *content* (single AGENTS.md with harness preamble + runbooks/harness-invocation.md)
 2. The install plumbing (`install_for`, `install_all`, `--harness`, `--all`) is already done
-<!-- agent:boundary:70b5f89c -->
+<!-- agent:boundary:0a5d0396 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

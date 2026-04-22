@@ -482,7 +482,7 @@ Installed workspace files in `agent-loop`:
 One clarification: there is not a separate root `agent-loop/SKILL.md` in this workspace. For Codex, the installed equivalent of the skill file is `.codex/AGENTS.md`.
 
 I verified the matching lines directly in both the source files and the installed `.codex` copies.
-<!-- agent:boundary:f6013dcb -->
+<!-- agent:boundary:8ecf2d48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

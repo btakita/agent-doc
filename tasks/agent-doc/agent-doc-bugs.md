@@ -505,13 +505,12 @@ Verification:
 - `cargo install --path .` replaced the local `agent-doc` binary.
 - `agent-doc skill install --harness codex` reports the local Codex install is up to date.
 - Source and installed pending runbooks both contain the custom-ID docs.
-<!-- agent:boundary:0b9bb801 -->
+<!-- agent:boundary:2e880234 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#9b2k] pending-add custom ID: add id= prefix syntax to --pending-add (pending.rs op_add_with_id, main.rs parse, pending-ops.md docs)
 - [ ] [#mmgb] Codex start should ignore claude_args when agent: codex is active; use only agent_args for Codex and add regression tests
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

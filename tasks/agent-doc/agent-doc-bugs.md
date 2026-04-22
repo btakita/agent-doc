@@ -576,7 +576,7 @@ I split the earlier aggregate recommendation into four explicit pending items so
 - move overflow detail to tooltips or secondary UI
 
 I reused `#9kqp` for the first item and added three new pending items ahead of the older multi-user follow-up entry.
-<!-- agent:boundary:974b8bc8 -->
+<!-- agent:boundary:37f753dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

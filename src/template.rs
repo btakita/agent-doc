@@ -311,6 +311,142 @@ pub fn apply_patches(
     )
 }
 
+fn is_exchange_turn_heading(trimmed: &str) -> bool {
+    trimmed == "## User"
+        || trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("## Re:")
+}
+
+fn tail_is_safe_exchange_content(tail: &str) -> bool {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+
+    for line in tail.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:")
+            || trimmed.starts_with("<!-- /agent:")
+            || trimmed.starts_with("<!-- patch:")
+            || trimmed.starts_with("<!-- /patch:")
+        {
+            return false;
+        }
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                continue;
+            }
+        } else {
+            if fence_close(trimmed, fence_char, fence_len) {
+                in_fence = false;
+            }
+            continue;
+        }
+
+        if trimmed.is_empty() || is_exchange_turn_heading(trimmed) {
+            continue;
+        }
+
+        let hashes = trimmed.chars().take_while(|&c| c == '#').count();
+        if hashes > 0 {
+            if (4..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ') {
+                continue;
+            }
+            return false;
+        }
+    }
+
+    !in_fence
+}
+
+/// Repair the safe malformed-template case where conversation content escaped
+/// below `<!-- /agent:exchange -->` and now trails the document after sibling
+/// components like pending/todo.
+pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
+    let components = component::parse(doc).context("failed to parse components")?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+
+    let code_ranges = component::find_code_ranges(doc);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
+
+    let mut tail_start = None;
+    let mut offset = 0usize;
+    for line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        if line_start < exchange.close_end || in_code(line_start) {
+            continue;
+        }
+        if is_exchange_turn_heading(line.trim()) {
+            tail_start = Some(line_start);
+            break;
+        }
+    }
+
+    let Some(tail_start) = tail_start else {
+        return Ok(None);
+    };
+
+    let tail = &doc[tail_start..];
+    if !tail_is_safe_exchange_content(tail) {
+        anyhow::bail!(
+            "conversation content escaped `agent:exchange`, but the trailing document structure is ambiguous"
+        );
+    }
+
+    let prefix = &doc[..tail_start];
+    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let exchange = prefix_components
+        .iter()
+        .find(|c| c.name == "exchange")
+        .context("exchange component disappeared during repair")?;
+    let escaped = tail.trim();
+    if escaped.is_empty() {
+        return Ok(None);
+    }
+
+    let repaired = if let Some(boundary_id) = find_boundary_in_component(prefix, exchange) {
+        exchange.append_with_boundary(prefix, escaped, &boundary_id)
+    } else {
+        let new_content = if exchange.content(prefix).trim().is_empty() {
+            format!("{escaped}\n")
+        } else {
+            format!("{}\n{}\n", exchange.content(prefix).trim_end(), escaped)
+        };
+        exchange.replace_content(prefix, &new_content)
+    };
+
+    Ok(Some(repaired))
+}
+
 /// Strip trailing bare `❯` lines from exchange-bound content.
 ///
 /// `❯` is the user's submit-prompt glyph. When an agent ends a response with a bare
@@ -2420,5 +2556,68 @@ Previous response.
         let new_content = "### Re: something\n\nAnswer.\n";
         let result = apply_mode("append", existing, new_content);
         assert_eq!(result, "Previous content.\n### Re: something\n\nAnswer.\n");
+    }
+
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_tail_back_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:pending -->\n\n",
+            "## Assistant\n\n",
+            "Follow-up response.\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let pending_open = repaired
+            .find("<!-- agent:pending patch=replace -->")
+            .unwrap();
+        let assistant = repaired.find("## Assistant").unwrap();
+
+        assert!(
+            assistant < exchange_close,
+            "assistant tail should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            pending_open > exchange_close,
+            "pending should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "repair should leave exactly one boundary marker"
+        );
+    }
+
+    #[test]
+    fn repair_conversation_tail_outside_exchange_rejects_ambiguous_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Assistant\n\n",
+            "Escaped answer.\n\n",
+            "## Todo / Backlog\n\n",
+            "- not conversation content\n"
+        );
+
+        let err = repair_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string().contains("escaped `agent:exchange`"),
+            "unexpected error: {err}"
+        );
     }
 }

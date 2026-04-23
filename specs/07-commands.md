@@ -332,6 +332,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Exchange prompt normalization:** For append-mode `agent:exchange`, the write path prefixes newly added user lines with `❯ ` based on the `snapshot -> baseline` diff. This normalization must ignore synthetic heading-only churn from binary-owned commit markers (for example a response heading gaining ` (HEAD)` in the committed snapshot). A heading replacement may preserve existing agent content, but it must not suppress `❯ ` prefixing for the next genuine user prompt.
 
+**Template structure guard:** After patch application and again after any merge, template writes must keep live conversation content inside `<!-- agent:exchange -->`. If a safe trailing `## User` / `## Assistant` / `### Re:` tail escaped below `<!-- /agent:exchange -->`, the binary moves it back inside exchange before snapshot/write. If the trailing suffix mixes conversation with other document structure, the write fails closed instead of committing a malformed template document.
+
 **Boundary marker lifecycle (binary-owned):** Boundary management is fully deterministic and handled by the binary — never by the SKILL workflow. The `apply_patches()` function manages the complete lifecycle:
 
 1. **Pre-patch cleanup:** Remove ALL stale boundary markers from the entire document (not just the target component)
@@ -470,7 +472,8 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
    - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `recover` + `commit`
    - If that `commit` path finds the staged snapshot already matches `HEAD`, it closes the cycle as already committed instead of logging `commit_failed`
-   - If the prior cycle is `preflight_started`, preflight only auto-closes when `recover` replays a pending/captured response first; otherwise it fails closed instead of letting a stale snapshot commit silently revert newer live content
+   - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `recover` repairs that stale preflight lock as a no-op closeout
+   - Otherwise, an open `preflight_started` cycle only auto-closes when `recover` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Recover orphaned pending/captured responses (`agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)

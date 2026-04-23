@@ -1494,10 +1494,10 @@ history line
         // Start a shell that reads a line and echoes it back with a marker
         iso.send_keys(
             &pane,
-            r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+            r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
         )
         .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let trigger = HarnessConfig::claude().trigger_command("test.md");
         iso.send_keys(&pane, &trigger).unwrap();
@@ -1525,10 +1525,10 @@ history line
 
         iso.send_keys(
             &pane,
-            r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+            r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
         )
         .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let trigger = HarnessConfig::codex().trigger_command("test.md");
         iso.send_keys(&pane, &trigger).unwrap();

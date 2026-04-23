@@ -205,6 +205,8 @@ fn run_component_compact(
 
     // Single atomic write: replace component content + update snapshot
     let compacted = comp.replace_content(content, &summary);
+    let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
+        .unwrap_or(compacted);
     crate::write::atomic_write_pub(file, &compacted)?;
     snapshot::save(file, &compacted)?;
 
@@ -310,6 +312,8 @@ fn run_component_compact_partial(
     }
 
     let compacted = comp.replace_content(content, &new_content);
+    let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
+        .unwrap_or(compacted);
     crate::write::atomic_write_pub(file, &compacted)?;
     snapshot::save(file, &compacted)?;
 

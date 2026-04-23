@@ -1629,6 +1629,7 @@ mod tests {
         snapshot::save(&doc, content).unwrap();
         crate::git::commit(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
         let err = run(&doc).unwrap_err();
         assert!(
@@ -1677,16 +1678,7 @@ mod tests {
 
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
 
-        let err = run(&doc).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("`preflight_started` with no recoverable response"),
-            "unexpected error: {err}"
-        );
-        assert!(
-            err.to_string().contains("### Re: newer"),
-            "error should mention likely bypassed patchback: {err}"
-        );
+        run(&doc).unwrap();
 
         let show = Command::new("git")
             .current_dir(root)
@@ -1705,10 +1697,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
     }
 
     #[test]

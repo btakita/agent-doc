@@ -8,6 +8,18 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc `#mdl1` response-header model attribution
+
+- [x] Audit the current response-header attribution contract across `preflight`, the bundled skill, installed harness runbooks, and docs so any harness-label drift is explicit before changing code.
+- [x] Tighten the skill/runbook/spec wording so `### Re:` headers use the resolved model short name (for example `gpt-5`, `opus-4-6`), never the harness label (`codex`, `claude`).
+- [x] Add regression coverage for the bundled/install content plus preflight short-name handling, then run the requested verification (`cargo test`, `make check`, `cargo build --release`, `cargo install --path .`).
+
+### 2026-04-22 — agent-doc `#drc1` durable response capture
+
+- [x] Add a durable response-capture ledger in `src/agent-doc` that persists the final response plus cycle metadata before write/hook emission and threads exact capture refs through cycle state.
+- [x] Teach recovery/preflight to replay captured-but-unwritten responses only when the baseline/snapshot fingerprints still match, and fail closed on divergence.
+- [x] Expose `capture_id` / `response_sha256` in hook payloads, add focused regression coverage, and run the required build/install verification for local testing.
+
 ### 2026-04-22 — agent-doc durable response-capture proposal
 
 - [ ] Inspect the current hook/write/recover boundaries closely enough to answer why the last patchback was missed and where durable capture would have to attach.
@@ -265,6 +277,25 @@ Review:
 - [x] Build and install the local `agent-doc` binary for local testing.
 
 ### 2026-04-22 — JetBrains Prompt Fix (`agent-doc-bugs`)
+
+### 2026-04-23 — `agent-doc-bugs` Codex args completion check
+
+- [x] Re-read `tasks/agent-doc/agent-doc-bugs.md` and the current `src/agent-doc` diff to confirm the exact unfinished `codex_args` task state.
+- [x] Run targeted `src/agent-doc` verification for the `codex_args` path and identify any remaining implementation or spec gaps.
+- [x] Make the minimal code/doc/test changes needed for `codex_args` support to be internally consistent, then re-run the relevant checks.
+- [x] Patch the outcome back into `tasks/agent-doc/agent-doc-bugs.md` and summarize whether the task is now complete or still blocked.
+
+Review:
+- `codex_args` support was already implemented and committed in `src/agent-doc` as `870d769` (`feat: add codex_args support`); the current live tree still carries the parser/config/start-path/docs coverage for that contract.
+- Re-verified in the current dirty worktree with targeted tests, `cargo check`, `cargo build --release`, `cargo install --path src/agent-doc`, and `make -C src/agent-doc check`.
+- No new `src/agent-doc` code patch was needed in this turn; the remaining action was to record the live verification result in `tasks/agent-doc/agent-doc-bugs.md`.
+
+### 2026-04-23 — Commit + Push `agent-doc-bugs` Patchback
+
+- [ ] Patch the latest user prompt and the exact failure explanation into `tasks/agent-doc/agent-doc-bugs.md`.
+- [ ] Update the shared plan log with the current commit/push follow-up so the parent-repo patchback has matching plan state.
+- [ ] Commit only `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md` in the parent repo.
+- [ ] Push the parent repo `main` branch and record whether it succeeded or failed.
 
 - [x] Reproduce the incorrect JetBrains prompt rendering from the current prompt-panel implementation/spec/tests and isolate the mismatch.
 - [x] Patch the JetBrains plugin prompt UI so the rendered row matches the intended prompt wording/layout, with focused regression coverage.

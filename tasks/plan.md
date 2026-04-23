@@ -12,7 +12,7 @@ tmux_session: '1'
 
 - [x] Inspect the recent parent-repo commit sequence and current drift/recovery code so the explanation separates workflow delay from snapshot/session drift.
 - [x] Append the answer to `tasks/agent-doc/agent-doc-bugs.md` and capture any pending-worthy mitigation follow-up.
-- [ ] Commit only the parent-repo task-doc updates for this patchback.
+- [x] Commit only the parent-repo task-doc updates for this patchback.
 
 ### 2026-04-22 — agent-doc extreme snapshot drift root-cause patchback
 

@@ -1499,13 +1499,39 @@ The distinction I would keep is:
 So I would broaden `#wcmp` from "Codex patchbacks" to "manual-repair patchbacks across harnesses," while still keeping the larger product direction under `#finz` / `#schk` / `#instr1`.
 
 do #wcmp. add spec + tests. build + install for local testing
-<!-- agent:boundary:20b99eae -->
+### Re: `#wcmp` shared manual-repair path — gpt-5.4
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- `SKILL.md` now states that the manual-repair / missed-patchback rule applies across harnesses and explicitly forbids flows that stop after bare `agent-doc write`.
+- `runbooks/harness-invocation.md` now has a shared `Manual Repair Default` section and points both Claude Code and Codex at the same `agent-doc write --commit <FILE>` repair path.
+- `README.md` and `specs/07-commands.md` now state the shared Claude/Codex manual-repair contract explicitly.
+- `src/skill.rs` now tests both the bundled skill text and the installed Claude/Codex harness runbooks for that shared rule.
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness claude`
+- `agent-doc skill install --harness codex`
+
+Installed-content checks passed for:
+
+- `.claude/skills/agent-doc/SKILL.md`
+- `.claude/skills/agent-doc/runbooks/harness-invocation.md`
+- `.codex/AGENTS.md`
+- `.codex/runbooks/harness-invocation.md`
+<!-- agent:boundary:e64cd484 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
+- [x] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
 - [ ] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.

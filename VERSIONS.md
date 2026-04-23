@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.13
+
+- **Codex closeout contract hardened.** `agent-doc finalize` is now the strict happy path for normal session responses, Codex/direct-exec instructions require an immediate `agent-doc session-check <FILE>` after `finalize` or `write --commit`, and the installed Codex `Stop` hook can auto-close a pending response cycle from `last_assistant_message` before failing closed. Added CLI/integration coverage for the `finalize + session-check` path and the real Codex hook flow.
+
+- **Interrupted-cycle + historical-drift repair.** `preflight` now fails closed on unrecoverable `preflight_started` cycles instead of snapshot-committing over newer live content, while `commit` / `session-check` can narrowly repair already-committed historical `### Re:` drift when `HEAD` proves the response is no longer out-of-band.
+
+- **Bare-path compatibility restored.** `agent-doc <FILE>` once again aliases to `agent-doc run <FILE>`, keeping older wrappers working while the explicit subcommand form remains canonical.
+
+- **Boundary cleanup invariants locked.** Boundary/head-marker cleanup is now regression-covered across the Rust path plus both editor helpers so stale boundary IDs and duplicate visible `(HEAD)` churn do not survive reposition.
+
 ## 0.33.12
 
 - **Codex agent backend (Phase 1).** New `agent/codex.rs` implements `Agent` + `StreamingAgent` for the OpenAI Codex CLI. Parses Codex JSONL event stream (`thread.started`, `item.completed`, `turn.completed`). Session resume via `codex exec resume <id>`, fork via `codex exec resume --last`. Registered in `agent::resolve("codex")`. 11 unit tests covering event parsing, session ID propagation, and stream iterator behavior.

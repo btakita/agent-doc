@@ -473,13 +473,35 @@ Spec/tests I would add with that work:
 - session-check/preflight: malformed exchange boundary cannot return green / no-changes success
 
 Sequence I’d recommend: land the validator + fail-closed backstop first, then the safe auto-repair, then the component-aware merge refactor.
+❯ Add to pending.
 Add to pending.
-<!-- agent:boundary:5a4f2b02 -->
+❯ Why are the response patchbacks failing on this document?
+### Re: `tasks/agent-doc/agent-doc-bugs.md` patchback failures — gpt-5
+
+They are not primarily failing in the patchback/write path on this document.
+
+Evidence from `.agent-doc/logs/ops.log`:
+
+- At `1776962321`, `ipc_file_delivered`, `snapshot_saved_file_ipc`, `ipc_write_consumed`, and `commit_success` all happened for `tasks/agent-doc/agent-doc-bugs.md`. That means the response patchback reached the document and crossed a commit boundary.
+- The failures start afterward. Fifty-five seconds later, `commit_staging` sees `snap_len=34376 file_len=31220`, then repeated `commit_failed exit_code=1` entries follow while the snapshot stays at the already-committed 34376-byte version.
+- In `src/agent-doc/src/git.rs`, `git::commit` stages the snapshot blob, not the out-of-band live-file drift, when the document has diverged. If that snapshot already matches `HEAD`, `git commit` has nothing new to commit and exits `1`. The current closeout/logging path records that as a failure and leaves interrupted-cycle / `response_captured` noise.
+
+So the root cause here is stale-snapshot closeout under heavy out-of-band edits, not missing `<!-- patch:exchange -->` markers and not the earlier exchange-boundary merge bug.
+
+Concrete fix direction:
+
+- special-case `staged snapshot already equals HEAD` as already committed / no-op closeout, or surface a dedicated stale-snapshot/no-op status instead of `commit_failed`;
+- keep `preflight` / `session-check` from reopening the cycle once the response patchback is already provably committed; and
+- only treat it as a real patchback failure when the response never reached `ipc_file_delivered` / `write_stream_done` or never got a first `commit_success`.
+
+I added that follow-up to pending as `#tgdf`.
+<!-- agent:boundary:d45f3fc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#tgdf] [recommended] Prevent false interrupted-cycle / commit_failed churn when a response patchback already committed but later out-of-band edits leave the live doc ahead of the stored snapshot: if the staged snapshot already matches HEAD, treat closeout as already committed or fail with a specific stale-snapshot/no-op signal instead of leaving response_captured noise.
 - [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside &lt;!-- agent:exchange --&gt;: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

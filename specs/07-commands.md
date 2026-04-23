@@ -191,13 +191,13 @@ Exits with error if the pane is dead or no session is registered.
    f. Extreme drift guard: when the file is vastly larger than the snapshot, `commit` may auto-resync only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents still do NOT wholesale re-sync from the live file, because that would risk absorbing unanswered user prompts.
 3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
 4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
-5. On successful commit: clean the on-disk snapshot, then either
-   - rewrite the working tree locally to the same clean boundary shape when no live editor IPC listener exists, or
-   - send reposition + VCS-refresh IPC signals so the plugin applies that same clean rewrite via the Document API
+5. On successful commit: keep the on-disk snapshot / visible document in the post-commit affordance shape, then either
+   - rewrite the working tree locally to that single-boundary + single-`(HEAD)` shape when no live editor IPC listener exists, or
+   - send reposition + VCS-refresh IPC signals so the plugin applies that same visible rewrite via the Document API
 
-**HEAD marker:** `(HEAD)` is treated as a transient artifact only. Older snapshots or out-of-band writes may still contain it, but `agent-doc commit` strips it before staging and cleans it back out of the snapshot / working tree during boundary cleanup.
+**HEAD marker:** `(HEAD)` is transient with respect to the committed blob only. `agent-doc commit` strips it before staging, but preserves a single visible ` (HEAD)` marker in the snapshot / user-facing document state as the current-response affordance.
 
-**Post-commit cleanup:** After a successful commit, the snapshot and working tree are both normalized to a clean single-boundary shape with no transient `(HEAD)` markers. This prevents stale boundary-only dirtiness from lingering after a committed patchback.
+**Post-commit cleanup:** After a successful commit, the snapshot and user-facing document are normalized to a single-boundary shape with one visible ` (HEAD)` marker on the current response heading. This preserves the affordance while preventing stale multi-boundary churn from lingering after a committed patchback.
 
 ## skill
 
@@ -342,7 +342,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **IPC boundary:** Before building the IPC patch JSON, all IPC write paths call `reposition_boundary_to_end()` on the current document in memory. This removes stale boundaries and inserts a fresh one at the end of the exchange — the same pre-patch step that `apply_patches_with_overrides()` performs. The repositioned document is used only for `boundary_id` extraction (never written to disk by this step). Without this, the IPC path would read the old boundary position (above the user's new prompt), causing responses to be inserted before the prompt. When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically.
 
-**FFI export:** `agent_doc_reposition_boundary_to_end(doc)` — exposed via C ABI for editor plugins. Takes a document string, returns a cleaned document with all stale boundaries removed and a single fresh 8-char boundary at end-of-exchange. Plugins should call this via JNA/FFI rather than reimplementing boundary cleanup logic.
+**FFI export:** `agent_doc_reposition_boundary_to_end(doc)` — exposed via C ABI for editor plugins. Takes a document string, returns the visible post-reposition document state with all stale boundaries removed, a single fresh 8-char boundary at end-of-exchange, and the normal single-`(HEAD)` affordance preserved. Plugins should call this via JNA/FFI rather than reimplementing boundary cleanup logic.
 
 ## watch
 

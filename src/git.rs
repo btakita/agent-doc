@@ -746,19 +746,12 @@ pub fn commit(file: &Path) -> Result<()> {
     }
 
     // Post-commit housekeeping. The staged blob is already clean (commit
-    // staging strips `(HEAD)` from the snapshot before `git hash-object`).
-    // Keep the on-disk snapshot in the same clean shape so the next cycle's
-    // diff doesn't see phantom `(HEAD)` additions/removals.
+    // staging strips `(HEAD)` from the snapshot before `git hash-object`),
+    // but the snapshot / visible document intentionally retain a single
+    // `(HEAD)` marker as the current-response affordance.
     if let Ok(ref s) = commit_status
         && s.success()
     {
-            if let Some(ref snap) = snapshot_content {
-                let clean_snap = strip_head_markers(snap);
-                if clean_snap != *snap
-                    && let Err(e) = crate::snapshot::save(file, &clean_snap) {
-                    eprintln!("[commit] failed to clean snapshot: {}", e);
-                }
-            }
             // Boundary reposition happens pre-commit now (see above) so the
             // new boundary id lands in the same commit as the response.
             // IPC reposition signal is still sent here so the plugin's
@@ -826,9 +819,11 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
 
     let mut changed = false;
 
-    // Reposition in snapshot with a clean boundary-only rewrite.
+    // Reposition in snapshot while preserving the visible `(HEAD)` affordance
+    // in the snapshot / working tree. Commit staging still strips `(HEAD)`
+    // from the blob written to git, so the committed file stays clean.
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        let new_snap = crate::template::reposition_boundary_to_end_clean(&snap_content);
+        let new_snap = crate::template::reposition_boundary_to_end(&snap_content);
         if new_snap != snap_content {
             match crate::snapshot::save(file, &new_snap) {
                 Ok(()) => {
@@ -860,7 +855,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let repositioned = crate::template::reposition_boundary_to_end_clean(&working);
+        let repositioned = crate::template::reposition_boundary_to_end(&working);
         if repositioned != working {
             match crate::write::atomic_write_pub(file, &repositioned) {
                 Ok(()) => {
@@ -1554,17 +1549,22 @@ mod tests {
             "committed blob should still contain the older heading; got:\n{blob}"
         );
 
-        // The working tree should also be rewritten back to the same clean
-        // shape as the committed blob when no live editor listener owns
-        // boundary refresh.
+        // The committed blob stays clean, but the working tree keeps a single
+        // visible `(HEAD)` marker as the current-response affordance.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("### Re: newer\n"),
-            "working tree should keep the clean new heading; got:\n{working}"
+            working.contains("### Re: newer (HEAD)\n"),
+            "working tree should retain the visible head marker; got:\n{working}"
         );
         assert!(
-            !working.contains("(HEAD)"),
-            "working tree should not retain transient HEAD markers; got:\n{working}"
+            working.matches("(HEAD)").count() == 1,
+            "working tree should retain exactly one head marker; got:\n{working}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: newer (HEAD)\n"),
+            "snapshot should retain the visible head marker; got:\n{snap}"
         );
     }
 
@@ -1637,7 +1637,7 @@ mod tests {
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("### Re: newer\n"),
+            snap.contains("### Re: newer (HEAD)\n"),
             "snapshot should advance to absorbed response:\n{snap}"
         );
         assert!(
@@ -1919,7 +1919,7 @@ mod tests {
             "snapshot should advance to absorbed status:\n{snap}"
         );
         assert!(
-            snap.contains("### Re: newer\n"),
+            snap.contains("### Re: newer (HEAD)\n"),
             "snapshot should advance to absorbed response:\n{snap}"
         );
     }
@@ -2304,7 +2304,7 @@ mod tests {
             .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
 
         // Stale plugin install marker without a live listener should not block
-        // the clean disk rewrite.
+        // the visible disk rewrite that preserves the head marker.
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
@@ -2318,8 +2318,8 @@ mod tests {
         assert!(!working.contains("oldid456"),
             "working tree should be repositioned when only patches dir exists");
         assert!(
-            !working.contains("(HEAD)"),
-            "working tree should stay clean after boundary rewrite"
+            working.contains("(HEAD)"),
+            "working tree should retain the visible head marker after boundary rewrite"
         );
     }
 

@@ -12,7 +12,7 @@ tmux_session: '1'
 
 - [x] Confirm the current model-attribution contract in `src/agent-doc/SKILL.md` / specs and distinguish harness label vs model label in the answer.
 - [x] Append the answer to `tasks/agent-doc/agent-doc-bugs.md` and capture any missing pending follow-up in that document's `agent:pending`.
-- [ ] Commit only the parent-repo task-doc updates for this patchback.
+- [x] Commit only the parent-repo task-doc updates for this patchback.
 
 ### 2026-04-22 — agent-doc patchback delay + drift mitigation follow-up
 

@@ -5,7 +5,9 @@
 
 Individual specs are in `specs/`. This file is the index.
 
-Notable invariant: `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree.
+Notable invariants:
+- `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree.
+- Post-commit cleanup normalizes the snapshot and working tree to a clean single-boundary shape with transient `(HEAD)` markers removed. When no live editor IPC listener exists, the CLI performs that working-tree rewrite itself instead of leaving boundary-only dirtiness behind.
 
 | # | File | Description |
 |---|------|-------------|

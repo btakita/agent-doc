@@ -183,20 +183,20 @@ Exits with error if the pane is dead or no session is registered.
 
 1. Load the snapshot for the file (the document state after the last `agent-doc write`)
 2. If snapshot exists:
-   a. Add `(HEAD)` suffix to all new markdown headings (any level `#`–`######`) not present in git HEAD. Falls back to bold-text pseudo-headers (`**...**` on its own line) when no markdown headings are found.
-   b. Write the modified snapshot to git's object database via `git hash-object -w --stdin`
-   c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>` — working tree is NOT modified
-   d. Result: snapshot content (agent response) is committed; user edits in the working tree stay uncommitted
+   a. Strip any transient `(HEAD)` suffixes from the snapshot copy used for staging
+   b. Write the clean snapshot to git's object database via `git hash-object -w --stdin`
+   c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>`
+   d. Result: snapshot content (agent response) is committed; plain user edits in the working tree stay uncommitted
    e. Narrow repair path: if the live document is ahead of the snapshot due to a missed agent-doc mutation, `commit` first refreshes the snapshot from the live file, then stages it. The repair only triggers when the redacted component structure is unchanged and the drift looks like an agent-owned `status` change and/or an appended `### Re:` block and/or a `pending` stable-ID superset. Plain user-prompt drift is not absorbed.
 3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
 4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
-5. On successful commit: write `vcs-refresh.signal` to `.agent-doc/patches/` — the IDE plugin watches this and triggers `VcsDirtyScopeManager.markEverythingDirty()` + VFS refresh so git gutter updates immediately
+5. On successful commit: clean the on-disk snapshot, then either
+   - rewrite the working tree locally to the same clean boundary shape when no live editor IPC listener exists, or
+   - send reposition + VCS-refresh IPC signals so the plugin applies that same clean rewrite via the Document API
 
-**HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. When no markdown headings exist, bold-text pseudo-headers (`**...**` on its own line) receive the marker instead. The working tree does not have these markers. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
+**HEAD marker:** `(HEAD)` is treated as a transient artifact only. Older snapshots or out-of-band writes may still contain it, but `agent-doc commit` strips it before staging and cleans it back out of the snapshot / working tree during boundary cleanup.
 
-**Duplicate heading detection:** Headings are identified as "new" by comparing occurrence counts between the current content and git HEAD. A heading is new if it appears more times in the current content than in HEAD. This correctly handles duplicate heading text across exchange cycles (e.g., multiple `### Re: Implementation complete` headings from different responses).
-
-**Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from headings and bold-text pseudo-headers in both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
+**Post-commit cleanup:** After a successful commit, the snapshot and working tree are both normalized to a clean single-boundary shape with no transient `(HEAD)` markers. This prevents stale boundary-only dirtiness from lingering after a committed patchback.
 
 ## skill
 

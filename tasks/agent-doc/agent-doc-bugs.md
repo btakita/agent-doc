@@ -1071,7 +1071,21 @@ Smallest safe implementation slice:
   - committed capture transitions + GC eligibility
 
 I added this as pending item `#drc1` in this document because it is exactly the concrete follow-up that falls out of the current failure mode.
-<!-- agent:boundary:77262f6e -->
+
+❯ do #drc1. add spec + tests. build + install for local testing
+❯ Add the last response patchback. Is this issue fixed?
+### Re: add the last response patchback / is this issue fixed? — gpt-5
+
+Yes for the specific issue I just fixed: the failing `resync` tests were caused by one-sample `pane_current_command` classification during shell startup. In the current `src/agent-doc` worktree, `src/resync.rs` now classifies pane processes across a short grace window and reuses that logic in issue detection, stash purge/return, bulk stash cleanup, and wrong-session fixups, so transient startup helpers like `mkdir`, `mv`, and `xset` no longer get misclassified as stable foreign processes.
+
+Verification passed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+The broader `#drc1` durable response-capture issue is still not fixed; it remains pending in this document. What is fixed is the immediate `resync` test failure, and this previously-missed response patchback is now being written through `agent-doc write --commit` rather than left as a plain terminal-only reply.
+<!-- agent:boundary:28cb0a3d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

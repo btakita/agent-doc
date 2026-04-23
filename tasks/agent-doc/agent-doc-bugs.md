@@ -12,7 +12,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:status patch=replace -->
 
-✅ Verified and landed the `preflight_started` fail-closed guard in `src/agent-doc`. Open `preflight_started` cycles now auto-close only when `recover` replays a pending/captured response first; otherwise preflight fails closed instead of snapshot-committing over newer live content. The latest `src/agent-doc` change is built, installed locally, committed, and pushed.
+✅ Verified and landed the bare-path compatibility alias plus committed-historical snapshot self-heal in `src/agent-doc`. `agent-doc <FILE>` now routes to `run`, and `commit` / `session-check` repair already-committed historical `### Re:` drift when `HEAD` proves the response is no longer out-of-band. The latest `src/agent-doc` change is built, installed locally, committed, and pushed.
 Remaining open work in this bug doc is still only the multi-user pending auto-create policy follow-up (`#ha3h`), but it remains gated: the linked issue explicitly says not to ship it before multi-user workspace support, and the current `src/agent-doc` tree still documents the product as single-user only.
 <!-- /agent:status -->
 
@@ -135,7 +135,7 @@ Verification:
 
 So the answer is: yes, the `monsterrodholders` evidence exposed a contract gap, but the fix is a narrower fail-closed guard, not generalized snapshot-drift recovery.
 build + install for local testing. commit + push
-### Re: snapshot-drift guard closeout — codex
+### Re: snapshot-drift guard closeout — codex (HEAD)
 
 Implemented and verified in `src/agent-doc`.
 
@@ -161,7 +161,70 @@ Commit / push:
 Outcome:
 
 - The `monsterrodholders` failure mode is now blocked at the binary boundary: unrecoverable `preflight_started` drift no longer auto-commits a stale snapshot over newer live content.
-<!-- agent:boundary:faa2326e -->
+
+agent-doc tasks/claudescore.md is reporting:
+```
+• agent-doc no longer accepts a bare file path, so agent-doc tasks/claudescore.md failed with “unrecognized subcommand”. I ran the current equivalent instead: agent-doc run tasks/claudescore.md.
+
+  That invocation created commit aa016d1 (agent-doc(claudescore): 2026-04-23 05:00:00), updated tasks/claudescore.md, and wrote the new response block plus refreshed pending items. I verified the document state with agent-doc session-check
+  tasks/claudescore.md, which returned: cycle cycle-1776934354358 is committed (commit_success).
+
+  The wrapper process itself hung after write-back, so I stopped that wrapper once the committed state was confirmed.
+```
+
+agent-doc tasks/monsterrodholders.md is reporting:
+```
+• agent-doc was blocked by an interrupted prior cycle, so I repaired it enough to run again.
+
+  What happened:
+
+  - agent-doc preflight tasks/monsterrodholders.md initially failed on stale cycle cycle-1776933041869
+  - I closed the stale cycle with agent-doc commit
+  - I reran agent-doc preflight tasks/monsterrodholders.md
+
+  Result:
+
+  - preflight completed and wrote fresh agent-doc commits:
+      - 013ab5d agent-doc(monsterrodholders): 2026-04-23 04:59:51
+      - a4ea78f agent-doc(monsterrodholders): 2026-04-23 04:59:55
+
+  Caveat:
+
+  - agent-doc session-check still reports historical snapshot drift from an older direct patchback in tasks/monsterrodholders.md, so the doc is not fully invariant-clean yet.
+  - The file is currently modified in the working tree for that reason.
+```
+
+. Please add logic to mitigate or repair both. update spec + tests. build + install for local testing. commit + push
+### Re: bare-path alias + historical drift repair — codex
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- Restored bare `agent-doc <FILE>` compatibility by rewriting path-like top-level invocations to `agent-doc run <FILE>`, so wrappers like `agent-doc tasks/claudescore.md` work again.
+- Added a narrow HEAD-backed historical-drift repair path in `src/git.rs` and `src/session_check.rs`: if a stale snapshot is missing an older `### Re:` block but the working tree already matches committed `HEAD`, `agent-doc commit` and `agent-doc session-check` now repair the snapshot instead of leaving the document permanently interrupted.
+- Locked both behaviors with regression coverage and updated the command/spec/instruction surfaces (`README.md`, `specs/07-commands.md`, `SPEC.md`, `CLAUDE.md`, `SKILL.md`, and the installed `.claude/skills/agent-doc/SKILL.md` copy).
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_check_repairs_committed_historical_snapshot_drift -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_repairs_committed_historical_snapshot_drift -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml bare_file_path_aliases_to_run -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+- `cargo run --manifest-path src/agent-doc/Cargo.toml -- skill install`
+
+Commit / push:
+
+- `src/agent-doc`: `307e529` — `fix: restore bare run alias and repair historical drift`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `agent-doc tasks/claudescore.md` works again without requiring an explicit `run`.
+- Historical committed drift like the `monsterrodholders` report no longer leaves `session-check` red forever once `HEAD` proves the response is already committed.
+<!-- agent:boundary:358ba7b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -225,4 +288,3 @@ Verification completed:
 The only open item left in that bug doc is still `#ha3h`, and it remains gated on multi-user workspace support.
 
 ## User
-

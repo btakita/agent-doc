@@ -96,3 +96,10 @@ Moved to [tasks/plan.md](tasks/plan.md).
 - [x] Run the remaining requested local verification for the new `preflight_started` fail-closed guard in `src/agent-doc` (`cargo build --release`, `cargo install --path .`).
 - [x] Patch the verified build/install + commit/push outcome back into `tasks/agent-doc/agent-doc-bugs.md`.
 - [x] Commit and push the `src/agent-doc` changes on the current branch, then update the parent repo submodule pointer / task docs in a separate `agent-loop` commit.
+
+## 2026-04-23 — `agent-doc-bugs` bare-path + historical-drift repair
+
+- [x] Reproduce the two reported regressions in the live `src/agent-doc` tree: bare `agent-doc <FILE>` invocation failure and `session-check` refusing a document with only historical agent-owned snapshot drift.
+- [x] Implement the minimal binary-owned fix in `src/agent-doc`, keeping the CLI/spec/runbook surface and drift-repair invariants aligned.
+- [x] Add or update regression coverage for both behaviors, then run the requested verification/build/install steps in `src/agent-doc`.
+- [x] Patch the verified outcome back into `tasks/agent-doc/agent-doc-bugs.md`, then commit and push the submodule and parent-repo boundary updates separately.

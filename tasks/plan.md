@@ -255,6 +255,19 @@ Review:
 - The first `src/agent-doc` commit attempt failed because the hook's `audit-docs` step flagged stale `README.md`, `SPEC.md`, `CLAUDE.md`, and `.claude/skills/agent-doc/SKILL.md`; updated those docs to match the clean post-commit boundary behavior and retried.
 - Committed the submodule fix as `4e1505b` (`fix: clean boundary cleanup after commit`) after the hook passed cleanly.
 
+### 2026-04-22 — `#ke5p` Extreme-Drift Prompt Swallow
+
+- [x] Patch `src/agent-doc/src/git.rs` so the extreme-drift snapshot resync path cannot absorb unanswered user prompts into the committed snapshot during preflight/commit.
+- [x] Add focused regression coverage plus spec/doc updates for the narrowed resync behavior.
+- [x] Verify with targeted tests, `make check`, and local build/install before patching back the result into `tasks/agent-doc/agent-doc-bugs.md`.
+
+Review:
+- Narrowed the extreme-drift branch in `src/agent-doc/src/git.rs`: wholesale snapshot re-sync now happens only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents stay snapshot-selective even under extreme drift, so unanswered prompts are not absorbed into commits.
+- Added regression coverage in `git.rs` for both sides of the branch: tracked scaffold+prompt drift stays uncommitted, while untracked scaffold bootstrap still re-syncs and stages the real file content.
+- Updated `README.md`, `CLAUDE.md`, `SPEC.md`, `specs/07-commands.md`, and the bundled `.claude/skills/agent-doc/SKILL.md` so the selective-commit/extreme-drift rule is explicit.
+- Verified with `cargo test git::tests -- --nocapture`, `make check`, `cargo build --release`, and `cargo install --path .`.
+- Committed in `src/agent-doc` as `e7c1cae` (`fix: block tracked extreme drift resync`).
+
 Review:
 - Updated `src/agent-doc/src/pending.rs` so `pending::op_add` accepts a leading `id=<custom> ` prefix, validates 1-8 ASCII alphanumeric ids, strips an optional leading `#`, rejects duplicates, and preserves the provided id instead of generating one.
 - Updated `src/agent-doc/src/main.rs`, `src/agent-doc/src/pending_cmd.rs`, `src/agent-doc/runbooks/pending-ops.md`, and `src/agent-doc/specs/pending-system.md` so the custom-ID syntax is documented in the CLI/help/runbook/spec surfaces.

@@ -196,7 +196,14 @@ Commit:
 - `src/agent-doc`: `e7c1cae` — `fix: block tracked extreme drift resync`
 
 I also marked pending item `#ke5p` done in this document.
-<!-- agent:boundary:a1ce7d14 -->
+No. `codex_args` is not a supported frontmatter key today.
+
+For Codex, use `agent_args: "-s danger-full-access"` instead.
+
+The parser only recognizes harness-neutral `agent_args` plus legacy `claude_args` compatibility, and the start path resolves Codex arguments from `agent_args` only. `claude_args` is ignored for Codex, and `codex_args` is not parsed at all.
+
+The current tests cover both cases: `resolve_agent_args_codex_ignores_claude_args_aliases` and `resolve_agent_args_codex_uses_agent_args_only`.
+<!-- agent:boundary:5712a731 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -206,5 +213,4 @@ I also marked pending item `#ke5p` done in this document.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
-[//]: # (After a `compact exchange` to this document, the patchback was not committed. Why?)
 [//]: # (Does `codex_args: -s danger-full-access` work? Do we support `codex_args` in the frontmatter?)

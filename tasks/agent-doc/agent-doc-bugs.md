@@ -1545,6 +1545,48 @@ Verification:
 - `make check`
 - `cargo build --release`
 - `cargo install --path .`
+
+You seem to be getting confused by plan.md. Perhaps we should keep the conversation in agent-doc-bugs.md. Any plan should be discrete in its own file.
+### Re: `#cmiv` hard response commit invariant — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- added `runbooks/commit.md` as the dedicated source runbook for the response commit boundary:
+  - normal response cycles use `agent-doc finalize <FILE>`
+  - manual repair / missed patchback on an already-present prompt uses `agent-doc write --commit <FILE>`
+  - bare `agent-doc write` is only acceptable when the user explicitly wants an uncommitted response or for intermediate checkpoints
+- rewrote the bundled `SKILL.md` happy path to use `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill` instead of the older write-then-commit narration, while keeping the shared manual-repair rule intact
+- updated `runbooks/harness-invocation.md` so Claude Code and Codex both describe `finalize` as the normal response-cycle command and keep `write --commit` as the repair path
+- updated `README.md`, `SPEC.md`, and `specs/07-commands.md` so the invariant is explicit in the product docs/spec: every appended response must cross a commit boundary unless the user explicitly says otherwise
+- updated `src/skill.rs` to bundle/install the new `commit.md` runbook and added parity tests for:
+  - bundled skill references to `commit.md` and `finalize`
+  - bundled `commit.md` content
+  - installed Claude/Codex `commit.md` content
+- updated `tests/test_cli.rs` so the installed-skill workflow test matches the new three-step skill shape and asserts that the normal response cycle uses `agent-doc finalize <FILE>`
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `cargo test finalize -- --nocapture`
+- `cargo test test_skill_md_contains_required_steps -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness claude`
+- `agent-doc skill install --harness codex`
+
+Installed local content refreshed:
+
+- `.claude/skills/agent-doc/SKILL.md`
+- `.claude/skills/agent-doc/runbooks/commit.md`
+- `.claude/skills/agent-doc/runbooks/harness-invocation.md`
+- `.codex/AGENTS.md`
+- `.codex/runbooks/commit.md`
+- `.codex/runbooks/harness-invocation.md`
+
+On the plan-file point: agreed. I kept the implementation/result conversation here in `agent-doc-bugs.md`; if we need a future plan, it should live in its own discrete planning file rather than being mixed into the running bug thread.
 <!-- agent:boundary:6260882e -->
 <!-- /agent:exchange -->
 
@@ -1552,7 +1594,7 @@ Verification:
 
 <!-- agent:pending patch=replace -->
 - [x] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
-- [ ] [#cmiv] Update `commit.md` to define a hard invariant: every appended `agent-doc` response must be committed unless explicitly told otherwise.
+- [x] [#cmiv] Update `commit.md` to define a hard invariant: every appended `agent-doc` response must be committed unless explicitly told otherwise.
 - [x] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.

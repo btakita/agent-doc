@@ -6,6 +6,13 @@ Moved to [tasks/plan.md](tasks/plan.md).
 - [x] Update `tasks/software/agent-loop.md` to mark the transfer item complete and record the transfer in the exchange.
 - [x] Review the diffs for only the touched files.
 
+## 2026-04-23 — `agent-doc-bugs` `#cshk`
+
+- [x] Confirm the current Codex hook contract and decide the minimal binary-owned integration surface for `#cshk`.
+- [x] Implement the Codex hook state/capture flow in `src/agent-doc`, keeping deterministic logic in Rust rather than in generated hook scripts.
+- [x] Install the Codex hook/config artifacts from `agent-doc skill install`, add regression coverage, then run the requested verification (`cargo test`, `make check`, `cargo build --release`, `cargo install --path .`).
+- [x] Patch the result back into `tasks/agent-doc/agent-doc-bugs.md` and commit the required repo changes in the correct repo boundaries.
+
 ## 2026-04-23 — `agent-doc-bugs` failing tests follow-up
 
 - [x] Reproduce the current `src/agent-doc` failures for the open `#cyc1` follow-up and isolate whether the implementation or test expectations are wrong.

@@ -1077,13 +1077,44 @@ So the target behavior should be:
 - equivalence is mode-aware, not legacy-append-biased
 
 That is the direction I would take.
-<!-- agent:boundary:56bb92a2 -->
+
+I agree. Implement the pure alias. Both the template and append mode **must** use the same command. The mode is derived from the document frontmatter with the default being template mode. update spec + tests. build + install for local testing. commit + push
+### Re: pure bare/run alias — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- `agent-doc <FILE>` and `agent-doc run <FILE>` now share the same mode-aware `run` entrypoint instead of treating bare-path as a legacy append-mode preset.
+- `run` now derives behavior from frontmatter via `resolve_mode()` with template as the default, builds template prompts that require `patch:exchange`, and keeps append docs on inline `## Assistant` / `## User` flow.
+- Template `run` responses now patch back inside `agent:exchange`, preserve concurrent edits against the original baseline, update `resume`, and commit the response write instead of leaving template docs on the old append-only closeout path.
+- Added integration coverage for template `run`, bare-path template invocation, and append `run`, plus prompt-shape unit tests; updated `README.md`, `SPEC.md`, and `specs/07-commands.md`.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml build_prompt_defaults_to_template_mode -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml build_prompt_append_mode_uses_inline_contract -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --test run_integration -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `cb9e6e5` — `fix: make run alias mode-aware`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#veqs` is done.
+- Bare-path and explicit `run` now behave the same way, and template/default-template docs no longer fall back to the old append-mode patchback path.
+<!-- agent:boundary:34ca4166 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#veqs] [recommended] Make bare-path / `run` template-aware: for template docs, route closeout through template finalize/write or fail closed instead of append-mode full-content IPC.
+- [x] [#veqs] [recommended] Make bare-path / `run` template-aware: for template docs, route closeout through template finalize/write or fail closed instead of append-mode full-content IPC.
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.

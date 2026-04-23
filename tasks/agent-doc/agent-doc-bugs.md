@@ -1158,7 +1158,21 @@ So the precise sequence was:
 5. The file was left dirty with the appended `## Assistant` / `## User` tail, and the cycle stayed open as `write_applied`.
 
 So the root cause is still: the final patchback was written but not committed. The narrower correction is that `0048267` was not the only commit attempt in that run; the missing step was specifically the commit after the final `ipc_file_delivered`, not every post-write commit.
-<!-- agent:boundary:ddbd3d97 -->
+
+Please add a pending item to fix this issue. What can you do to fix the issue?
+### Re: final post-delivery commit gap — gpt-5
+
+Yes. The fix should stay narrow and binary-owned.
+
+What I can do to fix it:
+
+1. Persist a dedicated post-write / pre-commit cycle phase immediately after the final response is applied to the live file (`ipc_file_delivered` / `write_template_done`), including the owning repo or submodule and the commit target.
+2. Refuse to report success until that same owner records `commit_success` and a green `session-check` for the document.
+3. On the next `preflight` / `recover`, if the response is already present, finish that pending commit deterministically instead of treating it as generic drift or appending another response.
+4. Add a regression that reproduces the `claudescore-3` shape exactly: pre-response commit succeeds, final response lands, process stops before commit, and the next cycle must close cleanly without duplicate patchback.
+
+I tightened the existing pending item for this bug instead of adding a duplicate entry.
+<!-- agent:boundary:2b47c1f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1166,12 +1180,12 @@ So the root cause is still: the final patchback was written but not committed. T
 <!-- agent:pending patch=replace -->
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
-- [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
+- [ ] [#n5hs] Prevent final response delivery from stopping at write_applied: after the last ipc_file_delivered/write_template_done, persist recoverable post-write/pre-commit state with owning repo/submodule metadata and deterministically finish commit + session-check on resume instead of leaving an uncommitted patchback or appending duplicates.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
 <!--
-Why id `agent-doc repair` not commit ?
+Why id `agent-doc repair` not commit the changes?
 • You ran agent-doc repair tasks/claudescore-3.md
   └ [recover] Response already present in document — skipping apply, cleaning up pending file
     [recover] repaired escaped conversation tail in tasks/claudescore-3.md

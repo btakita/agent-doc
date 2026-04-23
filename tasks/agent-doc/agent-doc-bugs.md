@@ -1108,13 +1108,12 @@ Outcome:
 
 - `#veqs` is done.
 - Bare-path and explicit `run` now behave the same way, and template/default-template docs no longer fall back to the old append-mode patchback path.
-<!-- agent:boundary:34ca4166 -->
+<!-- agent:boundary:8dff5c49 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#veqs] [recommended] Make bare-path / `run` template-aware: for template docs, route closeout through template finalize/write or fail closed instead of append-mode full-content IPC.
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.

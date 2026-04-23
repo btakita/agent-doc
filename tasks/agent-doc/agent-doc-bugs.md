@@ -1678,6 +1678,46 @@ Plan note:
 
 - used a discrete plan file at `tasks/agent-doc/plan-response-not-committed-delay.md`
 Why is the response not being committed? Codex runs for about 15 seconds after the response is patched back into this document.
+
+Why was my prompt placed after the response? Why is there no `❯ ` prefix to my prompts? I thought the preflight automatically added the `❯ ` prefix.
+### Re: response ordering / raw prompt placement / `❯ ` prefixing — gpt-5.4
+
+There are two different things happening here.
+
+First, on the "response visible before commit" issue: the current `src/agent-doc` instruction surface now treats response persistence as the close-out boundary of the turn, and the current worktree passes the gate that covers that path:
+
+- `cargo test skill::tests -- --nocapture`
+- `cargo test test_skill_md_contains_required_steps --test test_cli -- --nocapture`
+- `make check`
+
+So the current follow-up is not a live failing-test case in `src/agent-doc`; it is a task-doc/history issue.
+
+On this document specifically, git history shows that the line:
+
+`Why is the response not being committed? Codex runs for about 15 seconds after the response is patched back into this document.`
+
+first landed inside the previous parent-repo patchback commit `0e022cdf` (`agent-doc bugs: record session-check and ordering fixes`). That means it was committed as part of the same file edit that added the preceding `### Re:` block, instead of remaining a later uncommitted user prompt. So that line was not moved there by preflight; it was already inside the committed patchback hunk.
+
+The newer line:
+
+`Why was my prompt placed after the response? Why is there no \`❯ \` prefix to my prompts? I thought the preflight automatically added the \`❯ \` prefix.`
+
+is different: `git blame` shows it is still an uncommitted working-tree edit. It appears after the previous response simply because it is the next user prompt appended to `agent:exchange` after that response.
+
+On the `❯ ` prefix: preflight does **not** edit the document to add that prefix. The prefixing happens later in the write path, in `write.rs` via exchange prompt normalization against `snapshot -> baseline` when a response is persisted. Until that write-back happens, a raw newly-typed prompt can appear without `❯ ` in the live file.
+
+So the concrete root causes are:
+
+- one prompt line was accidentally committed in the same patchback commit as the prior response (`0e022cdf`)
+- the current raw prompt line has not gone through response-persistence normalization yet
+- preflight never owned `❯ ` insertion in the first place; the write path does
+
+The relevant regression coverage is already present and currently passing:
+
+- `write::tests::normalize_user_prompts_heading_replacement_does_not_swallow_next_prompt`
+- `write::tests::normalize_user_prompts_restores_prefix_lost_in_file`
+
+No new `src/agent-doc` code change was required from this follow-up because the current implementation/tests are green; the mismatch here is the historical task-doc state and the fact that prompt-prefix normalization only occurs on write-back, not on preflight.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

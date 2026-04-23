@@ -159,15 +159,52 @@ So the real bug here is narrower and clearer now:
 - I then failed to write a response in that cycle, which made the miss user-visible
 
 Your prompt is visible in the current diff now, and I added a concrete pending follow-up for hardening that drift-resync path so unanswered prompts cannot be swallowed into a commit.
-<!-- agent:boundary:575c037b -->
+
+❯ do #ke5p. add spec + tests. build + install for local testing
+### Re: `#ke5p` extreme-drift prompt swallow — codex
+
+Implemented.
+
+What changed in `src/agent-doc`:
+
+- `git::commit()` no longer wholesale re-syncs a tracked document's snapshot from the live file just because the file is much larger than the snapshot.
+- The extreme-drift auto-resync path is now limited to bootstrap scaffold snapshots on files with no `HEAD` entry yet.
+- Tracked documents remain snapshot-selective under extreme drift, so unanswered user prompts stay uncommitted instead of being silently absorbed during preflight.
+
+Verification:
+
+- `cargo test git::tests -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Regression coverage added:
+
+- tracked scaffold + unanswered prompt under extreme drift stays uncommitted
+- untracked scaffold bootstrap still re-syncs and stages the real file content
+
+Docs/specs updated:
+
+- `README.md`
+- `CLAUDE.md`
+- `SPEC.md`
+- `specs/07-commands.md`
+- `.claude/skills/agent-doc/SKILL.md`
+
+Commit:
+
+- `src/agent-doc`: `e7c1cae` — `fix: block tracked extreme drift resync`
+
+I also marked pending item `#ke5p` done in this document.
+<!-- agent:boundary:9df4de53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ke5p] Tighten extreme-drift snapshot resync so preflight commit cannot absorb unanswered user prompts into the committed snapshot.
-- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [x] [#ke5p] Tighten extreme-drift snapshot resync so preflight commit cannot absorb unanswered user prompts into the committed snapshot.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
 [//]: # (After a `compact exchange` to this document, the patchback was not committed. Why?)

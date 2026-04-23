@@ -524,13 +524,81 @@ Commit / push:
 Outcome:
 
 - When a response patchback is already committed and later live-file edits leave the working tree ahead of the stored snapshot, `agent-doc commit` / preflight now close the stale cycle as already committed instead of generating false interrupted-cycle / `commit_failed` churn.
-<!-- agent:boundary:6d0e6127 -->
+
+❯ I attempted to repair claudescore.md directly in the Codex session. The Codex session repair the document. When I attempted `compact exchange` using agent-doc, agent-doc reverted the repair back into the broken state. Plan on how this can be prevented from occurring:
+```
+• Because the bad change was reintroduced by agent-doc itself during its post-commit writeback, not by git undoing our
+  repair.
+
+  What happened, concretely:
+
+  - 7b4f098 was the manual repair commit. That moved the closing <!-- /agent:exchange --> marker back below the latest
+    ## User / ## Assistant turns.
+  - Then I ran agent-doc tasks/claudescore.md again.
+  - That run did two separate writes:
+      - it created commit 8f7879f
+      - then, after Submitting to codex..., it did a merge/writeback and left new uncommitted changes
+  - The tool output shows that sequence directly:
+      - repositioned boundary in snapshot
+      - repositioned boundary in working tree
+      - later: File was modified during run. Merging changes...
+      - later: Response appended to tasks/claudescore.md
+
+  The current uncommitted diff shows the exact regression:
+
+  - agent-doc closes agent:exchange immediately after the new user turn compact exchange
+  - then it renders ## Pending / Not Built and ## Todo / Backlog
+  - then it appends ## Assistant / Exchange compacted... after those sections
+
+  That is the broken state again: the assistant patchback is outside the exchange block.
+
+  So the root cause is:
+
+  - agent-doc’s writer/merge logic still has the wrong insertion point for this document shape
+  - our manual repair fixed the file content
+  - but rerunning agent-doc caused it to reconstruct the tail from its own boundary logic and re-break it
+
+  In short: the uncommitted changes reverse the fix because they are agent-doc’s new writeback, and agent-doc still has
+  a boundary-placement bug for this document.
+
+  If you want, I can repair it again and then stop using agent-doc on this file until the writer logic is fixed
+```
+### Re: preventing `claudescore.md` repair reversion after `compact exchange` — gpt-5
+
+The prevention work should target two places, not just one.
+
+1. Stop trusting whole-document writeback after exchange surgery.
+`compact::run_component_compact{,_partial}` and `write::run_template` / `run_stream` can both leave a syntactically valid file that is structurally wrong for template docs. The real invariant is: latest conversation stays inside `agent:exchange`, then the boundary marker, then `&lt;!-- /agent:exchange --&gt;`, and only then pending / todo sections.
+
+2. Add a structural validator immediately after every exchange mutation.
+After compact, template patch apply, merge fallback, boundary reposition, and commit-time cleanup, re-parse the document and check:
+- exactly one `agent:exchange` close marker;
+- no `## User`, `## Assistant`, `### Re:`, or compact-summary turn escaped below `&lt;!-- /agent:exchange --&gt;`;
+- pending / todo components remain outside exchange.
+
+3. Auto-repair the safe shape instead of preserving the bad merge.
+For the exact `claudescore.md` regression, the escaped tail is obviously exchange content followed by known components. Move that tail back into exchange, reinsert one boundary at the end, and rewrite file + snapshot together. If repair has to guess, fail closed.
+
+4. Put the same guard in `preflight` / `session-check`.
+Even if a bad write slips through, those commands should not return green on `assistant patchback outside exchange`. They should either repair the safe case or stop with a targeted structural error.
+
+5. Unify compact and write around one exchange normalizer.
+Right now compact rebuilds component content directly, while later writeback and commit cleanup do separate merge / boundary passes. That split is why a manual repair can be re-broken. The less brittle design is one shared `normalize_exchange_component()` step used by compact, write/finalize, and post-commit cleanup.
+
+Tests I would add:
+- `compact exchange` on a repaired `claudescore`-shaped doc, then a follow-up write with concurrent drift: latest `### Re:` stays inside exchange
+- safe malformed-tail repair: trailing assistant block after `&lt;!-- /agent:exchange --&gt;` gets moved back inside exchange
+- ambiguous trailing mixed content fails closed
+- `preflight` / `session-check` reject green status when exchange content escaped the component
+
+I updated `#vpm8` so the pending text now covers `compact` / `write` / `finalize`, which is the actual scope of this bug.
+<!-- agent:boundary:2a694107 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside &lt;!-- agent:exchange --&gt;: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
+- [ ] [#vpm8] [recommended] Prevent template compact/write/finalize from reintroducing out-of-exchange conversation blocks: validate/reparse post-merge and post-compact writeback, auto-repair safe cases, fail closed on ambiguous exchange-boundary drift.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.

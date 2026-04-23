@@ -311,7 +311,9 @@ impl PtySession {
     /// needing `MasterPty: Sync`.
     #[cfg(unix)]
     pub fn resize_handle(&self) -> Result<ResizeHandle> {
-        let fd = self.master.as_raw_fd()
+        let fd = self
+            .master
+            .as_raw_fd()
             .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for resize"))?;
         // dup the fd so the handle remains valid even if the session is dropped
         let duped = unsafe { libc::dup(fd) };
@@ -630,11 +632,7 @@ mod tests {
 
         // Fake-claude touches a marker file in cwd; if cwd is wrong the file
         // lands somewhere else and the assertion below fails.
-        let script = write_fake_claude(
-            &dir,
-            "cwd_check",
-            "#!/bin/sh\ntouch marker.txt\nexit 0\n",
-        );
+        let script = write_fake_claude(&dir, "cwd_check", "#!/bin/sh\ntouch marker.txt\nexit 0\n");
 
         let cfg = PtySpawnConfig {
             program: script.to_string_lossy().into_owned(),
@@ -835,7 +833,10 @@ mod tests {
         let input = b"\x1b[>4;2m";
         let mut out = Vec::new();
         filter_terminal_queries(input, &mut out);
-        assert!(out.is_empty(), "Kitty progressive enhancement should be stripped");
+        assert!(
+            out.is_empty(),
+            "Kitty progressive enhancement should be stripped"
+        );
     }
 
     #[test]
@@ -861,7 +862,11 @@ mod tests {
         let input = b"hello world\n";
         let mut out = Vec::new();
         filter_terminal_queries(input, &mut out);
-        assert_eq!(out, input.to_vec(), "plain text should pass through unchanged");
+        assert_eq!(
+            out,
+            input.to_vec(),
+            "plain text should pass through unchanged"
+        );
     }
 
     // --- Cross-boundary stateful filter tests ---
@@ -955,10 +960,10 @@ mod tests {
 
         // Split at arbitrary points
         let mut out = Vec::new();
-        f.filter(&full[..5], &mut out);   // \x1b[?99
-        f.filter(&full[5..12], &mut out);  // 7;1n\x1bP>
+        f.filter(&full[..5], &mut out); // \x1b[?99
+        f.filter(&full[5..12], &mut out); // 7;1n\x1bP>
         f.filter(&full[12..25], &mut out); // |tmux 3.6a\x1b
-        f.filter(&full[25..], &mut out);   // \\x1b[?1;2;4c Claude Code v2.1.109
+        f.filter(&full[25..], &mut out); // \\x1b[?1;2;4c Claude Code v2.1.109
 
         assert_eq!(
             String::from_utf8_lossy(&out),
@@ -980,6 +985,9 @@ mod tests {
         // Read 2: [32m (SGR green — should pass through)
         out.clear();
         f.filter(b"[32mgreen\x1b[0m", &mut out);
-        assert_eq!(out, b"\x1b[32mgreen\x1b[0m", "SGR preserved across boundary");
+        assert_eq!(
+            out, b"\x1b[32mgreen\x1b[0m",
+            "SGR preserved across boundary"
+        );
     }
 }

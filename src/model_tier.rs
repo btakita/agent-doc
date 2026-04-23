@@ -41,7 +41,7 @@
 //! - `tier_from_model_name_roundtrip`: `tier_from_model_name("opus", "claude-code", ...)`
 //!   returns `Some(Tier::High)`.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -51,7 +51,9 @@ use std::str::FromStr;
 /// Ordering: `Auto < Low < Med < High`. Gating logic uses a simple `>` comparison —
 /// a task whose effective tier exceeds the running model's tier should prompt the
 /// user to switch models.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
     /// No preference; fall through to next source in the precedence chain.
@@ -282,11 +284,16 @@ pub fn component_value_to_tier(
 /// - unknown / missing → `Med` (safe default)
 ///
 /// Path boost: `tasks/software/` and `src/**/specs/` paths bump one tier (cap `High`).
-pub fn suggested_tier(diff_type: Option<&str>, lines_added: usize, doc_path: &std::path::Path) -> Tier {
+pub fn suggested_tier(
+    diff_type: Option<&str>,
+    lines_added: usize,
+    doc_path: &std::path::Path,
+) -> Tier {
     let base = match diff_type {
-        Some("simple_question") | Some("approval") | Some("boundary_artifact") | Some("annotation") => {
-            Tier::Low
-        }
+        Some("simple_question")
+        | Some("approval")
+        | Some("boundary_artifact")
+        | Some("annotation") => Tier::Low,
         Some("content_addition") => {
             if lines_added < 10 {
                 Tier::Low
@@ -340,11 +347,7 @@ pub struct ModelSwitchScan {
 ///
 /// The `arg` is parsed via `parse_model_arg`, which accepts both tier names
 /// (`low|med|high`) and concrete model names (`opus|sonnet|...`).
-pub fn scan_model_switch(
-    diff: &str,
-    harness: &str,
-    model_config: &ModelConfig,
-) -> ModelSwitchScan {
+pub fn scan_model_switch(diff: &str, harness: &str, model_config: &ModelConfig) -> ModelSwitchScan {
     let mut model_switch: Option<String> = None;
     let mut model_switch_tier: Option<Tier> = None;
     let mut kept_lines: Vec<&str> = Vec::with_capacity(diff.lines().count());
@@ -710,7 +713,10 @@ mod tests {
     #[test]
     fn suggested_tier_large_addition() {
         let path = std::path::Path::new("tasks/research/x.md");
-        assert_eq!(suggested_tier(Some("content_addition"), 50, path), Tier::Med);
+        assert_eq!(
+            suggested_tier(Some("content_addition"), 50, path),
+            Tier::Med
+        );
     }
 
     #[test]
@@ -723,10 +729,7 @@ mod tests {
     fn suggested_tier_path_boost_software() {
         let path = std::path::Path::new("tasks/software/foo.md");
         // Low gets boosted to Med
-        assert_eq!(
-            suggested_tier(Some("simple_question"), 1, path),
-            Tier::Med
-        );
+        assert_eq!(suggested_tier(Some("simple_question"), 1, path), Tier::Med);
         // Med gets boosted to High
         assert_eq!(
             suggested_tier(Some("content_addition"), 50, path),

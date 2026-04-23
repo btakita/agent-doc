@@ -116,7 +116,10 @@ pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
     }
 
     if claimed.is_empty() {
-        eprintln!("[autoclaim] All claims for pane {} were stale (files moved/deleted)", pane_id);
+        eprintln!(
+            "[autoclaim] All claims for pane {} were stale (files moved/deleted)",
+            pane_id
+        );
         return Ok(());
     }
 
@@ -138,10 +141,8 @@ pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
 
     // Sync tmux layout so pane arrangement reflects claimed files.
     // Without this, the layout remains stale after context compaction.
-    let claimed_refs: Vec<(&String, &sessions::SessionEntry)> = claimed
-        .iter()
-        .map(|(k, v)| (k, v))
-        .collect();
+    let claimed_refs: Vec<(&String, &sessions::SessionEntry)> =
+        claimed.iter().map(|(k, v)| (k, v)).collect();
     sync_after_autoclaim_in(tmux, &pane_id, &claimed_refs, base_dir);
 
     // Output claim commands for the new session context.
@@ -204,8 +205,7 @@ fn sync_after_autoclaim_in(
     } else {
         eprintln!(
             "[autoclaim] Auto-synced {} files in window {}",
-            file_count,
-            window_id
+            file_count, window_id
         );
     }
 }
@@ -266,7 +266,10 @@ mod tests {
 
         // Verify select_pane was called: the active pane should now be pane_id, not pane2
         let active = iso.active_pane("test").expect("should have active pane");
-        assert_eq!(active, pane_id, "autoclaim should have focused the claimed pane");
+        assert_eq!(
+            active, pane_id,
+            "autoclaim should have focused the claimed pane"
+        );
 
         unsafe { std::env::remove_var("TMUX_PANE") };
     }
@@ -306,8 +309,16 @@ mod tests {
         let doc1 = dir.path().join("tasks/test1.md");
         let doc2 = dir.path().join("tasks/test2.md");
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        std::fs::write(&doc1, "---\nagent_doc_session: session-1\nagent_doc_mode: template\n---\n# Doc 1\n").unwrap();
-        std::fs::write(&doc2, "---\nagent_doc_session: session-2\nagent_doc_mode: template\n---\n# Doc 2\n").unwrap();
+        std::fs::write(
+            &doc1,
+            "---\nagent_doc_session: session-1\nagent_doc_mode: template\n---\n# Doc 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &doc2,
+            "---\nagent_doc_session: session-2\nagent_doc_mode: template\n---\n# Doc 2\n",
+        )
+        .unwrap();
 
         // Create tmux session with two panes in the same window
         let pane1 = iso.new_session("test", dir.path()).unwrap();

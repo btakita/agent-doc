@@ -63,7 +63,7 @@
 //! - append_with_boundary_no_code_block: boundary found → content inserted, old ID consumed, new boundary present
 //! - append_with_boundary_skips_code_block: boundary inside code block skipped, real boundary used
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
@@ -97,7 +97,9 @@ impl Component {
     ///
     /// Checks `patch=` first, falls back to `mode=` for backward compatibility.
     pub fn patch_mode(&self) -> Option<&str> {
-        self.attrs.get("patch").map(|s| s.as_str())
+        self.attrs
+            .get("patch")
+            .map(|s| s.as_str())
             .or_else(|| self.attrs.get("mode").map(|s| s.as_str()))
     }
 
@@ -117,14 +119,20 @@ impl Component {
     ///
     /// `caret_offset`: byte offset of the caret in the document. Pass `None` for
     /// normal append behavior.
-    pub fn append_with_caret(&self, doc: &str, content: &str, caret_offset: Option<usize>) -> String {
+    pub fn append_with_caret(
+        &self,
+        doc: &str,
+        content: &str,
+        caret_offset: Option<usize>,
+    ) -> String {
         let existing = &doc[self.open_end..self.close_start];
 
         if let Some(caret) = caret_offset {
             // Check if caret is inside this component
             if caret > self.open_end && caret <= self.close_start {
                 // Find the line boundary before the caret
-                let insert_at = doc[..caret].rfind('\n')
+                let insert_at = doc[..caret]
+                    .rfind('\n')
                     .map(|i| i + 1)
                     .unwrap_or(self.open_end);
 
@@ -167,7 +175,10 @@ impl Component {
             match content_region[search_from..].find(&boundary_marker) {
                 Some(rel_pos) => {
                     let abs_pos = self.open_end + search_from + rel_pos;
-                    if code_ranges.iter().any(|&(cs, ce)| abs_pos >= cs && abs_pos < ce) {
+                    if code_ranges
+                        .iter()
+                        .any(|&(cs, ce)| abs_pos >= cs && abs_pos < ce)
+                    {
                         // Inside a code block — skip and keep searching
                         search_from += rel_pos + boundary_marker.len();
                         continue;
@@ -226,8 +237,7 @@ fn is_valid_name(name: &str) -> bool {
     if !first.is_ascii_alphanumeric() {
         return false;
     }
-    name.bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// True if the text inside `<!-- ... -->` is an agent component marker.
@@ -323,7 +333,10 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
         }
 
         // Skip markers inside code regions
-        if code_ranges.iter().any(|&(start, end)| pos >= start && pos < end) {
+        if code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+        {
             pos += 4;
             continue;
         }
@@ -384,7 +397,10 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                         close_end: marker_end,
                     });
                 }
-                None => bail!("closing marker <!-- /agent:{} --> without matching open", name),
+                None => bail!(
+                    "closing marker <!-- /agent:{} --> without matching open",
+                    name
+                ),
             }
         } else if let Some(rest) = trimmed.strip_prefix("agent:") {
             // Skip boundary markers — these are not component markers
@@ -444,7 +460,11 @@ pub(crate) fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
 /// and external crates like `eval-runner`.
 pub fn strip_comments(content: &str) -> String {
     let code_ranges = find_code_ranges(content);
-    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
 
     let mut result = String::with_capacity(content.len());
     let bytes = content.as_bytes();
@@ -827,7 +847,11 @@ ok
         let ranges = find_code_ranges(doc);
         assert_eq!(ranges.len(), 1);
         let span = &doc[ranges[0].0..ranges[0].1];
-        assert!(span.contains("<!--"), "double-backtick span should contain <!--: {:?}", span);
+        assert!(
+            span.contains("<!--"),
+            "double-backtick span should contain <!--: {:?}",
+            span
+        );
     }
 
     #[test]
@@ -862,7 +886,10 @@ new content here\n\
         let components = parse(doc).unwrap();
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "exchange");
-        assert_eq!(components[0].attrs.get("mode").map(|s| s.as_str()), Some("append"));
+        assert_eq!(
+            components[0].attrs.get("mode").map(|s| s.as_str()),
+            Some("append")
+        );
         assert_eq!(components[0].content(doc), "Content\n");
     }
 
@@ -872,8 +899,14 @@ new content here\n\
         let components = parse(doc).unwrap();
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "log");
-        assert_eq!(components[0].attrs.get("mode").map(|s| s.as_str()), Some("prepend"));
-        assert_eq!(components[0].attrs.get("timestamp").map(|s| s.as_str()), Some("true"));
+        assert_eq!(
+            components[0].attrs.get("mode").map(|s| s.as_str()),
+            Some("prepend")
+        );
+        assert_eq!(
+            components[0].attrs.get("timestamp").map(|s| s.as_str()),
+            Some("true")
+        );
     }
 
     #[test]
@@ -1049,7 +1082,8 @@ actual content
         );
         let components = parse(&doc).unwrap();
         let comp = &components[0];
-        let result = comp.append_with_boundary(&doc, "### Re: Response\n\nContent here.", boundary_id);
+        let result =
+            comp.append_with_boundary(&doc, "### Re: Response\n\nContent here.", boundary_id);
 
         // Response should replace the REAL marker (outside code block),
         // not the one inside the code block.
@@ -1058,7 +1092,9 @@ actual content
         // The code block example should be preserved
         assert!(result.contains(&format!("<!-- agent:boundary:{boundary_id} -->\n```")));
         // The real marker should be consumed (replaced by response)
-        assert!(!result.contains(&format!("more user text\n<!-- agent:boundary:{boundary_id} -->\n<!-- /agent:exchange -->")));
+        assert!(!result.contains(&format!(
+            "more user text\n<!-- agent:boundary:{boundary_id} -->\n<!-- /agent:exchange -->"
+        )));
     }
 
     #[test]

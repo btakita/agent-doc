@@ -57,7 +57,8 @@ pub fn new_boundary_id_with_summary(summary: Option<&str>) -> String {
     let id = new_boundary_id();
     match summary {
         Some(s) if !s.is_empty() => {
-            let slug: String = s.to_lowercase()
+            let slug: String = s
+                .to_lowercase()
                 .chars()
                 .map(|c| if c.is_alphanumeric() { c } else { '-' })
                 .collect::<String>()

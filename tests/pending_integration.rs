@@ -6,8 +6,8 @@
 //! - `replace:pending` block rejection (and `--allow-replace-pending` escape hatch)
 //! - `patch:pending` dual-accept with deprecation warning (#25ag migration)
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -59,7 +59,12 @@ fn pending_add_creates_item_with_hash() {
 fn pending_add_accepts_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "add", "id=spec1 first task"])
+        .args([
+            "pending",
+            doc.to_str().unwrap(),
+            "add",
+            "id=spec1 first task",
+        ])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -70,7 +75,12 @@ fn pending_add_accepts_custom_id_prefix() {
 fn pending_add_rejects_invalid_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "add", "id=bad-id first task"])
+        .args([
+            "pending",
+            doc.to_str().unwrap(),
+            "add",
+            "id=bad-id first task",
+        ])
         .assert()
         .failure()
         .stderr(predicates::str::contains("invalid custom id"));
@@ -91,7 +101,13 @@ fn pending_done_marks_checked_by_id() {
 fn pending_edit_preserves_hash() {
     let (_tmp, doc) = setup_doc("- [ ] [#abcd] original text");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "edit", "abcd", "updated text"])
+        .args([
+            "pending",
+            doc.to_str().unwrap(),
+            "edit",
+            "abcd",
+            "updated text",
+        ])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -104,12 +120,7 @@ fn pending_edit_preserves_hash() {
 fn pending_reorder_by_id() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] first\n- [ ] [#bbbb] second\n- [ ] [#cccc] third");
     agent_doc()
-        .args([
-            "pending",
-            doc.to_str().unwrap(),
-            "reorder",
-            "cccc,aaaa",
-        ])
+        .args(["pending", doc.to_str().unwrap(), "reorder", "cccc,aaaa"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -183,8 +194,7 @@ fn write_pending_add_accepts_custom_id_prefix() {
 #[test]
 fn write_rejects_replace_pending_block() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
+    let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
     let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(payload)
@@ -204,8 +214,7 @@ fn write_rejects_legacy_patch_pending_block() {
     // Dual-accept window (#25ag): `patch:pending` still parses, still rejected
     // by default, and emits a deprecation warning on stderr.
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- patch:pending -->\n- [ ] [#zzzz] new\n<!-- /patch:pending -->\n";
+    let payload = "<!-- patch:pending -->\n- [ ] [#zzzz] new\n<!-- /patch:pending -->\n";
     let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(payload)
@@ -227,8 +236,7 @@ fn write_rejects_legacy_patch_pending_block() {
 #[test]
 fn write_allows_replace_pending_with_escape_hatch() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- replace:pending -->\n- [ ] [#zzzz] replaced\n<!-- /replace:pending -->\n";
+    let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] replaced\n<!-- /replace:pending -->\n";
     agent_doc()
         .args([
             "write",
@@ -248,8 +256,7 @@ fn write_allows_legacy_patch_pending_with_legacy_flag() {
     // Dual-accept: `patch:pending` + `--allow-patch-pending` still works one
     // more release. Clap alias routes the legacy flag to `allow_replace_pending`.
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- patch:pending -->\n- [ ] [#zzzz] replaced\n<!-- /patch:pending -->\n";
+    let payload = "<!-- patch:pending -->\n- [ ] [#zzzz] replaced\n<!-- /patch:pending -->\n";
     let assert_result = agent_doc()
         .args([
             "write",
@@ -275,8 +282,7 @@ fn write_allows_replace_pending_with_legacy_env_var() {
     // Dual-accept: legacy env var `AGENT_DOC_ALLOW_PATCH_PENDING=1` still
     // authorizes replace:pending blocks (library-layer compat path).
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- replace:pending -->\n- [ ] [#zzzz] replaced\n<!-- /replace:pending -->\n";
+    let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] replaced\n<!-- /replace:pending -->\n";
     agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .env("AGENT_DOC_ALLOW_PATCH_PENDING", "1")
@@ -358,7 +364,11 @@ fn write_pending_gate_done_errors() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
-    assert!(stderr.contains("cannot gate Done item"), "stderr: {}", stderr);
+    assert!(
+        stderr.contains("cannot gate Done item"),
+        "stderr: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -500,8 +510,7 @@ fn write_rejects_replace_pending_via_library_default() {
     // Phase 3 inversion: library-level callers must default to reject. The
     // inversion is checked across both env vars (canonical + legacy alias).
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload =
-        "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
+    let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
     let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .env_remove("AGENT_DOC_ALLOW_PATCH_PENDING")
@@ -510,5 +519,9 @@ fn write_rejects_replace_pending_via_library_default() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
-    assert!(stderr.contains("replace:pending block forbidden"), "stderr: {}", stderr);
+    assert!(
+        stderr.contains("replace:pending block forbidden"),
+        "stderr: {}",
+        stderr
+    );
 }

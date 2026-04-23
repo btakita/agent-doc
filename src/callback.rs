@@ -52,8 +52,7 @@ pub struct PendingCallback {
 
 /// Compute the callback directory path for a document.
 fn callback_dir_for(doc: &Path) -> Result<PathBuf> {
-    let root = snapshot::find_project_root(doc)
-        .context("could not find .agent-doc directory")?;
+    let root = snapshot::find_project_root(doc).context("could not find .agent-doc directory")?;
     let hash = snapshot::doc_hash(doc)?;
     Ok(root.join(".agent-doc").join("callbacks").join(hash))
 }
@@ -106,8 +105,8 @@ pub fn read_response(doc: &Path) -> Result<Option<CallbackResponse>> {
     }
 
     let content = std::fs::read_to_string(&response_path)?;
-    let response: CallbackResponse = serde_json::from_str(&content)
-        .context("failed to parse callback response JSON")?;
+    let response: CallbackResponse =
+        serde_json::from_str(&content).context("failed to parse callback response JSON")?;
 
     // Verify request_id matches
     let request = read_request(doc)?;
@@ -131,8 +130,8 @@ pub fn read_request(doc: &Path) -> Result<Option<CallbackRequest>> {
     }
 
     let content = std::fs::read_to_string(&request_path)?;
-    let request: CallbackRequest = serde_json::from_str(&content)
-        .context("failed to parse callback request JSON")?;
+    let request: CallbackRequest =
+        serde_json::from_str(&content).context("failed to parse callback request JSON")?;
 
     Ok(Some(request))
 }
@@ -210,7 +209,8 @@ pub fn cleanup_expired(project_root: &Path, _max_age_secs: u64) -> Result<()> {
 
         let request_path = path.join("request.json");
         if let Ok(content) = std::fs::read_to_string(&request_path)
-            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content) {
+            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
+        {
             let age = now.saturating_sub(request.created_at);
             if age > request.ttl_secs {
                 std::fs::remove_dir_all(&path)?;
@@ -261,7 +261,8 @@ pub fn scan_pending_callbacks(project_root: Option<&str>) -> Result<Vec<PendingC
         }
 
         if let Ok(content) = std::fs::read_to_string(&request_path)
-            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content) {
+            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
+        {
             let age = now.saturating_sub(request.created_at);
             if age > request.ttl_secs {
                 continue; // expired
@@ -439,8 +440,7 @@ mod tests {
         let doc = create_test_doc(&tmp, "test.md");
         create_request(&doc, &["compact"], None, 300).unwrap();
 
-        let pending =
-            scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
+        let pending = scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].operations, vec!["compact"]);
     }
@@ -471,8 +471,7 @@ mod tests {
         )
         .unwrap();
 
-        let pending =
-            scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
+        let pending = scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
         assert!(pending.is_empty());
     }
 }

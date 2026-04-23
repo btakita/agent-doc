@@ -214,13 +214,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch(
     // apply_patches_with_overrides needs a file path for config lookup — use a dummy
     // since we're providing explicit overrides
     let dummy_path = std::path::Path::new("/dev/null");
-    match template::apply_patches_with_overrides(
-        doc_str,
-        &[patch],
-        "",
-        dummy_path,
-        &overrides,
-    ) {
+    match template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides) {
         Ok(result) => FfiPatchResult {
             text: CString::new(result).unwrap_or_default().into_raw(),
             error: ptr::null_mut(),
@@ -277,11 +271,8 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
             Err(e) => return make_err(&format!("{e}")),
         };
         if let Some(comp) = components.iter().find(|c| c.name == name) {
-            let result = comp.append_with_caret(
-                doc_str,
-                patch_content,
-                Some(caret_offset as usize),
-            );
+            let result =
+                comp.append_with_caret(doc_str, patch_content, Some(caret_offset as usize));
             return FfiPatchResult {
                 text: CString::new(result).unwrap_or_default().into_raw(),
                 error: ptr::null_mut(),
@@ -601,10 +592,7 @@ pub extern "C" fn agent_doc_tracked_count() -> u32 {
 ///
 /// `file_path` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_idle(
-    file_path: *const c_char,
-    debounce_ms: i64,
-) -> i32 {
+pub unsafe extern "C" fn agent_doc_is_idle(file_path: *const c_char, debounce_ms: i64) -> i32 {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block callers
@@ -643,11 +631,8 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     // When the file is untracked in-process (e.g., after plugin restart), bridge to
     // file-based indicator so cross-process typing state isn't silently ignored.
     if !crate::debounce::is_tracked(path) {
-        return crate::debounce::await_idle_via_file(
-            path,
-            debounce_ms as u64,
-            timeout_ms as u64,
-        ) as i32;
+        return crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
+            as i32;
     }
     crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
@@ -708,10 +693,7 @@ pub unsafe extern "C" fn agent_doc_await_idle_via_file(
 ///
 /// `file_path` and `status` must be valid, NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_set_status(
-    file_path: *const c_char,
-    status: *const c_char,
-) {
+pub unsafe extern "C" fn agent_doc_set_status(file_path: *const c_char, status: *const c_char) {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(s) => s,
         Err(_) => return,
@@ -738,7 +720,9 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
         Err(_) => return CString::new("idle").unwrap().into_raw(),
     };
     let status = crate::debounce::get_status(path);
-    CString::new(status).unwrap_or_else(|_| CString::new("idle").unwrap()).into_raw()
+    CString::new(status)
+        .unwrap_or_else(|_| CString::new("idle").unwrap())
+        .into_raw()
 }
 
 /// Check if any operation is in progress for a file (file-based).
@@ -768,7 +752,9 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
 /// and VS Code plugins simultaneously.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_sync_try_lock() -> i32 {
-    SYNC_LOCKED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() as i32
+    SYNC_LOCKED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok() as i32
 }
 
 /// Release the sync lock acquired by `agent_doc_sync_try_lock()`.
@@ -853,9 +839,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 ///
 /// `project_root` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_stop_ipc_listener(
-    project_root: *const c_char,
-) {
+pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char) {
     let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
         Err(_) => return,
@@ -907,8 +891,11 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
     let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
     match std::fs::write(&sidecar, content_str) {
         Ok(_) => {
-            eprintln!("[ffi] ack_content written: {} bytes for patch_id {}",
-                content_str.len(), &patch_id_str[..patch_id_str.len().min(8)]);
+            eprintln!(
+                "[ffi] ack_content written: {} bytes for patch_id {}",
+                content_str.len(),
+                &patch_id_str[..patch_id_str.len().min(8)]
+            );
             1
         }
         Err(e) => {
@@ -944,8 +931,10 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
         .join(patch_id_str);
 
     if sentinel.exists() {
-        eprintln!("[ffi] patch_id {} claimed by force-disk — skipping apply",
-            &patch_id_str[..patch_id_str.len().min(8)]);
+        eprintln!(
+            "[ffi] patch_id {} claimed by force-disk — skipping apply",
+            &patch_id_str[..patch_id_str.len().min(8)]
+        );
         let _ = std::fs::remove_file(&sentinel);
         1
     } else {
@@ -995,13 +984,16 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
         .args(["rev-parse", "--show-toplevel"])
         .output();
     let git_root = match git_root_out {
-        Ok(o) if o.status.success() => std::path::PathBuf::from(
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        ),
+        Ok(o) if o.status.success() => {
+            std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string())
+        }
         _ => return false,
     };
 
-    let doc_name = file.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+    let doc_name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
     // Use unix timestamp (chrono not available in lib crate); full datetime in binary git::commit
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1020,7 +1012,10 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
         .map(|s| s.success())
         .unwrap_or(false);
     if !add_ok {
-        eprintln!("[ffi] agent_doc_commit: git add failed for {}", file.display());
+        eprintln!(
+            "[ffi] agent_doc_commit: git add failed for {}",
+            file.display()
+        );
         return false;
     }
 
@@ -1047,11 +1042,7 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
 /// Walk up from `path` to find the nearest ancestor containing `.agent-doc/`.
 /// Mirrors `snapshot::find_project_root` (binary crate) for the library crate.
 fn find_project_root_ffi(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let mut current = if path.is_file() {
-        path.parent()?
-    } else {
-        path
-    };
+    let mut current = if path.is_file() { path.parent()? } else { path };
     loop {
         if current.join(".agent-doc").is_dir() {
             return Some(current.to_path_buf());
@@ -1174,7 +1165,12 @@ mod tests {
         let c_content = CString::new("new content\n").unwrap();
         let c_mode = CString::new("replace").unwrap();
         let result = unsafe {
-            agent_doc_apply_patch(c_doc.as_ptr(), c_name.as_ptr(), c_content.as_ptr(), c_mode.as_ptr())
+            agent_doc_apply_patch(
+                c_doc.as_ptr(),
+                c_name.as_ptr(),
+                c_content.as_ptr(),
+                c_mode.as_ptr(),
+            )
         };
         assert!(result.error.is_null());
         assert!(!result.text.is_null());
@@ -1190,9 +1186,7 @@ mod tests {
         let fields = "model: opus";
         let c_doc = CString::new(doc).unwrap();
         let c_fields = CString::new(fields).unwrap();
-        let result = unsafe {
-            agent_doc_merge_frontmatter(c_doc.as_ptr(), c_fields.as_ptr())
-        };
+        let result = unsafe { agent_doc_merge_frontmatter(c_doc.as_ptr(), c_fields.as_ptr()) };
         assert!(result.error.is_null());
         assert!(!result.text.is_null());
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
@@ -1212,7 +1206,11 @@ mod tests {
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
         // Should have exactly one boundary marker at the end
         let boundary_count = text.matches("<!-- agent:boundary:").count();
-        assert_eq!(boundary_count, 1, "should have exactly 1 boundary, got {}", boundary_count);
+        assert_eq!(
+            boundary_count, 1,
+            "should have exactly 1 boundary, got {}",
+            boundary_count
+        );
         // The boundary should be just before the close tag
         assert!(text.contains("more\n<!-- agent:boundary:"));
         assert!(text.contains(" -->\n<!-- /agent:exchange -->"));
@@ -1231,7 +1229,10 @@ mod tests {
         let path = CString::new("/tmp/ffi-test-just-changed.md").unwrap();
         unsafe { agent_doc_document_changed(path.as_ptr()) };
         let result = unsafe { agent_doc_is_idle(path.as_ptr(), 2000) };
-        assert_eq!(result, 0, "file changed <2s ago should not be idle with 2000ms window");
+        assert_eq!(
+            result, 0,
+            "file changed <2s ago should not be idle with 2000ms window"
+        );
     }
 
     #[test]
@@ -1249,11 +1250,21 @@ mod tests {
 
         let c_path = CString::new(doc.to_str().unwrap()).unwrap();
         let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
-        assert!(!result.project_root.is_null(), "project_root should be non-null");
-        assert!(!result.relative_path.is_null(), "relative_path should be non-null");
+        assert!(
+            !result.project_root.is_null(),
+            "project_root should be non-null"
+        );
+        assert!(
+            !result.relative_path.is_null(),
+            "relative_path should be non-null"
+        );
 
-        let root = unsafe { CStr::from_ptr(result.project_root) }.to_str().unwrap();
-        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
+        let root = unsafe { CStr::from_ptr(result.project_root) }
+            .to_str()
+            .unwrap();
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }
+            .to_str()
+            .unwrap();
         // Nearest .agent-doc/ is the submodule, not the outer project.
         let expected_root = sub.canonicalize().unwrap();
         assert_eq!(std::path::Path::new(root), expected_root);
@@ -1279,10 +1290,17 @@ mod tests {
 
         let c_path = CString::new(doc.to_str().unwrap()).unwrap();
         let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
-        let root = unsafe { CStr::from_ptr(result.project_root) }.to_str().unwrap();
-        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
-        assert_eq!(std::path::Path::new(root), mid.canonicalize().unwrap(),
-            "should prefer nearest (mid) over outer");
+        let root = unsafe { CStr::from_ptr(result.project_root) }
+            .to_str()
+            .unwrap();
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            std::path::Path::new(root),
+            mid.canonicalize().unwrap(),
+            "should prefer nearest (mid) over outer"
+        );
         assert_eq!(rel, "deep/subdir/doc.md");
         unsafe {
             agent_doc_free_string(result.project_root);
@@ -1301,7 +1319,9 @@ mod tests {
         let c_path = CString::new(doc.to_str().unwrap()).unwrap();
         let result = unsafe { agent_doc_resolve_project_path(c_path.as_ptr()) };
         assert!(!result.project_root.is_null());
-        let rel = unsafe { CStr::from_ptr(result.relative_path) }.to_str().unwrap();
+        let rel = unsafe { CStr::from_ptr(result.relative_path) }
+            .to_str()
+            .unwrap();
         assert_eq!(rel, "plan.md");
         unsafe {
             agent_doc_free_string(result.project_root);
@@ -1313,9 +1333,8 @@ mod tests {
     fn crdt_merge_no_base() {
         let c_ours = CString::new("hello world").unwrap();
         let c_theirs = CString::new("hello world").unwrap();
-        let result = unsafe {
-            agent_doc_crdt_merge(ptr::null(), 0, c_ours.as_ptr(), c_theirs.as_ptr())
-        };
+        let result =
+            unsafe { agent_doc_crdt_merge(ptr::null(), 0, c_ours.as_ptr(), c_theirs.as_ptr()) };
         assert!(result.error.is_null());
         assert!(!result.text.is_null());
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
@@ -1341,16 +1360,18 @@ mod ack_content_tests {
         let content = CString::new("hello world").unwrap();
 
         let result = unsafe {
-            agent_doc_write_ack_content(
-                project_root.as_ptr(),
-                patch_id.as_ptr(),
-                content.as_ptr(),
-            )
+            agent_doc_write_ack_content(project_root.as_ptr(), patch_id.as_ptr(), content.as_ptr())
         };
         assert_eq!(result, 1, "should return 1 on success");
 
-        let sidecar = tmp.path().join(".agent-doc/ack-content/test-patch-id-123.md");
-        assert!(sidecar.exists(), "sidecar file should exist at {:?}", sidecar);
+        let sidecar = tmp
+            .path()
+            .join(".agent-doc/ack-content/test-patch-id-123.md");
+        assert!(
+            sidecar.exists(),
+            "sidecar file should exist at {:?}",
+            sidecar
+        );
         assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), "hello world");
     }
 
@@ -1364,9 +1385,13 @@ mod ack_content_tests {
         let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
         let patch_id = CString::new("test-patch-456").unwrap();
 
-        let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
+        let claimed =
+            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
         assert_eq!(claimed, 1, "should return 1 when sentinel exists");
-        assert!(!claimed_dir.join("test-patch-456").exists(), "sentinel should be deleted after check");
+        assert!(
+            !claimed_dir.join("test-patch-456").exists(),
+            "sentinel should be deleted after check"
+        );
     }
 
     #[test]
@@ -1375,7 +1400,8 @@ mod ack_content_tests {
         let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
         let patch_id = CString::new("nonexistent-patch").unwrap();
 
-        let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
+        let claimed =
+            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
         assert_eq!(claimed, 0, "should return 0 when sentinel absent");
     }
 

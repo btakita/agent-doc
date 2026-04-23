@@ -7,6 +7,8 @@
 //! - `post_commit` — after agent-doc commits changes
 //! - `claim` — when a document is claimed by a session
 //! - `layout_change` — when tmux layout changes
+//! - `post_write` / `post_commit` include `capture_id` and `response_sha256`
+//!   when a durable response capture exists for the current cycle.
 //!
 //! Best-effort: hook failures are logged but never block the main operation.
 
@@ -27,7 +29,9 @@ pub fn fire_doc_hooks(
     model: &Option<String>,
 ) {
     let Some(cmds) = hooks.get(event) else { return };
-    if cmds.is_empty() { return; }
+    if cmds.is_empty() {
+        return;
+    }
 
     let file_str = file.to_string_lossy();
     let agent_str = agent.as_deref().unwrap_or("");
@@ -72,7 +76,9 @@ pub fn fire_doc_event(file: &Path, event: &str) {
         Ok(r) => r,
         Err(_) => return,
     };
-    if fm.hooks.is_empty() { return; }
+    if fm.hooks.is_empty() {
+        return;
+    }
     let session_id = fm.session.as_deref().unwrap_or("").to_string();
     fire_doc_hooks(&fm.hooks, event, file, &session_id, &fm.agent, &fm.model);
 }
@@ -80,22 +86,41 @@ pub fn fire_doc_event(file: &Path, event: &str) {
 /// Fire a post_write hook event.
 pub fn fire_post_write(file: &Path, session_id: &str, patch_count: usize) {
     if let Some(registry) = registry_for_file(file) {
-        let _ = registry.fire("post_write", Event {
-            file: file.to_string_lossy().into(),
-            session_id: session_id.into(),
-            data: serde_json::json!({"patches": patch_count}),
-        }).map_err(|e| eprintln!("[hooks] post_write fire failed: {}", e));
+        let mut data = serde_json::json!({"patches": patch_count});
+        if let Some(meta) = capture_metadata(file)
+            && let Some(obj) = data.as_object_mut()
+        {
+            obj.extend(meta);
+        }
+        let _ = registry
+            .fire(
+                "post_write",
+                Event {
+                    file: file.to_string_lossy().into(),
+                    session_id: session_id.into(),
+                    data,
+                },
+            )
+            .map_err(|e| eprintln!("[hooks] post_write fire failed: {}", e));
     }
 }
 
 /// Fire a post_commit hook event.
 pub fn fire_post_commit(file: &Path, session_id: &str) {
     if let Some(registry) = registry_for_file(file) {
-        let _ = registry.fire("post_commit", Event {
-            file: file.to_string_lossy().into(),
-            session_id: session_id.into(),
-            data: serde_json::json!(null),
-        }).map_err(|e| eprintln!("[hooks] post_commit fire failed: {}", e));
+        let data = capture_metadata(file)
+            .map(serde_json::Value::Object)
+            .unwrap_or(serde_json::json!(null));
+        let _ = registry
+            .fire(
+                "post_commit",
+                Event {
+                    file: file.to_string_lossy().into(),
+                    session_id: session_id.into(),
+                    data,
+                },
+            )
+            .map_err(|e| eprintln!("[hooks] post_commit fire failed: {}", e));
     }
 }
 
@@ -103,11 +128,16 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
 #[allow(dead_code)]
 pub fn fire_claim(file: &Path, session_id: &str, pane_id: &str) {
     if let Some(registry) = registry_for_file(file) {
-        let _ = registry.fire("claim", Event {
-            file: file.to_string_lossy().into(),
-            session_id: session_id.into(),
-            data: serde_json::json!({"pane": pane_id}),
-        }).map_err(|e| eprintln!("[hooks] claim fire failed: {}", e));
+        let _ = registry
+            .fire(
+                "claim",
+                Event {
+                    file: file.to_string_lossy().into(),
+                    session_id: session_id.into(),
+                    data: serde_json::json!({"pane": pane_id}),
+                },
+            )
+            .map_err(|e| eprintln!("[hooks] claim fire failed: {}", e));
     }
 }
 
@@ -115,11 +145,16 @@ pub fn fire_claim(file: &Path, session_id: &str, pane_id: &str) {
 #[allow(dead_code)]
 pub fn fire_layout_change(file: &Path, session_id: &str, action: &str) {
     if let Some(registry) = registry_for_file(file) {
-        let _ = registry.fire("layout_change", Event {
-            file: file.to_string_lossy().into(),
-            session_id: session_id.into(),
-            data: serde_json::json!({"action": action}),
-        }).map_err(|e| eprintln!("[hooks] layout_change fire failed: {}", e));
+        let _ = registry
+            .fire(
+                "layout_change",
+                Event {
+                    file: file.to_string_lossy().into(),
+                    session_id: session_id.into(),
+                    data: serde_json::json!({"action": action}),
+                },
+            )
+            .map_err(|e| eprintln!("[hooks] layout_change fire failed: {}", e));
     }
 }
 
@@ -132,8 +167,21 @@ pub fn poll(file: &Path, hook_name: &str, since_secs: u64) -> Vec<agent_kit::hoo
 }
 
 fn registry_for_file(file: &Path) -> Option<HookRegistry> {
-    agent_kit::hooks::hooks_dir_for_file(file)
-        .map(HookRegistry::new)
+    agent_kit::hooks::hooks_dir_for_file(file).map(HookRegistry::new)
+}
+
+fn capture_metadata(file: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let capture = crate::capture::load_active(file).ok().flatten()?;
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "capture_id".to_string(),
+        serde_json::Value::String(capture.capture_id),
+    );
+    map.insert(
+        "response_sha256".to_string(),
+        serde_json::Value::String(capture.response_sha256),
+    );
+    Some(map)
 }
 
 #[cfg(test)]
@@ -143,11 +191,22 @@ mod tests {
 
     #[test]
     fn fire_doc_hooks_substitutes_all_vars() {
-        let tmp = std::env::temp_dir().join(format!("agent-doc-hooks-test-{}.txt", std::process::id()));
-        let cmd = format!("echo '{{{{session_id}}}}:{{{{file}}}}:{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
+        let tmp =
+            std::env::temp_dir().join(format!("agent-doc-hooks-test-{}.txt", std::process::id()));
+        let cmd = format!(
+            "echo '{{{{session_id}}}}:{{{{file}}}}:{{{{agent}}}}:{{{{model}}}}' > {}",
+            tmp.display()
+        );
         let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
         hooks.insert("post_write".to_string(), vec![cmd]);
-        fire_doc_hooks(&hooks, "post_write", Path::new("/my/doc.md"), "sid-1", &Some("claude".to_string()), &Some("opus".to_string()));
+        fire_doc_hooks(
+            &hooks,
+            "post_write",
+            Path::new("/my/doc.md"),
+            "sid-1",
+            &Some("claude".to_string()),
+            &Some("opus".to_string()),
+        );
         let output = std::fs::read_to_string(&tmp).unwrap_or_default();
         assert!(output.contains("sid-1"), "session_id missing: {}", output);
         assert!(output.contains("/my/doc.md"), "file missing: {}", output);
@@ -160,7 +219,14 @@ mod tests {
     fn fire_doc_hooks_noop_for_unknown_event() {
         let hooks: HashMap<String, Vec<String>> = HashMap::new();
         // must not panic
-        fire_doc_hooks(&hooks, "post_commit", Path::new("/doc.md"), "id", &None, &None);
+        fire_doc_hooks(
+            &hooks,
+            "post_commit",
+            Path::new("/doc.md"),
+            "id",
+            &None,
+            &None,
+        );
     }
 
     #[test]
@@ -171,10 +237,29 @@ mod tests {
 
     #[test]
     fn fire_doc_event_noop_when_hooks_empty() {
-        let tmp = std::env::temp_dir().join(format!("agent-doc-event-test-{}.md", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("agent-doc-event-test-{}.md", std::process::id()));
         std::fs::write(&tmp, "---\nsession: abc\n---\nBody\n").unwrap();
         // No hooks in frontmatter — must not panic
         fire_doc_event(&tmp, "post_write");
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn post_write_includes_capture_metadata_when_available() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "---\nsession: sid\n---\n\n## User\n\nHello\n").unwrap();
+        crate::snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
+        crate::capture::capture_response(&doc, "response").unwrap();
+
+        fire_post_write(&doc, "sid", 1);
+        let events = poll(&doc, "post_write", 0);
+        assert!(!events.is_empty());
+        let data = &events[0].event.data;
+        assert_eq!(data["patches"].as_u64(), Some(1));
+        assert!(data["capture_id"].is_string());
+        assert!(data["response_sha256"].is_string());
     }
 }

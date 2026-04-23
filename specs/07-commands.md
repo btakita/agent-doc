@@ -6,7 +6,7 @@
 
 `agent-doc run <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
 
-1. Compute diff → 2. Build prompt (diff + full doc) → 3. Branch if `-b` → 4. Send to agent → 5. Update session ID → 6. Append response → 7. Save snapshot → 8. `git add -f` + commit
+1. Compute diff → 2. Build prompt (diff + full doc) → 3. Branch if `-b` → 4. Send to agent → 5. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 6. Update session ID → 7. Append response → 8. Save snapshot → 9. `git add -f` + commit
 
 First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
 
@@ -313,6 +313,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot is saved from `content_ours` (baseline + response), NOT the current file on disk. This ensures user edits typed after the boundary marker are not absorbed into the snapshot and remain visible to the next diff. CRDT state is also saved from `content_ours`.
 
+**Durable response capture (v0.33.13):** Before any write path mutates the document or fires hooks, the final parsed response is persisted to `.agent-doc/captures/<doc-hash>/<cycle-id>.json` with the cycle ID, session/agent/model metadata, response SHA-256, and the exact snapshot/document hashes the response was generated against. `pending/<hash>.md` remains the short-lived queue, but it is now a projection of that durable capture rather than the only durable copy.
+
 **Write dedup (v0.28.2):** All four write paths skip the actual write when the merged/patched content is identical to the current file on disk. On dedup, pending state is cleared and the function returns early. Events are logged to stderr and appended (with backtrace) to `/tmp/agent-doc-write-dedup.log`.
 
 **Pane ownership verification (v0.28.2):** `verify_pane_ownership()` is called at the top of `run`, `run_template`, and `run_stream`. It reads the document's `session` frontmatter field, looks up the owning pane in the session registry, and compares it to the current tmux pane. If a different pane definitively owns the session, the write is rejected. The check is lenient: it passes silently when not in tmux, when there is no session ID, or when the pane is indeterminate.
@@ -440,9 +442,9 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 
 **Steps (in order):**
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
-   - If the prior cycle is still `preflight_started` or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If the prior cycle is still `preflight_started`, `response_captured`, or `write_applied`, preflight first auto-attempts `recover` + `commit`
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
-1. Recover orphaned pending responses (`agent-doc recover`)
+1. Recover orphaned pending/captured responses (`agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`
@@ -485,7 +487,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 
 - Primary source of truth: `.agent-doc/state/cycles/<doc-hash>.json`
 - Fallback for older repos: last non-empty `.agent-doc/logs/ops.log` line
-- Exit `1` when the current cycle state is still open (`preflight_started` or `write_applied`)
+- Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
 - Exit `0` when the cycle state is committed or no state/log file exists
 
 **URL link processing:**

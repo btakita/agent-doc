@@ -32,8 +32,7 @@ pub fn run(file: &Path) -> Result<()> {
     }
 
     let removed = content.len() - result.len();
-    std::fs::write(file, &result)
-        .with_context(|| format!("failed to write {}", file.display()))?;
+    std::fs::write(file, &result).with_context(|| format!("failed to write {}", file.display()))?;
 
     // Update snapshot to match
     crate::snapshot::save(file, &result)?;
@@ -43,9 +42,14 @@ pub fn run(file: &Path) -> Result<()> {
     if let Ok(hash) = crate::snapshot::doc_hash(file)
         && let Some(project_root) = crate::snapshot::find_project_root(file)
     {
-        let patch_file = project_root.join(".agent-doc/patches").join(format!("{}.json", hash));
+        let patch_file = project_root
+            .join(".agent-doc/patches")
+            .join(format!("{}.json", hash));
         if patch_file.exists() {
-            eprintln!("[dedupe] cleaning stale patch file: {}", patch_file.display());
+            eprintln!(
+                "[dedupe] cleaning stale patch file: {}",
+                patch_file.display()
+            );
             if let Err(e) = std::fs::remove_file(&patch_file) {
                 eprintln!("[dedupe] WARNING: failed to remove stale patch file: {}", e);
             }
@@ -95,12 +99,18 @@ fn dedupe_responses(content: &str) -> String {
     for pair in blocks.windows(2) {
         let (s1, e1) = pair[0];
         let (s2, e2) = pair[1];
-        let block1: String = lines[s1..e1].iter()
+        let block1: String = lines[s1..e1]
+            .iter()
             .filter(|l| !l.trim().starts_with("<!-- agent:boundary:"))
-            .map(|l| l.trim()).collect::<Vec<_>>().join("\n");
-        let block2: String = lines[s2..e2].iter()
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let block2: String = lines[s2..e2]
+            .iter()
             .filter(|l| !l.trim().starts_with("<!-- agent:boundary:"))
-            .map(|l| l.trim()).collect::<Vec<_>>().join("\n");
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join("\n");
         if block1 == block2 {
             eprintln!(
                 "[dedupe] duplicate found: \"{}\" (lines {}-{})",

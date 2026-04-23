@@ -46,6 +46,7 @@ mod audit_docs;
 mod autoclaim;
 mod boundary;
 mod callback;
+mod capture;
 mod claim;
 mod clean;
 mod cleanup_cmd;
@@ -54,19 +55,12 @@ mod compact;
 mod config;
 mod convert;
 mod cycle_state;
-mod pending;
-mod pending_cmd;
-mod status_cmd;
-mod project_config;
-mod gc;
-mod parallel;
-mod preflight;
-mod read;
 mod dedupe;
 mod diff;
 mod env;
 mod extract;
 mod focus;
+mod gc;
 mod git;
 mod harness;
 mod history;
@@ -80,31 +74,38 @@ mod lib_install;
 mod mode;
 mod notify;
 mod outline;
+mod parallel;
 mod patch;
+mod pending;
+mod pending_cmd;
 mod plugin;
+mod preflight;
+mod project_config;
 mod prompt;
+mod read;
 mod recover;
 mod rename;
 mod reset;
 mod resync;
 mod route;
+mod run;
 mod session_check;
 mod session_cmd;
 mod sessions;
 mod skill;
 mod snapshot;
 mod start;
+mod status_cmd;
 mod stream;
 mod supervisor;
-mod run;
 mod sync;
 mod terminal;
 pub(crate) use agent_doc::ipc_socket;
+mod ops_log;
 mod undo;
 mod upgrade;
 mod watch;
 mod worktree;
-mod ops_log;
 mod write;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths
@@ -130,7 +131,11 @@ pub enum AgentDocMode {
 }
 
 #[derive(Parser)]
-#[command(name = "agent-doc", version, about = "Interactive document sessions with AI agents")]
+#[command(
+    name = "agent-doc",
+    version,
+    about = "Interactive document sessions with AI agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -468,7 +473,11 @@ enum Commands {
         pending_set_gate_type: Vec<String>,
         /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
         /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
-        #[arg(long = "allow-replace-pending", alias = "allow-patch-pending", hide = true)]
+        #[arg(
+            long = "allow-replace-pending",
+            alias = "allow-patch-pending",
+            hide = true
+        )]
         allow_replace_pending: bool,
         /// Only mutate pending component — skip stdin reading and exchange synthesis.
         /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
@@ -988,8 +997,7 @@ fn init_tracing() {
     std::mem::forget(_guard);
 
     use tracing_subscriber::EnvFilter;
-    let env_filter = EnvFilter::try_new(&filter)
-        .unwrap_or_else(|_| EnvFilter::new("debug"));
+    let env_filter = EnvFilter::try_new(&filter).unwrap_or_else(|_| EnvFilter::new("debug"));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -1026,22 +1034,49 @@ fn main() -> anyhow::Result<()> {
             model,
             dry_run,
             no_git,
-        } => run::run(&file, branch, agent.as_deref(), model.as_deref(), dry_run, no_git, &config),
+        } => run::run(
+            &file,
+            branch,
+            agent.as_deref(),
+            model.as_deref(),
+            dry_run,
+            no_git,
+            &config,
+        ),
         Commands::History { file, restore } => match restore {
             Some(commit) => history::restore(&file, &commit),
             None => history::list(&file),
         },
         Commands::Log { file } => history::log(&file),
-        Commands::Show { file, back, at, tag } => {
-            history::show(&file, back, at, tag.as_deref())
-        }
-        Commands::Init { file, title, agent, mode } => {
-            init::run(file.as_deref(), title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
-        }
-        Commands::Install { editor, skip_prereqs, skip_plugins } => {
-            install::run(editor.as_deref(), skip_prereqs, skip_plugins)
-        }
-        Commands::Diff { file, wait, from, to } => {
+        Commands::Show {
+            file,
+            back,
+            at,
+            tag,
+        } => history::show(&file, back, at, tag.as_deref()),
+        Commands::Init {
+            file,
+            title,
+            agent,
+            mode,
+        } => init::run(
+            file.as_deref(),
+            title.as_deref(),
+            agent.as_deref(),
+            mode.as_deref(),
+            &config,
+        ),
+        Commands::Install {
+            editor,
+            skip_prereqs,
+            skip_plugins,
+        } => install::run(editor.as_deref(), skip_prereqs, skip_plugins),
+        Commands::Diff {
+            file,
+            wait,
+            from,
+            to,
+        } => {
             if let Some(from_ref) = from {
                 let to_ref = to.as_deref().unwrap_or("HEAD");
                 history::git_diff(&file, &from_ref, to_ref)
@@ -1055,12 +1090,21 @@ fn main() -> anyhow::Result<()> {
         Commands::Gc { root, dry_run } => {
             let result = gc::run(root.as_deref(), dry_run)?;
             if dry_run {
-                eprintln!("[gc] Dry run: {} files would be deleted, {} kept", result.deleted, result.skipped);
+                eprintln!(
+                    "[gc] Dry run: {} files would be deleted, {} kept",
+                    result.deleted, result.skipped
+                );
             }
             Ok(())
         }
         Commands::Start { file } => start::run(&file),
-        Commands::Route { file, pane, cols, focus: _focus, debounce } => {
+        Commands::Route {
+            file,
+            pane,
+            cols,
+            focus: _focus,
+            debounce,
+        } => {
             // NOTE: sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
             // separately with the correct --window arg. Running sync from both route AND
@@ -1080,9 +1124,28 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Commit { file } => git::commit(&file).map(|_| ()),
         Commands::Dedupe { file } => dedupe::run(&file),
-        Commands::Claim { file, position, pane, window, force, isolate } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force, isolate),
+        Commands::Claim {
+            file,
+            position,
+            pane,
+            window,
+            force,
+            isolate,
+        } => claim::run(
+            &file,
+            position.as_deref(),
+            pane.as_deref(),
+            window.as_deref(),
+            force,
+            isolate,
+        ),
         Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
-        Commands::Layout { files, split, pane, window } => {
+        Commands::Layout {
+            files,
+            split,
+            pane,
+            window,
+        } => {
             let split = match split.as_str() {
                 "v" | "vertical" => layout::Split::Vertical,
                 _ => layout::Split::Horizontal,
@@ -1096,9 +1159,7 @@ fn main() -> anyhow::Result<()> {
             focus,
             rename,
         } => {
-            if rename
-                && let Some(ref f) = focus
-            {
+            if rename && let Some(ref f) = focus {
                 sync::write_rename_debounce(f);
             }
             sync::run(&columns, window.as_deref(), focus.as_deref())
@@ -1130,37 +1191,45 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync { fix, session } => resync::run(fix, session.as_deref()),
-        Commands::Skill { command } => match command {
-            SkillCommands::Install { reload, harness, all } => {
-                if all {
-                    skill::install_all()?;
-                } else if let Some(ref h) = harness {
-                    let env = agent_kit::detect::Environment::from_name(h)
+        Commands::Skill { command } => {
+            match command {
+                SkillCommands::Install {
+                    reload,
+                    harness,
+                    all,
+                } => {
+                    if all {
+                        skill::install_all()?;
+                    } else if let Some(ref h) = harness {
+                        let env = agent_kit::detect::Environment::from_name(h)
                         .ok_or_else(|| anyhow::anyhow!(
                             "unknown harness '{}'. Valid: claude, opencode, codex, cursor, generic", h
                         ))?;
-                    skill::install_for(env)?;
-                } else {
-                    let updated = skill::install_and_check_updated()?;
-                    if updated
-                        && let Some(ref mode) = reload
-                    {
-                        match mode.as_str() {
-                            "restart" => {
-                                println!("SKILL_RELOAD=restart");
-                                println!("Skill updated. Please restart this session with --resume to reload the skill.");
-                            }
-                            _ => {
-                                println!("SKILL_RELOAD=compact");
-                                println!("Skill updated. Please run /compact to reload the updated skill instructions.");
+                        skill::install_for(env)?;
+                    } else {
+                        let updated = skill::install_and_check_updated()?;
+                        if updated && let Some(ref mode) = reload {
+                            match mode.as_str() {
+                                "restart" => {
+                                    println!("SKILL_RELOAD=restart");
+                                    println!(
+                                        "Skill updated. Please restart this session with --resume to reload the skill."
+                                    );
+                                }
+                                _ => {
+                                    println!("SKILL_RELOAD=compact");
+                                    println!(
+                                        "Skill updated. Please run /compact to reload the updated skill instructions."
+                                    );
+                                }
                             }
                         }
                     }
+                    Ok(())
                 }
-                Ok(())
+                SkillCommands::Check => skill::check(),
             }
-            SkillCommands::Check => skill::check(),
-        },
+        }
         Commands::Plugin { action } => match action {
             PluginAction::Install { editor, local } => {
                 if local {
@@ -1172,10 +1241,35 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_add_gated, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, pending_resolve_gate, pending_set_gate_type, allow_replace_pending, pending_only, status } => {
+        Commands::Write {
+            file,
+            baseline_file,
+            template: is_template,
+            stream: is_stream,
+            ipc: is_ipc,
+            force_disk,
+            origin,
+            commit: do_commit,
+            pending_add,
+            pending_add_gated,
+            pending_done,
+            pending_edit,
+            pending_clear,
+            pending_reorder,
+            pending_gate,
+            pending_ungate,
+            pending_resolve_gate,
+            pending_set_gate_type,
+            allow_replace_pending,
+            pending_only,
+            status,
+        } => {
             // Log write origin for tracing
             if let Some(ref orig) = origin {
-                crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
+                crate::ops_log::log_op(
+                    &file,
+                    &format!("write_origin file={} origin={}", file.display(), orig),
+                );
             }
 
             // Apply pending ops BEFORE the patch payload write so both mutations
@@ -1196,7 +1290,9 @@ fn main() -> anyhow::Result<()> {
                 anyhow::bail!("--pending-only requires at least one --pending-* flag");
             }
             if pending_only && (is_template || is_stream || is_ipc) {
-                anyhow::bail!("--pending-only cannot be combined with --template, --stream, or --ipc");
+                anyhow::bail!(
+                    "--pending-only cannot be combined with --template, --stream, or --ipc"
+                );
             }
             if has_pending_ops {
                 // Order: clear (destructive) → add → edit → gate → ungate → done → reorder.
@@ -1208,18 +1304,18 @@ fn main() -> anyhow::Result<()> {
                 pending_cmd::add_many(&file, &pending_add, false)?;
                 pending_cmd::add_many(&file, &pending_add_gated, true)?;
                 for pair in &pending_edit {
-                    let (id, text) = pair
-                        .split_once('=')
-                        .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+                    let (id, text) = pair.split_once('=').with_context(|| {
+                        format!("--pending-edit expects 'id=text', got: {}", pair)
+                    })?;
                     pending_cmd::edit(&file, id, text)?;
                 }
                 for id in &pending_gate {
                     pending_cmd::gate(&file, id)?;
                 }
                 for pair in &pending_set_gate_type {
-                    let (id, gt) = pair
-                        .split_once('=')
-                        .with_context(|| format!("--pending-set-gate-type expects 'id=type', got: {}", pair))?;
+                    let (id, gt) = pair.split_once('=').with_context(|| {
+                        format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
+                    })?;
                     pending_cmd::set_gate_type(&file, id, gt)?;
                 }
                 for id in &pending_ungate {
@@ -1284,7 +1380,9 @@ fn main() -> anyhow::Result<()> {
             // Signal to write module whether --pending-add was provided (for future-work lint)
             if !pending_add.is_empty() || !pending_add_gated.is_empty() {
                 // SAFETY: single-threaded at this point in the CLI entrypoint.
-                unsafe { std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1"); }
+                unsafe {
+                    std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1");
+                }
             }
 
             let baseline = baseline_file
@@ -1324,9 +1422,20 @@ fn main() -> anyhow::Result<()> {
             result?;
             Ok(())
         }
-        Commands::Stream { file, interval, agent, model, no_git } => {
-            stream::run(&file, interval, agent.as_deref(), model.as_deref(), no_git, &config)
-        }
+        Commands::Stream {
+            file,
+            interval,
+            agent,
+            model,
+            no_git,
+        } => stream::run(
+            &file,
+            interval,
+            agent.as_deref(),
+            model.as_deref(),
+            no_git,
+            &config,
+        ),
         Commands::TemplateInfo { file } => {
             let info = template::template_info(&file)?;
             println!("{}", serde_json::to_string_pretty(&info)?);
@@ -1348,19 +1457,52 @@ fn main() -> anyhow::Result<()> {
             component,
             message,
             tag,
-        } => compact::run(&file, keep, component.as_deref(), message.as_deref(), tag.as_deref()),
-        Commands::Convert { file, mode, agent_doc_format, agent_doc_write } => {
-            convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
-        }
+        } => compact::run(
+            &file,
+            keep,
+            component.as_deref(),
+            message.as_deref(),
+            tag.as_deref(),
+        ),
+        Commands::Convert {
+            file,
+            mode,
+            agent_doc_format,
+            agent_doc_write,
+        } => convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write),
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
-        Commands::Annotate { file, force, history } => annotate::run(&file, force, history),
+        Commands::Annotate {
+            file,
+            force,
+            history,
+        } => annotate::run(&file, force, history),
         Commands::Undo { file } => undo::run(&file),
-        Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
-        Commands::Transfer { source, target, component, bypass_claim, items, referral } => {
+        Commands::Extract {
+            source,
+            target,
+            component,
+        } => extract::run(&source, &target, component.as_deref()),
+        Commands::Transfer {
+            source,
+            target,
+            component,
+            bypass_claim,
+            items,
+            referral,
+        } => {
             let item_ids: Option<Vec<String>> = items.map(|s| {
-                s.split(',').map(|id| id.trim().trim_start_matches('#').to_string()).collect()
+                s.split(',')
+                    .map(|id| id.trim().trim_start_matches('#').to_string())
+                    .collect()
             });
-            extract::transfer(&source, &target, &component, bypass_claim, item_ids.as_deref(), referral)
+            extract::transfer(
+                &source,
+                &target,
+                &component,
+                bypass_claim,
+                item_ids.as_deref(),
+                referral,
+            )
         }
         Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
         Commands::Claims => {
@@ -1376,19 +1518,44 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Parallel { file, tasks_explicit, model, no_git, no_worktree, timeout, dry_run } => {
-            parallel::run(&file, parallel::ParallelConfig {
+        Commands::Parallel {
+            file,
+            tasks_explicit,
+            model,
+            no_git,
+            no_worktree,
+            timeout,
+            dry_run,
+        } => parallel::run(
+            &file,
+            parallel::ParallelConfig {
                 tasks: tasks_explicit,
                 model,
                 no_git,
                 no_worktree,
                 timeout_secs: timeout,
                 dry_run,
-            })
-        }
-        Commands::Notify { file, message, source, affects, no_commit, pending_add, pending_add_gated, no_create_pending } => {
-            notify::run(&file, message.as_deref(), source.as_deref(), affects.as_deref(), !no_commit, &pending_add, &pending_add_gated, no_create_pending)
-        }
+            },
+        ),
+        Commands::Notify {
+            file,
+            message,
+            source,
+            affects,
+            no_commit,
+            pending_add,
+            pending_add_gated,
+            no_create_pending,
+        } => notify::run(
+            &file,
+            message.as_deref(),
+            source.as_deref(),
+            affects.as_deref(),
+            !no_commit,
+            &pending_add,
+            &pending_add_gated,
+            no_create_pending,
+        ),
         Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
@@ -1414,9 +1581,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::GcLibs { target_dir } => {
-            lib_gc::run(target_dir.as_deref())
-        }
+        Commands::GcLibs { target_dir } => lib_gc::run(target_dir.as_deref()),
         Commands::LibInstall { source, target_dir } => {
             lib_install::run(source.as_deref(), target_dir.as_deref())
         }
@@ -1427,34 +1592,38 @@ fn main() -> anyhow::Result<()> {
             None => session_cmd::show(),
         },
         Commands::Hook { action } => match action {
-            HookAction::Fire { event, file, session_id, data } => {
-                hook_cmd::fire(&event, &file, session_id.as_deref(), data.as_deref())
-            }
+            HookAction::Fire {
+                event,
+                file,
+                session_id,
+                data,
+            } => hook_cmd::fire(&event, &file, session_id.as_deref(), data.as_deref()),
             HookAction::Poll { event, since, root } => {
                 hook_cmd::poll(&event, since, root.as_deref())
             }
-            HookAction::Listen { root } => {
-                hook_cmd::listen(root.as_deref())
-            }
-            HookAction::Gc { root } => {
-                hook_cmd::gc(root.as_deref())
-            }
+            HookAction::Listen { root } => hook_cmd::listen(root.as_deref()),
+            HookAction::Gc { root } => hook_cmd::gc(root.as_deref()),
             HookAction::CheckCallbacks { root } => {
                 let pending = callback::scan_pending_callbacks(root.as_deref())?;
                 let json = serde_json::to_string_pretty(
-                    &serde_json::json!({"pending_callbacks": pending})
+                    &serde_json::json!({"pending_callbacks": pending}),
                 )?;
                 println!("{}", json);
                 Ok(())
             }
         },
-        Commands::Cleanup { file, timeout, poll_interval, fallback_model } => {
-            cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model)
-        }
+        Commands::Cleanup {
+            file,
+            timeout,
+            poll_interval,
+            fallback_model,
+        } => cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model),
         Commands::Pending { file, action } => match action {
             PendingAction::Add { item } => pending_cmd::add(&file, &item, false),
             PendingAction::AddGated { item } => pending_cmd::add(&file, &item, true),
-            PendingAction::Remove { target, contains } => pending_cmd::remove(&file, &target, contains),
+            PendingAction::Remove { target, contains } => {
+                pending_cmd::remove(&file, &target, contains)
+            }
             PendingAction::Prune => pending_cmd::reap(&file),
             PendingAction::Reap => pending_cmd::reap(&file),
             PendingAction::Backfill => pending_cmd::backfill(&file),
@@ -1462,12 +1631,20 @@ fn main() -> anyhow::Result<()> {
             PendingAction::Edit { id, text } => pending_cmd::edit(&file, &id, &text),
             PendingAction::Clear => pending_cmd::clear(&file),
             PendingAction::Reorder { ids } => {
-                let ids: Vec<String> = ids.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let ids: Vec<String> = ids
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 pending_cmd::reorder(&file, &ids)
             }
             PendingAction::List => pending_cmd::list(&file),
-            PendingAction::ResolveGate { gate_type } => pending_cmd::resolve_gate(&file, &gate_type),
-            PendingAction::SetGateType { id, gate_type } => pending_cmd::set_gate_type(&file, &id, &gate_type),
+            PendingAction::ResolveGate { gate_type } => {
+                pending_cmd::resolve_gate(&file, &gate_type)
+            }
+            PendingAction::SetGateType { id, gate_type } => {
+                pending_cmd::set_gate_type(&file, &id, &gate_type)
+            }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
             // Determine scan root: explicit --scope, or cwd, or project root
@@ -1479,14 +1656,26 @@ fn main() -> anyhow::Result<()> {
             };
             let total = pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
             if total == 0 {
-                eprintln!("[resolve-gate] no [/{}] items found under {}", gate_type, scan_root.display());
+                eprintln!(
+                    "[resolve-gate] no [/{}] items found under {}",
+                    gate_type,
+                    scan_root.display()
+                );
             } else {
-                eprintln!("[resolve-gate] resolved {} total [/{}] item(s)", total, gate_type);
+                eprintln!(
+                    "[resolve-gate] resolved {} total [/{}] item(s)",
+                    total, gate_type
+                );
             }
             Ok(())
-        },
+        }
         Commands::Callback { action } => match action {
-            CallbackAction::Request { file, operations, context, ttl } => {
+            CallbackAction::Request {
+                file,
+                operations,
+                context,
+                ttl,
+            } => {
                 let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
                 let request = callback::create_request(&file, &ops, context.as_deref(), ttl)?;
                 println!("{}", serde_json::to_string_pretty(&request)?);
@@ -1504,14 +1693,20 @@ fn main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            CallbackAction::Respond { file, request_id, status, summary } => {
+            CallbackAction::Respond {
+                file,
+                request_id,
+                status,
+                summary,
+            } => {
                 callback::write_response(&file, &request_id, &status, &summary, None)?;
                 eprintln!("[callback] response written for request {}", request_id);
                 Ok(())
             }
             CallbackAction::Gc { root } => {
                 let cwd = std::env::current_dir()?;
-                let root_path = root.map(PathBuf::from)
+                let root_path = root
+                    .map(PathBuf::from)
                     .or_else(|| snapshot::find_project_root(&cwd))
                     .context("could not find project root")?;
                 callback::cleanup_expired(&root_path, 300)

@@ -70,7 +70,10 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
     let (fm, _) = frontmatter::parse(&content)?;
     let session_id = match fm.session {
         Some(id) => id,
-        None => anyhow::bail!("no session UUID in {} (use Claim to register)", file.display()),
+        None => anyhow::bail!(
+            "no session UUID in {} (use Claim to register)",
+            file.display()
+        ),
     };
 
     let pane = sessions::lookup(&session_id)?;

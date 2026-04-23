@@ -18,7 +18,12 @@ use agent_kit::hooks::{Event, HookRegistry};
 /// ```json
 /// { "hooks": { "PostToolUse": [{ "command": "agent-doc hook fire post_write $FILE" }] } }
 /// ```
-pub fn fire(event_name: &str, file: &str, session_id: Option<&str>, data: Option<&str>) -> Result<()> {
+pub fn fire(
+    event_name: &str,
+    file: &str,
+    session_id: Option<&str>,
+    data: Option<&str>,
+) -> Result<()> {
     let file_path = Path::new(file);
     let hooks_dir = agent_kit::hooks::hooks_dir_for_file(file_path)
         .context("could not find .agent-doc directory")?;
@@ -34,11 +39,14 @@ pub fn fire(event_name: &str, file: &str, session_id: Option<&str>, data: Option
         .and_then(|d| serde_json::from_str(d).ok())
         .unwrap_or(serde_json::json!(null));
 
-    let event_id = registry.fire(event_name, Event {
-        file: file.to_string(),
-        session_id,
-        data: data_value,
-    })?;
+    let event_id = registry.fire(
+        event_name,
+        Event {
+            file: file.to_string(),
+            session_id,
+            data: data_value,
+        },
+    )?;
 
     println!("{}", event_id);
     Ok(())
@@ -57,16 +65,21 @@ pub fn poll(event_name: &str, since_secs: u64, project_root: Option<&str>) -> Re
     let registry = HookRegistry::new(&hooks_dir);
     let events = registry.poll(event_name, since_secs)?;
 
-    let json = serde_json::to_string_pretty(&events.iter().map(|e| {
-        serde_json::json!({
-            "event_name": e.name,
-            "file": e.event.file,
-            "session_id": e.event.session_id,
-            "timestamp": e.timestamp,
-            "event_id": e.event_id,
-            "data": e.event.data,
-        })
-    }).collect::<Vec<_>>())?;
+    let json = serde_json::to_string_pretty(
+        &events
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "event_name": e.name,
+                    "file": e.event.file,
+                    "session_id": e.event.session_id,
+                    "timestamp": e.timestamp,
+                    "event_id": e.event_id,
+                    "data": e.event.data,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )?;
 
     println!("{}", json);
     Ok(())
@@ -104,11 +117,17 @@ pub fn listen(project_root: Option<&str>) -> Result<()> {
         match stream {
             Ok(mut stream) => {
                 use std::io::{BufRead, BufReader, Write};
-                let reader = BufReader::new(stream.try_clone().unwrap_or_else(|_| stream.try_clone().unwrap()));
+                let reader = BufReader::new(
+                    stream
+                        .try_clone()
+                        .unwrap_or_else(|_| stream.try_clone().unwrap()),
+                );
                 for line in reader.lines() {
                     let Ok(line) = line else { break };
                     let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
 
                     match handle_hook_message(trimmed, &hooks_dir) {
                         Ok(()) => {
@@ -140,10 +159,10 @@ pub fn listen(_project_root: Option<&str>) -> Result<()> {
 
 /// Handle a single hook message from the socket.
 fn handle_hook_message(msg: &str, hooks_dir: &Path) -> Result<()> {
-    let json: serde_json::Value = serde_json::from_str(msg)
-        .context("invalid JSON")?;
+    let json: serde_json::Value = serde_json::from_str(msg).context("invalid JSON")?;
 
-    let event_name = json["event_name"].as_str()
+    let event_name = json["event_name"]
+        .as_str()
         .or_else(|| json["event"].as_str())
         .context("missing event_name")?;
 
@@ -152,13 +171,19 @@ fn handle_hook_message(msg: &str, hooks_dir: &Path) -> Result<()> {
     let data = json.get("data").cloned().unwrap_or(serde_json::json!(null));
 
     let registry = HookRegistry::new(hooks_dir);
-    let event_id = registry.fire(event_name, Event {
-        file: file.to_string(),
-        session_id: session_id.to_string(),
-        data,
-    })?;
+    let event_id = registry.fire(
+        event_name,
+        Event {
+            file: file.to_string(),
+            session_id: session_id.to_string(),
+            data,
+        },
+    )?;
 
-    eprintln!("[hook-listen] received {} for {} (id={})", event_name, file, event_id);
+    eprintln!(
+        "[hook-listen] received {} for {} (id={})",
+        event_name, file, event_id
+    );
     Ok(())
 }
 

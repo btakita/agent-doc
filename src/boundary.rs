@@ -89,7 +89,11 @@ pub fn extract_id(marker: &str) -> Option<&str> {
 /// Returns `Some((marker_line_start, marker_line_end))` — the byte range of
 /// the entire line containing the marker (including trailing newline).
 #[allow(dead_code)]
-pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &str) -> Option<(usize, usize)> {
+pub fn find_in_component(
+    doc: &str,
+    comp: &component::Component,
+    boundary_id: &str,
+) -> Option<(usize, usize)> {
     let content_region = &doc[comp.open_end..comp.close_start];
     let marker = format_marker(boundary_id);
 
@@ -105,11 +109,12 @@ pub fn find_in_component(doc: &str, comp: &component::Component, boundary_id: &s
 
         // Find end of the line (including trailing newline)
         let marker_end = abs_pos + marker.len();
-        let line_end = if marker_end < comp.close_start && doc.as_bytes().get(marker_end) == Some(&b'\n') {
-            marker_end + 1
-        } else {
-            marker_end
-        };
+        let line_end =
+            if marker_end < comp.close_start && doc.as_bytes().get(marker_end) == Some(&b'\n') {
+                marker_end + 1
+            } else {
+                marker_end
+            };
 
         Some((line_start, line_end.min(comp.close_start)))
     } else {
@@ -128,7 +133,10 @@ pub fn find_boundary_id_in_component(doc: &str, comp: &component::Component) -> 
     let mut search_from = 0;
     while let Some(start) = content_region[search_from..].find(BOUNDARY_PREFIX) {
         let abs_start = comp.open_end + search_from + start;
-        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+        if code_ranges
+            .iter()
+            .any(|&(cs, ce)| abs_start >= cs && abs_start < ce)
+        {
             search_from += start + BOUNDARY_PREFIX.len();
             continue;
         }
@@ -306,8 +314,14 @@ mod tests {
         let (new_id, result) = insert(doc, "exchange").unwrap();
 
         // Stale markers should be gone
-        assert!(!result.contains("stale-1"), "stale marker 1 should be removed");
-        assert!(!result.contains("stale-2"), "stale marker 2 should be removed");
+        assert!(
+            !result.contains("stale-1"),
+            "stale marker 1 should be removed"
+        );
+        assert!(
+            !result.contains("stale-2"),
+            "stale marker 2 should be removed"
+        );
 
         // New marker should be present
         let new_marker = format_marker(&new_id);

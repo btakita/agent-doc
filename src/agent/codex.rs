@@ -74,12 +74,7 @@ impl Codex {
         self
     }
 
-    fn build_command(
-        &self,
-        session_id: Option<&str>,
-        fork: bool,
-        model: Option<&str>,
-    ) -> Command {
+    fn build_command(&self, session_id: Option<&str>, fork: bool, model: Option<&str>) -> Command {
         let mut cmd = Command::new(&self.command);
 
         if let Some(sid) = session_id {
@@ -93,10 +88,7 @@ impl Codex {
             }
         } else if fork {
             // codex exec resume --last --json -s workspace-write
-            cmd.arg("exec")
-                .arg("resume")
-                .arg("--last")
-                .arg("--json");
+            cmd.arg("exec").arg("resume").arg("--last").arg("--json");
             for arg in &self.base_args {
                 if arg != "exec" && arg != "--json" {
                     cmd.arg(arg);
@@ -131,10 +123,7 @@ pub fn parse_codex_line(line: &str) -> Result<StreamChunk> {
     let json: serde_json::Value = serde_json::from_str(line)
         .map_err(|e| anyhow::anyhow!("failed to parse Codex JSONL: {}: {}", e, line))?;
 
-    let event_type = json
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match event_type {
         "thread.started" => {
@@ -232,10 +221,7 @@ impl Agent for Codex {
                 Err(_) => continue,
             };
 
-            let event_type = json
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
             match event_type {
                 "thread.started" => {
@@ -251,7 +237,8 @@ impl Agent for Codex {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     if item_type == "agent_message"
-                        && let Some(text) = item.and_then(|i| i.get("text")).and_then(|v| v.as_str())
+                        && let Some(text) =
+                            item.and_then(|i| i.get("text")).and_then(|v| v.as_str())
                     {
                         if !response_text.is_empty() {
                             response_text.push('\n');
@@ -337,7 +324,9 @@ impl Iterator for CodexStreamIterator {
                                 chunk.session_id = self.session_id.take();
                             }
                             // Skip empty non-final chunks (turn.started, command_execution, etc.)
-                            if !chunk.is_final && chunk.text.is_empty() && chunk.thinking.is_none()
+                            if !chunk.is_final
+                                && chunk.text.is_empty()
+                                && chunk.thinking.is_none()
                                 && chunk.session_id.is_none()
                             {
                                 continue;
@@ -359,7 +348,8 @@ mod tests {
 
     #[test]
     fn parse_thread_started() {
-        let line = r#"{"type":"thread.started","thread_id":"019db613-e57b-77d2-844c-9e7dca83ad01"}"#;
+        let line =
+            r#"{"type":"thread.started","thread_id":"019db613-e57b-77d2-844c-9e7dca83ad01"}"#;
         let chunk = parse_codex_line(line).unwrap();
         assert_eq!(chunk.text, "");
         assert!(!chunk.is_final);

@@ -67,8 +67,7 @@ pub fn merge_contents_crdt(
     ours: &str,
     theirs: &str,
 ) -> Result<(String, Vec<u8>)> {
-    let merged = crate::crdt::merge(base_state, ours, theirs)
-        .context("CRDT merge failed")?;
+    let merged = crate::crdt::merge(base_state, ours, theirs).context("CRDT merge failed")?;
     // Build fresh CRDT state from the merged result
     let doc = crate::crdt::CrdtDoc::from_text(&merged);
     let state = doc.encode_state();
@@ -83,8 +82,7 @@ pub fn merge_contents_crdt(
 /// True conflicts (where existing content was modified differently)
 /// retain standard conflict markers.
 pub fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
-    let tmp = tempfile::TempDir::new()
-        .context("failed to create temp dir for merge")?;
+    let tmp = tempfile::TempDir::new().context("failed to create temp dir for merge")?;
 
     let base_path = tmp.path().join("base");
     let ours_path = tmp.path().join("ours");
@@ -100,9 +98,12 @@ pub fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
             "merge-file",
             "-p",
             "--diff3",
-            "-L", "agent-response",
-            "-L", "original",
-            "-L", "your-edits",
+            "-L",
+            "agent-response",
+            "-L",
+            "original",
+            "-L",
+            "your-edits",
             &ours_path.to_string_lossy(),
             &base_path.to_string_lossy(),
             &theirs_path.to_string_lossy(),
@@ -121,7 +122,9 @@ pub fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
         // Conflicts detected — try append-friendly resolution
         let (resolved, remaining_conflicts) = resolve_append_conflicts(&merged);
         if remaining_conflicts {
-            eprintln!("[write] WARNING: True merge conflicts remain. Please resolve conflict markers manually.");
+            eprintln!(
+                "[write] WARNING: True merge conflicts remain. Please resolve conflict markers manually."
+            );
         } else {
             eprintln!("[write] Merge conflicts auto-resolved (append-friendly).");
         }
@@ -457,12 +460,14 @@ User line 2.
         // User also edits concurrently (adds a line)
         let theirs_cycle1 = "Why were the videos not public?\nuser-edit-abc\n";
 
-        let (merged1, state1) = merge_contents_crdt(
-            Some(&initial_state), ours_cycle1, theirs_cycle1
-        ).unwrap();
+        let (merged1, state1) =
+            merge_contents_crdt(Some(&initial_state), ours_cycle1, theirs_cycle1).unwrap();
 
         // Both edits present after cycle 1
-        assert!(merged1.contains("Always publish public videos."), "missing agent response");
+        assert!(
+            merged1.contains("Always publish public videos."),
+            "missing agent response"
+        );
         assert!(merged1.contains("user-edit-abc"), "missing user edit");
 
         // --- Cycle 2: Agent writes another response, no concurrent user edits ---
@@ -471,9 +476,8 @@ User line 2.
         // No user edits this time — theirs is the same as what was written to disk
         let theirs_cycle2 = merged1.clone();
 
-        let (merged2, _state2) = merge_contents_crdt(
-            Some(&state1), &ours_cycle2, &theirs_cycle2
-        ).unwrap();
+        let (merged2, _state2) =
+            merge_contents_crdt(Some(&state1), &ours_cycle2, &theirs_cycle2).unwrap();
 
         // The user's edit should appear exactly ONCE, not duplicated
         let edit_count = merged2.matches("user-edit-abc").count();
@@ -511,10 +515,18 @@ User line 2.
         let (merged2, _state2) = merge_contents_crdt(Some(&state1), &ours2, &theirs2).unwrap();
 
         // Each piece of content appears exactly once
-        assert_eq!(merged2.matches("First paragraph.").count(), 1,
-            "First paragraph duplicated in:\n{}", merged2);
-        assert_eq!(merged2.matches("> user note").count(), 1,
-            "User note duplicated in:\n{}", merged2);
+        assert_eq!(
+            merged2.matches("First paragraph.").count(),
+            1,
+            "First paragraph duplicated in:\n{}",
+            merged2
+        );
+        assert_eq!(
+            merged2.matches("> user note").count(),
+            1,
+            "User note duplicated in:\n{}",
+            merged2
+        );
         assert!(merged2.contains("Second paragraph."));
         assert!(merged2.contains("> another note"));
     }

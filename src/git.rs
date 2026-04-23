@@ -85,7 +85,10 @@ impl CommitLock {
         let hash = crate::snapshot::doc_hash(doc).ok()?;
         let lock_dir = root.join(".agent-doc/locks");
         if let Err(e) = std::fs::create_dir_all(&lock_dir) {
-            eprintln!("[commit] commit-lock dir create failed: {} (proceeding unlocked)", e);
+            eprintln!(
+                "[commit] commit-lock dir create failed: {} (proceeding unlocked)",
+                e
+            );
             return None;
         }
         let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
@@ -97,12 +100,18 @@ impl CommitLock {
         {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("[commit] commit-lock open failed: {} (proceeding unlocked)", e);
+                eprintln!(
+                    "[commit] commit-lock open failed: {} (proceeding unlocked)",
+                    e
+                );
                 return None;
             }
         };
         if let Err(e) = file.try_lock_exclusive() {
-            eprintln!("[commit] commit-lock contended: {} (proceeding unlocked)", e);
+            eprintln!(
+                "[commit] commit-lock contended: {} (proceeding unlocked)",
+                e
+            );
             return None;
         }
         Some(Self { _file: file })
@@ -129,8 +138,8 @@ pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, st
         if let Some(superproject) = git_superproject_at(parent) {
             return Ok((superproject, file.to_path_buf()));
         }
-        let root = git_toplevel_at(parent)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let root =
+            git_toplevel_at(parent).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         return Ok((root, file.to_path_buf()));
     }
 
@@ -178,7 +187,11 @@ pub(crate) fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
         .ok()
         .and_then(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(s))
+            }
         })
 }
 
@@ -193,7 +206,11 @@ pub(crate) fn git_superproject_at(dir: &Path) -> Option<std::path::PathBuf> {
         .ok()
         .and_then(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(s))
+            }
         })
 }
 
@@ -317,7 +334,8 @@ pub(crate) fn is_in_git_repo(file: &Path) -> bool {
 }
 
 fn strip_boundary_markers(content: &str) -> String {
-    content.lines()
+    content
+        .lines()
         .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
         .collect::<Vec<_>>()
         .join("\n")
@@ -401,7 +419,10 @@ fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
     })
 }
 
-fn classify_safe_out_of_band_agent_doc_mutation(snapshot_doc: &str, file_doc: &str) -> Option<&'static str> {
+fn classify_safe_out_of_band_agent_doc_mutation(
+    snapshot_doc: &str,
+    file_doc: &str,
+) -> Option<&'static str> {
     if snapshot_doc == file_doc {
         return None;
     }
@@ -413,7 +434,9 @@ fn classify_safe_out_of_band_agent_doc_mutation(snapshot_doc: &str, file_doc: &s
         .map(|(_, body)| body)
         .unwrap_or(file_doc);
 
-    if redact_component_contents_for_absorb(snap_body)? != redact_component_contents_for_absorb(file_body)? {
+    if redact_component_contents_for_absorb(snap_body)?
+        != redact_component_contents_for_absorb(file_body)?
+    {
         return None;
     }
 
@@ -498,10 +521,14 @@ pub fn commit(file: &Path) -> Result<bool> {
             "[commit] file is in submodule {} — running git ops there",
             git_root.display()
         );
-        crate::ops_log::log_op(file, &format!(
-            "submodule_route file={} submodule={}",
-            file.display(), git_root.display()
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "submodule_route file={} submodule={}",
+                file.display(),
+                git_root.display()
+            ),
+        );
     }
     let timestamp = chrono_timestamp();
     let doc_name = file
@@ -521,10 +548,15 @@ pub fn commit(file: &Path) -> Result<bool> {
     let file_content = std::fs::read_to_string(file).unwrap_or_default();
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
-    crate::ops_log::log_op(file, &format!(
-        "commit_staging file={} snap_len={} file_len={}",
-        file.display(), snap_len, file_len
-    ));
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "commit_staging file={} snap_len={} file_len={}",
+            file.display(),
+            snap_len,
+            file_len
+        ),
+    );
 
     if let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
@@ -535,10 +567,16 @@ pub fn commit(file: &Path) -> Result<bool> {
             reason,
             file.display()
         );
-        crate::ops_log::log_op(file, &format!(
-            "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
-            file.display(), reason, snap_len, file_len
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                reason,
+                snap_len,
+                file_len
+            ),
+        );
         crate::snapshot::save(file, &file_content)?;
         snapshot_content = Some(file_content.clone());
     }
@@ -550,19 +588,34 @@ pub fn commit(file: &Path) -> Result<bool> {
         let drift = file_len - snap_len;
         // Always log out-of-band drift (any positive delta) for aggregation and
         // root-cause analysis — classifies small/frequent vs large/rare gaps.
-        crate::ops_log::log_op(file, &format!(
-            "out_of_band_write file={} drift={} snap_len={} file_len={}",
-            file.display(), drift, snap_len, file_len
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "out_of_band_write file={} drift={} snap_len={} file_len={}",
+                file.display(),
+                drift,
+                snap_len,
+                file_len
+            ),
+        );
         if drift > 100 {
             eprintln!(
                 "[commit] WARNING: file is {} bytes larger than snapshot for {} — possible out-of-band write (snap={}, file={})",
-                drift, file.display(), snap_len, file_len
+                drift,
+                file.display(),
+                snap_len,
+                file_len
             );
-            crate::ops_log::log_op(file, &format!(
-                "drift_warning file={} drift={} snap_len={} file_len={}",
-                file.display(), drift, snap_len, file_len
-            ));
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "drift_warning file={} drift={} snap_len={} file_len={}",
+                    file.display(),
+                    drift,
+                    snap_len,
+                    file_len
+                ),
+            );
 
             // Extreme drift can happen when a newly-bootstrapped document still
             // has the empty scaffold snapshot but the working tree now contains
@@ -580,10 +633,15 @@ pub fn commit(file: &Path) -> Result<bool> {
                         "[commit] Extreme drift detected ({}x) — re-syncing bootstrap scaffold snapshot from file content",
                         file_len / snap_len.max(1)
                     );
-                    crate::ops_log::log_op(file, &format!(
-                        "snapshot_resync file={} old_snap_len={} new_snap_len={}",
-                        file.display(), snap_len, file_len
-                    ));
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "snapshot_resync file={} old_snap_len={} new_snap_len={}",
+                            file.display(),
+                            snap_len,
+                            file_len
+                        ),
+                    );
                     crate::snapshot::save(file, &file_content)?;
                     snapshot_content = Some(file_content.clone());
                 } else {
@@ -591,10 +649,17 @@ pub fn commit(file: &Path) -> Result<bool> {
                         "[commit] Extreme drift detected ({}x) — NOT re-syncing tracked/non-scaffold snapshot",
                         file_len / snap_len.max(1)
                     );
-                    crate::ops_log::log_op(file, &format!(
-                        "snapshot_resync_blocked file={} head_exists={} scaffold_snapshot={} old_snap_len={} file_len={}",
-                        file.display(), head_exists, scaffold_snapshot, snap_len, file_len
-                    ));
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "snapshot_resync_blocked file={} head_exists={} scaffold_snapshot={} old_snap_len={} file_len={}",
+                            file.display(),
+                            head_exists,
+                            scaffold_snapshot,
+                            snap_len,
+                            file_len
+                        ),
+                    );
                 }
             }
         }
@@ -671,7 +736,10 @@ pub fn commit(file: &Path) -> Result<bool> {
     }
     let elapsed_staging = t_staging.elapsed().as_millis();
     if elapsed_staging > 0 {
-        eprintln!("[perf] commit.staging (hash_object+update-index): {}ms", elapsed_staging);
+        eprintln!(
+            "[perf] commit.staging (hash_object+update-index): {}ms",
+            elapsed_staging
+        );
     }
 
     // Commit — ignore failure (nothing to commit is fine).
@@ -690,8 +758,13 @@ pub fn commit(file: &Path) -> Result<bool> {
                 let stderr = String::from_utf8_lossy(&o.stderr);
                 if stderr.contains("index.lock") || stderr.contains("Unable to create") {
                     commit_attempts += 1;
-                    eprintln!("[commit] index.lock contention, retry {}/3", commit_attempts);
-                    std::thread::sleep(std::time::Duration::from_millis(50 * (1 << commit_attempts)));
+                    eprintln!(
+                        "[commit] index.lock contention, retry {}/3",
+                        commit_attempts
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        50 * (1 << commit_attempts),
+                    ));
                     continue;
                 }
             }
@@ -738,23 +811,29 @@ pub fn commit(file: &Path) -> Result<bool> {
             ) {
                 eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
             }
+            if let Err(e) = crate::capture::mark_committed(file) {
+                eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+            }
             // Fire post_commit hook for cross-session coordination
             let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();
             crate::hooks::fire_post_commit(file, &session_id);
             crate::hooks::fire_doc_event(file, "post_commit");
         }
         Ok(s) => {
-            crate::ops_log::log_op(file, &format!(
-                "commit_failed file={} exit_code={}",
-                file.display(),
-                s.code().unwrap_or(-1)
-            ));
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "commit_failed file={} exit_code={}",
+                    file.display(),
+                    s.code().unwrap_or(-1)
+                ),
+            );
         }
         Err(e) => {
-            crate::ops_log::log_op(file, &format!(
-                "commit_error file={} err={}",
-                file.display(), e
-            ));
+            crate::ops_log::log_op(
+                file,
+                &format!("commit_error file={} err={}", file.display(), e),
+            );
         }
     }
 
@@ -765,35 +844,35 @@ pub fn commit(file: &Path) -> Result<bool> {
     if let Ok(ref s) = commit_status
         && s.success()
     {
-            // Boundary reposition happens pre-commit now (see above) so the
-            // new boundary id lands in the same commit as the response.
-            // IPC reposition signal is still sent here so the plugin's
-            // Document buffer picks up the new boundary without a disk reload.
-            crate::write::try_ipc_reposition_boundary(file);
+        // Boundary reposition happens pre-commit now (see above) so the
+        // new boundary id lands in the same commit as the response.
+        // IPC reposition signal is still sent here so the plugin's
+        // Document buffer picks up the new boundary without a disk reload.
+        crate::write::try_ipc_reposition_boundary(file);
 
-            // Signal plugin to refresh VCS state so the gutter reflects the commit.
-            // Without this, the IDE shows the entire response as uncommitted until
-            // the user manually refreshes the file.
-            // Uses file-based signal (vcs-refresh.signal) since the socket listener
-            // may not be active — the plugin watches .agent-doc/patches/ for both
-            // patch files and signal files.
-            if let Ok(canonical) = file.canonicalize() {
-                let project_root = crate::snapshot::find_project_root(&canonical)
-                    .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-                let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
-                if signal_file.parent().is_some_and(|p| p.exists()) {
-                    match std::fs::write(&signal_file, "") {
-                        Ok(()) => eprintln!("[commit] VCS refresh signal written"),
-                        Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
-                    }
+        // Signal plugin to refresh VCS state so the gutter reflects the commit.
+        // Without this, the IDE shows the entire response as uncommitted until
+        // the user manually refreshes the file.
+        // Uses file-based signal (vcs-refresh.signal) since the socket listener
+        // may not be active — the plugin watches .agent-doc/patches/ for both
+        // patch files and signal files.
+        if let Ok(canonical) = file.canonicalize() {
+            let project_root = crate::snapshot::find_project_root(&canonical)
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+            let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
+            if signal_file.parent().is_some_and(|p| p.exists()) {
+                match std::fs::write(&signal_file, "") {
+                    Ok(()) => eprintln!("[commit] VCS refresh signal written"),
+                    Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
                 }
             }
+        }
 
-            // Submodule pointer update: if we just committed inside a submodule,
-            // stage the new submodule HEAD in the parent and partial-commit it.
-            if in_submodule {
-                update_parent_submodule_pointer(&super_root, &git_root, &msg);
-            }
+        // Submodule pointer update: if we just committed inside a submodule,
+        // stage the new submodule HEAD in the parent and partial-commit it.
+        if in_submodule {
+            update_parent_submodule_pointer(&super_root, &git_root, &msg);
+        }
     }
 
     let elapsed_total = t_total.elapsed().as_millis();
@@ -844,7 +923,10 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
                     changed = true;
                 }
                 Err(e) => {
-                    eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+                    eprintln!(
+                        "[commit] failed to update snapshot after boundary reposition: {}",
+                        e
+                    );
                 }
             }
         }
@@ -876,7 +958,10 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
                     changed = true;
                 }
                 Err(e) => {
-                    eprintln!("[commit] failed to reposition boundary in working tree: {}", e);
+                    eprintln!(
+                        "[commit] failed to reposition boundary in working tree: {}",
+                        e
+                    );
                 }
             }
         }
@@ -928,7 +1013,8 @@ fn strip_head_markers(content: &str) -> String {
     for line in content.lines() {
         let trimmed = line.trim_start();
         if !is_in_code_block(&code_ranges, offset)
-            && let Some(stripped) = line.strip_suffix(" (HEAD)") {
+            && let Some(stripped) = line.strip_suffix(" (HEAD)")
+        {
             // Strip from markdown headings
             if trimmed.starts_with('#') {
                 result_lines.push(stripped);
@@ -947,10 +1033,12 @@ fn strip_head_markers(content: &str) -> String {
         offset += line.len() + 1;
     }
     let result = result_lines.join("\n");
-    if content.ends_with('\n') { format!("{}\n", result) } else { result }
+    if content.ends_with('\n') {
+        format!("{}\n", result)
+    } else {
+        result
+    }
 }
-
-
 
 /// Write content to git's object database and return the blob hash.
 fn hash_object(git_root: &Path, content: &str) -> Result<String> {
@@ -1147,7 +1235,9 @@ pub fn last_commit_mtime(file: &Path) -> Result<Option<std::time::SystemTime>> {
         return Ok(None);
     }
 
-    Ok(Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch)))
+    Ok(Some(
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch),
+    ))
 }
 
 fn chrono_timestamp() -> String {
@@ -1168,9 +1258,13 @@ mod tests {
 
     #[test]
     fn strip_head_markers_from_headings() {
-        let input = "# Title\n### Re: Foo (HEAD)\nSome text with (HEAD) in it\n### Re: Bar (HEAD)\n";
+        let input =
+            "# Title\n### Re: Foo (HEAD)\nSome text with (HEAD) in it\n### Re: Bar (HEAD)\n";
         let result = strip_head_markers(input);
-        assert_eq!(result, "# Title\n### Re: Foo\nSome text with (HEAD) in it\n### Re: Bar\n");
+        assert_eq!(
+            result,
+            "# Title\n### Re: Foo\nSome text with (HEAD) in it\n### Re: Bar\n"
+        );
     }
 
     #[test]
@@ -1194,8 +1288,7 @@ mod tests {
         let input = "### Re: Answer (HEAD)\nResponse.\n```bash\n# comment (HEAD)\n```\n";
         let result = strip_head_markers(input);
         assert_eq!(
-            result,
-            "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
+            result, "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
             "fenced (HEAD) must be preserved, got:\n{result}"
         );
     }
@@ -1223,8 +1316,14 @@ mod tests {
     fn reposition_boundary_preserves_user_edits() {
         let content = "<!-- agent:exchange patch=append -->\n### Re: Answer\nAgent response.\n<!-- agent:boundary:old-id -->\nUser's new prompt here.\nMore user text.\n<!-- /agent:exchange -->\n";
         let result = agent_doc::template::reposition_boundary_to_end(content);
-        assert!(result.contains("User's new prompt here."), "user edit must be preserved");
-        assert!(result.contains("More user text."), "user edit must be preserved");
+        assert!(
+            result.contains("User's new prompt here."),
+            "user edit must be preserved"
+        );
+        assert!(
+            result.contains("More user text."),
+            "user edit must be preserved"
+        );
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let user_pos = result.find("User's new prompt here.").unwrap();
         assert!(boundary_pos > user_pos, "boundary must be after user text");
@@ -1242,11 +1341,20 @@ mod tests {
             <!-- /agent:exchange -->\n";
         let result = agent_doc::template::reposition_boundary_to_end(content);
         // All old boundaries should be removed
-        assert!(!result.contains("aaa111"), "first stale boundary must be removed");
-        assert!(!result.contains("bbb222"), "second stale boundary must be removed");
+        assert!(
+            !result.contains("aaa111"),
+            "first stale boundary must be removed"
+        );
+        assert!(
+            !result.contains("bbb222"),
+            "second stale boundary must be removed"
+        );
         // Exactly one fresh boundary should exist
         let boundary_count = result.matches("<!-- agent:boundary:").count();
-        assert_eq!(boundary_count, 1, "exactly one boundary marker should remain");
+        assert_eq!(
+            boundary_count, 1,
+            "exactly one boundary marker should remain"
+        );
         // The single boundary should be after user prompt
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let user_pos = result.find("User prompt.").unwrap();
@@ -1308,14 +1416,29 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         let doc = root.join("doc.md");
         fs::write(&doc, "# test\n").unwrap();
 
-        assert!(is_in_git_repo(&doc), "file inside git repo should return true");
+        assert!(
+            is_in_git_repo(&doc),
+            "file inside git repo should return true"
+        );
     }
 
     #[test]
@@ -1325,7 +1448,10 @@ mod tests {
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "# test\n").unwrap();
 
-        assert!(!is_in_git_repo(&doc), "file outside git repo should return false");
+        assert!(
+            !is_in_git_repo(&doc),
+            "file outside git repo should return false"
+        );
     }
 
     #[test]
@@ -1417,15 +1543,35 @@ mod tests {
         let root = dir.path();
 
         // Set up git repo
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         // Create and commit an initial file so HEAD exists
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Create a document at its pre-response state and commit it.
         let doc = root.join("session.md");
@@ -1433,8 +1579,16 @@ mod tests {
         fs::write(&doc, initial_content).unwrap();
 
         // Stage + initial commit so the file is tracked
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Simulate a write cycle landing a new response: update both the
         // working tree and the snapshot with the post-response content so
@@ -1470,9 +1624,21 @@ mod tests {
         // Verify the retry loop triggers when git commit stderr contains "index.lock".
         // We simulate this by checking that the retry backoff constants are correct:
         // attempts 1→100ms, 2→200ms, 3→400ms (50 * 2^attempt).
-        assert_eq!(50u64 * (1u64 << 1u32), 100, "retry 1 backoff should be 100ms");
-        assert_eq!(50u64 * (1u64 << 2u32), 200, "retry 2 backoff should be 200ms");
-        assert_eq!(50u64 * (1u64 << 3u32), 400, "retry 3 backoff should be 400ms");
+        assert_eq!(
+            50u64 * (1u64 << 1u32),
+            100,
+            "retry 1 backoff should be 100ms"
+        );
+        assert_eq!(
+            50u64 * (1u64 << 2u32),
+            200,
+            "retry 2 backoff should be 200ms"
+        );
+        assert_eq!(
+            50u64 * (1u64 << 3u32),
+            400,
+            "retry 3 backoff should be 400ms"
+        );
     }
 
     #[test]
@@ -1481,27 +1647,60 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
-        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        let content =
+            "---\nagent_doc_session: test\n---\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&doc, content).unwrap();
         let snap_path = crate::snapshot::path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, content).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         // No lock present — commit should succeed on first try
         let result = commit(&doc);
-        assert!(result.is_ok(), "commit without lock should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "commit without lock should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1514,13 +1713,33 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Initial doc + snapshot, tracked cleanly (no HEAD markers yet).
         let doc = root.join("session.md");
@@ -1530,8 +1749,16 @@ mod tests {
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, initial).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Simulate a write cycle: snapshot has a new response whose heading
         // still carries a transient `(HEAD)` marker.
@@ -1587,15 +1814,35 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
@@ -1609,8 +1856,16 @@ mod tests {
             <!-- /agent:pending -->\n";
         fs::write(&doc, snapshot).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -1665,15 +1920,35 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
@@ -1684,8 +1959,16 @@ mod tests {
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -1729,15 +2012,35 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
         let scaffold = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
@@ -1752,8 +2055,16 @@ mod tests {
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
         crate::snapshot::save(&doc, scaffold).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add scaffold", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add scaffold", "--no-verify"])
+            .output()
+            .unwrap();
 
         let live = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
             ## Status\n\n\
@@ -1801,15 +2112,35 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
         let scaffold = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
@@ -1866,15 +2197,35 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
 
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
         let readme = root.join("README.md");
         fs::write(&readme, "# test\n").unwrap();
-        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         let doc = root.join("session.md");
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
@@ -1888,8 +2239,16 @@ mod tests {
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
-        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
@@ -1953,29 +2312,84 @@ mod tests {
         // Initialize a "submodule" repo inside a temp dir
         let sub_dir = tempfile::TempDir::new().unwrap();
         let sub_origin = sub_dir.path();
-        Command::new("git").current_dir(sub_origin).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
         // Allow file:// transport inside this test invocation
-        Command::new("git").current_dir(sub_origin).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
         fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
-        Command::new("git").current_dir(sub_origin).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["commit", "-m", "init sub", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Initialize the outer repo
-        Command::new("git").current_dir(outer).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "user.name", "Test"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
         fs::write(outer.join("README.md"), "# outer\n").unwrap();
-        Command::new("git").current_dir(outer).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["commit", "-m", "init outer", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Add the submodule
         let sub_url = format!("file://{}", sub_origin.display());
         let sub_status = Command::new("git")
             .current_dir(outer)
-            .args(["-c", "protocol.file.allow=always", "submodule", "add", &sub_url, "src/sub"])
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ])
             .output()
             .unwrap();
         assert!(
@@ -1983,24 +2397,48 @@ mod tests {
             "submodule add failed: {}",
             String::from_utf8_lossy(&sub_status.stderr)
         );
-        Command::new("git").current_dir(outer).args(["commit", "-m", "add submodule", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
 
         let submodule_path = outer.join("src/sub");
         // Configure the checked-out submodule for committing
-        Command::new("git").current_dir(&submodule_path).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(&submodule_path).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         // Sanity: narrow_to_submodule returns the submodule path, not the outer
         let doc = submodule_path.join("session.md");
-        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
+        let content =
+            "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
         fs::write(&doc, content).unwrap();
         let (narrowed, in_sub) = narrow_to_submodule(outer, &doc);
         assert!(in_sub, "doc inside src/sub should be detected as submodule");
-        assert_eq!(narrowed, submodule_path, "narrowed root should be the submodule toplevel");
+        assert_eq!(
+            narrowed, submodule_path,
+            "narrowed root should be the submodule toplevel"
+        );
 
         // Stage + commit the file inside the submodule so it's tracked
-        Command::new("git").current_dir(&submodule_path).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(&submodule_path).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Modify the file (simulate an agent response landing) and create snapshot
         let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
@@ -2016,7 +2454,11 @@ mod tests {
 
         // Run commit() — should route through the submodule, succeed, and update parent pointer
         let result = commit(&doc);
-        assert!(result.is_ok(), "commit should succeed for submodule file: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "commit should succeed for submodule file: {:?}",
+            result.err()
+        );
 
         // Verify the submodule has a new agent-doc commit
         let sub_log = Command::new("git")
@@ -2048,11 +2490,18 @@ mod tests {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
         let doc = root.join("session.md");
         fs::write(&doc, "x").unwrap();
         let (narrowed, in_sub) = narrow_to_submodule(root, &doc);
-        assert!(!in_sub, "non-submodule file should not be detected as in-submodule");
+        assert!(
+            !in_sub,
+            "non-submodule file should not be detected as in-submodule"
+        );
         assert_eq!(narrowed, root);
     }
 
@@ -2096,8 +2545,11 @@ mod tests {
 
         // relative_to should resolve symlinks and produce the correct relative path
         let rel = relative_to(&file_via_symlink, real_root);
-        assert_eq!(rel, PathBuf::from("tasks/doc.md"),
-            "should produce submodule-relative path even when accessed via symlink");
+        assert_eq!(
+            rel,
+            PathBuf::from("tasks/doc.md"),
+            "should produce submodule-relative path even when accessed via symlink"
+        );
     }
 
     #[test]
@@ -2114,44 +2566,123 @@ mod tests {
         // Initialize a "submodule" origin repo
         let sub_dir = tempfile::TempDir::new().unwrap();
         let sub_origin = sub_dir.path();
-        Command::new("git").current_dir(sub_origin).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["config", "user.name", "Test"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
         fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
-        Command::new("git").current_dir(sub_origin).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(sub_origin).args(["commit", "-m", "init sub", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Initialize the outer repo (via real path, as git would)
-        Command::new("git").current_dir(outer).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "user.name", "Test"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
         fs::write(outer.join("README.md"), "# outer\n").unwrap();
-        Command::new("git").current_dir(outer).args(["add", "README.md"]).output().unwrap();
-        Command::new("git").current_dir(outer).args(["commit", "-m", "init outer", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Add submodule
         let sub_url = format!("file://{}", sub_origin.display());
         let sub_status = Command::new("git")
             .current_dir(outer)
-            .args(["-c", "protocol.file.allow=always", "submodule", "add", &sub_url, "src/sub"])
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ])
             .output()
             .unwrap();
-        assert!(sub_status.status.success(), "submodule add failed: {}",
-            String::from_utf8_lossy(&sub_status.stderr));
-        Command::new("git").current_dir(outer).args(["commit", "-m", "add submodule", "--no-verify"]).output().unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
 
         let submodule_path = outer.join("src/sub");
-        Command::new("git").current_dir(&submodule_path).args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(&submodule_path).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         // Create and track the document inside the submodule
         let doc_real = submodule_path.join("session.md");
-        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
+        let content =
+            "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
         fs::write(&doc_real, content).unwrap();
-        Command::new("git").current_dir(&submodule_path).args(["add", "session.md"]).output().unwrap();
-        Command::new("git").current_dir(&submodule_path).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Modify the file and create snapshot
         let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
@@ -2169,8 +2700,11 @@ mod tests {
 
         // commit() should succeed even with the symlinked absolute path
         let result = commit(&doc_via_symlink);
-        assert!(result.is_ok(),
-            "commit should succeed for submodule file accessed via symlink: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "commit should succeed for submodule file accessed via symlink: {:?}",
+            result.err()
+        );
 
         // Verify the submodule has the agent-doc commit
         let sub_log = Command::new("git")
@@ -2179,8 +2713,10 @@ mod tests {
             .output()
             .unwrap();
         let sub_log_str = String::from_utf8_lossy(&sub_log.stdout);
-        assert!(sub_log_str.contains("agent-doc(session)"),
-            "submodule git log should contain agent-doc commit, got:\n{sub_log_str}");
+        assert!(
+            sub_log_str.contains("agent-doc(session)"),
+            "submodule git log should contain agent-doc commit, got:\n{sub_log_str}"
+        );
     }
 
     // --- #8jzg: resolve_pane_cwd tests ---
@@ -2190,13 +2726,20 @@ mod tests {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
         let doc = root.join("plan.md");
         fs::write(&doc, "# Plan\n").unwrap();
 
         // resolve_pane_cwd should return the git root (not the file's parent)
         let cwd = resolve_pane_cwd(&doc);
-        assert_eq!(cwd, root, "cwd should be the git root for a file inside a plain repo");
+        assert_eq!(
+            cwd, root,
+            "cwd should be the git root for a file inside a plain repo"
+        );
     }
 
     #[test]
@@ -2208,8 +2751,10 @@ mod tests {
 
         // resolve_pane_cwd should not panic and should return a valid path
         let cwd = resolve_pane_cwd(&non_git_file);
-        assert!(cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
-            "fallback cwd should be the process cwd or an existing path");
+        assert!(
+            cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
+            "fallback cwd should be the process cwd or an existing path"
+        );
     }
 
     #[test]
@@ -2233,11 +2778,21 @@ mod tests {
         use std::time::Duration;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         let doc_content = "---\nagent_doc_format: template\n---\n\
             <!-- agent:exchange patch=append -->\n\
@@ -2253,10 +2808,16 @@ mod tests {
         crate::snapshot::save(&doc, doc_content).unwrap();
 
         // Initial commit
-        Command::new("git").current_dir(root)
-            .args(["add", "."]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Start a live IPC listener to simulate an active editor plugin.
         fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -2264,7 +2825,8 @@ mod tests {
         let server = thread::spawn(move || {
             crate::ipc_socket::start_listener(&root_clone, |_msg| {
                 Some(serde_json::json!({"type": "ack"}).to_string())
-            }).ok();
+            })
+            .ok();
         });
         thread::sleep(Duration::from_millis(100));
 
@@ -2273,12 +2835,17 @@ mod tests {
 
         // Snapshot should be repositioned
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(!snap.contains("oldid123"), "snapshot boundary should be repositioned");
+        assert!(
+            !snap.contains("oldid123"),
+            "snapshot boundary should be repositioned"
+        );
 
         // Working tree should NOT be modified (listener owns the update)
         let working = fs::read_to_string(&doc).unwrap();
-        assert!(working.contains("oldid123"),
-            "working tree should keep old boundary when listener is active");
+        assert!(
+            working.contains("oldid123"),
+            "working tree should keep old boundary when listener is active"
+        );
 
         assert!(changed, "snapshot change should report changed=true");
 
@@ -2291,11 +2858,21 @@ mod tests {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["config", "user.email", "test@test.com"]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
         let doc_content = "---\nagent_doc_format: template\n---\n\
             <!-- agent:exchange patch=append -->\n\
@@ -2311,10 +2888,16 @@ mod tests {
         crate::snapshot::save(&doc, doc_content).unwrap();
 
         // Initial commit
-        Command::new("git").current_dir(root)
-            .args(["add", "."]).output().unwrap();
-        Command::new("git").current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
         // Stale plugin install marker without a live listener should not block
         // the visible disk rewrite that preserves the head marker.
@@ -2325,11 +2908,16 @@ mod tests {
 
         // Both snapshot AND working tree should be repositioned
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(!snap.contains("oldid456"), "snapshot boundary should be repositioned");
+        assert!(
+            !snap.contains("oldid456"),
+            "snapshot boundary should be repositioned"
+        );
 
         let working = fs::read_to_string(&doc).unwrap();
-        assert!(!working.contains("oldid456"),
-            "working tree should be repositioned when only patches dir exists");
+        assert!(
+            !working.contains("oldid456"),
+            "working tree should be repositioned when only patches dir exists"
+        );
         assert!(
             working.contains("(HEAD)"),
             "working tree should retain the visible head marker after boundary rewrite"
@@ -2341,7 +2929,11 @@ mod tests {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
 
         let doc = root.join("plan.md");
         fs::write(&doc, "test").unwrap();
@@ -2370,7 +2962,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(result.is_none(), "should return None when lock is held");
-        assert!(elapsed.as_millis() < 100, "should not block — took {}ms", elapsed.as_millis());
+        assert!(
+            elapsed.as_millis() < 100,
+            "should not block — took {}ms",
+            elapsed.as_millis()
+        );
 
         // Clean up
         held.unlock().unwrap();

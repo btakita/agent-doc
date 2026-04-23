@@ -62,6 +62,9 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
 - **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
+- **Preflight gate** — `agent-doc preflight` auto-recovers open `response_captured` / `write_applied` cycles, fails closed when the prior cycle still cannot reach a committed state, and emits `effective_tier`, `required_tier`, `suggested_tier`, `model_switch(_tier)`, and `agent_model` for the skill
+- **Durable response capture** — every final response is persisted to `.agent-doc/captures/<doc-hash>/<cycle-id>.json` before write-back, so interrupted cycles can replay the exact response body instead of regenerating it
+- **Model-attributed response headers** — `### Re:` headings should carry the resolved model short name (`gpt-5`, `opus-4-6`), not the harness label (`codex`, `claude`)
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Commit self-heal** — `agent-doc commit` can absorb a narrowly-scoped missed agent patchback (`status`, appended `### Re:` response, pending-ID superset) into the snapshot before staging, while still leaving plain user prompts uncommitted
 - **Extreme-drift guard stays conservative** — if a tracked document's snapshot is badly stale, `commit` warns but does not re-sync the snapshot from the live file wholesale; bootstrap scaffold auto-resync is limited to files with no `HEAD` entry yet so unanswered prompts cannot be swallowed into a commit
@@ -72,7 +75,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Stash + rescue** — replaced panes are stashed (alive in background); stash rescue brings them back when the user switches to that document again
 - **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
 - **Component-aware baseline guard** — detects stale baselines by comparing append-mode components only; user edits to replace-mode components (status, pending) don't trigger false positives
-- **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; integrates with Claude Code hooks via `PostToolUse` bridge
+- **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; `post_write` / `post_commit` events now include `capture_id` and `response_sha256` when a durable capture exists, and the system integrates with Claude Code hooks via `PostToolUse` bridge
 - **Slash command dispatch** — `preflight` extracts slash commands from user-added diff lines (`parse_slash_commands`); the SKILL executes them before responding; guards exclude code fences, blockquotes, and non-added lines
 - **Dedupe stale patch cleanup** — after removing duplicate blocks, `dedupe` also deletes the stale `.agent-doc/patches/<hash>.json` to prevent the plugin's startup scan from re-applying removed content
 
@@ -160,7 +163,7 @@ agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/e
 | Term | Definition |
 |------|-----------|
 | **Directive** | A signal that authorizes and requests action. User inputs like "do", "go", "yes" are directives. Classified as `DiffType::Approval` in preflight. The directive's brevity is independent of the expected execution thoroughness — quality processes always apply in full. |
-| **Cycle** | One round-trip: user edits -> preflight -> agent response -> write-back -> commit. Logged in `.agent-doc/logs/cycles.jsonl` with git state references for reproducibility, with the current per-document phase tracked in `.agent-doc/state/cycles/<doc-hash>.json` so interrupted cycles can be recovered or blocked exactly. |
+| **Cycle** | One round-trip: user edits -> preflight -> agent response -> write-back -> commit. Logged in `.agent-doc/logs/cycles.jsonl` with git state references for reproducibility, with the current per-document phase tracked in `.agent-doc/state/cycles/<doc-hash>.json` and the exact response body durably captured in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` so interrupted cycles can be replayed or blocked exactly. |
 | **Layout check** | Pre-agent tmux health inspection (`check_layout()`). Detects: missing window 0, non-idle stash panes, and session drift (registered panes spanning multiple tmux sessions). Reported as `layout_issues[]` in preflight JSON. |
 | **Session drift** | Condition where registered document panes span more than one tmux session. Detected by preflight's `check_layout()`. Fixed by `agent-doc session set <N>` to consolidate panes into the target session. |
 | **Diff** | The user's changes since the last snapshot. Classified by `classify_diff()` into a `DiffType` for skill routing. Comment-stripped before comparison. |

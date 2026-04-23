@@ -1,7 +1,7 @@
 //! CLI integration tests for agent-doc.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn agent_doc_cmd() -> Command {
@@ -204,7 +204,10 @@ fn test_cli_route_generates_session_for_bare_file() {
     );
     // Verify the file was updated with frontmatter
     let content = std::fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("session:"), "frontmatter should have been generated");
+    assert!(
+        content.contains("session:"),
+        "frontmatter should have been generated"
+    );
 }
 
 #[test]
@@ -229,9 +232,15 @@ fn test_cli_route_generates_session_for_null_session() {
     // Verify the file now has a real session UUID (not null)
     let content = std::fs::read_to_string(&doc).unwrap();
     assert!(content.contains("session:"), "frontmatter should exist");
-    assert!(!content.contains("session: null"), "session should no longer be null");
+    assert!(
+        !content.contains("session: null"),
+        "session should no longer be null"
+    );
     // Agent field should be preserved
-    assert!(content.contains("agent:"), "other frontmatter fields should be preserved");
+    assert!(
+        content.contains("agent:"),
+        "other frontmatter fields should be preserved"
+    );
 }
 
 #[test]
@@ -251,7 +260,10 @@ fn test_cli_start_generates_session_for_bare_file() {
         .stderr(predicate::str::contains("not running inside tmux"));
     // Verify the file was updated with frontmatter before the tmux error
     let content = std::fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("session:"), "start should auto-generate session UUID");
+    assert!(
+        content.contains("session:"),
+        "start should auto-generate session UUID"
+    );
 }
 
 #[test]
@@ -270,7 +282,10 @@ fn test_cli_start_generates_session_for_null_session() {
         .stderr(predicate::str::contains("not running inside tmux"));
     let content = std::fs::read_to_string(&doc).unwrap();
     assert!(content.contains("session:"), "frontmatter should exist");
-    assert!(!content.contains("session: null"), "session should no longer be null");
+    assert!(
+        !content.contains("session: null"),
+        "session should no longer be null"
+    );
 }
 
 #[test]
@@ -351,13 +366,11 @@ fn test_cli_init_prints_quickstart() {
     cmd.current_dir(tmp.path());
     cmd.arg("init");
     // The quick-start hint mentions "agent-doc init" or "quick"
-    cmd.assert()
-        .success()
-        .stderr(
-            predicate::str::contains("agent-doc init")
-                .or(predicate::str::contains("quick"))
-                .or(predicate::str::contains("Quick")),
-        );
+    cmd.assert().success().stderr(
+        predicate::str::contains("agent-doc init")
+            .or(predicate::str::contains("quick"))
+            .or(predicate::str::contains("Quick")),
+    );
 }
 
 // ── init tests (document-level, with file arg) ───────────────────────────────
@@ -375,7 +388,10 @@ fn test_cli_init_file_creates_document() {
     assert!(doc.exists());
     let content = std::fs::read_to_string(&doc).unwrap();
     // Must have YAML frontmatter with a session ID
-    assert!(content.contains("agent_doc_session:"), "expected frontmatter with session id");
+    assert!(
+        content.contains("agent_doc_session:"),
+        "expected frontmatter with session id"
+    );
 }
 
 #[test]
@@ -391,8 +407,14 @@ fn test_cli_init_file_with_mode() {
     assert!(doc.exists());
     let content = std::fs::read_to_string(&doc).unwrap();
     // Template-mode documents have component markers
-    assert!(content.contains("agent:exchange"), "expected exchange component marker");
-    assert!(content.contains("agent_doc_format: template"), "expected template format in frontmatter");
+    assert!(
+        content.contains("agent:exchange"),
+        "expected exchange component marker"
+    );
+    assert!(
+        content.contains("agent_doc_format: template"),
+        "expected template format in frontmatter"
+    );
 }
 
 #[test]
@@ -407,8 +429,14 @@ fn test_cli_init_file_lazy_project_init() {
     cmd.assert().success();
 
     // Both the project directory and the document should have been created
-    assert!(tmp.path().join(".agent-doc").is_dir(), ".agent-doc/ should be lazily created");
-    assert!(tmp.path().join("test.md").exists(), "test.md should be created");
+    assert!(
+        tmp.path().join(".agent-doc").is_dir(),
+        ".agent-doc/ should be lazily created"
+    );
+    assert!(
+        tmp.path().join("test.md").exists(),
+        "test.md should be created"
+    );
 }
 
 // ── skill tests ───────────────────────────────────────────────────────────────
@@ -439,7 +467,10 @@ fn test_cli_skill_install_creates_file() {
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
     assert!(skill_path.exists(), "SKILL.md should be created");
     let content = std::fs::read_to_string(&skill_path).unwrap();
-    assert!(content.contains("agent-doc-version:"), "SKILL.md should have agent-doc-version in frontmatter");
+    assert!(
+        content.contains("agent-doc-version:"),
+        "SKILL.md should have agent-doc-version in frontmatter"
+    );
 }
 
 #[test]
@@ -480,7 +511,10 @@ fn test_cli_skill_install_idempotent() {
     cmd.assert().success();
 
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
-    assert!(skill_path.exists(), "SKILL.md should still exist after second install");
+    assert!(
+        skill_path.exists(),
+        "SKILL.md should still exist after second install"
+    );
 }
 
 #[test]
@@ -491,7 +525,10 @@ fn test_cli_skill_install_reload_compact() {
     cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install", "--reload", "compact"]);
     let output = cmd.output().unwrap();
-    assert!(output.status.success(), "skill install --reload compact should succeed");
+    assert!(
+        output.status.success(),
+        "skill install --reload compact should succeed"
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -603,8 +640,8 @@ fn test_skill_md_references_valid_commands() {
 
 #[test]
 fn test_submodule_write_patches_dir_structure() {
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     // This is a simpler integration test that verifies the expected directory structure
     // for submodule patch routing. The actual git submodule test is in write.rs unit tests
@@ -621,8 +658,14 @@ fn test_submodule_write_patches_dir_structure() {
 
     // Verify patches directory exists and is accessible
     let parent_patches = parent.join(".agent-doc/patches");
-    assert!(parent_patches.exists(), "parent should have .agent-doc/patches directory");
-    assert!(parent_patches.is_dir(), ".agent-doc/patches should be a directory");
+    assert!(
+        parent_patches.exists(),
+        "parent should have .agent-doc/patches directory"
+    );
+    assert!(
+        parent_patches.is_dir(),
+        ".agent-doc/patches should be a directory"
+    );
 
     // Simulate a document in a submodule location
     let simulated_submodule_path = parent.join("src/submodule/tasks");

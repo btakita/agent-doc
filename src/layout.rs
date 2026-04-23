@@ -86,7 +86,13 @@ pub fn run(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&st
     run_with_tmux(files, split, pane, window, &Tmux::default_server())
 }
 
-pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&str>, tmux: &Tmux) -> Result<()> {
+pub fn run_with_tmux(
+    files: &[&Path],
+    split: Split,
+    pane: Option<&str>,
+    window: Option<&str>,
+    tmux: &Tmux,
+) -> Result<()> {
     tracing::debug!(file_count = files.len(), split = ?split, window, "layout::run start");
     if files.is_empty() {
         anyhow::bail!("at least one file required");
@@ -213,11 +219,17 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
         {
             // Skip busy panes (running agent-doc/claude sessions)
             if is_pane_busy(tmux, existing_pane) {
-                eprintln!("Skipped busy pane {} in window {}", existing_pane, target_window);
+                eprintln!(
+                    "Skipped busy pane {} in window {}",
+                    existing_pane, target_window
+                );
                 continue;
             }
             tmux.break_pane(existing_pane)?;
-            eprintln!("Broke out pane {} from window {}", existing_pane, target_window);
+            eprintln!(
+                "Broke out pane {} from window {}",
+                existing_pane, target_window
+            );
         }
     }
 
@@ -229,7 +241,10 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
         }
 
         PaneMoveOp::new(tmux, pane_id, &anchor_pane).join(split.tmux_flag())?;
-        eprintln!("Joined {} (pane {}) into window {}", file_display, pane_id, target_window);
+        eprintln!(
+            "Joined {} (pane {}) into window {}",
+            file_display, pane_id, target_window
+        );
     }
 
     // Focus the first file's pane (the most recently selected file from the plugin).
@@ -249,13 +264,12 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
 
 /// Check if a tmux pane is running an active agent-doc or claude session.
 fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
-    let output = tmux.cmd()
+    let output = tmux
+        .cmd()
         .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
         .output();
     let pid_str = match output {
-        Ok(ref o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        }
+        Ok(ref o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => return false,
     };
     if pid_str.is_empty() {

@@ -26,7 +26,7 @@
 //! - find_asset_prefers_signed: release with both signed and unsigned zip → signed asset selected
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::fs;
 use std::io::{self, Read as _, Write as _};
@@ -60,9 +60,10 @@ fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a st
 
     // Prefer signed variant
     let signed_name = format!("{prefix}-signed.{ext}");
-    if let Some(asset) = assets.iter().find(|a| {
-        a["name"].as_str().is_some_and(|n| n == signed_name)
-    }) {
+    if let Some(asset) = assets
+        .iter()
+        .find(|a| a["name"].as_str().is_some_and(|n| n == signed_name))
+    {
         let name = asset["name"].as_str().unwrap();
         let url = asset["browser_download_url"]
             .as_str()
@@ -72,9 +73,9 @@ fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a st
 
     // Fall back to any matching asset
     if let Some(asset) = assets.iter().find(|a| {
-        a["name"].as_str().is_some_and(|n| {
-            n.starts_with(prefix) && n.ends_with(&format!(".{ext}"))
-        })
+        a["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with(prefix) && n.ends_with(&format!(".{ext}")))
     }) {
         let name = asset["name"].as_str().unwrap();
         let url = asset["browser_download_url"]
@@ -286,7 +287,9 @@ fn find_local_build_dir() -> Result<PathBuf> {
         if src_agent_doc.is_dir() {
             return Ok(dir.join("src/agent-doc"));
         }
-        dir = dir.parent().context("Could not find project root with editors/ directory")?;
+        dir = dir
+            .parent()
+            .context("Could not find project root with editors/ directory")?;
     }
 }
 
@@ -297,7 +300,12 @@ fn install_jetbrains_local() -> Result<()> {
     // Find the latest signed zip, fall back to unsigned
     let zip_path = find_local_zip(&dist_dir, true)
         .or_else(|| find_local_zip(&dist_dir, false))
-        .with_context(|| format!("No agent-doc-jetbrains*.zip found in {}", dist_dir.display()))?;
+        .with_context(|| {
+            format!(
+                "No agent-doc-jetbrains*.zip found in {}",
+                dist_dir.display()
+            )
+        })?;
 
     eprintln!("Installing from local build: {}", zip_path.display());
 
@@ -344,7 +352,11 @@ fn install_vscode_local() -> Result<()> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.ends_with(".vsix") { Some(e.path()) } else { None }
+            if name.ends_with(".vsix") {
+                Some(e.path())
+            } else {
+                None
+            }
         })
         .max_by_key(|p| p.metadata().ok().and_then(|m| m.modified().ok()))
         .with_context(|| format!("No .vsix file found in {}", dist_dir.display()))?;
@@ -400,10 +412,14 @@ pub fn update(editor: &str) -> Result<()> {
                 let manifest = d.join("agent-doc-jetbrains/META-INF/plugin.xml");
                 if manifest.exists()
                     && let Ok(content) = fs::read_to_string(&manifest)
-                        && content.contains(&format!("<version>{}</version>", version.trim_start_matches('v'))) {
-                            eprintln!("JetBrains plugin is already at {version}.");
-                            return Ok(());
-                        }
+                    && content.contains(&format!(
+                        "<version>{}</version>",
+                        version.trim_start_matches('v')
+                    ))
+                {
+                    eprintln!("JetBrains plugin is already at {version}.");
+                    return Ok(());
+                }
             }
             install_jetbrains(&release)
         }
@@ -442,15 +458,16 @@ pub fn list() -> Result<()> {
     if let Ok(output) = std::process::Command::new(code)
         .args(["--list-extensions", "--show-versions"])
         .output()
-        && output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if line.to_lowercase().contains("agent-doc") {
-                    println!("vscode     {}", line);
-                    found = true;
-                }
+        && output.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.to_lowercase().contains("agent-doc") {
+                println!("vscode     {}", line);
+                found = true;
             }
         }
+    }
 
     if !found {
         eprintln!("No agent-doc editor plugins found.");

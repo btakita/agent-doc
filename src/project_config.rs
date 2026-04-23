@@ -104,36 +104,45 @@ pub(crate) fn load_project_from(path: &Path) -> ProjectConfig {
     if let Some(parent) = path.parent() {
         let legacy_path = parent.join("components.toml");
         if legacy_path.exists()
-            && let Ok(legacy_content) = std::fs::read_to_string(&legacy_path) {
-                // Legacy format: flat [name] sections with ComponentConfig fields
-                match toml::from_str::<BTreeMap<String, ComponentConfig>>(&legacy_content) {
-                    Ok(legacy_components) => {
-                        let mut migrated = 0usize;
-                        for (name, comp) in legacy_components {
-                            // config.toml entries take precedence — only insert missing
-                            config.components.entry(name).or_insert_with(|| {
-                                migrated += 1;
-                                comp
-                            });
-                        }
-                        // Save merged config and remove legacy file
-                        if let Err(e) = save_project_to(&config, path) {
-                            eprintln!("warning: failed to save migrated config: {}", e);
-                        } else {
-                            if let Err(e) = std::fs::remove_file(&legacy_path) {
-                                eprintln!("warning: failed to remove legacy {}: {}", legacy_path.display(), e);
-                            } else {
-                                eprintln!(
-                                    "[config] migrated {} component(s) from components.toml → config.toml",
-                                    migrated
-                                );
-                            }
-                        }
+            && let Ok(legacy_content) = std::fs::read_to_string(&legacy_path)
+        {
+            // Legacy format: flat [name] sections with ComponentConfig fields
+            match toml::from_str::<BTreeMap<String, ComponentConfig>>(&legacy_content) {
+                Ok(legacy_components) => {
+                    let mut migrated = 0usize;
+                    for (name, comp) in legacy_components {
+                        // config.toml entries take precedence — only insert missing
+                        config.components.entry(name).or_insert_with(|| {
+                            migrated += 1;
+                            comp
+                        });
                     }
-                    Err(e) => {
-                        eprintln!("warning: failed to parse legacy {}: {}", legacy_path.display(), e);
+                    // Save merged config and remove legacy file
+                    if let Err(e) = save_project_to(&config, path) {
+                        eprintln!("warning: failed to save migrated config: {}", e);
+                    } else {
+                        if let Err(e) = std::fs::remove_file(&legacy_path) {
+                            eprintln!(
+                                "warning: failed to remove legacy {}: {}",
+                                legacy_path.display(),
+                                e
+                            );
+                        } else {
+                            eprintln!(
+                                "[config] migrated {} component(s) from components.toml → config.toml",
+                                migrated
+                            );
+                        }
                     }
                 }
+                Err(e) => {
+                    eprintln!(
+                        "warning: failed to parse legacy {}: {}",
+                        legacy_path.display(),
+                        e
+                    );
+                }
+            }
         }
     }
 

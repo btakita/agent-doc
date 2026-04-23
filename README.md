@@ -65,6 +65,8 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Preflight gate** — `agent-doc preflight` auto-recovers open `response_captured` / `write_applied` cycles, fails closed when the prior cycle still cannot reach a committed state, and emits `effective_tier`, `required_tier`, `suggested_tier`, `model_switch(_tier)`, and `agent_model` for the skill
 - **Durable response capture** — every final response is persisted to `.agent-doc/captures/<doc-hash>/<cycle-id>.json` before write-back, so interrupted cycles can replay the exact response body instead of regenerating it
+- **Hard response commit boundary** — every appended response should cross a commit boundary unless the operator explicitly wants it left open; the normal happy path is `agent-doc finalize <file>`, while missed-patchback repair uses `agent-doc write --commit <file>`
+- **Binary-owned finalize path** — `agent-doc finalize <file>` is the strict happy-path response command: it reuses the normal write pipeline but requires the document to live in git and fails unless the cycle reaches a terminal committed state
 - **Model-attributed response headers** — `### Re:` headings should carry the resolved model short name (`gpt-5`, `opus-4-6`), not the harness label (`codex`, `claude`)
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Commit self-heal** — `agent-doc commit` can absorb a narrowly-scoped missed agent patchback (`status`, appended `### Re:` response, pending-ID superset) into the snapshot before staging, while still leaving plain user prompts uncommitted
@@ -98,6 +100,7 @@ The binary owns all deterministic behavior: component parsing, patch application
 | Reading diff, interpreting user intent | **Skill** (SKILL.md) | Requires LLM reasoning |
 | Generating response content | **Skill** (SKILL.md) | Non-deterministic |
 | Deciding what to write to which component | **Skill** (SKILL.md) | Context-dependent, including the shared Claude/Codex manual-repair rule to use `agent-doc write --commit <file>` when the prompt already exists |
+| Enforcing response-cycle completion for the normal happy path | **Binary** (Rust) | `agent-doc finalize` fails closed unless the write reaches a terminal committed cycle state |
 | Streaming checkpoints, progress tracking | **Skill** (SKILL.md) | Response-generation timing |
 | Pending item management (parse, populate, process) | **Skill** (SKILL.md) | Semantic understanding of prompts |
 

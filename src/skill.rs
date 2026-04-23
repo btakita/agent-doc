@@ -60,6 +60,7 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "document-format.md",
         include_str!("../runbooks/document-format.md"),
     ),
+    ("commit.md", include_str!("../runbooks/commit.md")),
     (
         "code-enforced-directives.md",
         include_str!("../runbooks/code-enforced-directives.md"),
@@ -337,6 +338,26 @@ mod tests {
     }
 
     #[test]
+    fn installed_harness_runbooks_include_commit_invariant() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+
+        let claude =
+            std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/runbooks/commit.md"))
+                .unwrap();
+        let codex = std::fs::read_to_string(dir.path().join(".codex/runbooks/commit.md")).unwrap();
+
+        for content in [&claude, &codex] {
+            assert!(content.contains("Every appended `agent-doc` response must be committed"));
+            assert!(content.contains("agent-doc finalize <FILE>"));
+            assert!(content.contains("agent-doc write --commit <FILE>"));
+            assert!(content.contains("bare `agent-doc write`"));
+        }
+    }
+
+    #[test]
     fn installed_harness_runbooks_share_manual_repair_rule() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -409,6 +430,7 @@ mod tests {
     fn bundled_skill_contains_harness_preamble() {
         assert!(BUNDLED_SKILL.contains("Harness Compatibility"));
         assert!(BUNDLED_SKILL.contains("harness-invocation.md"));
+        assert!(BUNDLED_SKILL.contains("runbooks/commit.md"));
     }
 
     #[test]
@@ -430,12 +452,17 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_contains_finalize_commit_invariant() {
+        assert!(BUNDLED_SKILL.contains("agent-doc finalize <FILE>"));
+        assert!(BUNDLED_SKILL.contains("unless the user explicitly told you to leave the response uncommitted"));
+        assert!(BUNDLED_SKILL.contains("requires the cycle to reach `committed`"));
+    }
+
+    #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
         assert!(BUNDLED_SKILL.contains("### Re: topic — gpt-5"));
         assert!(BUNDLED_SKILL.contains("### Re: topic — opus-4-6"));
-        assert!(
-            BUNDLED_SKILL.contains("Never use the harness label (`codex`, `claude`)")
-        );
+        assert!(BUNDLED_SKILL.contains("Never use the harness label (`codex`, `claude`)"));
     }
 
     #[test]
@@ -470,6 +497,14 @@ mod tests {
     }
 
     #[test]
+    fn bundled_runbooks_include_commit_runbook() {
+        assert!(
+            BUNDLED_RUNBOOKS.iter().any(|(name, _)| *name == "commit.md"),
+            "commit.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
     fn harness_invocation_runbook_content() {
         let (_, content) = BUNDLED_RUNBOOKS
             .iter()
@@ -490,6 +525,18 @@ mod tests {
         assert!(content.contains("### Re: topic — claude"));
         assert!(content.contains("Manual repair / missed patchback"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
+    }
+
+    #[test]
+    fn commit_runbook_content() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "commit.md")
+            .expect("commit.md not found");
+        assert!(content.contains("Every appended `agent-doc` response must be committed"));
+        assert!(content.contains("agent-doc finalize <FILE>"));
+        assert!(content.contains("agent-doc write --commit <FILE>"));
+        assert!(content.contains("bare `agent-doc write`"));
     }
 
     #[test]

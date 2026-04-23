@@ -552,13 +552,17 @@ fn test_skill_md_contains_required_steps() {
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
     let content = std::fs::read_to_string(&skill_path).unwrap();
 
-    let required_steps = ["### 0.", "### 1.", "### 2.", "### 3."];
+    let required_steps = ["### 0.", "### 1.", "### 2."];
     for step in &required_steps {
         assert!(
             content.contains(step),
             "SKILL.md missing required workflow step: {step}"
         );
     }
+    assert!(
+        content.contains("agent-doc finalize <FILE>"),
+        "SKILL.md should use finalize for the normal response cycle"
+    );
 }
 
 #[test]

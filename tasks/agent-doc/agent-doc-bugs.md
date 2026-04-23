@@ -114,7 +114,7 @@ Evidence:
 So the failure here was not submodule routing. The relevant patchback did cross a commit boundary once in `b908b13`, but a later snapshot-based `agent-doc` commit in the submodule reverted it, and the newest re-added copy is currently just out-of-band working-tree content.
 
 Should we implement recovery logic to fix snapshot drift?
-### Re: snapshot-drift recovery policy — codex (HEAD)
+### Re: snapshot-drift recovery policy — codex
 
 Not broad recovery logic.
 
@@ -135,7 +135,7 @@ Verification:
 
 So the answer is: yes, the `monsterrodholders` evidence exposed a contract gap, but the fix is a narrower fail-closed guard, not generalized snapshot-drift recovery.
 build + install for local testing. commit + push
-### Re: snapshot-drift guard closeout — codex (HEAD)
+### Re: snapshot-drift guard closeout — codex
 
 Implemented and verified in `src/agent-doc`.
 
@@ -161,7 +161,7 @@ Commit / push:
 Outcome:
 
 - The `monsterrodholders` failure mode is now blocked at the binary boundary: unrecoverable `preflight_started` drift no longer auto-commits a stale snapshot over newer live content.
-<!-- agent:boundary:cb0362e3 -->
+<!-- agent:boundary:faa2326e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -209,3 +209,20 @@ Verification passed:
 I did not commit or push these changes.
 
 ## User
+## Assistant
+
+Updated [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:1) and [plan.md](/home/brian/work/btakita/agent-loop/plan.md:1), finished the requested closeout, and pushed both repo boundaries.
+
+In `src/agent-doc`, the new fail-closed guard is committed as `c85020f` on `20260422/codex-agent-backend` and pushed. The parent `agent-loop` submodule-pointer/task-doc commit is `7457e04b` on `main` and pushed. The fix keeps `preflight_started` cycles from auto-committing a stale snapshot unless `recover` actually replays a pending/captured response first, and it keeps the bypassed-patchback case fail-closed instead of reverting newer live content.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_started_cycle_does_not_revert_stale_snapshot_head -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_fails_closed_on_open_preflight_started_cycle -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+The only open item left in that bug doc is still `#ha3h`, and it remains gated on multi-user workspace support.
+
+## User
+

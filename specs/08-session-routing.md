@@ -73,6 +73,8 @@ The stash system preserves running Claude sessions when the user switches editor
 
 **Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same visible post-commit shape as the user-facing document: ALL stale boundaries are stripped, a single fresh 8-char boundary is inserted at end-of-exchange, and a single ` (HEAD)` marker is preserved on the current response heading.
 
+**Editor cleanup invariant:** The editor-side reposition helpers (JetBrains and VS Code) must preserve that single visible ` (HEAD)` marker while collapsing stale boundaries. Boundary-only cleanup must not create a follow-up diff that is only old boundary IDs or ` (HEAD)` churn.
+
 **Boundary reposition lifecycle:**
 1. **Before IPC patch JSON (clean boundary reposition):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and normalize boundaries in memory before extracting `boundary_id` values. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
 2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch. The plugin should call `agent_doc_reposition_boundary_to_end()` via FFI to ensure identical cleanup logic.

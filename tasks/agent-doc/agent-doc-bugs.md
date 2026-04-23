@@ -900,12 +900,32 @@ So the short version is:
 - yes, write+commit are already combinable via `agent-doc write --commit`
 - no, the last uncommitted patchback did not use that path
 - the later repair response did use `agent-doc` properly and created `e84d96c4`
-<!-- agent:boundary:7711b261 -->
+
+❯ Do we need a hook or to strengthen the skill/runbook for codex to always use agent-doc to write the response?
+### Re: hook vs skill/runbook hardening for Codex patchbacks — gpt-5
+
+We should strengthen the skill/runbook path first, and only add a hook if that still proves too easy to bypass.
+
+Why I am drawing that line:
+
+- the current `agent-doc` skill already says the write step is mandatory and the commit step is mandatory every cycle
+- the recent miss was not caused by missing product behavior in `agent-doc`; it happened because I stepped outside that path and patched the file directly instead of going through `agent-doc write` plus commit
+- a hook would be defense-in-depth, but it is not the narrowest fix for the failure we just saw
+
+So my recommendation is:
+
+- **first**: strengthen the Codex skill/runbooks so manual repair / patchback flows explicitly say: if the prompt is already in the doc, use `agent-doc write --commit <file>`; do not patch the response directly into the file
+- **second**: add regression coverage around the Codex-facing skill/install content so this requirement is tested, not just documented
+- **only after that if needed**: consider a hook or helper that fails closed when a cycle ends with an `agent-doc`-managed doc changed but without a corresponding `agent-doc write`/commit boundary
+
+So yes, some hardening is warranted, but I would start with skill/runbook enforcement rather than introducing a new hook immediately. The bug here was primarily workflow drift, not missing binary capability.
+<!-- agent:boundary:7b980188 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
 - [x] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.

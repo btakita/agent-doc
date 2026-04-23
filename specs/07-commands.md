@@ -475,7 +475,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
    - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `recover` repairs that stale preflight lock as a no-op closeout
    - Otherwise, an open `preflight_started` cycle only auto-closes when `recover` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
-1. Recover orphaned pending/captured responses (`agent-doc recover`)
+1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`

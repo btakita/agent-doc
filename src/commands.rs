@@ -160,9 +160,9 @@ fn all_commands() -> Vec<CommandInfo> {
         "Append assistant response (reads from stdin)",
     ));
     cmds.push(cmd(
-        "/agent-doc recover",
+        "/agent-doc repair",
         "<FILE>",
-        "Recover orphaned response after compaction",
+        "Repair orphaned response / stale document cycle (`recover` alias kept)",
     ));
     cmds.push(cmd(
         "/agent-doc template-info",

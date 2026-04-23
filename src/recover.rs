@@ -9,8 +9,10 @@
 //!   already present (dedup guard). If already present, removes the pending file without writing
 //!   (returns `Ok(false)`). When replaying from a durable capture, requires the current document and
 //!   snapshot hashes to still match the captured baseline; otherwise fails closed.
-//!   Detection of `<!-- patch:` in the response selects template-patch write
-//!   (`write::apply_template_from_string`); otherwise plain append is used (`write::apply_append_from_string`).
+//!   Template/CRDT documents always replay through the template write path
+//!   (`write::apply_template_from_string`) even when the captured response is raw text
+//!   without `<!-- patch:... -->` fences (for example `compact exchange` closeouts).
+//!   Non-template documents use plain append (`write::apply_append_from_string`).
 //!   Removes the pending file on successful write.
 //! - Empty pending files are cleaned up without triggering a write; `run` returns `false`.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
@@ -35,7 +37,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{snapshot, write};
+use crate::{frontmatter, snapshot, write};
 
 fn repair_stale_preflight_started_cycle(file: &Path) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -175,9 +177,10 @@ pub fn run(file: &Path) -> Result<bool> {
         response.len()
     );
 
-    // Check if response contains template patch blocks
-    let is_template = response.contains("<!-- patch:");
-    if is_template {
+    let (fm, _) = frontmatter::parse(&doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
+    if use_template_write {
         write::apply_template_from_string(file, &response)?;
     } else {
         write::apply_append_from_string(file, &response)?;
@@ -308,7 +311,7 @@ mod tests {
     fn recover_append_response() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
-        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let content = "---\nsession: test\nagent_doc_mode: append\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
 
         // Save a pending response
@@ -326,6 +329,43 @@ mod tests {
         // Pending file should be cleaned up
         let pending = snapshot::pending_path_for(&doc).unwrap();
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn recover_plain_response_uses_template_path_for_template_docs() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n",
+            "compact exchange\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(&doc, "Exchange compacted. No new work was run in this turn.").unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert!(recovered);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
+        let summary = result
+            .find("Exchange compacted. No new work was run in this turn.")
+            .unwrap();
+        assert!(
+            summary < exchange_close,
+            "plain recovery for template docs should stay inside exchange:\n{result}"
+        );
+        assert!(
+            !result[exchange_close..].contains("## Assistant"),
+            "template recovery must not append inline assistant blocks after exchange:\n{result}"
+        );
     }
 
     #[test]

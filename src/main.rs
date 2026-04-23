@@ -544,7 +544,8 @@ enum Commands {
         /// Path to the document
         file: PathBuf,
     },
-    /// Recover an orphaned response (from interrupted write-back after compaction)
+    /// Repair an orphaned response or stale document cycle
+    #[command(name = "repair", visible_alias = "recover")]
     Recover {
         /// Path to the session document
         file: PathBuf,

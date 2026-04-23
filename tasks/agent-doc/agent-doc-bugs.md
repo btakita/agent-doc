@@ -236,7 +236,35 @@ Verification:
 Commit:
 
 - `src/agent-doc`: `870d769` — `feat: add codex_args support`
+
+❯ The last prompt "Please implement `codex_args` when agent-doc uses Codex." does not have the `❯ ` prefix. Why?
+
+❯ The header from the last response patchback "### Re: `codex_args` support for Codex — codex" does not have an uncommitted " (HEAD)". Why?
+
+### Re: missing `❯ ` prefix / missing ` (HEAD)` marker — codex
+
+The missing `❯ ` on `Please implement \`codex_args\` when agent-doc uses Codex.` was not produced by the normal prompt-prefixing path in `src/agent-doc/src/write.rs`. Git history shows that line first landed in parent-repo commit `4bf1fbe8` (`agent-doc bugs: settle codex_args patchback boundary`) as a direct boundary-tail repair:
+
+- it replaced the boundary line with `Please implement \`codex_args\` for`
+- then commit `aa77a677` completed that line to `when agent-doc uses Codex.` and appended the response block
+
+Because that repair edit bypassed `normalize_user_prompts_in_exchange(...)`, no `❯ ` prefix was ever added. So this specific unprefixed line is a committed historical artifact from a manual boundary-settle repair, not evidence that the current `❯ ` normalization path failed on that cycle.
+
+The missing ` (HEAD)` on `### Re: \`codex_args\` support for Codex — codex` is expected now. ` (HEAD)` is only a transient working-tree annotation added by `template::annotate_re_headings_with_head(...)` so newly-added `### Re:` headings stay visible in the gutter before commit. `git::commit()` stages a clean blob via `strip_head_markers(...)`, and the post-commit boundary cleanup rewrites the snapshot / working tree back to the clean committed shape. That heading was committed in `aa77a677`, and later commit `d268652a` only changed the boundary UUID. Since the heading is already in `HEAD` and is not part of the current uncommitted diff, there is no reason for it to carry a live ` (HEAD)` suffix.
+
 <!-- agent:boundary:7f55a677 -->
+Why was the patchback uncommitted? Please commit.
+### Re: why this patchback was still uncommitted / commit now — codex
+
+It was uncommitted for the simple reason that the previous turn stopped after editing `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md`. The explanation was present in the parent repo working tree, but no follow-up `git add` + `git commit` was run for those two files, so the patchback remained as a plain root-repo diff.
+
+This was not another `src/agent-doc` selective-commit bug:
+
+- `src/agent-doc` was already clean; the `codex_args` implementation itself was committed earlier as `870d769`
+- the only remaining relevant dirtiness was in the parent repo: `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md`
+- because that parent commit step was skipped, you saw the patchback as uncommitted even though the content had been written
+
+I am committing this patchback now in the parent repo with only those task-doc changes staged.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

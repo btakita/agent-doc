@@ -333,3 +333,19 @@ Review:
 - Updated `src/frontmatter.rs`, `src/config.rs`, and `src/start.rs` with parsing/merge/runtime support, plus regression coverage for frontmatter merge/roundtrip, config fallback, and Codex-vs-Claude precedence.
 - Updated `specs/02-document-format.md`, `specs/06-config.md`, and `specs/codex-support.md` so the new Codex alias and exact precedence rules are documented.
 - Verified with `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_agent_args -- --nocapture`, `cargo test --manifest-path src/agent-doc/Cargo.toml agent_args -- --nocapture`, `cargo test --manifest-path src/agent-doc/Cargo.toml codex_args -- --nocapture`, `cargo check --manifest-path src/agent-doc/Cargo.toml`, `cargo build --manifest-path src/agent-doc/Cargo.toml --release`, `cargo install --path src/agent-doc`, and `make check` in `src/agent-doc`.
+
+### 2026-04-22 — Explain `codex_args` Patchback Formatting (`agent-doc-bugs`)
+
+- [x] Trace why the historical prompt `Please implement \`codex_args\` when agent-doc uses Codex.` landed without a `❯ ` prefix and confirm whether that came from the normal write-path normalization or a later manual/boundary repair commit.
+- [x] Trace why `### Re: \`codex_args\` support for Codex — codex` no longer shows ` (HEAD)` and confirm whether that is expected post-commit cleanup behavior.
+- [x] Patch the explanation back into `tasks/agent-doc/agent-doc-bugs.md` and verify the resulting diff is limited to the task doc and plan entry.
+
+Review:
+- The unprefixed historical prompt was not produced by the live write-path normalizer. `git blame`/`git show` traced it to parent commit `4bf1fbe8`, which manually replaced the boundary tail during a boundary-settle repair; commit `aa77a677` then completed the line and appended the response block.
+- The missing ` (HEAD)` marker is expected post-commit behavior. `template::annotate_re_headings_with_head(...)` is only a transient working-tree annotation, while `git::commit()` strips it from the staged blob via `strip_head_markers(...)`; the heading in question is already committed, and `d268652a` later changed only the boundary UUID.
+
+### 2026-04-22 — Commit `codex_args` Patchback Explanation (`agent-doc-bugs`)
+
+- [ ] Explain why the previous patchback remained uncommitted after it was written into `tasks/agent-doc/agent-doc-bugs.md`.
+- [ ] Commit the current `agent-doc-bugs` patchback plus the matching `tasks/plan.md` update without staging unrelated repo changes.
+- [ ] Verify the repo state for those files is clean after the commit.

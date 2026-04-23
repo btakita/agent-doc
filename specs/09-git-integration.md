@@ -34,4 +34,4 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 - `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
 - `Stop` → `agent-doc hook codex-stop`
 
-The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop: when Codex reaches `Stop` with an open `agent-doc` cycle, the binary captures `last_assistant_message` into the existing pending/capture ledger and blocks or fails closed so the response cannot silently leave the harness without a recoverable record.
+The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop: when Codex reaches `Stop` with an open `agent-doc` cycle, the binary captures `last_assistant_message` into the existing pending/capture ledger and tries to finish the normal recover/write/commit path automatically. If that auto-close succeeds, `session-check` should be green and the tracked hook state should be cleared. If it cannot close the cycle, the hook must block or fail closed so the response cannot silently leave the harness without a recoverable record.

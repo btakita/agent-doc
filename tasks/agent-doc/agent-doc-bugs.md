@@ -948,7 +948,54 @@ So the bug is really in the alias target:
 - but it aliased bare-path invocation to the wrong execution model for template docs
 
 That is the exact reason `claudescore-2.md` used legacy closeout instead of template `finalize` / `write_template` behavior.
-<!-- agent:boundary:6a4bd6da -->
+
+What command + options were used? Should we even expose an override to a template document for nondeterministic procedures?
+### Re: exact command + whether template docs should expose an override — gpt-5
+
+The command used was the bare-path form with no special options:
+
+- `agent-doc tasks/claudescore-2.md`
+
+Under `0.33.13`, `src/agent-doc/src/main.rs` rewrites that argv to:
+
+- `agent-doc run tasks/claudescore-2.md`
+
+There is no evidence of extra flags on that path, and the CLI test that locked this behavior is `test_cli_bare_file_path_aliases_to_run()` in `src/agent-doc/tests/test_cli.rs`.
+
+So the effective command + options were:
+
+- subcommand: `run`
+- file: `tasks/claudescore-2.md`
+- branch: `false`
+- dry-run: `false`
+- no-git: `false`
+- model: none from CLI
+- agent: none from CLI
+
+Should template docs expose an override to this path?
+
+No, not as a normal user-facing path.
+
+For a template document, the safe default contract should be:
+
+- template doc => template-aware write path only
+- if the user invokes a command that would use append/full-content closeout, fail closed with a targeted error
+- tell the user to use the template/finalize path instead
+
+If an override exists at all, it should be explicit and obviously dangerous, something like a low-level expert-only escape hatch, not an implicit alias and not a default bare-path behavior.
+
+So I would separate the answers this way:
+
+- should `run` be reachable implicitly for template docs? no
+- should there ever be an explicit override? maybe, but only as a clearly dangerous/manual debugging escape hatch, not part of the normal UX
+
+Given this bug, the compatibility alias should not silently route template docs into `run`. It should either:
+
+- dispatch by document mode to the correct template workflow, or
+- error out on template docs and require the correct command
+
+The current behavior is the worst middle state: it accepts the command, but maps it to the wrong write model.
+<!-- agent:boundary:b6a7c773 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

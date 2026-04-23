@@ -1394,12 +1394,15 @@ What I would change is narrow and mechanical:
 - Keep moving completion invariants into the binary or tests wherever possible; the agent should not be trusted to enforce commit-boundary discipline by narration alone.
 
 This is why Claude looks better here: not because your instructions are clearer for Claude, but because the Claude path currently has a tighter harness contract. Codex needs the same contract reduced to fewer hot-path rules plus stronger machine enforcement.
-<!-- agent:boundary:582326ad -->
+<!-- agent:boundary:866e6b7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex patchbacks; remove hot-path examples that stop after bare write-back.
+- [ ] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
+- [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

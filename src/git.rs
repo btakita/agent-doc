@@ -12,12 +12,14 @@
 //!   agent-doc-style status mutation and/or exchange append and/or pending mutation, `commit`
 //!   first absorbs that live document state into the snapshot, then stages it. Plain user prompts
 //!   are not absorbed.
-//!   Falls back to `git add -f` when hash-object fails.  After a successful commit, repositions
-//!   the boundary marker in the snapshot and fires an IPC reposition signal
+//!   Falls back to `git add -f` when hash-object fails.  If the staged snapshot already matches
+//!   `HEAD`, `commit` closes the cycle as an already-committed no-op instead of logging a false
+//!   `commit_failed`. After a successful commit, repositions the boundary marker in the snapshot
+//!   and fires an IPC reposition signal
 //!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
 //!   via the plugin's Document API when a live listener exists; otherwise the file is rewritten
 //!   locally to the same clean shape as the committed blob. Returns `true` when a git commit was
-//!   created and `false` when there was nothing to commit.
+//!   created and `false` when there was nothing new to commit.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
@@ -57,6 +59,7 @@
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
 //! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
 //! - commit_repairs_committed_historical_snapshot_drift: historical direct response already committed in `HEAD` repairs the stale snapshot without creating a duplicate commit
+//! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
 
 use anyhow::Result;
 use fs2::FileExt;
@@ -794,6 +797,25 @@ pub fn commit(file: &Path) -> Result<bool> {
         snapshot_content = Some(file_content.clone());
     }
 
+    if snapshot_blob_already_matches_head(file, snapshot_content.as_deref())? {
+        eprintln!(
+            "[commit] staged snapshot already matches HEAD for {} — closing cycle as already committed",
+            file.display()
+        );
+        finalize_already_committed_noop(
+            file,
+            "commit_already_current",
+            snapshot_content.as_deref(),
+            Some(&file_content),
+        );
+
+        let elapsed_total = t_total.elapsed().as_millis();
+        if elapsed_total > 0 {
+            eprintln!("[perf] commit total: {}ms", elapsed_total);
+        }
+        return Ok(false);
+    }
+
     // Reposition boundary BEFORE staging so the commit captures the new
     // boundary id atomically. Previously this ran post-commit, which left
     // the boundary-id delta to be picked up by the next turn's preflight
@@ -1199,6 +1221,36 @@ fn git_add_force(git_root: &Path, resolved: &Path) -> Result<()> {
         anyhow::bail!("git add failed");
     }
     Ok(())
+}
+
+fn snapshot_blob_already_matches_head(file: &Path, snapshot_content: Option<&str>) -> Result<bool> {
+    let Some(snapshot) = snapshot_content else {
+        return Ok(false);
+    };
+    let Some(head_doc) = show_head(file)? else {
+        return Ok(false);
+    };
+    Ok(strip_head_markers(snapshot) == head_doc)
+}
+
+fn finalize_already_committed_noop(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) {
+    crate::ops_log::log_cycle(file, "commit_noop", snapshot_content, file_content);
+    crate::ops_log::log_op(
+        file,
+        &format!("commit_already_current file={} basis=head", file.display()),
+    );
+    if let Err(e) = crate::cycle_state::mark_committed(file, event, snapshot_content, file_content)
+    {
+        eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
+    }
+    if let Err(e) = crate::capture::mark_committed(file) {
+        eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+    }
 }
 
 /// Create and checkout a branch for the session.
@@ -2527,6 +2579,114 @@ mod tests {
         assert!(
             committed.contains("### Re: historical\n"),
             "committed blob should keep the historical response after repair:\n{committed}"
+        );
+    }
+
+    #[test]
+    fn commit_closes_cycle_when_staged_snapshot_already_matches_head() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:test-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let visible_snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            <!-- agent:boundary:test-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        crate::snapshot::save(&doc, visible_snapshot).unwrap();
+
+        let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
+        fs::write(&doc, &with_user_edit).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
+            .unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(visible_snapshot),
+            Some(&with_user_edit),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let did_commit = commit(&doc).expect("commit should treat HEAD-current snapshot as no-op");
+        assert!(
+            !did_commit,
+            "HEAD-current closeout should not create a duplicate git commit"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
+
+        let capture = crate::capture::load_active(&doc).unwrap();
+        assert!(
+            capture.is_none(),
+            "already-committed no-op closeout should clear active capture state"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_already_current file="),
+            "ops log should record the dedicated no-op closeout:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_failed"),
+            "already-committed no-op must not be logged as commit_failed:\n{log}"
         );
     }
 

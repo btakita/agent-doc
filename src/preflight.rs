@@ -1549,6 +1549,78 @@ mod tests {
     }
 
     #[test]
+    fn preflight_closes_response_captured_cycle_when_snapshot_already_matches_head() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let committed = "---\nsession: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:test-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let visible_snapshot = "---\nsession: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            <!-- agent:boundary:test-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        snapshot::save(&doc, visible_snapshot).unwrap();
+
+        let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
+        std::fs::write(&doc, &with_user_edit).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
+            .unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(visible_snapshot),
+            Some(&with_user_edit),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        assert!(!recovered, "no pending response replay should be needed");
+        assert!(
+            !committed,
+            "HEAD-current closeout should not create a duplicate git commit"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_already_current file="),
+            "preflight should record the no-op closeout instead of failing:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_failed"),
+            "preflight should not log a false commit_failed for HEAD-current closeout:\n{log}"
+        );
+    }
+
+    #[test]
     fn preflight_fails_closed_on_open_preflight_started_cycle() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

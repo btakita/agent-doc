@@ -126,4 +126,10 @@ fn finalize_writes_and_commits_template_response() {
         "cycle should be committed, got: {}",
         cycle_json
     );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
 }

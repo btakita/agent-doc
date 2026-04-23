@@ -360,13 +360,13 @@ Tracked scope:
 - normalize `src/agent-doc` by removing tracked `.agent-doc` runtime files from the index;
 - remove the accidental `.gitgnore` typo file if it was not intentional; and
 - keep the real ignore rule, then rebase `20260422/codex-agent-backend` onto `origin/main`.
-<!-- agent:boundary:e748b8a1 -->
+<!-- agent:boundary:1ae333e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#ndyy] Normalize  before rebasing: remove tracked  runtime files from the index, remove the typo  file if accidental, keep the real ignore rule, then rebase  onto .
+- [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
 - [ ] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

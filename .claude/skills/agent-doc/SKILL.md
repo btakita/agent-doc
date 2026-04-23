@@ -50,6 +50,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - Print any `claims` to the console as a record.
 - Use `baseline_file` as `--baseline-file` for every subsequent `agent-doc write`. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
+- Do not invent your own pane-readiness heuristics in the skill. Route prompt detection / trigger acceptance is binary-owned and already handles shell startup noise / echoed command text.
 
 ### 0b. Execute slash commands (if any)
 

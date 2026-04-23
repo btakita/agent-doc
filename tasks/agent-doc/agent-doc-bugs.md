@@ -135,7 +135,7 @@ Verification:
 
 So the answer is: yes, the `monsterrodholders` evidence exposed a contract gap, but the fix is a narrower fail-closed guard, not generalized snapshot-drift recovery.
 build + install for local testing. commit + push
-### Re: snapshot-drift guard closeout — codex (HEAD)
+### Re: snapshot-drift guard closeout — codex
 
 Implemented and verified in `src/agent-doc`.
 
@@ -224,7 +224,7 @@ Outcome:
 
 - `agent-doc tasks/claudescore.md` works again without requiring an explicit `run`.
 - Historical committed drift like the `monsterrodholders` report no longer leaves `session-check` red forever once `HEAD` proves the response is already committed.
-<!-- agent:boundary:358ba7b7 -->
+<!-- agent:boundary:80494ac0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -288,3 +288,13 @@ Verification completed:
 The only open item left in that bug doc is still `#ha3h`, and it remains gated on multi-user workspace support.
 
 ## User
+## Assistant
+
+`src/agent-doc` now accepts bare `agent-doc <FILE>` again, and `commit` / `session-check` can self-heal already-committed historical snapshot drift when `HEAD` proves the missing `### Re:` block is no longer out-of-band. I updated the command/spec docs, contract docs, skill docs, and added regression coverage for both cases.
+
+Verification ran with the targeted regressions, `make -C src/agent-doc check`, `cargo build --manifest-path src/agent-doc/Cargo.toml --release`, `cargo install --path src/agent-doc`, and `cargo run --manifest-path src/agent-doc/Cargo.toml -- skill install`. The submodule commit is `307e529` (`fix: restore bare run alias and repair historical drift`), pushed to `origin 20260422/codex-agent-backend`. The parent repo patchback commit is `36ffdea5` (`tasks: record bare path and drift repair`), pushed to `origin main`.
+
+The workspace still has unrelated local dirtiness in `AGENTS.md` and `.claude/skills/agent-doc/SKILL.md`; I left those out of the parent commit.
+
+## User
+

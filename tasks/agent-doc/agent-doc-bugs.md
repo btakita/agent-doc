@@ -869,6 +869,8 @@ Why did the last response patchback not get committed? Please use agent-doc to w
 
 The last response patchback did not get committed because the previous turn stopped after writing the reply into `tasks/agent-doc/agent-doc-bugs.md` and never ran the parent-repo commit step.
 
+❯ Can we combine the agent-doc write and commit steps? Did the last response use agent-doc or the write tool?
+
 The concrete evidence in the current repo state is:
 
 - `git status --short tasks/agent-doc/agent-doc-bugs.md` still shows the file as modified
@@ -877,7 +879,28 @@ The concrete evidence in the current repo state is:
 So this was not a new selective-commit regression inside `src/agent-doc`. It was a plain execution miss in the parent repo: the patchback was written, but the cycle ended before the root-repo `git add`/`git commit` step happened.
 
 I am fixing that in this cycle by using `agent-doc` itself to append this prompt/response and commit the document update immediately, so it does not remain as another working-tree-only patchback.
-<!-- agent:boundary:5f378d35 -->
+### Re: write+commit combination / previous write path — gpt-5
+
+Yes, `agent-doc` already supports combining the response write and the git commit in one command: `agent-doc write --commit <file>`. That is the correct path when the user prompt is already present in the document and the only remaining step is to append the assistant response and cross the commit boundary immediately.
+
+What it does **not** combine is "append a new user prompt to the exchange" plus "append the assistant response" in one low-level command. For that, there are two realistic paths:
+
+- normal session flow: `agent-doc run <file>` handles the full diff/send/write cycle
+- manual repair flow: first ensure the user prompt is already in the document, then use `agent-doc write --commit <file>` for the response
+
+On your second question: the immediately previous committed response used `agent-doc`, not the plain patch tool for the response write. The exact path was:
+
+- `agent-doc patch ... exchange` to append your user prompt into the exchange component
+- `agent-doc write --force-disk --commit tasks/agent-doc/agent-doc-bugs.md` to append the assistant response and create commit `e84d96c4`
+
+The response before that one did **not** use `agent-doc write`; it was patched into the file directly through the file-edit path, which is why it never crossed the parent commit boundary. That is the specific miss you were calling out.
+
+So the short version is:
+
+- yes, write+commit are already combinable via `agent-doc write --commit`
+- no, the last uncommitted patchback did not use that path
+- the later repair response did use `agent-doc` properly and created `e84d96c4`
+<!-- agent:boundary:7711b261 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

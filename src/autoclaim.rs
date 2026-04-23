@@ -216,6 +216,8 @@ mod tests {
     use crate::sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
     use tempfile::TempDir;
 
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Helper: set up a temp dir with a sessions.json containing a claim for the given pane.
     fn setup_registry(dir: &std::path::Path, pane_id: &str) {
         let mut reg = SessionRegistry::new();
@@ -239,6 +241,7 @@ mod tests {
 
     #[test]
     fn autoclaim_focuses_pane_with_claim() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-focus");
         let dir = TempDir::new().unwrap();
 
@@ -302,6 +305,7 @@ mod tests {
 
     #[test]
     fn autoclaim_syncs_layout_with_multiple_files() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-sync");
         let dir = TempDir::new().unwrap();
 
@@ -350,6 +354,7 @@ mod tests {
 
     #[test]
     fn autoclaim_no_claim_skips_focus() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
         let dir = TempDir::new().unwrap();
 
         // Empty registry — no claims

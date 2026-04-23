@@ -1160,11 +1160,7 @@ mod tests {
         last
     }
 
-    fn wait_for_pane_exit(
-        iso: &IsolatedTmux,
-        pane: &str,
-        timeout: std::time::Duration,
-    ) -> bool {
+    fn wait_for_pane_exit(iso: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
         let start = std::time::Instant::now();
         let poll = std::time::Duration::from_millis(50);
         while start.elapsed() < timeout {
@@ -1447,7 +1443,8 @@ mod tests {
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Codex uses > as prompt
-        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
+        let script =
+            r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
         iso.send_keys(&pane, script).unwrap();
 
         let harness = HarnessConfig::codex();
@@ -1499,7 +1496,7 @@ history line
             &pane,
             r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
         )
-            .unwrap();
+        .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let trigger = HarnessConfig::claude().trigger_command("test.md");
@@ -1530,7 +1527,7 @@ history line
             &pane,
             r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
         )
-            .unwrap();
+        .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let trigger = HarnessConfig::codex().trigger_command("test.md");

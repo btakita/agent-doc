@@ -1,7 +1,7 @@
 # Harness Invocation Patterns
 
 This runbook covers the harness-specific differences in how agent-doc is invoked.
-The core workflow (preflight, respond, write, commit) is identical across all harnesses.
+The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 
 ## Manual Repair Default
 
@@ -30,7 +30,7 @@ Identify your harness from your environment:
 - **Invocation:** User types `/agent-doc <file>` which triggers the `Skill` tool.
 - **Slash commands:** Execute via the `Skill` tool. Strip the leading `/`; pass remaining args.
 - **Auto-update prompt:** Use `AskUserQuestion` to prompt the user to run `/compact`.
-- **Write-back:** Pipe via `Bash` tool using heredoc (`cat <<'RESPONSE' | agent-doc write ...`).
+- **Write-back:** Pipe the normal response cycle via `Bash` using `agent-doc finalize ...`; use `agent-doc write --commit ...` only for manual repair when the prompt already exists.
 - **Manual repair / missed patchback:** Use the shared default above. In Claude Code that still means piping the response through `Bash`, but the command should be `agent-doc write --commit <FILE>` once the prompt already exists in the document.
 - **Built-in commands** (e.g., `/compact`, `/clear`): Cannot invoke via Skill. Write a document note instructing the user to run it at the terminal.
 
@@ -40,7 +40,7 @@ Identify your harness from your environment:
 - **Use this form instead:** `agent-doc <FILE>` as a normal message, for example `agent-doc tasks/agent-doc/agent-doc-bugs.md`.
 - **Slash commands:** Codex has no slash commands. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
 - **Auto-update prompt:** Print a message asking the user to restart.
-- **Write-back:** Execute `agent-doc write` directly (Codex runs shell commands natively).
+- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle (Codex runs shell commands natively).
 - **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file.
 - **Session resume:** Codex uses `codex resume --last` instead of `--continue`.
 
@@ -48,4 +48,4 @@ Identify your harness from your environment:
 
 - **Invocation:** Follow the same pattern as Codex (direct execution).
 - **Slash commands:** Not available. Skip `slash_commands`; note `builtin_commands`.
-- **Write-back:** Execute shell commands directly.
+- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle.

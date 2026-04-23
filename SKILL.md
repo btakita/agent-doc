@@ -11,7 +11,7 @@ Interactive document session — respond to user edits in a markdown document.
 
 ## Harness Compatibility
 
-This skill works across multiple agent harnesses (Claude Code, Codex, Cursor, etc.). The core workflow is identical; only invocation and tool dispatch differ. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific patterns.
+This skill works across multiple agent harnesses (Claude Code, Codex, Cursor, etc.). The core workflow is identical; only invocation and tool dispatch differ. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific patterns and [runbooks/commit.md](runbooks/commit.md) for the response commit boundary.
 
 ## Invocation
 
@@ -48,7 +48,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Print any `claims` to the console as a record.
-- Use `baseline_file` as `--baseline-file` for every subsequent `agent-doc write`. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
+- Use `baseline_file` as `--baseline-file` for every subsequent response-persistence command. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
 
 ### 0b. Execute slash commands (if any)
@@ -89,15 +89,17 @@ If the document has an `<!-- agent:pending -->` component, mutations go through 
 
 **Promotion heuristic (when to add pending in the same cycle):** if your response ends with a numbered list of distinct, actionable recommendations (e.g., "What I'd recommend: 1. ..., 2. ..., 3. ..."), and either pending is currently empty OR the user asked for a backlog / "tasks" / "todo", add each recommendation as a pending item in the same cycle. The pending component is where backlog lives. Skip promotion when items are hypotheticals, options you're asking the user to choose between, or already captured elsewhere.
 
-### 2. Write back (MANDATORY — never skip)
+### 2. Persist the response (MANDATORY — never skip)
 
-Pipe the response through `agent-doc write --stream` — it handles patch parsing, CRDT merge, atomic write, and snapshot update. **This step is MANDATORY every cycle, regardless of response length or complexity. Skipping write breaks the document sync.**
+For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 ```bash
-cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
 <your response — patch blocks for template mode, or plain text for inline mode>
 RESPONSE
 ```
+
+`finalize` reuses the normal write pipeline, then requires the cycle to reach `committed`. Use [runbooks/commit.md](runbooks/commit.md) for the default/exception contract.
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 
@@ -105,13 +107,7 @@ RESPONSE
 
 **Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document and you are repairing a missed patchback, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` for the response write-back so the repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists in the document.
 
-Document format, frontmatter fields, append vs template mode conventions, and component naming: [runbooks/document-format.md](runbooks/document-format.md).
-
-### 3. Commit (MANDATORY — never skip)
-
-Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
-
-**Never use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`.
+Document format, frontmatter fields, append vs template mode conventions, and component naming: [runbooks/document-format.md](runbooks/document-format.md). Commit-boundary exceptions and anti-patterns live in [runbooks/commit.md](runbooks/commit.md).
 
 ## Runbooks
 
@@ -122,6 +118,7 @@ Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **T
 - [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
 - [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
 - [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
+- [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions
 - [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) — which invariants live in the binary
 
 ## Success Criteria

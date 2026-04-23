@@ -1499,7 +1499,7 @@ The distinction I would keep is:
 So I would broaden `#wcmp` from "Codex patchbacks" to "manual-repair patchbacks across harnesses," while still keeping the larger product direction under `#finz` / `#schk` / `#instr1`.
 
 do #wcmp. add spec + tests. build + install for local testing
-### Re: `#wcmp` shared manual-repair path — gpt-5.4
+### Re: `#wcmp` shared manual-repair path — gpt-5.4 (HEAD)
 
 Implemented in `src/agent-doc`.
 
@@ -1525,14 +1525,35 @@ Installed-content checks passed for:
 - `.claude/skills/agent-doc/runbooks/harness-invocation.md`
 - `.codex/AGENTS.md`
 - `.codex/runbooks/harness-invocation.md`
-<!-- agent:boundary:e64cd484 -->
+
+do #finz. add spec + tests. build + install for local testing
+### Re: `#finz` strict finalize path — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- added `agent-doc finalize <FILE>` in `src/main.rs` as the binary-owned happy-path response command
+- moved the shared CLI write/finalize flow into `src/write.rs` with `CommitMode::{None, BestEffort, Required}` so `write --commit` stays the documented best-effort manual-repair path while `finalize` requires git and refuses success unless the cycle closes as `committed`
+- `finalize` now fails before mutating non-git documents, reuses the normal write pipeline and pending/status mutation surface, and rejects `--pending-only` because it is meant for response cycles rather than standalone pending maintenance
+- added `tests/finalize_integration.rs` covering both the non-git fail-before-write case and the successful template finalize path that writes the response, commits it, and leaves cycle state at `committed`
+- updated `README.md`, `SPEC.md`, `CLAUDE.md`, and `specs/07-commands.md` so the strict `finalize` contract is explicit and distinguished from the manual-repair `write --commit` contract
+
+Verification:
+
+- `cargo test finalize -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:6260882e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
-- [ ] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
+- [ ] [#cmiv] Update `commit.md` to define a hard invariant: every appended `agent-doc` response must be committed unless explicitly told otherwise.
+- [x] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.

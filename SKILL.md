@@ -103,7 +103,7 @@ RESPONSE
 
 `finalize` reuses the normal write pipeline, then requires the cycle to reach `committed`. Use [runbooks/commit.md](runbooks/commit.md) for the default/exception contract.
 
-**End-of-turn guard:** after any final response persistence command (`agent-doc finalize <FILE> ...` for the normal path, or `agent-doc write --commit <FILE> ...` for manual repair), run `agent-doc session-check <FILE>`. If it exits nonzero, the cycle is still open or the document shows a likely direct assistant patchback that bypassed `agent-doc`: do **not** report success, and continue recovery instead of ending the turn.
+**End-of-turn guard:** after any final response persistence command (`agent-doc finalize <FILE> ...` for the normal path, or `agent-doc write --commit <FILE> ...` for manual repair), run `agent-doc session-check <FILE>`. If it exits nonzero, the cycle is still open or the document shows a likely direct assistant patchback that bypassed `agent-doc`: do **not** report success, and continue recovery instead of ending the turn. The only self-heal exception is already-committed historical snapshot drift that `session-check` can prove from `HEAD`.
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is the immediate `session-check`, minimal recovery if it fails, and concise result reporting.
 

@@ -4,11 +4,13 @@
 
 ## run
 
-`agent-doc run <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
+`agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
 
 1. Compute diff → 2. Build prompt (diff + full doc) → 3. Branch if `-b` → 4. Send to agent → 5. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 6. Update session ID → 7. Append response → 8. Save snapshot → 9. `git add -f` + commit
 
 First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
+
+Bare `agent-doc <FILE>` remains accepted as a compatibility alias for `agent-doc run <FILE>`.
 
 ## init
 
@@ -513,6 +515,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 - Fallback for older repos: last non-empty `.agent-doc/logs/ops.log` line
 - Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
 - Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
+- Narrow self-heal: if that marker is only historical drift already committed in `HEAD`, and the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers, `session-check` repairs the stale snapshot first and exits `0`
 - Exit `0` when the cycle state is committed or no state/log file exists
 - Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.
 

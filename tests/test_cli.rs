@@ -120,6 +120,18 @@ fn test_cli_run_requires_file() {
 }
 
 #[test]
+fn test_cli_bare_file_path_aliases_to_run() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let missing = tmp.path().join("missing.md");
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg(&missing);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
 fn test_cli_init_no_file_runs_project_init() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();

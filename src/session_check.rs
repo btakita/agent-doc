@@ -10,6 +10,10 @@
 //! - Also fails closed when the current document diverges from its snapshot in
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
+//! - Narrow self-heal: when that drift is already committed in `HEAD` and the
+//!   current working tree matches `HEAD` modulo transient boundary / `(HEAD)`
+//!   markers, `session-check` repairs the stale snapshot instead of reporting
+//!   a fresh interruption forever.
 //! - Exit 0 when the current cycle state is committed, when state/log files
 //!   are missing, or when the fallback `ops.log` event is terminal and no
 //!   likely bypassed patchback is present.
@@ -19,7 +23,8 @@
 //! - Exit 2 on unexpected I/O errors.
 //!
 //! ## Agentic Contracts
-//! - Read-only — never mutates the log or any document state.
+//! - Mutates only the snapshot in the narrow committed-historical-drift repair
+//!   case above; otherwise read-only.
 //! - Called by supervisors / watchdogs (and directly from skill) to
 //!   detect the "started but never wrote" invariant violation flagged
 //!   as bug #a011.
@@ -31,6 +36,7 @@
 //! - `detect_bypassed_response_write_flags_template_heading`
 //! - `detect_bypassed_response_write_flags_inline_assistant_heading`
 //! - `detect_bypassed_response_write_ignores_plain_user_prompt`
+//! - `session_check_repairs_committed_historical_snapshot_drift`
 //! - `session_check_missing_log_exits_zero`
 
 use anyhow::Result;
@@ -75,6 +81,15 @@ pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
             )));
         }
         if let Some(marker) = detect_bypassed_response_write(file)? {
+            if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
+                    state.cycle_id,
+                    phase_name(state.phase),
+                    state.last_event,
+                    reason
+                )));
+            }
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
                 marker
@@ -91,6 +106,13 @@ pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
     match last_ops_event(file)? {
         None => {
             if let Some(marker) = detect_bypassed_response_write(file)? {
+                if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
+                {
+                    return Ok(SessionCheckStatus::Ok(format!(
+                        "[session-check] ok — repaired committed historical {} snapshot drift",
+                        reason
+                    )));
+                }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
                     marker
@@ -108,6 +130,13 @@ pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
         }
         Some(event) => {
             if let Some(marker) = detect_bypassed_response_write(file)? {
+                if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
+                {
+                    return Ok(SessionCheckStatus::Ok(format!(
+                        "[session-check] ok — last event: {}; repaired committed historical {} snapshot drift",
+                        event, reason
+                    )));
+                }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
                     marker
@@ -193,6 +222,7 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
 mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command;
 
     fn make_project(tmp: &Path) -> std::path::PathBuf {
         fs::create_dir_all(tmp.join(".agent-doc/logs")).unwrap();
@@ -314,5 +344,105 @@ mod tests {
         fs::write(&doc, format!("{snapshot}\nWhy is this still dirty?\n")).unwrap();
 
         assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn session_check_repairs_committed_historical_snapshot_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let tracked = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, tracked).unwrap();
+        crate::snapshot::save(&doc, tracked).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let stale_snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        let historical = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: historical\n\
+            repaired body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, historical).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual repair", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(historical)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(historical),
+            Some(historical),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("repaired committed historical exchange snapshot drift"));
+            }
+            other => panic!("expected ok status, got {other:?}"),
+        }
+
+        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            repaired_snapshot.contains("### Re: historical"),
+            "snapshot should advance to the committed historical response:\n{repaired_snapshot}"
+        );
+        assert!(
+            detect_bypassed_response_write(&doc).unwrap().is_none(),
+            "snapshot repair should clear the interrupted marker"
+        );
     }
 }

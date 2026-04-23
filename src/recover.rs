@@ -37,6 +37,73 @@ use std::path::Path;
 
 use crate::{snapshot, write};
 
+fn repair_stale_preflight_started_cycle(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
+        return Ok(false);
+    }
+
+    let file_content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} for stale preflight repair",
+            file.display()
+        )
+    })?;
+    let snapshot_content = snapshot::load(file)?;
+    let current_file_hash = crate::ops_log::content_hash(&file_content);
+    let current_snapshot_hash = snapshot_content
+        .as_deref()
+        .map(crate::ops_log::content_hash);
+
+    if state.file_hash.as_deref() != Some(current_file_hash.as_str())
+        || state.snapshot_hash != current_snapshot_hash
+    {
+        return Ok(false);
+    }
+
+    crate::cycle_state::mark_committed(
+        file,
+        "recover_preflight_stale_lock",
+        snapshot_content.as_deref(),
+        Some(&file_content),
+    )?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "recover_preflight_stale_lock file={} cycle_id={}",
+            file.display(),
+            state.cycle_id
+        ),
+    );
+    eprintln!(
+        "[recover] repaired stale preflight_started cycle {} for {}",
+        state.cycle_id,
+        file.display()
+    );
+    Ok(true)
+}
+
+fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<String> {
+    match crate::template::repair_conversation_tail_outside_exchange(doc_content)? {
+        Some(repaired) => {
+            write::atomic_write_pub(file, &repaired)?;
+            snapshot::save(file, &repaired)?;
+            crate::ops_log::log_op(
+                file,
+                &format!("recover_repair_exchange_tail file={}", file.display()),
+            );
+            eprintln!(
+                "[recover] repaired escaped conversation tail in {}",
+                file.display()
+            );
+            Ok(repaired)
+        }
+        None => Ok(doc_content.to_string()),
+    }
+}
+
 /// Check for a pending response and apply it if found.
 ///
 /// Returns `true` if a pending response was recovered, `false` otherwise.
@@ -49,6 +116,9 @@ pub fn run(file: &Path) -> Result<bool> {
     let pending_path = snapshot::pending_path_for(&canonical)?;
     let capture = crate::capture::load_active(&canonical)?;
     if !pending_path.exists() && capture.is_none() {
+        if repair_stale_preflight_started_cycle(file)? {
+            return Ok(true);
+        }
         return Ok(false);
     }
 
@@ -82,11 +152,12 @@ pub fn run(file: &Path) -> Result<bool> {
         eprintln!(
             "[recover] Response already present in document — skipping apply, cleaning up pending file"
         );
+        let repaired_doc = repair_template_tail_if_needed(file, &doc_content)?;
         if let Err(e) = crate::cycle_state::mark_write_applied(
             file,
             "recover_already_applied",
-            Some(&doc_content),
-            Some(&doc_content),
+            Some(&repaired_doc),
+            Some(&repaired_doc),
         ) {
             eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
         }
@@ -360,5 +431,53 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn recover_repairs_stale_preflight_started_cycle_when_hashes_match() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert!(repaired, "stale preflight lock should be repaired");
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "recover_preflight_stale_lock");
+    }
+
+    #[test]
+    fn recover_repairs_escaped_exchange_tail_when_response_already_present() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- [ ] keep\n",
+            "<!-- /agent:pending -->\n\n",
+            "## Assistant\n\n",
+            "Recovered answer.\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(&doc, "Recovered answer.").unwrap();
+        let recovered = run(&doc).unwrap();
+        assert!(!recovered, "dedup path should skip replay");
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let assistant = repaired.find("## Assistant").unwrap();
+        assert!(
+            assistant < exchange_close,
+            "escaped assistant block should move back inside exchange:\n{repaired}"
+        );
     }
 }

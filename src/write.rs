@@ -948,6 +948,24 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
     }
 }
 
+fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
+    let lifted = lift_pending_from_exchange_safe(content, file);
+    match crate::template::repair_conversation_tail_outside_exchange(&lifted)? {
+        Some(repaired) => {
+            eprintln!(
+                "[write] repaired: moved escaped conversation tail back into agent:exchange for {}",
+                file.display()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_exchange_tail file={}", file.display()),
+            );
+            Ok(repaired)
+        }
+        None => Ok(lifted),
+    }
+}
+
 /// Detect whether a baseline is stale relative to the current snapshot.
 ///
 /// Only checks **append-mode** components (exchange, findings, etc.) — these grow
@@ -1310,6 +1328,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Apply patches to baseline
     let content_ours = template::apply_patches(base, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
+    let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
@@ -1321,6 +1340,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
     };
+    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -1549,6 +1569,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
             // Lift pending out of exchange if nested (structural repair)
             content_ours = lift_pending_from_exchange_safe(&content_ours, file);
+            content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
             // Shrink guard: refuse if new exchange content is dramatically shorter
             check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
@@ -1704,6 +1725,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     }
                 }
             };
+            let final_content = normalize_template_structure_or_fail(&final_content, file)?;
             // Snapshot saved BEFORE document write (#wcf5).
             if let Err(e) = snapshot::save(file, &final_content) {
                 eprintln!(
@@ -1813,6 +1835,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     // Lift pending out of exchange if nested (structural repair)
     content_ours = lift_pending_from_exchange_safe(&content_ours, file);
+    content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     // Shrink guard: refuse if new exchange content is dramatically shorter
     check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
@@ -1836,6 +1859,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
         merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?
     };
+    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -2035,6 +2059,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     let base = baseline.unwrap_or(&content_at_start);
     let mut content_ours = template::apply_patches(base, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
+    content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     // Apply frontmatter patch if present
     if let Some(ref yaml) = frontmatter_yaml {
@@ -2052,6 +2077,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
         let crdt_state = snapshot::load_crdt(file)?;
         merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
     };
+    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
@@ -2119,6 +2145,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
+    let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     let doc_lock = acquire_doc_lock(file)?;
 
@@ -2130,10 +2157,11 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
+    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
 
     atomic_write(file, &final_content)?;
-    // Save snapshot as content_ours, not final_content
-    snapshot::save(file, &content_ours)?;
+    // Save snapshot as the repaired/merged final content.
+    snapshot::save(file, &final_content)?;
     drop(doc_lock);
     eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())

@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc extreme snapshot drift root-cause patchback
+
+- [x] Inspect the current `src/agent-doc/src/git.rs` extreme-drift path and recent commits/tests so the explanation matches the implemented behavior.
+- [x] Append a root-cause explanation to `tasks/agent-doc/agent-doc-bugs.md`.
+- [ ] Commit only the parent-repo task-doc updates for this patchback.
+
 ### 2026-04-22 — agent-doc `#vedj`
 
 - [x] Reproduce and isolate the `normalize_user_prompts_in_exchange` bug where synthetic heading-only churn (for example `(HEAD)` suffix updates) suppresses `❯ ` prefixing for the following user prompt.

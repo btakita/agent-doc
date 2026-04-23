@@ -304,6 +304,27 @@ Verification:
 - `cargo test reposition_updates_working_tree_when_only_patches_dir_exists -- --nocapture`
 - `cargo check`
 - full submodule hook path via `git commit`: `cargo clippy -- -D warnings`, full `cargo test`, and `cargo run --quiet -- audit-docs`
+
+Why do we have "extreme snapshot drift"? What are the root causes?
+### Re: extreme snapshot drift root causes — codex
+
+There are two distinct root causes behind the old "extreme snapshot drift" condition:
+
+1. Real snapshot/file divergence existed. The snapshot could lag behind the live document whenever content changed outside the normal `agent-doc` write pipeline. In the code today that is still what the drift warning means: `src/agent-doc/src/git.rs` logs any positive `file_len - snap_len` delta as an out-of-band write candidate before commit.
+2. The old repair heuristic was too broad. Before `e7c1cae`, `git::commit()` treated "file is much larger than snapshot" as enough reason to re-sync the snapshot from the live file. That heuristic mixed together two very different cases:
+   - legitimate bootstrap drift: a newly scaffolded document still had the tiny empty template snapshot, while the working tree already contained the real session content
+   - unsafe tracked-document drift: a normal tracked doc had fallen behind because of missed patchback/snapshot updates, manual edits, interrupted cycles, or other out-of-band writes
+
+So the real root causes are:
+
+- **Out-of-band writes / stale snapshot state.** Something updated the document without updating the snapshot in lockstep. That can come from manual edits, direct repair edits, interrupted write/preflight cycles, IPC/write failures, or any path that bypasses the normal snapshot save.
+- **A size-only resync heuristic.** The old code used "5x larger than snapshot" as a proxy for "safe to rebuild snapshot from file", which is only actually safe for an untracked bootstrap scaffold. On tracked docs, that turned stale-snapshot symptoms into prompt-swallow risk by copying unanswered user content into the snapshot during commit/preflight.
+
+That is why the current code now separates the cases explicitly:
+
+- it still warns/logs on drift for diagnosis
+- it only auto-resyncs when there is **no HEAD entry** and the snapshot is recognized as the **empty scaffold template**
+- it explicitly refuses to re-sync tracked/non-scaffold snapshots, so extreme drift on a real session remains visible instead of being silently absorbed
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

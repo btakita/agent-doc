@@ -635,20 +635,83 @@ Outcome:
 
 - `#6nj9` is done.
 - I added a recommended follow-up for the `audit-docs` root-selection bug rather than shipping that scope change in the same turn.
-<!-- agent:boundary:b4afe42a -->
+
+The claudescore.md tail is malformed again:
+```
+• agent-doc tasks/claudescore.md ran and appended another response, but it left the document in the broken state again.
+
+  Current state:
+
+  - working tree is dirty: tasks/claudescore.md
+  - agent-doc session-check tasks/claudescore.md fails with:
+    cycle ... is still response_captured — no terminal commit followed
+
+  The tail is malformed again:
+
+  - compact exchange was appended inside the exchange
+  - <!-- /agent:exchange --> closes before the new assistant turn
+  - then another ## Assistant / ## User block was appended after Pending / Todo
+
+  So this run reproduced the same exchange-boundary bug rather than repairing it.
+• agent-doc tasks/claudescore.md ran under agent-doc 0.33.13.
+
+  It created commit 5db32f4 (agent-doc(claudescore): 2026-04-23 13:27:50), then appended another response and left the
+  file broken again. The working tree is dirty with tasks/claudescore.md modified.
+
+  agent-doc session-check tasks/claudescore.md still fails:
+
+  [session-check] INTERRUPTED: cycle `cycle-1776939317875` is still `response_captured` — no terminal commit followed
+
+  So 0.33.13 did not fix the failure mode here. The tail is malformed in the same pattern:
+
+  - another compact exchange was appended inside the exchange
+  - <!-- /agent:exchange --> closes before the new assistant turn
+  - then ## Assistant / ## User were appended after Pending / Todo again
+```
+### Re: stale preflight lock repair + exchange-tail repair — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- `recover` now repairs stale `preflight_started` locks when the recorded snapshot/file hashes still match exactly, so canceling during `agent-doc preflight` no longer leaves an unrecoverable open cycle.
+- Template `write` / `finalize` / `recover` / `compact` now share a structural exchange-tail guard: if a safe trailing `## User` / `## Assistant` / `### Re:` block escaped below `&lt;!-- /agent:exchange --&gt;`, the binary moves it back inside exchange before snapshot/write; if the suffix mixes conversation with other document structure, the write fails closed instead of recommitting a malformed template doc.
+- Updated `specs/07-commands.md`, `README.md`, and `SPEC.md` to document the exact stale-lock repair contract and the template exchange fail-closed/safe-repair behavior.
+- While getting the full suite green, I also stabilized the Claude `route` send-keys regression test by waiting on a shell `READY` sentinel instead of a fixed sleep.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_conversation_tail_outside_exchange -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_repairs_stale_preflight_started_cycle_when_hashes_match -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_repairs_escaped_exchange_tail_when_response_already_present -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `cc729f6` — `fix: repair stale preflight locks and exchange tails`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#vpm8` is done.
+- Interrupted `preflight` runs now self-clear in the no-drift case instead of blocking the next cycle.
+- The `claudescore.md` tail-shape is now repaired in the safe case and rejected in ambiguous cases instead of being silently preserved/recommitted broken.
+<!-- agent:boundary:0ac65999 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
-- [ ] [#vpm8] [recommended] Prevent template compact/write/finalize from reintroducing out-of-exchange conversation blocks: validate/reparse post-merge and post-compact writeback, auto-repair safe cases, fail closed on ambiguous exchange-boundary drift.
+- [x] [#vpm8] [recommended] Prevent template compact/write/finalize from reintroducing out-of-exchange conversation blocks: validate/reparse post-merge and post-compact writeback, auto-repair safe cases, fail closed on ambiguous exchange-boundary drift.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
-[//]: agent-doc repair should recover any preflight locks that were caused by cancelling a previous run during `agent-doc preflight`. I canceled during `agent-doc preflight`. The the last run had issues with an uncleared preflight lock. `agent-doc repair` does not repair preflight locks. Then the previous patchback went from a committed to an uncommitted state. The repair command must repair stale preflight locks. Also investigate why the previous patchback went from a committed to an uncommitted state.
+[//]: agent-doc recover should be renamed to agent-doc repair. Alias recover to repair. agent-doc repair should repair any preflight locks that were caused by cancelling a previous run during `agent-doc preflight`. In an agent-doc run on this document, I canceled during `agent-doc preflight`. A recent run had issues with an uncleared preflight lock. `agent-doc repair` does not repair preflight locks. Then the previous patchback to the recent run went from a committed to an uncommitted state. The repair command must repair stale preflight locks. Also investigate why the previous patchback went from a committed to an uncommitted state. `agent-doc repair` should also repair the document itself from any corruption. The document must be runnable with a clean slate and the exchange + pending contents preserved.
 [//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
 [//]: # (Please diagnose why audit-docs is hanging.)
 [//]: # Fix test suite warnings ignored tests

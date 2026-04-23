@@ -1370,7 +1370,7 @@ So the enforceable version is:
 That turns the instruction set into an auditable completion boundary instead of a prose promise. I should have been doing that already.
 
 There seems to be a systemic issue having Codex follow the skills/runbooks. Are we losing context? Are there too many skills/runbooks?
-### Re: systemic Codex/runbook compliance diagnosis — gpt-5
+### Re: systemic Codex/runbook compliance diagnosis — gpt-5 (HEAD)
 
 Not primarily context loss. The repeated misses happened while the relevant rule was already present in the live task doc and in the installed Codex instructions (`.codex/AGENTS.md`, `.codex/runbooks/harness-invocation.md`). That points more to execution-boundary failures than to the model forgetting long-range context.
 
@@ -1394,7 +1394,92 @@ What I would change is narrow and mechanical:
 - Keep moving completion invariants into the binary or tests wherever possible; the agent should not be trusted to enforce commit-boundary discipline by narration alone.
 
 This is why Claude looks better here: not because your instructions are clearer for Claude, but because the Claude path currently has a tighter harness contract. Codex needs the same contract reduced to fewer hot-path rules plus stronger machine enforcement.
-<!-- agent:boundary:ff197f14 -->
+
+### Re: preventing stop-after-write-back / transferred from `src/session-share/tasks/claudescore.md` — codex
+
+Yes. The binary can help a lot, and in this case it probably should.
+
+What is happening now is:
+
+- `agent-doc write` succeeds
+- I treat that as "done"
+- but the cycle is still open until the response commit happens
+- `agent-doc commit` only handles the snapshot commit, not the missed response commit
+
+So the real gap is that the tooling currently allows a successful write-back without forcing the response-commit step to happen before the agent can stop.
+
+What already exists:
+- `agent-doc session-check <FILE>`: fails if the cycle is still open
+- `agent-doc write --commit <FILE>`: can create the response commit as part of write-back
+- `preflight`: auto-recovers open prior cycles
+
+Why that still did not save me:
+- I was using `agent-doc write` without `--commit`
+- I was not running `session-check` before ending the turn
+- the workflow still permits "write happened, commit did not"
+
+What would actually prevent this:
+
+1. Change the skill/runbook default to always use `agent-doc write --commit`.
+   This is the fastest fix.
+   The local `agent-doc` docs already point in this direction.
+
+2. Add a single binary command for the normal cycle.
+   Example: `agent-doc finalize <FILE>`
+   It should do:
+   - write response
+   - create response commit
+   - run `agent-doc commit <FILE>`
+   - exit nonzero if any step fails
+
+3. Make open-cycle completion a hard gate.
+   After any assistant exchange write, if no response commit exists, `session-check` should fail and the wrapper/skill should refuse to report success.
+
+4. Optionally add a strict mode:
+   - `agent-doc write` on `exchange` without `--commit` exits nonzero
+   - or only allow it in explicit modes like `--no-commit-ok`
+
+My recommendation:
+- Immediate workflow fix: switch all skill/runbook write-back examples to `agent-doc write --commit`
+- Product fix: add `agent-doc finalize <FILE>` and make that the only supported happy-path command for session responses
+
+That is the cleanest way to prevent this class of mistake at the binary layer instead of relying on agent discipline.
+
+Please plan how we can extract deterministic procedural into binary agent-doc commands. Please plan how we can update our skill/runbooks to support Codex following the rules while not breaking Claude. Efficient token usage in loaded context is also important.
+### Re: `#cyc1` failing tests follow-up / current result — gpt-5
+
+Fixed. The current failures were in the test surface, not in the `#cyc1` runtime behavior itself.
+
+Root cause:
+
+- the `route` tmux integration tests were brittle against shell startup noise and timing; several were using the ambient process cwd plus interactive shell commands whose echoed input could be mistaken for real prompt/output state
+- the `autoclaim` tests were mutating `TMUX_PANE` in parallel without serialization
+- the stash-eviction regression test was still depending on cwd-scoped registry lookup in a way that became unstable under parallel test execution
+
+What changed in `src/agent-doc`:
+
+- `src/route.rs`
+  - factored the stash-pane eviction logic into `evict_previous_stash_pane_entry(...)` so the regression test can exercise the real eviction behavior without depending on global cwd-scoped registry state
+  - hardened the route tmux tests with a stable repo cwd, `/bin/sh`-based mock agent scripts, and polling helpers instead of fixed sleeps
+  - updated the unicode-prompt test to wait for the actual prompt state instead of treating the echoed command line as evidence of readiness
+  - updated the stash-eviction test to wait for pane death explicitly, which removes the tmux timing race under parallel load
+- `src/autoclaim.rs`
+  - serialized the tests that set `TMUX_PANE` so they do not trample each other in parallel
+
+Verification that now passes:
+
+- `cargo test route::tests:: -- --nocapture`
+- `cargo test autoclaim::tests -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Result:
+
+- `make check` is green again
+- full route test surface is green again
+- the earlier `#cyc1` open-cycle tests still pass inside the full suite; the failure was in surrounding test harness assumptions, not in the cycle-state implementation
+<!-- agent:boundary:45d8062b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

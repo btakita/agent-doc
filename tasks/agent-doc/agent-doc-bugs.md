@@ -756,7 +756,8 @@ Outcome:
 - safe trailing raw suffixes after sibling components are repaired back into `agent:exchange`
 - `agent-doc repair` now matches the actual user-facing role of the command while preserving `recover` compatibility
 
-claudescore.md is still reverted back to the corrupted state. If there is an agent:exchange component, any `Assistant` or `User` header should be automatically placed inside agent:exchange. update spec + tests. build + install for local testing. commit + push
+You missed the following prompt.
+> claudescore.md is still reverted back to the corrupted state. If there is an agent:exchange component, any `Assistant` or `User` header should be automatically placed inside agent:exchange. update spec + tests. build + install for local testing. commit + push
 
 ```
 • agent-doc tasks/claudescore.md ran and reproduced the same failure again.
@@ -778,7 +779,7 @@ claudescore.md is still reverted back to the corrupted state. If there is an age
 [//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
 [//]: # (Please diagnose why audit-docs is hanging.)
 [//]: # Fix test suite warnings ignored tests
-<!-- agent:boundary:26deea89 -->
+<!-- agent:boundary:74b002a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

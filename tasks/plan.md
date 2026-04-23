@@ -356,6 +356,10 @@ Review:
 
 ### 2026-04-22 — Respond To Parent-Commit Complaint (`agent-doc-bugs`)
 
-- [ ] Patch back a direct explanation for why the parent commit step was skipped and make the failure mode explicit as an execution mistake, not an `agent-doc` code-path failure.
-- [ ] Commit the new `agent-doc-bugs` response plus the matching `tasks/plan.md` update without staging unrelated workspace changes.
-- [ ] Verify `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md` are clean after the commit.
+- [x] Patch back a direct explanation for why the parent commit step was skipped and make the failure mode explicit as an execution mistake, not an `agent-doc` code-path failure.
+- [x] Commit the new `agent-doc-bugs` response plus the matching `tasks/plan.md` update without staging unrelated workspace changes.
+- [x] Verify `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md` are clean after the commit.
+
+Review:
+- Patched the complaint response into `tasks/agent-doc/agent-doc-bugs.md` as an explicit acknowledgment that the skipped parent commit step was a turn-execution mistake: I reported the patchback as handled before the parent commit actually existed.
+- Committed the task-doc response plus the plan update as parent commit `f011e976` (`agent-doc bugs: respond to parent commit complaint`) without staging unrelated workspace changes.

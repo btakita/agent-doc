@@ -304,8 +304,8 @@ fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
 
 fn merge_codex_hooks_json(path: &Path) -> Result<()> {
     let mut root = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let content =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         serde_json::from_str::<serde_json::Value>(&content)
             .with_context(|| format!("parse {}", path.display()))?
     } else {
@@ -354,7 +354,8 @@ fn ensure_codex_hook_command(
     };
 
     let already_present = entry_array.iter().any(|entry| {
-        entry.get("hooks")
+        entry
+            .get("hooks")
             .and_then(|hooks| hooks.as_array())
             .map(|hooks| {
                 hooks.iter().any(|hook| {
@@ -379,9 +380,10 @@ fn ensure_codex_hook_command(
 
 fn merge_codex_config(path: &Path) -> Result<()> {
     let mut root = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("read {}", path.display()))?;
-        toml::from_str::<toml::Value>(&content).with_context(|| format!("parse {}", path.display()))?
+        let content =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        toml::from_str::<toml::Value>(&content)
+            .with_context(|| format!("parse {}", path.display()))?
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
@@ -436,7 +438,10 @@ pub fn install_and_check_updated() -> Result<bool> {
 
     cfg.install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
-    install_env_artifacts(agent_kit::detect::Environment::detect(), resolved.as_deref())?;
+    install_env_artifacts(
+        agent_kit::detect::Environment::detect(),
+        resolved.as_deref(),
+    )?;
     Ok(!was_current)
 }
 
@@ -581,9 +586,11 @@ mod tests {
         super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
-        let claude =
-            std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/runbooks/commit.md"))
-                .unwrap();
+        let claude = std::fs::read_to_string(
+            dir.path()
+                .join(".claude/skills/agent-doc/runbooks/commit.md"),
+        )
+        .unwrap();
         let codex = std::fs::read_to_string(dir.path().join(".codex/runbooks/commit.md")).unwrap();
 
         for content in [&claude, &codex] {
@@ -663,9 +670,11 @@ mod tests {
         let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
             .as_array()
             .unwrap();
-        assert!(submit_hooks
-            .iter()
-            .any(|hook| hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND)));
+        assert!(
+            submit_hooks
+                .iter()
+                .any(|hook| hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND))
+        );
 
         let config: toml::Value =
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -700,9 +709,10 @@ mod tests {
 
         super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
 
-        let hooks: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap())
-                .unwrap();
+        let hooks: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap(),
+        )
+        .unwrap();
         let stop_hooks = hooks["hooks"]["Stop"].as_array().unwrap();
         assert!(stop_hooks.iter().any(|entry| {
             entry["hooks"]
@@ -719,10 +729,14 @@ mod tests {
                 .any(|hook| hook["command"].as_str() == Some(CODEX_STOP_COMMAND))
         }));
 
-        let config: toml::Value =
-            toml::from_str(&std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap())
-                .unwrap();
-        assert_eq!(config["sandbox"]["default"].as_str(), Some("workspace-write"));
+        let config: toml::Value = toml::from_str(
+            &std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            config["sandbox"]["default"].as_str(),
+            Some("workspace-write")
+        );
         assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
     }
 
@@ -782,8 +796,10 @@ mod tests {
     #[test]
     fn bundled_skill_contains_finalize_commit_invariant() {
         assert!(SKILL_TEMPLATE.contains("agent-doc finalize <FILE>"));
-        assert!(SKILL_TEMPLATE
-            .contains("unless the user explicitly told you to leave the response uncommitted"));
+        assert!(
+            SKILL_TEMPLATE
+                .contains("unless the user explicitly told you to leave the response uncommitted")
+        );
         assert!(SKILL_TEMPLATE.contains("requires the cycle to reach `committed`"));
         assert!(SKILL_TEMPLATE.contains("agent-doc session-check <FILE>"));
         assert!(SKILL_TEMPLATE.contains("final document-mutation boundary for the cycle"));
@@ -853,7 +869,9 @@ mod tests {
     #[test]
     fn bundled_runbooks_include_commit_runbook() {
         assert!(
-            BUNDLED_RUNBOOKS.iter().any(|(name, _)| *name == "commit.md"),
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "commit.md"),
             "commit.md should be in BUNDLED_RUNBOOKS"
         );
     }
@@ -880,7 +898,11 @@ mod tests {
         assert!(content.contains("Manual repair / missed patchback"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("agent-doc session-check <FILE>"));
-        assert!(content.contains("Do not patch the document early and then keep working for the same turn"));
+        assert!(
+            content.contains(
+                "Do not patch the document early and then keep working for the same turn"
+            )
+        );
         assert!(content.contains(".codex/hooks.json"));
         assert!(content.contains("UserPromptSubmit"));
         assert!(content.contains("agent-doc hook codex-stop"));
@@ -945,8 +967,8 @@ mod tests {
             .install_for(Environment::Codex, Some(dir.path()))
             .unwrap();
 
-        let claude = std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/SKILL.md"))
-            .unwrap();
+        let claude =
+            std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/SKILL.md")).unwrap();
         let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
 
         for content in [&claude, &codex] {

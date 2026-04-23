@@ -798,11 +798,74 @@ claudescore.md is still reverted back to the corrupted state. If there is an age
   - tasks/claudescore-2.md
 ```
 
-[//]: agent-doc recover should be renamed to agent-doc repair. Alias recover to repair. agent-doc repair should repair any preflight locks that were caused by cancelling a previous run during `agent-doc preflight`. In an agent-doc run on this document, I canceled during `agent-doc preflight`. A recent run had issues with an uncleared preflight lock. `agent-doc repair` does not repair preflight locks. Then the previous patchback to the recent run went from a committed to an uncommitted state. The repair command must repair stale preflight locks. Also investigate why the previous patchback went from a committed to an uncommitted state. `agent-doc repair` should also repair the document itself from any corruption. The document must be runnable with a clean slate and the exchange + pending contents preserved.
-[//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
-[//]: # (Please diagnose why audit-docs is hanging.)
-[//]: # Fix test suite warnings ignored tests
-<!-- agent:boundary:d222373f -->
+Fix the following that happened when running this agent-doc:
+
+```
+• preflight is reporting no_changes for two concrete reasons.
+
+  First, each run is auto-cleaning an older open cycle before it diffs. Your logs show:
+
+  - Response already present in document — skipping apply
+  - repaired escaped conversation tail
+  - then an agent-doc(...) commit
+
+  That happens in the preflight recovery/commit path before diffing, so some document state gets absorbed before the
+  actual comparison. See src/agent-doc/src/preflight.rs:727.
+
+  Second, the remaining delta in agent-doc-bugs.md is not substantive user content. A direct raw diff against the
+  snapshot shows only this change near the tail of tasks/agent-doc/agent-doc-bugs.md:805:
+
+  -<!-- agent:boundary:d222373f -->
+  +<!-- agent:boundary:2b4532af -->
+
+  agent-doc treats that as transient boundary churn, not a prompt. The diff layer explicitly classifies boundary UUID
+  and (HEAD) changes as BoundaryArtifact in src/agent-doc/src/diff.rs:28, and git-side normalization strips boundary
+  markers for absorb/normalization in src/agent-doc/src/git.rs:341.
+
+  Also, comment-only edits are ignored by design. Your file contains [//]: # (...) scratch comments, and those are
+  stripped before diff comparison in src/agent-doc/src/component.rs:461.
+
+  So the short version is:
+
+  - previous open-cycle content is being recovered and committed before diff
+  - comment-only edits are stripped
+  - the live raw file is currently only dirty by agent:boundary UUID churn, which is treated as non-actionable
+
+  If you want, I can trace why that boundary-only working-tree dirtiness is still being left behind after commit,
+  because that part does look like a separate bug.
+```
+
+### Re: preflight no-changes / boundary-churn cleanup — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- Tightened the already-committed no-op path in `src/git.rs` so transient cleanup no longer depends on resetting the working tree to bare `HEAD`.
+- The cleanup now normalizes boundary / `(HEAD)` markers back to the committed `HEAD` shape while preserving comment-only notes outside the committed response.
+- Added regression coverage for both the pure transient-churn case and the mixed `comment-only note + transient churn` case.
+- Updated `SPEC.md` and `specs/08-session-routing.md` so the post-commit cleanup contract explicitly preserves comment-only notes while removing marker churn.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_already_current_repairs_transient_working_tree_churn -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_already_current_cleans_transient_markers_without_dropping_comments -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests::send_keys_delivers_codex_command_with_enter -- --nocapture`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Notes:
+
+- The two new commit-cleanup regressions pass.
+- `make -C src/agent-doc check` still fails on `route::tests::send_keys_delivers_codex_command_with_enter`, and that same route test still fails when re-run in isolation. I did not fold that separate route/send-keys bug into this turn.
+
+Outcome:
+
+- The no-op commit cleanup now removes stale boundary / `(HEAD)` churn without dropping scratch comments that live outside `agent:exchange`.
+- The local `agent-doc` binary is rebuilt and reinstalled.
+<!-- agent:boundary:38dac299 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

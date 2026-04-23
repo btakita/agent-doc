@@ -1394,7 +1394,7 @@ What I would change is narrow and mechanical:
 - Keep moving completion invariants into the binary or tests wherever possible; the agent should not be trusted to enforce commit-boundary discipline by narration alone.
 
 This is why Claude looks better here: not because your instructions are clearer for Claude, but because the Claude path currently has a tighter harness contract. Codex needs the same contract reduced to fewer hot-path rules plus stronger machine enforcement.
-<!-- agent:boundary:866e6b7f -->
+<!-- agent:boundary:ff197f14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -79,7 +79,7 @@ A document has four concurrent representations during a write cycle:
 **Consistency invariants:**
 - After preflight step 2b: `baseline == snapshot` (minus boundary markers)
 - After `agent-doc write`: `snapshot == baseline + response` (content_ours)
-- After `agent-doc commit`: git HEAD contains the clean snapshot blob, while the on-disk snapshot / visible document retain a single ` (HEAD)` marker as the current-response affordance
+- After `agent-doc commit`: git HEAD, the on-disk snapshot, and the visible document converge back to the same clean boundary shape (no transient ` (HEAD)` marker churn)
 - The editor buffer may diverge from all three persistent states (unsaved user edits)
 
 **Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this via component-aware comparison:

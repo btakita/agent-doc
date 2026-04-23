@@ -136,7 +136,7 @@ Content.
     }
 
     @Test
-    fun `preserves single HEAD marker while collapsing stale boundaries`() {
+    fun `strips transient HEAD marker while collapsing stale boundaries`() {
         val doc = """
 <!-- agent:exchange patch=append -->
 ### Re: test — opus-4-6 (HEAD)
@@ -149,8 +149,8 @@ User prompt.
 
         val result = repositionBoundaryToEndUtil(doc, "exchange")
         assertNotNull(result)
-        assertTrue(result!!.contains("### Re: test — opus-4-6 (HEAD)"))
-        assertEquals(1, Regex("""\(HEAD\)""").findAll(result).count())
+        assertTrue(result!!.contains("### Re: test — opus-4-6\n"))
+        assertEquals(0, Regex("""\(HEAD\)""").findAll(result).count())
         assertEquals(1, Regex("""<!-- agent:boundary:[a-z0-9]+ -->""").findAll(result).count())
         assertTrue(result.contains("User prompt.\n<!-- agent:boundary:"))
         assertFalse(result.contains("aaa11111"))

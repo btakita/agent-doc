@@ -14,12 +14,11 @@
 //!   are not absorbed.
 //!   Falls back to `git add -f` when hash-object fails.  If the staged snapshot already matches
 //!   `HEAD`, `commit` closes the cycle as an already-committed no-op instead of logging a false
-//!   `commit_failed`. After a successful commit, repositions the boundary marker in the snapshot
-//!   and fires an IPC reposition signal
-//!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
-//!   via the plugin's Document API when a live listener exists; otherwise the file is rewritten
-//!   locally to the same clean shape as the committed blob. Returns `true` when a git commit was
-//!   created and `false` when there was nothing new to commit.
+//!   `commit_failed`. After a successful commit, post-commit cleanup collapses boundary churn in
+//!   the snapshot and fires an IPC reposition signal (`try_ipc_reposition_boundary`) so the IDE
+//!   plugin can normalize the working tree to the same clean shape as the committed blob. Without
+//!   a live listener, the file is rewritten locally to that same clean shape. Returns `true` when
+//!   a git commit was created and `false` when there was nothing new to commit.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
@@ -52,7 +51,7 @@
 //! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
-//! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob so prior-cycle headings don't take phantom diffs when the boundary moves
+//! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob and post-commit cleanup leaves the working tree/snapshot clean
 //! - commit_lock_nonblocking_when_held: CommitLock::acquire returns None immediately when another process holds the lock (no indefinite blocking)
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
@@ -60,6 +59,7 @@
 //! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
 //! - commit_repairs_committed_historical_snapshot_drift: historical direct response already committed in `HEAD` repairs the stale snapshot without creating a duplicate commit
 //! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
+//! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
 
 use anyhow::Result;
 use fs2::FileExt;
@@ -802,11 +802,14 @@ pub fn commit(file: &Path) -> Result<bool> {
             "[commit] staged snapshot already matches HEAD for {} — closing cycle as already committed",
             file.display()
         );
+        let (snapshot_after_noop, file_after_noop) =
+            repair_clean_head_if_only_transient_worktree_drift(file, &file_content)?
+                .unwrap_or((snapshot_content.clone(), file_content.clone()));
         finalize_already_committed_noop(
             file,
             "commit_already_current",
-            snapshot_content.as_deref(),
-            Some(&file_content),
+            snapshot_after_noop.as_deref(),
+            Some(&file_after_noop),
         );
 
         let elapsed_total = t_total.elapsed().as_millis();
@@ -841,12 +844,11 @@ pub fn commit(file: &Path) -> Result<bool> {
 
     let t_staging = std::time::Instant::now();
     if let Some(ref snap) = snapshot_content {
-        // Stage a CLEAN copy of the snapshot — (HEAD) is a working-tree-only
-        // marker and must never appear in the committed blob. With a clean
-        // blob, the working tree's current-boundary `### Re: ... (HEAD)`
-        // heading shows as a single modified line (blue gutter) automatically,
-        // and moving the boundary across cycles cannot produce a phantom
-        // "strip (HEAD)" diff on previously-committed headings.
+        // Stage a CLEAN copy of the snapshot — `(HEAD)` is transient metadata
+        // and must never appear in the committed blob. Post-commit cleanup also
+        // collapses the working tree/snapshot back to the same clean shape, so
+        // moving the boundary across cycles cannot produce phantom marker-only
+        // diffs on previously committed headings.
         let staged_content = strip_head_markers(snap);
 
         let rel_path = relative_to(&resolved, &git_root);
@@ -973,8 +975,8 @@ pub fn commit(file: &Path) -> Result<bool> {
 
     // Post-commit housekeeping. The staged blob is already clean (commit
     // staging strips `(HEAD)` from the snapshot before `git hash-object`),
-    // but the snapshot / visible document intentionally retain a single
-    // `(HEAD)` marker as the current-response affordance.
+    // and post-commit cleanup keeps the snapshot / visible document in that
+    // same clean boundary shape.
     if let Ok(ref s) = commit_status
         && s.success()
     {
@@ -1027,9 +1029,9 @@ pub fn commit(file: &Path) -> Result<bool> {
 /// foreign docs that never touch `agent-doc write` — this function is
 /// the canonical place the on-disk state becomes consistent.
 ///
-/// The working-tree rewrite uses the clean boundary-only reposition helper so
-/// the on-disk file matches the committed blob shape instead of introducing
-/// `(HEAD)`-only churn.
+/// The cleanup uses the clean boundary-only reposition helper so the on-disk
+/// snapshot/file match the committed blob shape instead of introducing
+/// transient `(HEAD)` / boundary-only churn.
 ///
 /// Returns true if the snapshot OR working tree content changed.
 fn reposition_boundary_in_snapshot(file: &Path) -> bool {
@@ -1045,11 +1047,9 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
 
     let mut changed = false;
 
-    // Reposition in snapshot while preserving the visible `(HEAD)` affordance
-    // in the snapshot / working tree. Commit staging still strips `(HEAD)`
-    // from the blob written to git, so the committed file stays clean.
+    // Reposition the snapshot to the same clean shape we stage into git.
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        let new_snap = crate::template::reposition_boundary_to_end(&snap_content);
+        let new_snap = crate::template::reposition_boundary_to_end_clean(&snap_content);
         if new_snap != snap_content {
             match crate::snapshot::save(file, &new_snap) {
                 Ok(()) => {
@@ -1084,7 +1084,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let repositioned = crate::template::reposition_boundary_to_end(&working);
+        let repositioned = crate::template::reposition_boundary_to_end_clean(&working);
         if repositioned != working {
             match crate::write::atomic_write_pub(file, &repositioned) {
                 Ok(()) => {
@@ -1231,6 +1231,31 @@ fn snapshot_blob_already_matches_head(file: &Path, snapshot_content: Option<&str
         return Ok(false);
     };
     Ok(strip_head_markers(snapshot) == head_doc)
+}
+
+fn repair_clean_head_if_only_transient_worktree_drift(
+    file: &Path,
+    file_content: &str,
+) -> Result<Option<(Option<String>, String)>> {
+    let Some(head_doc) = show_head(file)? else {
+        return Ok(None);
+    };
+    if file_content == head_doc {
+        return Ok(None);
+    }
+    if normalize_transient_agent_doc_markers(file_content)
+        != normalize_transient_agent_doc_markers(&head_doc)
+    {
+        return Ok(None);
+    }
+
+    crate::write::atomic_write_pub(file, &head_doc)?;
+    crate::snapshot::save(file, &head_doc)?;
+    crate::ops_log::log_op(
+        file,
+        &format!("transient_cleanup file={} basis=head", file.display()),
+    );
+    Ok(Some((Some(head_doc.clone()), head_doc)))
 }
 
 fn finalize_already_committed_noop(
@@ -1982,22 +2007,26 @@ mod tests {
             "committed blob should still contain the older heading; got:\n{blob}"
         );
 
-        // The committed blob stays clean, but the working tree keeps a single
-        // visible `(HEAD)` marker as the current-response affordance.
+        // Post-commit cleanup now collapses the working tree back to the same
+        // clean shape as the committed blob.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("### Re: newer (HEAD)\n"),
-            "working tree should retain the visible head marker; got:\n{working}"
+            working.contains("### Re: newer\n"),
+            "working tree should keep the clean heading; got:\n{working}"
         );
         assert!(
-            working.matches("(HEAD)").count() == 1,
-            "working tree should retain exactly one head marker; got:\n{working}"
+            working.matches("(HEAD)").count() == 0,
+            "working tree should not retain transient head markers; got:\n{working}"
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("### Re: newer (HEAD)\n"),
-            "snapshot should retain the visible head marker; got:\n{snap}"
+            snap.contains("### Re: newer\n"),
+            "snapshot should keep the clean heading; got:\n{snap}"
+        );
+        assert!(
+            snap.matches("(HEAD)").count() == 0,
+            "snapshot should not retain transient head markers; got:\n{snap}"
         );
     }
 
@@ -2098,8 +2127,12 @@ mod tests {
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("### Re: newer (HEAD)\n"),
+            snap.contains("### Re: newer\n"),
             "snapshot should advance to absorbed response:\n{snap}"
+        );
+        assert!(
+            !snap.contains("(HEAD)"),
+            "snapshot should stay clean after absorbed closeout:\n{snap}"
         );
         assert!(
             snap.contains("[#c3d4] new pending"),
@@ -2484,8 +2517,12 @@ mod tests {
             "snapshot should advance to absorbed status:\n{snap}"
         );
         assert!(
-            snap.contains("### Re: newer (HEAD)\n"),
+            snap.contains("### Re: newer\n"),
             "snapshot should advance to absorbed response:\n{snap}"
+        );
+        assert!(
+            !snap.contains("(HEAD)"),
+            "snapshot should stay clean after absorbed status+exchange closeout:\n{snap}"
         );
     }
 
@@ -2688,6 +2725,90 @@ mod tests {
             !log.contains("commit_failed"),
             "already-committed no-op must not be logged as commit_failed:\n{log}"
         );
+    }
+
+    #[test]
+    fn commit_already_current_repairs_transient_working_tree_churn() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: newer\n\
+            body\n\
+            <!-- agent:boundary:head-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let transient = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: newer (HEAD)\n\
+            body\n\
+            <!-- agent:boundary:fresh-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, transient).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("HEAD-current closeout should succeed");
+        assert!(
+            !did_commit,
+            "transient-only churn should close as already committed"
+        );
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working, committed,
+            "working tree should be restored to clean HEAD when only transient churn differed"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap, committed,
+            "snapshot should also be restored to clean HEAD after transient cleanup"
+        );
+
     }
 
     // --- Fix 1: snapshot saved before process::exit(75) (structural test) ---
@@ -3234,13 +3355,13 @@ mod tests {
             "snapshot boundary should be repositioned"
         );
         assert!(
-            snap.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "snapshot should retain the visible head marker"
+            snap.contains("### Re: test — opus-4-6\n"),
+            "snapshot should be normalized to the clean heading"
         );
         assert_eq!(
             snap.matches("(HEAD)").count(),
-            1,
-            "snapshot should retain exactly one visible head marker"
+            0,
+            "snapshot should not retain transient head markers"
         );
 
         // Working tree should NOT be modified (listener owns the update)
@@ -3251,7 +3372,7 @@ mod tests {
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "working tree should retain the visible head marker before plugin reposition"
+            "working tree should stay untouched before plugin reposition"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
@@ -3312,7 +3433,7 @@ mod tests {
             .unwrap();
 
         // Stale plugin install marker without a live listener should not block
-        // the visible disk rewrite that preserves the head marker.
+        // the clean disk rewrite that removes transient marker churn.
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
@@ -3325,13 +3446,13 @@ mod tests {
             "snapshot boundary should be repositioned"
         );
         assert!(
-            snap.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "snapshot should retain the visible head marker"
+            snap.contains("### Re: test — opus-4-6\n"),
+            "snapshot should be normalized to the clean heading"
         );
         assert_eq!(
             snap.matches("(HEAD)").count(),
-            1,
-            "snapshot should retain exactly one visible head marker"
+            0,
+            "snapshot should not retain transient head markers"
         );
 
         let working = fs::read_to_string(&doc).unwrap();
@@ -3340,13 +3461,13 @@ mod tests {
             "working tree should be repositioned when only patches dir exists"
         );
         assert!(
-            working.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "working tree should retain the visible head marker after boundary rewrite"
+            working.contains("### Re: test — opus-4-6\n"),
+            "working tree should be normalized to the clean heading after boundary rewrite"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
-            1,
-            "working tree should retain exactly one visible head marker after boundary rewrite"
+            0,
+            "working tree should not retain transient head markers after boundary rewrite"
         );
     }
 

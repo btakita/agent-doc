@@ -1173,7 +1173,7 @@ internal fun repositionBoundaryToEndUtil(doc: String, component: String): String
         val trimmed = line.trim()
         !(trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->"))
     }
-    val cleanContent = filteredLines.joinToString("\n")
+    val cleanContent = stripTransientHeadMarkers(filteredLines.joinToString("\n"))
 
     val newBoundaryId = java.util.UUID.randomUUID().toString().substring(0, 8)
     val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
@@ -1181,6 +1181,43 @@ internal fun repositionBoundaryToEndUtil(doc: String, component: String): String
     val after = doc.substring(closeIdx)
     val prefix = if (cleanContent.endsWith("\n")) "" else "\n"
     return before + cleanContent + prefix + newBoundary + "\n" + after
+}
+
+private fun stripTransientHeadMarkers(content: String): String {
+    val lines = content.split("\n")
+    val result = mutableListOf<String>()
+    var inFence = false
+    var fenceChar = '\u0000'
+    var fenceLen = 0
+
+    for (line in lines) {
+        val trimmed = line.trimStart()
+        val first = trimmed.firstOrNull()
+        val runLen = if (first == null) 0 else trimmed.takeWhile { it == first }.length
+
+        if (!inFence && (first == '`' || first == '~') && runLen >= 3) {
+            inFence = true
+            fenceChar = first
+            fenceLen = runLen
+            result.add(line)
+            continue
+        }
+        if (inFence) {
+            if (first == fenceChar && runLen >= fenceLen && trimmed.drop(runLen).trim().isEmpty()) {
+                inFence = false
+            }
+            result.add(line)
+            continue
+        }
+
+        if (Regex("""^\s*#{1,6}\s""").containsMatchIn(line) && line.endsWith(" (HEAD)")) {
+            result.add(line.removeSuffix(" (HEAD)"))
+        } else {
+            result.add(line)
+        }
+    }
+
+    return result.joinToString("\n")
 }
 
 /**

@@ -81,7 +81,7 @@ describe('repositionBoundaryToEnd', () => {
         assert.ok(result.includes('New user input.\n<!-- agent:boundary:'));
     });
 
-    it('preserves a single HEAD marker while collapsing stale boundaries', () => {
+    it('strips transient HEAD markers while collapsing stale boundaries', () => {
         const doc = [
             '<!-- agent:exchange patch=append -->',
             '### Re: test — opus-4-6 (HEAD)',
@@ -94,8 +94,8 @@ describe('repositionBoundaryToEnd', () => {
 
         const result = repositionBoundaryToEnd(doc, 'exchange');
         assert.ok(result, 'should return repositioned content');
-        assert.ok(result.includes('### Re: test — opus-4-6 (HEAD)'));
-        assert.strictEqual((result.match(/\(HEAD\)/g) || []).length, 1, 'exactly one HEAD marker');
+        assert.ok(result.includes('### Re: test — opus-4-6\n'));
+        assert.strictEqual((result.match(/\(HEAD\)/g) || []).length, 0, 'no HEAD markers remain');
         assert.strictEqual(
             (result.match(/<!-- agent:boundary:[a-f0-9]+ -->/g) || []).length,
             1,

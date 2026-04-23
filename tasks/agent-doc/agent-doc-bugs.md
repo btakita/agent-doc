@@ -83,7 +83,6 @@ Outcome:
 
 - `#bndy` is done: the post-commit boundary cleanup contract is now explicitly covered for the active-listener and stale-patches-dir modes, including the visible `(HEAD)` affordance in Rust and both editor helpers.
 
-In src/boost-client why was the patchback to tasks/monsterrodholders.md not committed?
 ❯ do #ha3h. update spec + tests. build + install for local testing. commit + push
 ### Re: `#ha3h` recipient-side pending auto-create policy gate — gpt-5
 
@@ -99,7 +98,21 @@ Outcome:
 
 - No `src/agent-doc` code/spec/test/build/install/commit work was done for `#ha3h`, because landing it now would violate the explicit issue/task ship gate.
 - `#ha3h` should stay gated until multi-user workspace support exists, or that prerequisite is explicitly reprioritized and the issue/task contract is changed first.
-<!-- agent:boundary:69b7b64f -->
+
+In src/boost-client why was the patchback to tasks/monsterrodholders.md not committed?
+### Re: `src/boost-client/tasks/monsterrodholders.md` patchback boundary — codex
+
+It was committed once, then a later `agent-doc` commit reverted it back to the older snapshot.
+
+Evidence:
+
+- In `src/boost-client`, commit `b908b13` (`tasks: update monsterrodholders agent-doc`, 2026-04-23 04:28:56 EDT) includes the `Is #h6gx done?` patchback, removes pending `#h6gx`, and writes boundary `f022d65e`.
+- Two minutes later, commit `7421238` (`agent-doc(monsterrodholders): 2026-04-23 04:30:39 EDT`) reverses that exact hunk, restoring the earlier `session refreshed` state, boundary `360ee9bd`, and pending `#h6gx`.
+- `src/boost-client/.agent-doc/logs/ops.log` shows the revert commit happened while the live file had out-of-band drift relative to the snapshot: at `1776933039`, `commit_staging` logged `snap_len=123424 file_len=123811 drift=387`, then `commit_success` followed immediately. That is the selective-commit path committing the snapshot, not the live-file drift.
+- The current working tree then re-adds the same `#h6gx` answer again, but it still has not crossed a write/commit boundary. The active cycle-state file is left at `phase=preflight_started`, so that re-added copy never reached `write` or `commit`.
+
+So the failure here was not submodule routing. The relevant patchback did cross a commit boundary once in `b908b13`, but a later snapshot-based `agent-doc` commit in the submodule reverted it, and the newest re-added copy is currently just out-of-band working-tree content.
+<!-- agent:boundary:05e07842 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -122,6 +135,15 @@ Verification passed with the targeted Rust/editor suites plus `make -C src/agent
 Updated [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:15) and [plan.md](/home/brian/work/btakita/agent-loop/plan.md:75). I did not implement `#ha3h` in `src/agent-doc`.
 
 The blocker is explicit: issue `#40` says not to ship recipient-side `receive.auto_create_components` before multi-user workspace support, and the live repo still documents `agent-doc` as single-user only in [README.md](/home/brian/work/btakita/agent-loop/src/agent-doc/README.md:180) and [specs/10-security.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/10-security.md:3). So I patched the bug doc to record the deferral instead of landing code that violates the current contract. No tests, build, or install steps ran because there were no `src/agent-doc` code changes. Source: https://github.com/btakita/agent-doc/issues/40
+
+## User
+## Assistant
+
+Updated [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:102) and [plan.md](/home/brian/work/btakita/agent-loop/plan.md:82) with the `src/boost-client/tasks/monsterrodholders.md` analysis.
+
+The finding is: that patchback was committed once in `src/boost-client` as `b908b13`, then reverted by the later `agent-doc(monsterrodholders)` commit `7421238`, which staged the older snapshot instead of the live file. The current re-added `#h6gx` answer is also still only working-tree drift: `src/boost-client/.agent-doc/state/cycles/...json` is left at `preflight_started`, so it never reached `write` or `commit`.
+
+No tests ran, because this turn was doc-only analysis.
 
 ## User
 

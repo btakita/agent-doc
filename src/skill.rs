@@ -337,6 +337,30 @@ mod tests {
     }
 
     #[test]
+    fn installed_harness_runbooks_share_manual_repair_rule() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+
+        let claude = std::fs::read_to_string(
+            dir.path()
+                .join(".claude/skills/agent-doc/runbooks/harness-invocation.md"),
+        )
+        .unwrap();
+        let codex =
+            std::fs::read_to_string(dir.path().join(".codex/runbooks/harness-invocation.md"))
+                .unwrap();
+
+        for content in [&claude, &codex] {
+            assert!(content.contains("## Manual Repair Default"));
+            assert!(content.contains("For both **Claude Code** and **Codex**"));
+            assert!(content.contains("agent-doc write --commit <FILE>"));
+            assert!(content.contains("bare `agent-doc write`"));
+        }
+    }
+
+    #[test]
     fn install_for_codex_writes_codex_specific_content() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -396,12 +420,13 @@ mod tests {
 
     #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
-        assert!(BUNDLED_SKILL.contains("Manual repair / missed patchback rule"));
+        assert!(BUNDLED_SKILL.contains("Manual repair / missed patchback rule (all harnesses)"));
         assert!(
             BUNDLED_SKILL
                 .contains("do **not** patch the assistant response directly into the file")
         );
         assert!(BUNDLED_SKILL.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(BUNDLED_SKILL.contains("bare `agent-doc write`"));
     }
 
     #[test]
@@ -450,12 +475,15 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "harness-invocation.md")
             .expect("harness-invocation.md not found");
+        assert!(content.contains("## Manual Repair Default"));
+        assert!(content.contains("For both **Claude Code** and **Codex**"));
         assert!(content.contains("Claude Code"));
         assert!(content.contains("Codex"));
         assert!(content.contains("Harness Detection"));
         assert!(content.contains("Response Header Attribution"));
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("bare `agent-doc write`"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("### Re: topic — opus-4-6"));
         assert!(content.contains("### Re: topic — codex"));

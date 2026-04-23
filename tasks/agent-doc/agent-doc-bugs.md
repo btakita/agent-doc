@@ -986,12 +986,98 @@ So the answer to your second question is:
 That is why I drew the line against an automatic second prompt. If the original response text is missing, a helper that "asks again" is generating a fresh answer, not recovering the lost one.
 
 If we want deterministic missed-patchback recovery beyond the existing pending-file path, the missing ingredient is a new durable response-capture mechanism, for example storing the final response payload before or alongside hook emission. Without that, hooks are observability, not replay.
-<!-- agent:boundary:c99a8ef8 -->
+❯ Please propose how we can build a "durable response-capture mechanism".
+❯ Write the last response back into this document. Why did the response patchback fail?
+### Re: durable response capture / why the previous patchback missed write-back — gpt-5
+
+The previous patchback failed for the simple reason that I ended the turn after the terminal response and plan update without invoking `agent-doc write --commit` for this document.
+
+That means none of the binary-owned durability paths ran for that response:
+
+- no `agent-doc write` call, so no append/template write happened
+- no pending-store save tied to the write path, so there was no authoritative response body on disk for `recover` to replay
+- no `post_write` / `post_commit` event for this response, because those fire after the product write/commit path
+- no document-level cycle transition beyond normal task-doc edits in the repo worktree
+
+So the response existed only in the assistant output stream, not in an `agent-doc` durable store. That is exactly the gap a durable response-capture mechanism should close.
+
+Proposed design:
+
+1. Add a separate capture ledger, not just the existing pending file.
+   Use a new append-only store such as `.agent-doc/captures/<doc-hash>/<cycle-id>.json` plus `.md`, or a single JSON file with embedded body. Do **not** overload `.agent-doc/pending/<hash>.md` as the long-lived source of truth, because pending is intentionally cleared after a successful write.
+2. Capture the final parsed response before any document mutation or hook emission.
+   The attachment point should be immediately after the agent backend returns the final response text / patch block and before `write` starts applying it. At that point the binary has the exact authoritative payload and can persist it atomically.
+3. Store enough metadata to make replay deterministic.
+   Minimum fields:
+   - `cycle_id`
+   - `session_id`
+   - `file`
+   - `agent`
+   - `model`
+   - `captured_at`
+   - `format` / `write_strategy`
+   - `response_body`
+   - `response_sha256`
+   - `baseline_sha256`
+   - `snapshot_sha256`
+   - `prompt_fingerprint` or diff hash
+   - lifecycle state: `captured | write_applied | committed | replayed | discarded`
+   - optional `git_commit` once committed
+4. Integrate it with `cycle_state` instead of inventing a parallel heuristic.
+   Extend the cycle phases so the exact state becomes:
+   - `preflight_started`
+   - `response_captured`
+   - `write_applied`
+   - `committed`
+   Then `preflight` and `session-check` can reason from exact state rather than from file-size drift or hook absence.
+5. Make recovery replay the captured payload, never regenerate text.
+   Add a deterministic recovery path such as `agent-doc recover-response <FILE>` or fold it into existing `recover` logic:
+   - if cycle is `response_captured` and the document still matches the expected baseline/prompt fingerprint, replay the captured response
+   - if the document diverged materially, fail closed and leave the capture on disk for explicit operator choice
+   - never auto-prompt the model again as “recovery”
+6. Keep pending as the short-lived write queue and make it derive from capture.
+   The write path can still populate `.agent-doc/pending/<hash>.md` for the existing recovery behavior, but that file should become a projection of the durable capture record, not the only durable copy.
+7. Expose references in hooks, not necessarily the full body.
+   `post_write` / `post_commit` can carry:
+   - `capture_id`
+   - `response_sha256`
+   - lifecycle state
+   - maybe a path/ref to the capture record
+   That keeps hooks useful for observability and deterministic replay without forcing every hook consumer to receive the full message body inline.
+8. Add retention + GC rules.
+   Suggested policy:
+   - keep uncommitted / unreplayed captures until resolved
+   - keep recently committed captures for a bounded window such as 7-30 days
+   - let `agent-doc gc` prune old committed captures after their retention period
+   - never GC open-cycle captures
+
+Why this is the right boundary:
+
+- it preserves the binary/agent split: the binary owns deterministic persistence and replay, the skill still decides what to say
+- it avoids the current blind spot where a response can exist in the chat stream but nowhere durable in `agent-doc`
+- it gives hooks and preflight an authoritative record to reason from without pretending they can reconstruct missing text from git history or metadata alone
+
+Smallest safe implementation slice:
+
+- add `response_captured` to `cycle_state`
+- add `captures/` storage with atomic write + metadata
+- persist the final response before `write`
+- teach `recover` / `preflight` to replay captured-but-unwritten responses
+- include `capture_id` + `response_sha256` in hook payloads
+- add focused tests for:
+  - capture persisted before write
+  - replay after interrupted cycle with no document write
+  - fail-closed when baseline/prompt fingerprint no longer matches
+  - committed capture transitions + GC eligibility
+
+I added this as pending item `#drc1` in this document because it is exactly the concrete follow-up that falls out of the current failure mode.
+<!-- agent:boundary:77262f6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#drc1] [recommended] Build a durable response-capture ledger: persist the final parsed agent response plus cycle metadata before write/hook emission, add deterministic replay for open cycles with captured-but-unwritten output, and expose hook payload refs/hashes instead of relying on reconstructing text from history.
 - [x] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
 - [x] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.

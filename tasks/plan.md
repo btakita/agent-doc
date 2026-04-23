@@ -8,6 +8,18 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc durable response-capture proposal
+
+- [ ] Inspect the current hook/write/recover boundaries closely enough to answer why the last patchback was missed and where durable capture would have to attach.
+- [ ] Patch back a concrete design proposal into `tasks/agent-doc/agent-doc-bugs.md`, including storage shape, lifecycle, replay path, and failure semantics.
+- [ ] Add any accepted follow-up work to that document's own pending list and commit the patchback through `agent-doc write --commit`.
+
+### 2026-04-22 — agent-doc `codex_args` follow-up test failures
+
+- [x] Reproduce the current full-verification failures in `src/agent-doc` and isolate whether they come from the recent cycle/codex-args branch or from existing tmux-test instability.
+- [x] Fix the minimal implementation or regression-test issue needed to restore the intended `codex_args`/cycle-follow-up change set without disturbing unrelated dirty worktree edits.
+- [x] Re-run the relevant targeted tests plus the required broader verification (`make check`, build/install if still required) and record the exact result.
+
 ### 2026-04-22 — agent-doc `#cyc1` patchback
 
 - [x] Isolate the intended `src/agent-doc` cycle-invariant change set from the dirty submodule worktree and land a clean submodule commit.
@@ -51,6 +63,29 @@ tmux_session: '1'
 - [x] Run prerelease verification (`make check`, local install, relevant audits) and resolve local release blockers (`clippy` helper arity + flaky flock test + stale docs audit).
 - [x] Complete release actions in `src/agent-doc`: create release commit, push branch, tag `v0.33.12`, push tag, publish to crates.io, and commit the parent submodule pointer update.
 - [ ] Update the session document with exact outcomes and note the remaining asynchronous CI state (`Release` workflow in progress on GitHub).
+
+### 2026-04-22 — agent-doc-bugs patchback commit gap
+
+- [x] Confirm why the most recent `agent-doc-bugs` patchback remained as a working-tree diff instead of a committed parent-repo change.
+- [x] Use `agent-doc` itself to append the current user prompt and the response into `tasks/agent-doc/agent-doc-bugs.md`.
+- [x] Commit that document update through the `agent-doc` write path so the patchback does not remain dirty again.
+
+### 2026-04-22 — agent-doc-bugs write+commit follow-up
+
+- [x] Answer whether `agent-doc` write and commit can be combined, and state exactly which path the previous response used.
+- [x] Write the answer back into `tasks/agent-doc/agent-doc-bugs.md` through `agent-doc write --commit`.
+
+### 2026-04-22 — agent-doc `#wrtc1`
+
+- [x] Confirm the current `agent-doc` skill already mandates write+commit every cycle and narrow `#wrtc1` to Codex/manual-repair guidance rather than a new binary hook.
+- [x] Update the `src/agent-doc` bundled skill/runbook/test surface so missed-patchback repair explicitly uses `agent-doc write --commit <file>` instead of direct response patching.
+- [x] Verify with targeted tests plus build/install, refresh the local Codex skill files, and patch back the result into `tasks/agent-doc/agent-doc-bugs.md`.
+
+### 2026-04-22 — agent-doc hook payload recovery question
+
+- [x] Check whether current hook payloads include the full agent response text or only metadata.
+- [x] Distinguish what `agent-doc` can recover deterministically today (`recover`, `history`) from what would require a new durable response-capture mechanism.
+- [x] Patch back the answer into `tasks/agent-doc/agent-doc-bugs.md` through `agent-doc write --commit`.
 
 ## Status
 

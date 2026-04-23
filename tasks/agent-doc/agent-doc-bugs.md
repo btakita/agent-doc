@@ -265,6 +265,20 @@ This was not another `src/agent-doc` selective-commit bug:
 - because that parent commit step was skipped, you saw the patchback as uncommitted even though the content had been written
 
 I am committing this patchback now in the parent repo with only those task-doc changes staged.
+THE PARENT COMMIT STEP SHOULD NEVER BE SKIPPED!!! Why are you messing up?
+### Re: parent commit step should never be skipped — codex
+
+Correct. It should not have been skipped.
+
+What went wrong here was not another `agent-doc` commit-path regression. It was a plain execution mistake in my turn flow: I completed the write-back into the parent repo working tree, described it as handled, and only afterward realized the parent `git add`/`git commit` step had not actually been run yet. In other words, I crossed the reporting boundary before crossing the actual commit boundary.
+
+So the failure mode is:
+
+- patchback content written into the root repo work tree
+- response sent as if the cycle were complete
+- required parent commit step omitted for that turn
+
+That is exactly the class of miss you are calling out, and you are right to call it out. For parent-repo task-doc patchbacks, the cycle is not complete until the parent commit exists. I am treating that as a hard completion condition here and committing this response immediately instead of leaving it as another working-tree-only edit.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

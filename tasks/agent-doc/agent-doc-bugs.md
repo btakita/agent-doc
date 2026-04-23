@@ -290,7 +290,43 @@ Current state:
 Note:
 
 - I did not force `src/agent-doc` `main` forward. That branch is on a divergent older line (`cf56772`, `chore: release v0.33.10 (#41)`), and merging it into the release branch produced a repo-wide conflict set. The actual shipped source of truth for this release is the pushed branch head plus tag `v0.33.13`.
-<!-- agent:boundary:a4a8c525 -->
+
+❯ In src/session-share, `agent-doc tasks/claudescore.md` resulted in an uncommitted response patchback. Why did this happen?
+
+❯ How can we rebase or merge main? There are many .agent-doc/snapshot files in the repo. I added .agent-doc to .gitignore in the branch.
+### Re: `src/session-share/tasks/claudescore.md` uncommitted patchback + `src/agent-doc` merge/rebase path — gpt-5
+
+`src/session-share/tasks/claudescore.md` looks like a write that reached document delivery but did not cross the submodule commit boundary in the same run.
+
+Evidence:
+
+- In `src/session-share/.agent-doc/logs/ops.log`, at `2026-04-23 11:57:29 EDT` the response was already delivered into the live file (`ipc_file_delivered`) and the snapshot was saved at `len=62111`.
+- There is no same-run submodule commit immediately after that write. The next submodule-owned closeout appears at `2026-04-23 12:04:04 EDT`, when this run logged `submodule_route ... src/session-share` followed by `commit_success`.
+- That matches preflight's recovery message: `Response already present in document — skipping apply, cleaning up pending file`.
+
+So the failure mode was: the assistant response made it into the document, but the prior wrapper run stopped before the submodule commit phase finished. This run repaired it. Current state is green: `agent-doc session-check src/session-share/tasks/claudescore.md` now reports `cycle-1776939317875` as `committed (commit_success)`.
+
+For `src/agent-doc`, the branch situation is:
+
+- `main` vs `20260422/codex-agent-backend`: `1` commit on `main` only, `92` commits on the feature branch only.
+- I do **not** see tracked snapshot files as the main merge blocker. In `src/agent-doc`, `git ls-files | rg '(^|/)\\.agent-doc/'` returns only one tracked runtime artifact: `.agent-doc/logs/ops.log`.
+- `.gitignore` only affects untracked files. It will not help with already-tracked `.agent-doc/*` paths.
+- There is also a staged typo file, `.gitgnore`, containing only `.agent-doc`. That file does nothing; if accidental, drop it before rebasing.
+
+Recommended path in `src/agent-doc`:
+
+1. Clean up generated-state tracking first.
+   If `.agent-doc/logs/ops.log` should not be versioned, remove it from the index with `git rm --cached .agent-doc/logs/ops.log` and keep the ignore rule in the real `.gitignore`.
+2. Drop the typo file if it was accidental.
+   `git restore --staged .gitgnore` and remove it from the working tree.
+3. Commit the ignore cleanup on the feature branch.
+4. Rebase onto `origin/main`.
+   `git fetch origin && git rebase origin/main`
+5. Resolve the remaining conflicts as normal source/spec conflicts.
+   Given the `1 / 92` split, after the generated-file cleanup the conflicts should be in the real code/docs touched by the recent `agent-doc` work, not in local snapshot churn.
+
+If you want this fully normalized before merging, the important invariant is: no tracked `.agent-doc` runtime files, and no typo ignore file. After that, rebasing `20260422/codex-agent-backend` onto `origin/main` is straightforward, just large.
+<!-- agent:boundary:ec8dcb35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

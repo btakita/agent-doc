@@ -290,7 +290,7 @@ Current state:
 Note:
 
 - I did not force `src/agent-doc` `main` forward. That branch is on a divergent older line (`cf56772`, `chore: release v0.33.10 (#41)`), and merging it into the release branch produced a repo-wide conflict set. The actual shipped source of truth for this release is the pushed branch head plus tag `v0.33.13`.
-<!-- agent:boundary:74609ded -->
+<!-- agent:boundary:a4a8c525 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -39,14 +39,35 @@ const BUNDLED_SKILL: &str = include_str!("../SKILL.md");
 
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
-    ("compact-exchange.md", include_str!("../runbooks/compact-exchange.md")),
-    ("transfer-extract.md", include_str!("../runbooks/transfer-extract.md")),
+    (
+        "compact-exchange.md",
+        include_str!("../runbooks/compact-exchange.md"),
+    ),
+    (
+        "transfer-extract.md",
+        include_str!("../runbooks/transfer-extract.md"),
+    ),
     ("pending-ops.md", include_str!("../runbooks/pending-ops.md")),
-    ("model-tier-gate.md", include_str!("../runbooks/model-tier-gate.md")),
-    ("streaming-checkpoints.md", include_str!("../runbooks/streaming-checkpoints.md")),
-    ("document-format.md", include_str!("../runbooks/document-format.md")),
-    ("code-enforced-directives.md", include_str!("../runbooks/code-enforced-directives.md")),
-    ("harness-invocation.md", include_str!("../runbooks/harness-invocation.md")),
+    (
+        "model-tier-gate.md",
+        include_str!("../runbooks/model-tier-gate.md"),
+    ),
+    (
+        "streaming-checkpoints.md",
+        include_str!("../runbooks/streaming-checkpoints.md"),
+    ),
+    (
+        "document-format.md",
+        include_str!("../runbooks/document-format.md"),
+    ),
+    (
+        "code-enforced-directives.md",
+        include_str!("../runbooks/code-enforced-directives.md"),
+    ),
+    (
+        "harness-invocation.md",
+        include_str!("../runbooks/harness-invocation.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).
@@ -289,8 +310,14 @@ mod tests {
         install_test(Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
 
-        let runbook_path = dir.path().join(".claude/skills/agent-doc/runbooks/compact-exchange.md");
-        assert!(runbook_path.exists(), "runbook not found at {}", runbook_path.display());
+        let runbook_path = dir
+            .path()
+            .join(".claude/skills/agent-doc/runbooks/compact-exchange.md");
+        assert!(
+            runbook_path.exists(),
+            "runbook not found at {}",
+            runbook_path.display()
+        );
         let content = std::fs::read_to_string(&runbook_path).unwrap();
         assert!(content.contains("Compact Exchange"));
     }
@@ -302,7 +329,11 @@ mod tests {
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
         let runbook_path = dir.path().join(".codex/runbooks/compact-exchange.md");
-        assert!(runbook_path.exists(), "codex runbook not found at {}", runbook_path.display());
+        assert!(
+            runbook_path.exists(),
+            "codex runbook not found at {}",
+            runbook_path.display()
+        );
     }
 
     #[test]
@@ -328,10 +359,26 @@ mod tests {
 
         super::install_runbooks_all(Some(dir.path())).unwrap();
 
-        assert!(dir.path().join(".claude/skills/agent-doc/runbooks/compact-exchange.md").exists());
-        assert!(dir.path().join(".codex/runbooks/compact-exchange.md").exists());
-        assert!(dir.path().join(".opencode/skills/agent-doc/runbooks/compact-exchange.md").exists());
-        assert!(dir.path().join(".cursor/rules/runbooks/compact-exchange.md").exists());
+        assert!(
+            dir.path()
+                .join(".claude/skills/agent-doc/runbooks/compact-exchange.md")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join(".codex/runbooks/compact-exchange.md")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join(".opencode/skills/agent-doc/runbooks/compact-exchange.md")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join(".cursor/rules/runbooks/compact-exchange.md")
+                .exists()
+        );
     }
 
     #[test]
@@ -348,12 +395,20 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_contains_manual_repair_write_commit_rule() {
+        assert!(BUNDLED_SKILL.contains("Manual repair / missed patchback rule"));
+        assert!(BUNDLED_SKILL.contains("do **not** patch the assistant response directly into the file"));
+        assert!(BUNDLED_SKILL.contains("Use `agent-doc write --commit <FILE>`"));
+    }
+
+    #[test]
     fn codex_content_uses_plain_text_invocation() {
         let content = super::content_for_env(Environment::Codex);
 
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
+        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
     }
 
@@ -368,7 +423,9 @@ mod tests {
     #[test]
     fn bundled_runbooks_include_harness_invocation() {
         assert!(
-            BUNDLED_RUNBOOKS.iter().any(|(name, _)| *name == "harness-invocation.md"),
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "harness-invocation.md"),
             "harness-invocation.md should be in BUNDLED_RUNBOOKS"
         );
     }
@@ -384,6 +441,8 @@ mod tests {
         assert!(content.contains("Harness Detection"));
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("Manual repair / missed patchback"));
+        assert!(content.contains("agent-doc write --commit <FILE>"));
     }
 
     #[test]

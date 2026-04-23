@@ -10,6 +10,7 @@ Notable invariants:
 - Extreme snapshot/file drift does not relax that rule for tracked documents. Wholesale snapshot re-sync from the live file is reserved for bootstrap scaffold snapshots on files with no `HEAD` entry yet; tracked documents stay selective so unanswered prompts cannot be committed during preflight.
 - Post-commit cleanup keeps the committed blob clean but preserves a single visible ` (HEAD)` marker on the current response heading in the snapshot and user-facing document state as the current-response affordance. When no live editor IPC listener exists, the CLI performs that working-tree rewrite itself instead of leaving stale boundary churn behind.
 - Harness-specific arg aliases are explicit: `agent_args` is generic, `claude_args` applies only to Claude, and `codex_args` applies only to Codex.
+- Bundled skill/install content is part of the external contract: Codex/manual-repair instructions must distinguish adding a missing user prompt from repairing a missed assistant response, and the missed-response repair path should use `agent-doc write --commit <file>` rather than direct file patching.
 
 | # | File | Description |
 |---|------|-------------|

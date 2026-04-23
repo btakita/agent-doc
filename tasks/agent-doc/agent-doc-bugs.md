@@ -112,7 +112,29 @@ Evidence:
 - The current working tree then re-adds the same `#h6gx` answer again, but it still has not crossed a write/commit boundary. The active cycle-state file is left at `phase=preflight_started`, so that re-added copy never reached `write` or `commit`.
 
 So the failure here was not submodule routing. The relevant patchback did cross a commit boundary once in `b908b13`, but a later snapshot-based `agent-doc` commit in the submodule reverted it, and the newest re-added copy is currently just out-of-band working-tree content.
-<!-- agent:boundary:05e07842 -->
+
+Should we implement recovery logic to fix snapshot drift?
+### Re: snapshot-drift recovery policy — codex
+
+Not broad recovery logic.
+
+The right fix is stricter fail-closed behavior for open `preflight_started` cycles, not a wholesale snapshot resync. Broad drift recovery would violate the current selective-commit contract and risks swallowing plain user prompts into committed history.
+
+Implemented in `src/agent-doc`:
+
+- Tightened `preflight` so an open `preflight_started` cycle only auto-closes if `recover` actually replays a pending/captured response first.
+- If no recoverable response exists, `preflight` now fails closed before `git::commit`, and when the snapshot→file diff already contains a likely bypassed agent patchback (`### Re:` / `## Assistant`) the error calls that out explicitly.
+- Added a regression test proving the `monsterrodholders` shape no longer lets a stale snapshot commit revert a newer live `### Re:` patchback from `HEAD`.
+- Clarified the `preflight` contract in `README.md` and `specs/07-commands.md`.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_started_cycle_does_not_revert_stale_snapshot_head -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_fails_closed_on_open_preflight_started_cycle -- --nocapture`
+- `make -C src/agent-doc check`
+
+So the answer is: yes, the `monsterrodholders` evidence exposed a contract gap, but the fix is a narrower fail-closed guard, not generalized snapshot-drift recovery.
+<!-- agent:boundary:c9eff0d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -144,6 +166,20 @@ Updated [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/
 The finding is: that patchback was committed once in `src/boost-client` as `b908b13`, then reverted by the later `agent-doc(monsterrodholders)` commit `7421238`, which staged the older snapshot instead of the live file. The current re-added `#h6gx` answer is also still only working-tree drift: `src/boost-client/.agent-doc/state/cycles/...json` is left at `preflight_started`, so it never reached `write` or `commit`.
 
 No tests ran, because this turn was doc-only analysis.
+
+## User
+## Assistant
+
+Updated [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:116) and [plan.md](/home/brian/work/btakita/agent-loop/plan.md:88), and I patched `src/agent-doc` to close the `monsterrodholders` gap.
+
+The fix is in [src/preflight.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/preflight.rs:493): an open `preflight_started` cycle no longer gets auto-closed by a plain snapshot commit. `preflight` now only proceeds if `recover` actually replays a pending/captured response first; otherwise it fails closed, and it calls out likely bypassed patchbacks like `### Re:` explicitly. I also added the regression test at [src/preflight.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/preflight.rs:1570) and aligned the docs in [specs/07-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-commands.md:467) and [README.md](/home/brian/work/btakita/agent-loop/src/agent-doc/README.md:66).
+
+Verification passed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_started_cycle_does_not_revert_stale_snapshot_head -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_fails_closed_on_open_preflight_started_cycle -- --nocapture`
+- `make -C src/agent-doc check`
+
+I did not commit or push these changes.
 
 ## User
 

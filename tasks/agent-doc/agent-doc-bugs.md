@@ -391,7 +391,7 @@ That means the bug shape here is narrower:
 - the working tree is still left modified afterward because the visible HEAD marker / boundary token was rewritten again.
 
 I added a recommended pending item for that specific follow-up, because it is still a real invariant gap: a successful `agent-doc` run should not leave a semantically-clean doc dirty only from `(HEAD)` or boundary-id updates.
-<!-- agent:boundary:21c77cdb -->
+<!-- agent:boundary:73972e8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

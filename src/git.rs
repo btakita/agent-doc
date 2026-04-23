@@ -9,6 +9,10 @@
 //!   never touched; user keystrokes typed after the snapshot was taken remain uncommitted (green
 //!   gutter), and the working tree's current-boundary `### Re: ... (HEAD)` heading shows as a
 //!   single modified line (blue gutter) automatically since the blob has no `(HEAD)` suffix.
+//!   Narrow exception: when the working tree is ahead of the snapshot due to a missed
+//!   agent-doc-style status mutation and/or exchange append and/or pending mutation, `commit`
+//!   first absorbs that live document state into the snapshot, then stages it. Plain user prompts
+//!   are not absorbed.
 //!   Falls back to `git add -f` when hash-object fails.  After a successful commit, repositions
 //!   the boundary marker in the snapshot and fires an IPC reposition signal
 //!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
@@ -36,6 +40,10 @@
 //!   submodule, so git commands always run in the correct repo.
 //! - `show_head` and `last_commit_mtime` return `Ok(None)` (not `Err`) when the file has no git
 //!   history.
+//! - Safe out-of-band absorb is narrow: only component-local drift that leaves the redacted
+//!   document structure unchanged and looks like an agent-owned `status` change and/or an
+//!   appended `### Re:` block and/or a pending-ID superset is absorbed. Free-form user edits
+//!   remain uncommitted.
 //!
 //! ## Evals
 //! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
@@ -52,6 +60,7 @@
 use anyhow::Result;
 use fs2::FileExt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -308,6 +317,142 @@ pub(crate) fn is_in_git_repo(file: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn strip_boundary_markers(content: &str) -> String {
+    content.lines()
+        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_component_content_for_absorb(content: &str) -> String {
+    strip_head_markers(&strip_boundary_markers(content))
+        .trim()
+        .to_string()
+}
+
+fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
+    let components = crate::component::parse(body).ok()?;
+    let mut redacted = String::with_capacity(body.len());
+    let mut last = 0usize;
+    for comp in components {
+        redacted.push_str(&body[last..comp.open_end]);
+        redacted.push_str(&body[comp.close_start..comp.close_end]);
+        last = comp.close_end;
+    }
+    redacted.push_str(&body[last..]);
+    Some(redacted)
+}
+
+fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
+    if !file_content.starts_with(snapshot_content) {
+        return false;
+    }
+    let suffix = file_content[snapshot_content.len()..].trim();
+    !suffix.is_empty() && suffix.starts_with("### Re:")
+}
+
+fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &str) -> bool {
+    let (snap_prelude, snap_items, snap_postlude) = crate::pending::parse_items(snapshot_content);
+    let (file_prelude, file_items, file_postlude) = crate::pending::parse_items(file_content);
+
+    if snap_prelude.trim() != file_prelude.trim() || snap_postlude.trim() != file_postlude.trim() {
+        return false;
+    }
+    if file_items.is_empty() {
+        return false;
+    }
+
+    let file_ids: HashSet<&str> = file_items
+        .iter()
+        .filter(|item| !item.id.is_empty())
+        .map(|item| item.id.as_str())
+        .collect();
+    if file_ids.is_empty() {
+        return false;
+    }
+
+    snap_items
+        .iter()
+        .filter(|item| !item.id.is_empty())
+        .all(|item| file_ids.contains(item.id.as_str()))
+}
+
+fn is_safe_out_of_band_status_mutation(snapshot_content: &str, file_content: &str) -> bool {
+    snapshot_content.trim() != file_content.trim()
+}
+
+fn classify_safe_out_of_band_agent_doc_mutation(snapshot_doc: &str, file_doc: &str) -> Option<&'static str> {
+    if snapshot_doc == file_doc {
+        return None;
+    }
+
+    let snap_body = crate::frontmatter::parse(snapshot_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(snapshot_doc);
+    let file_body = crate::frontmatter::parse(file_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(file_doc);
+
+    if redact_component_contents_for_absorb(snap_body)? != redact_component_contents_for_absorb(file_body)? {
+        return None;
+    }
+
+    let snap_components = crate::component::parse(snap_body).ok()?;
+    let file_components = crate::component::parse(file_body).ok()?;
+    if snap_components.len() != file_components.len() {
+        return None;
+    }
+
+    let mut saw_exchange = false;
+    let mut saw_pending = false;
+    let mut saw_status = false;
+
+    for (snap_comp, file_comp) in snap_components.iter().zip(file_components.iter()) {
+        if snap_comp.name != file_comp.name || snap_comp.patch_mode() != file_comp.patch_mode() {
+            return None;
+        }
+
+        let snap_content = normalize_component_content_for_absorb(snap_comp.content(snap_body));
+        let file_content = normalize_component_content_for_absorb(file_comp.content(file_body));
+        if snap_content == file_content {
+            continue;
+        }
+
+        match snap_comp.name.as_str() {
+            "exchange" => {
+                if !is_safe_out_of_band_exchange_growth(&snap_content, &file_content) {
+                    return None;
+                }
+                saw_exchange = true;
+            }
+            "pending" => {
+                if !is_safe_out_of_band_pending_mutation(&snap_content, &file_content) {
+                    return None;
+                }
+                saw_pending = true;
+            }
+            "status" => {
+                if !is_safe_out_of_band_status_mutation(&snap_content, &file_content) {
+                    return None;
+                }
+                saw_status = true;
+            }
+            _ => return None,
+        }
+    }
+
+    match (saw_status, saw_exchange, saw_pending) {
+        (true, true, true) => Some("status+exchange+pending"),
+        (true, true, false) => Some("status+exchange"),
+        (true, false, true) => Some("status+pending"),
+        (true, false, false) => Some("status"),
+        (false, true, true) => Some("exchange+pending"),
+        (false, true, false) => Some("exchange"),
+        (false, false, true) => Some("pending"),
+        (false, false, false) => None,
+    }
+}
+
 /// Commit a file with an auto-generated message. Skips hooks.
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
@@ -361,8 +506,26 @@ pub fn commit(file: &Path) -> Result<()> {
         file.display(), snap_len, file_len
     ));
 
+    if let Some(ref snapshot) = snapshot_content
+        && snapshot != &file_content
+        && let Some(reason) = classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content)
+    {
+        eprintln!(
+            "[commit] absorbing out-of-band {} mutation into snapshot for {}",
+            reason,
+            file.display()
+        );
+        crate::ops_log::log_op(file, &format!(
+            "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
+            file.display(), reason, snap_len, file_len
+        ));
+        crate::snapshot::save(file, &file_content)?;
+        snapshot_content = Some(file_content.clone());
+    }
+
     // Warn on significant file/snapshot drift — may indicate an out-of-band write
     // that bypassed the agent-doc write pipeline (snapshot not updated).
+    let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     if snap_len > 0 && file_len > snap_len {
         let drift = file_len - snap_len;
         // Always log out-of-band drift (any positive delta) for aggregation and
@@ -1155,6 +1318,87 @@ mod tests {
     }
 
     #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_exchange_and_pending() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:pending patch=replace -->\n\
+            - [ ] [#a1b2] existing\n\
+            <!-- /agent:pending -->\n";
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:pending patch=replace -->\n\
+            - [ ] [#c3d4] new pending\n\
+            - [ ] [#a1b2] existing\n\
+            <!-- /agent:pending -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            Some("exchange+pending")
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_user_prompt_append() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n";
+        let file = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ❯ follow-up question\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_status_and_exchange() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Older status\n\
+            <!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n";
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Newer status\n\
+            <!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            Some("status+exchange")
+        );
+    }
+
+    #[test]
     fn write_commit_lifecycle() {
         // Full lifecycle: git repo + snapshot + commit → verify commit in log.
         use std::fs;
@@ -1320,6 +1564,225 @@ mod tests {
             working.matches("(HEAD)").count(),
             1,
             "working tree should have exactly one (HEAD) — the current boundary"
+        );
+    }
+
+    #[test]
+    fn commit_absorbs_out_of_band_exchange_and_pending_mutation() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:pending patch=replace -->\n\
+            - [ ] [#a1b2] existing\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:pending patch=replace -->\n\
+            - [ ] [#c3d4] new pending\n\
+            - [ ] [#a1b2] existing\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, file).unwrap();
+
+        commit(&doc).expect("commit should succeed");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed.contains("### Re: newer\n"),
+            "committed blob should contain absorbed response:\n{committed}"
+        );
+        assert!(
+            committed.contains("[#c3d4] new pending"),
+            "committed blob should contain absorbed pending item:\n{committed}"
+        );
+        assert!(
+            !committed.contains("(HEAD)"),
+            "committed blob must be clean:\n{committed}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: newer\n"),
+            "snapshot should advance to absorbed response:\n{snap}"
+        );
+        assert!(
+            snap.contains("[#c3d4] new pending"),
+            "snapshot should advance to absorbed pending item:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn commit_does_not_absorb_out_of_band_user_prompt() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        let file = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ❯ follow-up question\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, file).unwrap();
+
+        commit(&doc).expect("commit should succeed even when there's nothing new to stage");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            !committed.contains("follow-up question"),
+            "user prompt should remain uncommitted:\n{committed}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snap.contains("follow-up question"),
+            "snapshot should stay at the older committed state:\n{snap}"
+        );
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("❯ follow-up question"),
+            "working tree should retain the user prompt:\n{working}"
+        );
+    }
+
+    #[test]
+    fn commit_absorbs_out_of_band_status_and_exchange_mutation() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Older status\n\
+            <!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:oldid -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Newer status\n\
+            <!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            <!-- agent:boundary:newid -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, file).unwrap();
+
+        commit(&doc).expect("commit should absorb status+exchange mutation");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed.contains("Newer status"),
+            "committed blob should contain absorbed status:\n{committed}"
+        );
+        assert!(
+            committed.contains("### Re: newer\n"),
+            "committed blob should contain absorbed response:\n{committed}"
+        );
+        assert!(
+            !committed.contains("(HEAD)"),
+            "committed blob must be clean:\n{committed}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("Newer status"),
+            "snapshot should advance to absorbed status:\n{snap}"
+        );
+        assert!(
+            snap.contains("### Re: newer\n"),
+            "snapshot should advance to absorbed response:\n{snap}"
         );
     }
 

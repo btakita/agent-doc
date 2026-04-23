@@ -26,9 +26,25 @@ class PromptPanelTest {
         )
 
         assertTrue(result.displayText.endsWith("…"))
+        assertFalse(result.displayText.contains("agent-doc-bugs.md"))
+        assertFalse(result.displayText.contains("prompts pending"))
         val tooltip = requireNotNull(result.tooltipText)
         assertTrue(tooltip.contains("[agent-doc-bugs.md]"))
         assertTrue(tooltip.contains("(3 prompts pending)"))
+    }
+
+    @Test
+    fun `questionPresentation keeps secondary context out of visible prompt row`() {
+        val result = questionPresentation(
+            question = "Allow this action?",
+            fileName = "agent-doc-bugs.md",
+            totalActive = 2,
+        )
+
+        assertEquals("Allow this action?", result.displayText)
+        val tooltip = requireNotNull(result.tooltipText)
+        assertTrue(tooltip.contains("[agent-doc-bugs.md]"))
+        assertTrue(tooltip.contains("(2 prompts pending)"))
     }
 
     @Test
@@ -45,7 +61,7 @@ class PromptPanelTest {
 
         assertTrue(controls.layout is BoxLayout)
         val children = controls.components.toList()
-        assertTrue(children.any { it is JButton && it.toolTipText == "Yes" })
+        assertTrue(children.any { it is JButton && it.toolTipText == "[1] Yes" })
         assertTrue(children.any { it is JLabel && it.toolTipText?.contains("2 prompts pending") == true })
     }
 

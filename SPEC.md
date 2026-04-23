@@ -5,6 +5,8 @@
 
 Individual specs are in `specs/`. This file is the index.
 
+Notable invariant: `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree.
+
 | # | File | Description |
 |---|------|-------------|
 | 1 | [Overview](specs/01-overview.md) | What agent-doc does and how sessions work |

@@ -62,6 +62,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
+- **Commit self-heal** — `agent-doc commit` can absorb a narrowly-scoped missed agent patchback (`status`, appended `### Re:` response, pending-ID superset) into the snapshot before staging, while still leaving plain user prompts uncommitted
 - **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40; `--fix --session <name>` relocates WrongSession panes via join-pane instead of killing them
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
 - **Stash + rescue** — replaced panes are stashed (alive in background); stash rescue brings them back when the user switches to that document again
@@ -82,7 +83,7 @@ The binary owns all deterministic behavior: component parsing, patch application
 | Component parsing, patch application, mode resolution | **Binary** (Rust) | Deterministic, testable, consistent across agents |
 | CRDT merge, snapshot management, atomic writes | **Binary** (Rust) | Concurrency safety requires flock + atomic rename |
 | Diff computation, comment stripping, truncation detection | **Binary** (Rust) | Reproducible baseline comparison |
-| Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls |
+| Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls; selective commit can self-heal narrow missed agent-owned drift |
 | Tmux routing, session registry, pane management | **Binary** (Rust) | Process-level coordination |
 | Pre-response snapshots, undo, extract, transfer | **Binary** (Rust) | File-level atomicity |
 | Boundary marker lifecycle (insert, reposition, cleanup) | **Binary** (Rust) | Deterministic, all write paths need it |

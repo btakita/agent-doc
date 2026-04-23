@@ -29,6 +29,15 @@ internal data class PromptTextPresentation(
     val tooltipText: String?,
 )
 
+private fun htmlTooltip(vararg lines: String?): String? {
+    val parts = lines.filterNotNull().filter { it.isNotBlank() }
+    return when (parts.size) {
+        0 -> null
+        1 -> parts.first()
+        else -> parts.joinToString(prefix = "<html>", separator = "<br>", postfix = "</html>")
+    }
+}
+
 internal fun truncateSingleLineText(text: String, maxLen: Int): PromptTextPresentation {
     val normalized = text.replace(Regex("\\s+"), " ").trim()
     if (normalized.length <= maxLen) {
@@ -46,9 +55,12 @@ internal fun questionPresentation(
     totalActive: Int,
 ): PromptTextPresentation {
     val baseQuestion = question ?: "Permission required"
-    val prefix = if (fileName != null) "[$fileName] " else ""
-    val suffix = if (totalActive > 1) " ($totalActive prompts pending)" else ""
-    return truncateSingleLineText("$prefix$baseQuestion$suffix", MAX_QUESTION_LABEL_LEN)
+    val questionText = truncateSingleLineText(baseQuestion, MAX_QUESTION_LABEL_LEN)
+    val pending = if (totalActive > 1) "($totalActive prompts pending)" else null
+    return PromptTextPresentation(
+        displayText = questionText.displayText,
+        tooltipText = htmlTooltip(questionText.tooltipText, fileName?.let { "[$it]" }, pending),
+    )
 }
 
 internal fun detailTooltipText(totalActive: Int): String {
@@ -80,7 +92,7 @@ internal fun buildPromptControlsRow(
         val btn = JButton(display.displayText).apply {
             isFocusable = false
             font = font.deriveFont(buttonFont.size2D)
-            toolTipText = display.tooltipText ?: opt.label
+            toolTipText = display.tooltipText ?: fullText
             margin = Insets(2, 8, 2, 8)
             addActionListener { onAnswer(opt.index) }
         }

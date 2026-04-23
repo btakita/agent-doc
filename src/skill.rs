@@ -978,6 +978,8 @@ mod tests {
             assert!(content.contains("agent-doc session-check <FILE>"));
             assert!(content.contains("final document-mutation boundary for the cycle"));
             assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
+            assert!(content.contains("Agent harnesses own full-suite verification"));
+            assert!(content.contains("Do not rely on a pre-commit hook"));
         }
         assert!(claude.contains("final document-mutation boundary for the cycle"));
         assert!(codex.contains(".codex/hooks.json"));

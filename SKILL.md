@@ -93,6 +93,8 @@ If the document has an `<!-- agent:pending -->` component, mutations go through 
 
 Complete the requested implementation, verification, build/install, and local inspection work for this turn **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
 
+**Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after the edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook to do this for you.
+
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 ```bash

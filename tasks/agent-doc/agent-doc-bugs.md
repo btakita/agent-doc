@@ -306,6 +306,8 @@ Evidence:
 
 So the failure mode was: the assistant response made it into the document, but the prior wrapper run stopped before the submodule commit phase finished. This run repaired it. Current state is green: `agent-doc session-check src/session-share/tasks/claudescore.md` now reports `cycle-1776939317875` as `committed (commit_success)`.
 
+❯ How can agent-doc prevent this issue from occurring?
+
 For `src/agent-doc`, the branch situation is:
 
 - `main` vs `20260422/codex-agent-backend`: `1` commit on `main` only, `92` commits on the feature branch only.
@@ -326,12 +328,34 @@ Recommended path in `src/agent-doc`:
    Given the `1 / 92` split, after the generated-file cleanup the conflicts should be in the real code/docs touched by the recent `agent-doc` work, not in local snapshot churn.
 
 If you want this fully normalized before merging, the important invariant is: no tracked `.agent-doc` runtime files, and no typo ignore file. After that, rebasing `20260422/codex-agent-backend` onto `origin/main` is straightforward, just large.
-<!-- agent:boundary:2891f659 -->
+
+❯ Please add to pending.
+
+❯ I also want to remove the pre-commit hook that runs the entire suite. The agent harnesses should run the entire test suite after making a change. This should be in AGENTS.md. Add to pending.
+### Re: preventing delivered-but-uncommitted patchbacks + requested pending items — gpt-5
+
+`agent-doc` should prevent this by treating `response delivered` and `response committed` as one durability contract, not two loosely-related steps.
+
+Concretely, the gap to close is:
+
+- once the response has been applied to the live document or snapshot, `agent-doc` should already have enough cycle-state persisted to recover as `write_applied_pending_commit`, not fall back to looking like generic out-of-band drift;
+- the closeout path should then require a `commit_success` in the owning repo or submodule before returning success to the wrapper; and
+- if the wrapper dies after delivery but before commit, preflight should see that explicit state and finish the submodule commit deterministically instead of discovering it indirectly from document drift.
+
+That is the narrow fix for the `src/session-share/tasks/claudescore.md` shape. The document was already updated, but the previous run appears to have stopped before the submodule-owned commit phase completed. The safest mitigation is to make that phase explicit and recoverable, not best-effort.
+
+I added both requested items to pending:
+
+- prevent delivered-but-uncommitted patchbacks by persisting recoverable post-write / pre-commit state and forcing same-owner commit completion;
+- remove the full-suite pre-commit hook, and move that responsibility into harness policy documented in `AGENTS.md`.
+<!-- agent:boundary:9a8e50b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
+- [ ] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

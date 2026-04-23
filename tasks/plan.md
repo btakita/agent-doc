@@ -12,7 +12,7 @@ tmux_session: '1'
 
 - [x] Inspect the current `src/agent-doc/src/git.rs` extreme-drift path and recent commits/tests so the explanation matches the implemented behavior.
 - [x] Append a root-cause explanation to `tasks/agent-doc/agent-doc-bugs.md`.
-- [ ] Commit only the parent-repo task-doc updates for this patchback.
+- [x] Commit only the parent-repo task-doc updates for this patchback.
 
 ### 2026-04-22 — agent-doc `#vedj`
 

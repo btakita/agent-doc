@@ -348,12 +348,25 @@ I added both requested items to pending:
 
 - prevent delivered-but-uncommitted patchbacks by persisting recoverable post-write / pre-commit state and forcing same-owner commit completion;
 - remove the full-suite pre-commit hook, and move that responsibility into harness policy documented in `AGENTS.md`.
-<!-- agent:boundary:63403b85 -->
+
+❯ Add to pending
+❯ > If you want this fully normalized before merging, the important invariant is: no tracked `.agent-doc` runtime files, and no typo ignore file. After that, rebasing `20260422/codex-agent-backend` onto `origin/main` is straightforward, just large.
+### Re: pending add for merge normalization — gpt-5
+
+Added to pending.
+
+Tracked scope:
+
+- normalize `src/agent-doc` by removing tracked `.agent-doc` runtime files from the index;
+- remove the accidental `.gitgnore` typo file if it was not intentional; and
+- keep the real ignore rule, then rebase `20260422/codex-agent-backend` onto `origin/main`.
+<!-- agent:boundary:1c718308 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#ndyy] Normalize  before rebasing: remove tracked  runtime files from the index, remove the typo  file if accidental, keep the real ignore rule, then rebase  onto .
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
 - [ ] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

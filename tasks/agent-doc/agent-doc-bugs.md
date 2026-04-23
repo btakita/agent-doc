@@ -196,13 +196,12 @@ Commit:
 - `src/agent-doc`: `e7c1cae` — `fix: block tracked extreme drift resync`
 
 I also marked pending item `#ke5p` done in this document.
-<!-- agent:boundary:2fa66403 -->
+<!-- agent:boundary:a1ce7d14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#ke5p] Tighten extreme-drift snapshot resync so preflight commit cannot absorb unanswered user prompts into the committed snapshot.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -1479,13 +1479,31 @@ Result:
 - `make check` is green again
 - full route test surface is green again
 - the earlier `#cyc1` open-cycle tests still pass inside the full suite; the failure was in surrounding test harness assumptions, not in the cycle-state implementation
+
+re: #wcmp. Should we make `agent-doc write --commit <FILE>` the default documented/manual-repair path for both Codex & Claude?
+### Re: `#wcmp` scope / Codex vs Claude — gpt-5
+
+Yes. For the **documented manual-repair path**, it should be the default for both Codex and Claude.
+
+Reason:
+
+- the failure mode is not harness-specific; the risk is "response write happened, response commit did not"
+- `agent-doc write --commit <FILE>` crosses that boundary in one command, which is exactly what manual repair needs regardless of whether the live harness is Codex or Claude
+- keeping different repair rules per harness adds unnecessary instruction drift for no real product benefit
+
+The distinction I would keep is:
+
+- **manual repair / missed patchback guidance:** both harnesses should default to `agent-doc write --commit <FILE>`
+- **normal happy-path session workflow:** longer-term this should converge on a binary-owned `agent-doc finalize <FILE>` or equivalent, rather than teaching either harness a more procedural multi-command sequence than necessary
+
+So I would broaden `#wcmp` from "Codex patchbacks" to "manual-repair patchbacks across harnesses," while still keeping the larger product direction under `#finz` / `#schk` / `#instr1`.
 <!-- agent:boundary:45d8062b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex patchbacks; remove hot-path examples that stop after bare write-back.
+- [ ] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
 - [ ] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.

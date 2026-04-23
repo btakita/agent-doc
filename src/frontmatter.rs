@@ -249,13 +249,17 @@ pub struct Frontmatter {
     )]
     pub stream_config: Option<StreamConfig>,
     /// Additional CLI arguments to pass to the agent process (harness-neutral).
-    /// Takes precedence over `claude_args`. Space-separated string.
+    /// Takes precedence over harness-specific aliases. Space-separated string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_args: Option<String>,
     /// Additional CLI arguments to pass to the `claude` process.
     /// Backward-compatible alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<String>,
+    /// Additional CLI arguments to pass to the `codex` process.
+    /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_args: Option<String>,
     /// When true, passes `--no-mcp` to the `claude` process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_mcp: Option<bool>,
@@ -481,6 +485,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             }
             "agent_args" => fm.agent_args = val_str(),
             "claude_args" => fm.claude_args = val_str(),
+            "codex_args" => fm.codex_args = val_str(),
             _ => {
                 eprintln!("[frontmatter] ignoring unknown patch field: {}", key_str);
             }
@@ -661,6 +666,7 @@ mod tests {
             stream_config: None,
             agent_args: None,
             claude_args: None,
+            codex_args: None,
             no_mcp: None,
             enable_tool_search: None,
             debounce_ms: None,
@@ -1105,24 +1111,27 @@ mod tests {
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert!(fm.claude_args.is_none());
+        assert!(fm.codex_args.is_none());
     }
 
     #[test]
-    fn parse_agent_args_and_claude_args() {
+    fn parse_agent_args_and_harness_aliases() {
         let content =
-            "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\n---\nBody\n";
+            "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
             fm.claude_args.as_deref(),
             Some("--dangerously-skip-permissions")
         );
+        assert_eq!(fm.codex_args.as_deref(), Some("-s danger-full-access"));
     }
 
     #[test]
     fn write_roundtrip_agent_args() {
         let fm = Frontmatter {
             agent_args: Some("--json -s workspace-write".to_string()),
+            codex_args: Some("-s danger-full-access".to_string()),
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
@@ -1131,14 +1140,25 @@ mod tests {
             fm2.agent_args.as_deref(),
             Some("--json -s workspace-write")
         );
+        assert_eq!(fm2.codex_args.as_deref(), Some("-s danger-full-access"));
     }
 
     #[test]
     fn merge_fields_agent_args() {
-        let content = "---\nclaude_args: old\n---\nBody\n";
+        let content = "---\nclaude_args: old\ncodex_args: old-codex\n---\nBody\n";
         let result = merge_fields(content, "agent_args: new").unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("new"));
         assert_eq!(fm.claude_args.as_deref(), Some("old"));
+        assert_eq!(fm.codex_args.as_deref(), Some("old-codex"));
+    }
+
+    #[test]
+    fn merge_fields_codex_args() {
+        let content = "---\nagent_args: old\n---\nBody\n";
+        let result = merge_fields(content, "codex_args: new").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.agent_args.as_deref(), Some("old"));
+        assert_eq!(fm.codex_args.as_deref(), Some("new"));
     }
 }

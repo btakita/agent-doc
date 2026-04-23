@@ -6,7 +6,8 @@
 //! - Resolves agent args through the active harness:
 //!   - Claude: frontmatter `agent_args` > frontmatter `claude_args` >
 //!     config `agent_args` > config `claude_args` > `AGENT_DOC_CLAUDE_ARGS`
-//!   - Codex: frontmatter `agent_args` > config `agent_args`
+//!   - Codex: frontmatter `agent_args` > frontmatter `codex_args` >
+//!     config `agent_args` > config `codex_args`
 //! - Requires an active tmux session; bails immediately if not inside tmux.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
@@ -58,8 +59,8 @@
 //!   UUID to the current tmux pane ID.
 //! - `start_claude_args_precedence`: Claude resolves frontmatter `claude_args`
 //!   over config `claude_args`, with `AGENT_DOC_CLAUDE_ARGS` as fallback.
-//! - `start_codex_ignores_claude_args_alias`: Codex ignores `claude_args` and
-//!   only accepts `agent_args`.
+//! - `start_codex_uses_codex_specific_alias_chain`: Codex resolves `codex_args`
+//!   after `agent_args` and ignores `claude_args`.
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
@@ -968,6 +969,12 @@ fn resolve_agent_args(
             .or_else(|| global_config.agent_args.clone())
             .or_else(|| global_config.claude_args.clone())
             .or_else(|| std::env::var("AGENT_DOC_CLAUDE_ARGS").ok()),
+        "codex" => fm
+            .agent_args
+            .clone()
+            .or_else(|| fm.codex_args.clone())
+            .or_else(|| global_config.agent_args.clone())
+            .or_else(|| global_config.codex_args.clone()),
         _ => fm
             .agent_args
             .clone()
@@ -1062,6 +1069,23 @@ mod tests {
     }
 
     #[test]
+    fn resolve_agent_args_codex_prefers_codex_alias_chain() {
+        let fm = Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            codex_args: Some("-s workspace-write".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+
+    #[test]
     fn resolve_agent_args_codex_ignores_claude_args_aliases() {
         let fm = Frontmatter {
             claude_args: Some("--dangerously-skip-permissions".into()),
@@ -1080,11 +1104,26 @@ mod tests {
     fn resolve_agent_args_codex_uses_agent_args_only() {
         let fm = Frontmatter {
             agent_args: Some("-s danger-full-access".into()),
+            codex_args: Some("-s workspace-write".into()),
             claude_args: Some("--dangerously-skip-permissions".into()),
             ..Default::default()
         };
         let cfg = Config {
             agent_args: Some("-s workspace-write".into()),
+            codex_args: Some("-s read-only".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+
+    #[test]
+    fn resolve_agent_args_codex_uses_config_codex_args_fallback() {
+        let fm = Frontmatter::default();
+        let cfg = Config {
+            codex_args: Some("-s danger-full-access".into()),
             claude_args: Some("--old-flag".into()),
             ..Default::default()
         };

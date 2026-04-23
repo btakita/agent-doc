@@ -3,7 +3,7 @@
 //! ## Spec
 //! - Defines `Config`: global user configuration loaded from `~/.config/agent-doc/config.toml`
 //!   (or `$XDG_CONFIG_HOME/agent-doc/config.toml`). Fields: `default_agent`, `agents` map,
-//!   `agent_args`, `claude_args` (compat alias), `execution_mode`, `terminal`.
+//!   `agent_args`, `claude_args`, `codex_args` (harness aliases), `execution_mode`, `terminal`.
 //! - Defines `AgentConfig`: per-named-agent settings (`command`, `args`, `result_path`,
 //!   `session_path`).
 //! - Defines `TerminalConfig`: command template for launching an external terminal; supports
@@ -61,13 +61,17 @@ pub struct Config {
     #[serde(default)]
     pub agents: BTreeMap<String, AgentConfig>,
     /// Additional CLI arguments to pass to the agent process (harness-neutral).
-    /// Takes precedence over `claude_args`. Space-separated string.
+    /// Takes precedence over harness-specific aliases. Space-separated string.
     #[serde(default)]
     pub agent_args: Option<String>,
     /// Additional CLI arguments to pass to the `claude` process.
     /// Backward-compatible alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default)]
     pub claude_args: Option<String>,
+    /// Additional CLI arguments to pass to the `codex` process.
+    /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
+    #[serde(default)]
+    pub codex_args: Option<String>,
     /// Execution mode: hybrid (default), parallel, sequential.
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]
@@ -151,6 +155,7 @@ mod tests {
         let toml_str = r#"
 agent_args = "--json -s workspace-write"
 claude_args = "--dangerously-skip-permissions"
+codex_args = "-s danger-full-access"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
@@ -161,6 +166,7 @@ claude_args = "--dangerously-skip-permissions"
             cfg.claude_args.as_deref(),
             Some("--dangerously-skip-permissions")
         );
+        assert_eq!(cfg.codex_args.as_deref(), Some("-s danger-full-access"));
     }
 
     #[test]
@@ -185,5 +191,17 @@ claude_args = "--dangerously-skip-permissions"
         };
         let resolved = cfg.agent_args.or(cfg.claude_args);
         assert_eq!(resolved.as_deref(), Some("--old-flag"));
+    }
+
+    #[test]
+    fn test_config_codex_args_fallback() {
+        // When agent_args is absent, codex_args is used for Codex-specific resolution.
+        let cfg = Config {
+            agent_args: None,
+            codex_args: Some("-s danger-full-access".to_string()),
+            ..Default::default()
+        };
+        let resolved = cfg.agent_args.or(cfg.codex_args);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
     }
 }

@@ -346,6 +346,10 @@ Review:
 
 ### 2026-04-22 — Commit `codex_args` Patchback Explanation (`agent-doc-bugs`)
 
-- [ ] Explain why the previous patchback remained uncommitted after it was written into `tasks/agent-doc/agent-doc-bugs.md`.
-- [ ] Commit the current `agent-doc-bugs` patchback plus the matching `tasks/plan.md` update without staging unrelated repo changes.
-- [ ] Verify the repo state for those files is clean after the commit.
+- [x] Explain why the previous patchback remained uncommitted after it was written into `tasks/agent-doc/agent-doc-bugs.md`.
+- [x] Commit the current `agent-doc-bugs` patchback plus the matching `tasks/plan.md` update without staging unrelated repo changes.
+- [x] Verify the repo state for those files is clean after the commit.
+
+Review:
+- The patchback was uncommitted because the previous turn stopped after writing the explanation into the parent repo working tree; no follow-up parent `git add`/`git commit` ran, so the content remained as a plain diff.
+- Committed the task-doc patchback plus the concurrent `tasks/plan.md` update as parent commit `a514c9fe` (`agent-doc bugs: commit codex_args patchback explanation`) without staging unrelated workspace changes.

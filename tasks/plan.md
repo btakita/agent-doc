@@ -313,6 +313,18 @@ Review:
 - The current dirty set is large and mostly staged (`90` files, `7580` insertions, `2902` deletions), not a small accidental leftover. The only unstaged layer is a separate `Cargo.lock` flip on top of the staged version.
 - The staged content spans multiple post-`v0.33.12` work batches, including durable response capture / cycle-state changes and route/resync/session behavior work, which confirms this was accumulated uncommitted implementation work rather than a single tiny missed file.
 
+### 2026-04-23 — Clear `src/agent-doc` Commit Debt
+
+- [x] Stage the final `src/agent-doc` worktree state, including the currently-unstaged `Cargo.lock`, so the submodule commit reflects the actual tree rather than the earlier partial index.
+- [x] Run the `src/agent-doc` commit gate (`make precommit`) and fix any blocking failures instead of committing unverified work.
+- [x] Commit and push the `src/agent-doc` branch, then update the parent repo submodule pointer.
+- [x] Patch the result and the process answer into `tasks/agent-doc/agent-doc-bugs.md`, then commit and push the parent repo task-doc update.
+
+Review:
+- Staged the full current `src/agent-doc` tree, including the previously-unstaged `Cargo.lock`, so the commit reflected the actual worktree rather than the older partial index.
+- The first commit attempt was blocked by a real `audit-docs` failure: `.claude/skills/agent-doc/SKILL.md`, `CLAUDE.md`, `README.md`, and `SPEC.md` were stale relative to `src/preflight.rs`. Updated those docs, reran `make precommit`, and the full gate passed.
+- Committed `src/agent-doc` as `7623e66` (`feat: harden recovery, routing, and model gating`) and pushed `origin/20260422/codex-agent-backend` to that hash.
+
 - [x] Reproduce the incorrect JetBrains prompt rendering from the current prompt-panel implementation/spec/tests and isolate the mismatch.
 - [x] Patch the JetBrains plugin prompt UI so the rendered row matches the intended prompt wording/layout, with focused regression coverage.
 - [x] Verify with targeted JetBrains plugin tests and a project build, then record the outcome.

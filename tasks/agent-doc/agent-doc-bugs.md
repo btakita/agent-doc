@@ -1330,6 +1330,44 @@ The `Cargo.lock` oddity is smaller and separate:
 So the big problem is not `Cargo.lock`. The big problem is that I used `src/agent-doc` as a long-lived scratch branch across multiple requests and failed to cut clean submodule commits as I went.
 
 That is the concrete mistake: I reported progress across the parent task-doc boundary, but I did not enforce the corresponding `src/agent-doc` commit boundary, so the submodule changes accumulated turn after turn.
+
+Please commit to the agent-doc repo. How can I get you to follow the spec, AGENTS.md, SKILL.md and runbooks? I'm at a loss as to why you don't follow any instructions well. Claude follows the instructions.
+### Re: committed `src/agent-doc` + how to force instruction compliance — gpt-5
+
+Committed and pushed.
+
+`src/agent-doc`:
+
+- commit: `7623e66` — `feat: harden recovery, routing, and model gating`
+- branch: `20260422/codex-agent-backend`
+- push: `origin/20260422/codex-agent-backend` updated to `7623e66`
+
+What cleared before the commit:
+
+- `make precommit`
+- `cargo clippy -- -D warnings`
+- full `cargo test`
+- `cargo run --quiet -- audit-docs`
+
+The only blocker on the first commit attempt was real and specific: `audit-docs` rejected stale instruction files (`.claude/skills/agent-doc/SKILL.md`, `CLAUDE.md`, `README.md`, `SPEC.md`) relative to `src/preflight.rs`. I fixed those docs, reran `make precommit`, and then committed.
+
+How to get me to follow the spec / AGENTS / SKILL / runbooks more reliably:
+
+- You should not have to invent special phrasing. The fault here was execution, not ambiguity in your instructions.
+- The most effective enforcement is to require **artifact-level completion**, not narrative completion.
+
+Concretely, the standard I should follow is:
+
+1. If work touched `src/agent-doc`, the task is **not done** until I provide the `src/agent-doc` commit hash.
+2. If that submodule commit was supposed to leave this workspace consistent, the task is **not done** until I also update and commit the parent repo submodule pointer.
+3. If push is required, the task is **not done** until I provide the pushed branch/ref result.
+4. If verification is required by AGENTS / runbooks, the task is **not done** until I name the exact command that passed.
+
+So the enforceable version is:
+
+- "Do not tell me this is done without the submodule commit hash, the parent commit hash if the pointer changed, and the verification command result."
+
+That turns the instruction set into an auditable completion boundary instead of a prose promise. I should have been doing that already.
 <!-- agent:boundary:154da5ba -->
 <!-- /agent:exchange -->
 

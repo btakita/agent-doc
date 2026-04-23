@@ -524,13 +524,12 @@ Commit / push:
 Outcome:
 
 - When a response patchback is already committed and later live-file edits leave the working tree ahead of the stored snapshot, `agent-doc commit` / preflight now close the stale cycle as already committed instead of generating false interrupted-cycle / `commit_failed` churn.
-<!-- agent:boundary:886aa139 -->
+<!-- agent:boundary:6d0e6127 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#tgdf] [recommended] Prevent false interrupted-cycle / commit_failed churn when a response patchback already committed but later out-of-band edits leave the live doc ahead of the stored snapshot: if the staged snapshot already matches HEAD, treat closeout as already committed or fail with a specific stale-snapshot/no-op signal instead of leaving response_captured noise.
 - [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside &lt;!-- agent:exchange --&gt;: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

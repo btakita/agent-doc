@@ -698,14 +698,13 @@ Outcome:
 - `#vpm8` is done.
 - Interrupted `preflight` runs now self-clear in the no-drift case instead of blocking the next cycle.
 - The `claudescore.md` tail-shape is now repaired in the safe case and rejected in ambiguous cases instead of being silently preserved/recommitted broken.
-<!-- agent:boundary:0ac65999 -->
+<!-- agent:boundary:faec3fdd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
-- [x] [#vpm8] [recommended] Prevent template compact/write/finalize from reintroducing out-of-exchange conversation blocks: validate/reparse post-merge and post-compact writeback, auto-repair safe cases, fail closed on ambiguous exchange-boundary drift.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

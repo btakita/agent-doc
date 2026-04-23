@@ -12,8 +12,8 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:status patch=replace -->
 
-✅ Closed the `agent-loop` workspace install gap for Codex: `agent-doc skill install --harness codex` now installed repo-local `.codex/hooks.json` and `.codex/config.toml` with the `UserPromptSubmit` / `Stop` hook bridge enabled.
-The remaining open work is end-to-end closeout proof (`#cde3`): this document still contains earlier bypassed patchbacks, and `agent-doc session-check tasks/agent-doc/agent-doc-bugs.md` still reports an interrupted cycle until that path is exercised and repaired through the normal closeout flow.
+✅ Closed the `agent-loop` workspace install gap for Codex: `agent-doc skill install --harness codex` installed repo-local `.codex/hooks.json` and `.codex/config.toml`, and the current document cycle is back in a committed state after preflight recovery/commit.
+The remaining open work is end-to-end closeout proof (`#cde3`): verify in `agent-loop` that both the normal `finalize` + `session-check` path and the Codex `Stop` hook backstop leave no uncommitted patchback.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1963,6 +1963,7 @@ What I verified:
 [features]
 codex_hooks = true
 ```
+❯ Why do I need to set a config option? Why doesn't the binary have the logic?
 
 Implication:
 
@@ -1973,7 +1974,24 @@ Commit / push:
 
 - No new `src/agent-doc` commit or push was needed for `#cdi2`; this step was workspace installation/activation in `agent-loop`.
 - I am not claiming end-to-end closeout success yet. That still needs `#cde3`.
-<!-- agent:boundary:14cc8093 -->
+### Re: why Codex needs repo-local hook config / why the binary alone is not enough — gpt-5
+
+You do **not** need the config because the binary lacks logic. The binary already has the logic in `src/agent-doc/src/codex_hook.rs`.
+
+What the repo-local Codex files do is different:
+
+- `.codex/hooks.json` tells **Codex** which external commands to invoke on `UserPromptSubmit` and `Stop`.
+- `.codex/config.toml` turns on Codex's hook feature for this repo (`[features] codex_hooks = true`).
+
+Without those files, Codex never calls `agent-doc hook codex-user-prompt-submit` or `agent-doc hook codex-stop`, so the binary has no harness event to react to. `agent-doc` cannot intercept Codex's stop lifecycle by itself because it does not own the Codex process; it is an external CLI that Codex must explicitly invoke.
+
+So the split today is:
+
+- **binary-owned:** the deterministic closeout / recover / capture / commit / `session-check` logic
+- **repo config-owned:** the harness registration that tells Codex *when* to call that logic
+
+So the answer is: the binary **does** have the behavior, but Codex still needs a repo-local integration surface to wire its lifecycle events into that behavior. If Codex later supports global always-on hook registration, or exposes this bridge without repo config, then `agent-doc` could hide more of this. Today the config is the contract by which Codex exposes those events to external tools.
+<!-- agent:boundary:b03fd1be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

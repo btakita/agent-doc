@@ -29,6 +29,7 @@ Identify your harness from your environment:
 - **Slash commands:** Codex has no slash commands. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
 - **Auto-update prompt:** Print a message asking the user to restart.
 - **Write-back:** Execute `agent-doc write` directly (Codex runs shell commands natively).
+- **Manual repair / missed patchback:** If the prompt is already in the document and you are repairing a missed assistant response, use `agent-doc write --commit <FILE>` for the response itself. Do **not** patch the assistant response directly into the file. If the user prompt is missing, insert that prompt into `exchange` first, then return to `agent-doc write --commit <FILE>` for the response path.
 - **Session resume:** Codex uses `codex resume --last` instead of `--continue`.
 
 ## Cursor / Generic

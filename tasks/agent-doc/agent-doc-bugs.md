@@ -391,7 +391,38 @@ That means the bug shape here is narrower:
 - the working tree is still left modified afterward because the visible HEAD marker / boundary token was rewritten again.
 
 I added a recommended pending item for that specific follow-up, because it is still a real invariant gap: a successful `agent-doc` run should not leave a semantically-clean doc dirty only from `(HEAD)` or boundary-id updates.
-<!-- agent:boundary:73972e8c -->
+
+❯ do #bfv9. Fix build issues. commit + push
+### Re: `#bfv9` remove full-suite pre-commit hook / move verification to harness policy — gpt-5
+
+Implemented in `src/agent-doc` and recorded in this repo's `AGENTS.md`.
+
+What changed:
+
+- `src/agent-doc/Makefile`: `install-hooks` no longer installs a `pre-commit` hook that runs the full suite. It now removes that legacy hook and tells the operator to run verification explicitly.
+- Shared instruction surfaces now make the responsibility explicit: agent harnesses own full-suite verification after code / test / build / instruction changes, and must run it before final response persistence instead of relying on a git hook.
+- Updated the mirrored doc/install surfaces and the `src/skill.rs` parity test so the installed Claude/Codex instructions keep that rule aligned.
+- Added the same harness-verification rule to this repo's top-level `AGENTS.md`.
+
+Verification:
+
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+- `make -C src/agent-doc install-hooks` (confirmed the submodule pre-commit hook was removed)
+
+Commit / push:
+
+- `src/agent-doc`: `2556074` — `chore: move full-suite verification out of pre-commit`
+- pushed to `origin 20260422/codex-agent-backend`
+- parent repo: `f93cf738` — `chore: require explicit harness verification after changes`
+- pushed to `origin main`
+
+Note:
+
+- The submodule commit also carried forward two changes that were already staged in `src/agent-doc` before the retry: deleting tracked `.agent-doc/logs/ops.log` and adding `.gitgnore`. I did not mark `#ndyy` done, because the broader merge-normalization work is still not complete.
+- `make -C src/agent-doc precommit` initially failed before hook removal because the installed hook was still active and `audit-docs` flagged stale mirrored instruction files; I updated those surfaces. A later standalone `audit-docs` invocation in this environment hung after printing `Auditing docs...`, so I do **not** have a clean final zero-exit result for that standalone step.
+<!-- agent:boundary:78cab931 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -400,7 +431,9 @@ I added a recommended pending item for that specific follow-up, because it is st
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
-- [ ] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.
+- [x] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
+[//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
+[//]: # Fix test suite warnings ignored tests

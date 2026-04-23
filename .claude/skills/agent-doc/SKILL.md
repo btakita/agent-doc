@@ -107,7 +107,7 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 
 ### 3. Commit (MANDATORY — never skip)
 
-Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches, then normalizes transient `(HEAD)` / boundary cleanup through the plugin when a live IPC listener exists or directly on disk when one does not. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
+Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches, then normalizes transient `(HEAD)` / boundary cleanup through the plugin when a live IPC listener exists or directly on disk when one does not. Extreme snapshot/file drift does **not** relax the selective-commit rule for tracked documents — do not assume a preflight commit may safely absorb an unanswered prompt just because the snapshot is badly stale. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
 
 **Never use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`.
 

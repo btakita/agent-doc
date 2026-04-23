@@ -63,6 +63,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Commit self-heal** — `agent-doc commit` can absorb a narrowly-scoped missed agent patchback (`status`, appended `### Re:` response, pending-ID superset) into the snapshot before staging, while still leaving plain user prompts uncommitted
+- **Extreme-drift guard stays conservative** — if a tracked document's snapshot is badly stale, `commit` warns but does not re-sync the snapshot from the live file wholesale; bootstrap scaffold auto-resync is limited to files with no `HEAD` entry yet so unanswered prompts cannot be swallowed into a commit
 - **Clean post-commit boundary cleanup** — commit strips transient `(HEAD)` markers from the staged snapshot and normalizes boundary state after commit; with a live IPC listener the plugin applies the visible rewrite, otherwise the CLI rewrites the file directly so boundary-only dirtiness does not linger
 - **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40; `--fix --session <name>` relocates WrongSession panes via join-pane instead of killing them
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file

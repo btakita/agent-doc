@@ -117,7 +117,8 @@ pub(crate) use agent_doc::merge;
 pub(crate) use agent_doc::template;
 
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Document mode for agent-doc sessions.
@@ -140,6 +141,28 @@ pub enum AgentDocMode {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+fn looks_like_document_path(arg: &str) -> bool {
+    let path = Path::new(arg);
+    path.exists() || path.components().count() > 1 || path.extension().is_some()
+}
+
+fn rewrite_bare_file_invocation(mut args: Vec<OsString>) -> Vec<OsString> {
+    let Some(first) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return args;
+    };
+    if first.starts_with('-') {
+        return args;
+    }
+
+    let is_known_subcommand = Cli::command()
+        .get_subcommands()
+        .any(|sub| sub.get_name() == first);
+    if !is_known_subcommand && looks_like_document_path(first) {
+        args.insert(1, OsString::from("run"));
+    }
+    args
 }
 
 #[derive(Args, Clone)]
@@ -1033,7 +1056,7 @@ fn main() -> anyhow::Result<()> {
     // When unset, no file logging (zero overhead).
     init_tracing();
 
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(rewrite_bare_file_invocation(std::env::args_os().collect()));
 
     // Warn about newer versions on startup, but skip if running the upgrade command itself.
     if !matches!(cli.command, Commands::Upgrade) {

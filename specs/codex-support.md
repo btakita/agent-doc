@@ -86,10 +86,11 @@ Key differences from Claude Code:
 1. ✅ Added `agent_args` frontmatter field (generic replacement for `claude_args`):
    - `agent_args: "--json -s workspace-write"` — passed to whatever agent is active
    - `claude_args` kept as backward-compatible alias
+   - `codex_args` added as a Codex-only alias for explicit Codex session config
    - Claude precedence: `fm.agent_args > fm.claude_args > config.agent_args > config.claude_args > AGENT_DOC_CLAUDE_ARGS`
-   - Codex precedence: `fm.agent_args > config.agent_args`
+   - Codex precedence: `fm.agent_args > fm.codex_args > config.agent_args > config.codex_args`
    - `claude_args` remains Claude-only; Codex ignores it
-   - 4 frontmatter tests + 3 config tests
+   - Frontmatter/config/start tests cover the harness-specific chains
 
 2. ✅ Config `default_agent` already works for `"codex"` value — verified in `run.rs`, `stream.rs`, `init.rs`
 

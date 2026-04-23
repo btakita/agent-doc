@@ -698,7 +698,64 @@ Outcome:
 - `#vpm8` is done.
 - Interrupted `preflight` runs now self-clear in the no-drift case instead of blocking the next cycle.
 - The `claudescore.md` tail-shape is now repaired in the safe case and rejected in ambiguous cases instead of being silently preserved/recommitted broken.
-<!-- agent:boundary:faec3fdd -->
+
+agent-doc on claudescore.md is still reverting to the corrupted state after an agent-doc recover.
+```
+• agent-doc tasks/claudescore.md ran and reproduced the same failure again.
+
+  It created commit bb05203 (agent-doc(claudescore): 2026-04-23 13:43:27), then appended another response and left the
+  file dirty. agent-doc session-check tasks/claudescore.md still fails with:
+
+  [session-check] INTERRUPTED: cycle `cycle-1776939317875` is still `response_captured` — no terminal commit followed
+
+  The tail is malformed again. It now contains repeated compact exchange user text, duplicated Exchange compacted...
+  assistant text, and a final ## Assistant / ## User pair outside the intended exchange flow.
+```
+### Re: `claudescore.md` recover re-corruption + `repair` command — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+Root cause:
+
+- `recover::run()` was choosing template vs append replay only from `<!-- patch:... -->` fences.
+- For template docs, a raw captured closeout like `Exchange compacted. No new work was run in this turn.` therefore replayed through append mode, which is how `## Assistant` / `## User` blocks could land outside `agent:exchange` after `compact exchange` / recover.
+- The existing escaped-tail repair was also too narrow: it only started at a post-exchange heading, so plain trailing raw suffix text after sibling components could be left behind.
+
+What changed:
+
+- `src/recover.rs`
+  - template/CRDT docs now always recover through `apply_template_from_string()`, even when the captured response is plain unmatched text rather than explicit patch blocks
+  - added regression coverage proving a plain `compact exchange` closeout replays inside `agent:exchange` instead of appending a trailing inline assistant block
+- `src/template.rs`
+  - widened escaped-tail repair to pick up the raw trailing suffix after the last sibling component, not just heading-led tails immediately after `agent:exchange`
+  - added regression coverage for the `pending/todo + raw compact summary + trailing ## Assistant` shape
+- CLI/docs
+  - `agent-doc repair` is now the canonical command name, with `recover` kept as a visible alias for compatibility
+  - updated the command surface, stop-hook guidance, and command/reference docs accordingly
+
+Verification:
+
+- focused regressions:
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml recover_plain_response_uses_template_path_for_template_docs -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml repair_conversation_tail_outside_exchange_moves_plain_trailing_suffix_after_todo -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml test_cli_repair_aliases_legacy_recover -- --nocapture`
+- full suite:
+  - `make -C src/agent-doc check`
+- build + install:
+  - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+  - `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `96ea6f7` — `fix: repair template recovery closeouts`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- raw template recoveries like the `claudescore.md` `compact exchange` closeout no longer fall back to append-mode patchback
+- safe trailing raw suffixes after sibling components are repaired back into `agent:exchange`
+- `agent-doc repair` now matches the actual user-facing role of the command while preserving `recover` compatibility
+<!-- agent:boundary:5337fa98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -919,13 +919,52 @@ So my recommendation is:
 - **only after that if needed**: consider a hook or helper that fails closed when a cycle ends with an `agent-doc`-managed doc changed but without a corresponding `agent-doc write`/commit boundary
 
 So yes, some hardening is warranted, but I would start with skill/runbook enforcement rather than introducing a new hook immediately. The bug here was primarily workflow drift, not missing binary capability.
-<!-- agent:boundary:7b980188 -->
+
+❯ do #wrtc1. add spec + tests. build + install for local testing
+
+❯ Can the hook or helper do another prompt to write the last response patchback into the claimed agent doc
+❯ > consider a hook or helper that fails closed when a cycle ends with an `agent-doc`-managed doc changed but without a corresponding `agent-doc write`/commit boundary
+### Re: `#wrtc1` Codex/manual-repair write path — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- updated `src/agent-doc/SKILL.md` with an explicit manual-repair / missed-patchback rule: when the prompt is already in the document, repair the response via `agent-doc write --commit <FILE>` instead of patching the assistant response directly into the file
+- updated `src/agent-doc/runbooks/harness-invocation.md` so the Codex section now spells out the same repair path and distinguishes missing-user-prompt insertion from response write-back
+- added regression coverage in `src/agent-doc/src/skill.rs` for:
+  - bundled skill content containing the manual-repair rule
+  - Codex-installed skill content containing `agent-doc write --commit <FILE>`
+  - the bundled harness-invocation runbook containing the Codex manual-repair guidance
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `cargo check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness codex`
+- verified installed local Codex files contain the new guidance:
+  - `.codex/AGENTS.md`
+  - `.codex/runbooks/harness-invocation.md`
+
+On the hook/helper question: not as an automatic second prompt by default.
+
+The safe boundary is:
+
+- a hook/helper can fail closed, emit a recovery note, or surface a purpose-built recovery command when an `agent-doc`-managed document changed without a write/commit boundary
+- it should **not** silently generate a second agent prompt to reconstruct the missed patchback unless the response text is already durably captured somewhere authoritative
+
+Reason: if the original response text was never written, the binary does not actually know what the assistant intended to say. Auto-prompting again would create a second non-deterministic response, which is closer to re-asking the model than recovering the missed patchback. That is the wrong default for a recovery mechanism.
+
+So `#wrtc1` is closed as skill/runbook hardening. If we later decide the remaining failure mode still needs binary help, the next step should be a deterministic recovery hook/helper that blocks or records the miss, not one that improvises a fresh patchback.
+<!-- agent:boundary:107f614a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
+- [x] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
 - [x] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.

@@ -211,8 +211,32 @@ Use `agent_args` instead, for example `agent_args: "-s danger-full-access"`.
 
 `agent-doc` only parses harness-neutral `agent_args` plus the legacy Claude-only alias `claude_args`. On the start path, Codex resolves arguments from `agent_args` only and ignores `claude_args`; there is no `codex_args` field.
 
-Please implement `codex_args` for 
-<!-- agent:boundary:7ad67549 -->
+Please implement `codex_args` when agent-doc uses Codex.
+### Re: `codex_args` support for Codex — codex
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- Added `codex_args` as a Codex-only alias in both frontmatter and global config.
+- Start-time resolution for Codex is now `agent_args > codex_args > config.agent_args > config.codex_args`.
+- Claude behavior is unchanged: it still uses `agent_args > claude_args > config.agent_args > config.claude_args > AGENT_DOC_CLAUDE_ARGS`.
+- Updated docs/specs to make the harness-specific arg rules explicit.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_agent_args -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml agent_args -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml codex_args -- --nocapture`
+- `cargo check --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+- `make check`
+
+Commit:
+
+- `src/agent-doc`: `870d769` — `feat: add codex_args support`
+<!-- agent:boundary:f3967a01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -326,7 +326,7 @@ Recommended path in `src/agent-doc`:
    Given the `1 / 92` split, after the generated-file cleanup the conflicts should be in the real code/docs touched by the recent `agent-doc` work, not in local snapshot churn.
 
 If you want this fully normalized before merging, the important invariant is: no tracked `.agent-doc` runtime files, and no typo ignore file. After that, rebasing `20260422/codex-agent-backend` onto `origin/main` is straightforward, just large.
-<!-- agent:boundary:ec8dcb35 -->
+<!-- agent:boundary:2891f659 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

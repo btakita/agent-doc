@@ -958,7 +958,35 @@ The safe boundary is:
 Reason: if the original response text was never written, the binary does not actually know what the assistant intended to say. Auto-prompting again would create a second non-deterministic response, which is closer to re-asking the model than recovering the missed patchback. That is the wrong default for a recovery mechanism.
 
 So `#wrtc1` is closed as skill/runbook hardening. If we later decide the remaining failure mode still needs binary help, the next step should be a deterministic recovery hook/helper that blocks or records the miss, not one that improvises a fresh patchback.
-<!-- agent:boundary:107f614a -->
+
+❯ Do any hooks receive the agent message? Can call agent-doc to reconstruct the history and patch in the response?
+### Re: hook payloads / reconstructing a missed response — gpt-5
+
+Not from the current hook payloads, no.
+
+Today the hook system carries metadata, not the full agent message body:
+
+- `post_write` fires with `{ "patches": <count> }`
+- `post_commit` fires with `null` data
+- document-level shell hooks get template vars like `{{session_id}}`, `{{file}}`, `{{agent}}`, and `{{model}}`
+
+So a hook can tell that a write or commit happened, and for which document/session, but it does **not** receive the assistant response text itself.
+
+What `agent-doc` can reconstruct deterministically today is narrower:
+
+- **uncommitted response already saved to pending store**: yes. `recover` can re-apply `.agent-doc/pending/<hash>.md` because that file contains the actual response text.
+- **already committed exchange history**: yes. `history restore` can prepend older committed exchange content from git history.
+- **response text that was never durably written anywhere**: no. If the response never made it into pending storage, a write patch, or a committed snapshot, the binary does not have authoritative content to replay.
+
+So the answer to your second question is:
+
+- `agent-doc` can patch the response back in **only when it already has the response text in a durable store**
+- it cannot reconstruct the missing response from hook events alone, because those events currently do not include the message body
+
+That is why I drew the line against an automatic second prompt. If the original response text is missing, a helper that "asks again" is generating a fresh answer, not recovering the lost one.
+
+If we want deterministic missed-patchback recovery beyond the existing pending-file path, the missing ingredient is a new durable response-capture mechanism, for example storing the final response payload before or alongside hook emission. Without that, hooks are observability, not replay.
+<!-- agent:boundary:c99a8ef8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

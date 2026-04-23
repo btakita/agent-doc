@@ -1587,6 +1587,40 @@ Installed local content refreshed:
 - `.codex/runbooks/harness-invocation.md`
 
 On the plan-file point: agreed. I kept the implementation/result conversation here in `agent-doc-bugs.md`; if we need a future plan, it should live in its own discrete planning file rather than being mixed into the running bug thread.
+
+Are the latest changes built + installed? In not, built + install the latest changes.
+do #instr1. add spec + tests. build + install for local testing
+### Re: `#instr1` generated harness instruction surface — gpt-5.4
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- replaced the old Codex-specific whole-string replacement in `src/skill.rs` with explicit shared rendering helpers so Claude and Codex now generate from the same `SKILL.md` source surface
+- limited harness-specific differences to the frontmatter description and the `## Invocation` section; the rest of the hot-path workflow now stays mechanically shared
+- added regression coverage for:
+  - shared Claude/Codex hot-path parity outside `## Invocation`
+  - installed Claude/Codex skill content both carrying the same completion-boundary language
+  - existing Codex-specific invocation behavior still rendering correctly
+- updated `SPEC.md`, `CLAUDE.md`, and `README.md` so the shared-generation/install-parity contract is explicit
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness claude`
+- `agent-doc skill install --harness codex`
+
+Installed local content refreshed:
+
+- `.claude/skills/agent-doc/SKILL.md`
+- `.codex/AGENTS.md`
+
+Plan note:
+
+- used a discrete plan file at `tasks/agent-doc/plan-instr1-generated-skill-surface.md`
 <!-- agent:boundary:6260882e -->
 <!-- /agent:exchange -->
 
@@ -1597,7 +1631,7 @@ On the plan-file point: agreed. I kept the implementation/result conversation he
 - [x] [#cmiv] Update `commit.md` to define a hard invariant: every appended `agent-doc` response must be committed unless explicitly told otherwise.
 - [x] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
-- [ ] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
+- [x] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

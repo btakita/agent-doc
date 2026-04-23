@@ -8,8 +8,10 @@
 //! - `handle_stop()` reads the Codex `Stop` JSON payload from stdin, checks the
 //!   tracked document with `session_check::inspect()`, and only intervenes when
 //!   the cycle is still open.
-//! - On the first intercepted stop, the hook saves the final assistant text into
-//!   the existing pending/capture ledger via `recover::save_pending()` before
+//! - On the first intercepted stop, the hook first tries to finish the response
+//!   cycle deterministically: save/capture `last_assistant_message`, replay it
+//!   through `recover`, and run the normal `git::commit()` boundary.
+//! - If the cycle still cannot be closed automatically, the hook falls back to
 //!   blocking the turn with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
 //!   (`stop_hook_active = true`), fail closed with `continue=false` instead of
@@ -24,8 +26,9 @@
 //!
 //! ## Evals
 //! - `user_prompt_submit_tracks_agent_doc_file`
-//! - `stop_blocks_open_cycle_and_captures_response`
+//! - `stop_auto_closes_open_cycle_from_last_assistant_message`
 //! - `stop_passes_through_committed_cycle`
+//! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
 
 use anyhow::{Context, Result};
@@ -78,6 +81,12 @@ enum StopResponse {
     },
 }
 
+enum StopCloseAttempt {
+    Closed,
+    StillOpen { note: String },
+    NotPossible,
+}
+
 pub fn handle_user_prompt_submit() -> Result<()> {
     let payload = match read_stdin_payload() {
         Ok(payload) => payload,
@@ -117,8 +126,12 @@ fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         return Ok(());
     };
 
-    let doc_path = resolve_agent_doc_path(&input.prompt, &cwd)
-        .or_else(|| load_state(&root, &input.session_id).ok().flatten().map(|s| PathBuf::from(s.doc_path)));
+    let doc_path = resolve_agent_doc_path(&input.prompt, &cwd).or_else(|| {
+        load_state(&root, &input.session_id)
+            .ok()
+            .flatten()
+            .map(|s| PathBuf::from(s.doc_path))
+    });
     let Some(doc_path) = doc_path else {
         return Ok(());
     };
@@ -153,9 +166,33 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
 
     match crate::session_check::inspect(&file)? {
         crate::session_check::SessionCheckStatus::Ok(_) => {
+            clear_state(&root, &input.session_id)?;
             Ok(StopResponse::Continue { continue_: true })
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+            if !input.stop_hook_active {
+                match attempt_stop_closeout(&file, input)? {
+                    StopCloseAttempt::Closed => {
+                        clear_state(&root, &input.session_id)?;
+                        return Ok(StopResponse::Continue { continue_: true });
+                    }
+                    StopCloseAttempt::StillOpen { note } => {
+                        return Ok(StopResponse::Block {
+                            decision: "block",
+                            reason: format!(
+                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. {}{} Do not send the final answer yet. If the response is missing from the document, run `agent-doc recover {}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
+                                file.display(),
+                                reason,
+                                note,
+                                file.display(),
+                                file.display()
+                            ),
+                        });
+                    }
+                    StopCloseAttempt::NotPossible => {}
+                }
+            }
+
             let capture_note = if input.stop_hook_active {
                 String::new()
             } else {
@@ -176,6 +213,53 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                     "agent-doc Stop hook intercepted an unfinished document cycle for {display}. {reason}{capture_note} Do not send the final answer yet. If the response is missing from the document, run `agent-doc recover {display}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {display}`."
                 ),
             })
+        }
+    }
+}
+
+fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAttempt> {
+    let has_response = !input.last_assistant_message.trim().is_empty();
+    let has_bypassed_patchback =
+        crate::session_check::detect_bypassed_response_write(file)?.is_some();
+    if !has_response && !has_bypassed_patchback {
+        return Ok(StopCloseAttempt::NotPossible);
+    }
+
+    let mut note = String::new();
+    if has_response {
+        crate::recover::save_pending(file, &input.last_assistant_message)?;
+        crate::ops_log::log_op(file, "codex_stop_capture_saved");
+        note.push_str(
+            " The latest assistant text was captured into the pending/capture ledger before auto-close.",
+        );
+    }
+
+    if crate::recover::run(file)? {
+        note.push_str(" The hook replayed the response through the normal write path.");
+    }
+
+    if !crate::git::is_in_git_repo(file) {
+        note.push_str(
+            " The document is not in a git repository, so the hook could not finish the required commit boundary automatically.",
+        );
+        return Ok(StopCloseAttempt::StillOpen { note });
+    }
+
+    if crate::git::commit(file)? {
+        note.push_str(" The hook finished the commit boundary automatically.");
+    }
+
+    match crate::session_check::inspect(file)? {
+        crate::session_check::SessionCheckStatus::Ok(_) => {
+            crate::ops_log::log_op(file, "codex_stop_auto_close_success");
+            Ok(StopCloseAttempt::Closed)
+        }
+        crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+            crate::ops_log::log_op(file, &format!("codex_stop_auto_close_open reason={reason}"));
+            note.push_str(&format!(
+                " The cycle remained open after the auto-close attempt: {reason}"
+            ));
+            Ok(StopCloseAttempt::StillOpen { note })
         }
     }
 }
@@ -237,8 +321,8 @@ fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
     }
     let content =
         std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let state = serde_json::from_str(&content)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let state =
+        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
     Ok(Some(state))
 }
 
@@ -277,6 +361,7 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command as ProcessCommand;
 
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -284,6 +369,34 @@ mod tests {
         fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
+    }
+
+    fn init_git_repo(root: &Path, tracked: &Path) {
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .status()
+            .unwrap();
     }
 
     fn write_doc(dir: &tempfile::TempDir) -> PathBuf {
@@ -318,9 +431,10 @@ mod tests {
     }
 
     #[test]
-    fn stop_blocks_open_cycle_and_captures_response() {
+    fn stop_auto_closes_open_cycle_from_last_assistant_message() {
         let dir = setup_project();
         let doc = write_doc(&dir);
+        init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -334,18 +448,59 @@ mod tests {
         })
         .unwrap();
 
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+
+        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        assert!(
+            !pending.exists(),
+            "pending capture should be cleared after recovery"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Final assistant response."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+        let log = ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["log", "--oneline", "-1"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&log.stdout).contains("agent-doc(task):"),
+            "expected auto-close commit, got: {}",
+            String::from_utf8_lossy(&log.stdout)
+        );
+        let root = project_root_for(dir.path()).unwrap();
+        assert!(load_state(&root, "codex-session").unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_blocks_open_cycle_without_recoverable_response() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: String::new(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
         match response {
             StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("unfinished document cycle"));
                 assert!(reason.contains("agent-doc recover"));
-                assert!(reason.contains("session-check"));
             }
             other => panic!("expected block response, got {other:?}"),
         }
-
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
-        assert!(pending.exists(), "pending capture should exist");
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.response_body, "Final assistant response.");
     }
 
     #[test]

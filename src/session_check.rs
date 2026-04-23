@@ -164,7 +164,7 @@ fn strip_timestamp_prefix(line: &str) -> &str {
     line
 }
 
-fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
+pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = crate::snapshot::load(file)? else {
         return Ok(None);
     };
@@ -285,11 +285,7 @@ mod tests {
         let snapshot = "---\nagent_doc_format: template\n---\n\n## Exchange\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
-        fs::write(
-            &doc,
-            format!("{snapshot}### Re: test — gpt-5\n\nBody\n"),
-        )
-        .unwrap();
+        fs::write(&doc, format!("{snapshot}### Re: test — gpt-5\n\nBody\n")).unwrap();
 
         let marker = detect_bypassed_response_write(&doc).unwrap();
         assert_eq!(marker.as_deref(), Some("### Re: test — gpt-5"));
@@ -302,11 +298,7 @@ mod tests {
         let snapshot = "## User\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
-        fs::write(
-            &doc,
-            format!("{snapshot}\n## Assistant\n\nResponse\n"),
-        )
-        .unwrap();
+        fs::write(&doc, format!("{snapshot}\n## Assistant\n\nResponse\n")).unwrap();
 
         let marker = detect_bypassed_response_write(&doc).unwrap();
         assert_eq!(marker.as_deref(), Some("## Assistant"));

@@ -106,7 +106,7 @@ RESPONSE
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is the immediate `session-check`, minimal recovery if it fails, and concise result reporting.
 
-**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file, capture `last_assistant_message` into the pending/capture ledger when Codex reaches `Stop` with an open cycle, and auto-continue or fail closed instead of silently letting a bypassed patchback leave the harness. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit` and `session-check`.
+**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file. On `Stop`, the hook first tries to finish the response cycle deterministically from `last_assistant_message` by replaying the normal write/commit path; if the cycle still cannot be closed, it falls back to capture-and-block / fail-closed behavior instead of silently letting a bypassed patchback leave the harness. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit` and `session-check`.
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 

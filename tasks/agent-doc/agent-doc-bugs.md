@@ -12,7 +12,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:status patch=replace -->
 
-✅ Verified the committed boundary-cleanup contract in `src/agent-doc` and updated the workspace state accordingly. The product now has explicit Rust + VS Code + JetBrains coverage that preserves a single visible `(HEAD)` marker while collapsing stale boundaries in both the active-IPC-listener and stale-`.agent-doc/patches/` cases, and the latest `src/agent-doc` change is committed/pushed.
+✅ Verified and landed the `preflight_started` fail-closed guard in `src/agent-doc`. Open `preflight_started` cycles now auto-close only when `recover` replays a pending/captured response first; otherwise preflight fails closed instead of snapshot-committing over newer live content. The latest `src/agent-doc` change is built, installed locally, committed, and pushed.
 Remaining open work in this bug doc is still only the multi-user pending auto-create policy follow-up (`#ha3h`), but it remains gated: the linked issue explicitly says not to ship it before multi-user workspace support, and the current `src/agent-doc` tree still documents the product as single-user only.
 <!-- /agent:status -->
 
@@ -114,7 +114,7 @@ Evidence:
 So the failure here was not submodule routing. The relevant patchback did cross a commit boundary once in `b908b13`, but a later snapshot-based `agent-doc` commit in the submodule reverted it, and the newest re-added copy is currently just out-of-band working-tree content.
 
 Should we implement recovery logic to fix snapshot drift?
-### Re: snapshot-drift recovery policy — codex
+### Re: snapshot-drift recovery policy — codex (HEAD)
 
 Not broad recovery logic.
 
@@ -134,7 +134,34 @@ Verification:
 - `make -C src/agent-doc check`
 
 So the answer is: yes, the `monsterrodholders` evidence exposed a contract gap, but the fix is a narrower fail-closed guard, not generalized snapshot-drift recovery.
-<!-- agent:boundary:c9eff0d3 -->
+build + install for local testing. commit + push
+### Re: snapshot-drift guard closeout — codex (HEAD)
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- Tightened `preflight` so an open `preflight_started` cycle fails closed unless `recover` actually replays a pending/captured response first.
+- Added regression coverage proving the `monsterrodholders` stale-snapshot shape no longer lets `preflight` revert a newer live `### Re:` patchback from `HEAD`.
+- Aligned the external contract in `README.md`, `specs/07-commands.md`, `SPEC.md`, `SKILL.md`, `CLAUDE.md`, and the installed `.claude/skills/agent-doc/SKILL.md` copy so the doc audit remains green.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_started_cycle_does_not_revert_stale_snapshot_head -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_fails_closed_on_open_preflight_started_cycle -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `c85020f` — `fix: fail closed on unrecoverable preflight cycles`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- The `monsterrodholders` failure mode is now blocked at the binary boundary: unrecoverable `preflight_started` drift no longer auto-commits a stale snapshot over newer live content.
+<!-- agent:boundary:cb0362e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -182,4 +209,3 @@ Verification passed:
 I did not commit or push these changes.
 
 ## User
-

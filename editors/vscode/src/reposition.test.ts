@@ -80,4 +80,29 @@ describe('repositionBoundaryToEnd', () => {
         assert.ok(result, 'should handle open tag with extra attributes');
         assert.ok(result.includes('New user input.\n<!-- agent:boundary:'));
     });
+
+    it('preserves a single HEAD marker while collapsing stale boundaries', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: test — opus-4-6 (HEAD)',
+            'Response.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'User prompt.',
+            '<!-- agent:boundary:bbb22222 -->',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = repositionBoundaryToEnd(doc, 'exchange');
+        assert.ok(result, 'should return repositioned content');
+        assert.ok(result.includes('### Re: test — opus-4-6 (HEAD)'));
+        assert.strictEqual((result.match(/\(HEAD\)/g) || []).length, 1, 'exactly one HEAD marker');
+        assert.strictEqual(
+            (result.match(/<!-- agent:boundary:[a-f0-9]+ -->/g) || []).length,
+            1,
+            'exactly one boundary marker',
+        );
+        assert.ok(result.includes('User prompt.\n<!-- agent:boundary:'));
+        assert.ok(!result.includes('aaa11111'));
+        assert.ok(!result.includes('bbb22222'));
+    });
 });

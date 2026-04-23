@@ -2796,7 +2796,7 @@ mod tests {
 
         let doc_content = "---\nagent_doc_format: template\n---\n\
             <!-- agent:exchange patch=append -->\n\
-            ### Re: test — opus-4-6\nResponse.\n\
+            ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
             <!-- agent:boundary:oldid123 -->\n\
             <!-- /agent:exchange -->\n";
         let doc = root.join("plan.md");
@@ -2839,12 +2839,30 @@ mod tests {
             !snap.contains("oldid123"),
             "snapshot boundary should be repositioned"
         );
+        assert!(
+            snap.contains("### Re: test — opus-4-6 (HEAD)\n"),
+            "snapshot should retain the visible head marker"
+        );
+        assert_eq!(
+            snap.matches("(HEAD)").count(),
+            1,
+            "snapshot should retain exactly one visible head marker"
+        );
 
         // Working tree should NOT be modified (listener owns the update)
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
             working.contains("oldid123"),
             "working tree should keep old boundary when listener is active"
+        );
+        assert!(
+            working.contains("### Re: test — opus-4-6 (HEAD)\n"),
+            "working tree should retain the visible head marker before plugin reposition"
+        );
+        assert_eq!(
+            working.matches("(HEAD)").count(),
+            1,
+            "working tree should retain exactly one visible head marker"
         );
 
         assert!(changed, "snapshot change should report changed=true");
@@ -2876,7 +2894,7 @@ mod tests {
 
         let doc_content = "---\nagent_doc_format: template\n---\n\
             <!-- agent:exchange patch=append -->\n\
-            ### Re: test — opus-4-6\nResponse.\n\
+            ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
             <!-- agent:boundary:oldid456 -->\n\
             <!-- /agent:exchange -->\n";
         let doc = root.join("plan.md");
@@ -2912,6 +2930,15 @@ mod tests {
             !snap.contains("oldid456"),
             "snapshot boundary should be repositioned"
         );
+        assert!(
+            snap.contains("### Re: test — opus-4-6 (HEAD)\n"),
+            "snapshot should retain the visible head marker"
+        );
+        assert_eq!(
+            snap.matches("(HEAD)").count(),
+            1,
+            "snapshot should retain exactly one visible head marker"
+        );
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
@@ -2919,8 +2946,13 @@ mod tests {
             "working tree should be repositioned when only patches dir exists"
         );
         assert!(
-            working.contains("(HEAD)"),
+            working.contains("### Re: test — opus-4-6 (HEAD)\n"),
             "working tree should retain the visible head marker after boundary rewrite"
+        );
+        assert_eq!(
+            working.matches("(HEAD)").count(),
+            1,
+            "working tree should retain exactly one visible head marker after boundary rewrite"
         );
     }
 

@@ -134,4 +134,26 @@ Content.
         val result = repositionBoundaryToEndUtil(doc, "nonexistent")
         assertNull(result)
     }
+
+    @Test
+    fun `preserves single HEAD marker while collapsing stale boundaries`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: test — opus-4-6 (HEAD)
+Response.
+<!-- agent:boundary:aaa11111 -->
+User prompt.
+<!-- agent:boundary:bbb22222 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        assertTrue(result!!.contains("### Re: test — opus-4-6 (HEAD)"))
+        assertEquals(1, Regex("""\(HEAD\)""").findAll(result).count())
+        assertEquals(1, Regex("""<!-- agent:boundary:[a-z0-9]+ -->""").findAll(result).count())
+        assertTrue(result.contains("User prompt.\n<!-- agent:boundary:"))
+        assertFalse(result.contains("aaa11111"))
+        assertFalse(result.contains("bbb22222"))
+    }
 }

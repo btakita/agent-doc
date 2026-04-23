@@ -279,6 +279,31 @@ So the failure mode is:
 - required parent commit step omitted for that turn
 
 That is exactly the class of miss you are calling out, and you are right to call it out. For parent-repo task-doc patchbacks, the cycle is not complete until the parent commit exists. I am treating that as a hard completion condition here and committing this response immediately instead of leaving it as another working-tree-only edit.
+
+The ` (HEAD)` suffix is a user affordance. Please readd the functionality. IS THIS BEHAVIOR NOT IN THE SPECS? WHY ARE YOU MAKING DECISIONS THAT ARE AGAINST THE SPEC?
+### Re: restore ` (HEAD)` affordance / spec drift — codex
+
+You were right to call that out. The recent "clean post-commit with no visible ` (HEAD)` marker" behavior was an implementation/docs drift away from the intended affordance. I treated ` (HEAD)` as something to clean out of the user-facing post-commit state, but that was the wrong boundary: it should be stripped from the committed blob, not removed from the visible snapshot/editor state.
+
+I restored the behavior in `src/agent-doc`:
+
+- `git::commit()` still stages a clean blob with `strip_head_markers(...)`
+- post-commit snapshot / working-tree boundary reposition now uses the visible-head path again, so a single current-response ` (HEAD)` marker remains after commit
+- the shared FFI export in `src/ffi.rs` now uses the same visible-head reposition helper, so editor plugin refresh matches the no-listener disk path
+- specs/docs/skill text were updated to match the restored contract: clean commit blob, visible post-commit ` (HEAD)` affordance
+
+Committed in `src/agent-doc`:
+
+- `9fe4c26` — `fix: restore post-commit head marker affordance`
+
+Verification:
+
+- `cargo test commit_staged_blob_has_no_head_markers -- --nocapture`
+- `cargo test commit_absorbs_out_of_band_exchange_and_pending_mutation -- --nocapture`
+- `cargo test commit_absorbs_out_of_band_status_and_exchange_mutation -- --nocapture`
+- `cargo test reposition_updates_working_tree_when_only_patches_dir_exists -- --nocapture`
+- `cargo check`
+- full submodule hook path via `git commit`: `cargo clippy -- -D warnings`, full `cargo test`, and `cargo run --quiet -- audit-docs`
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

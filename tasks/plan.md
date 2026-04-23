@@ -363,3 +363,16 @@ Review:
 Review:
 - Patched the complaint response into `tasks/agent-doc/agent-doc-bugs.md` as an explicit acknowledgment that the skipped parent commit step was a turn-execution mistake: I reported the patchback as handled before the parent commit actually existed.
 - Committed the task-doc response plus the plan update as parent commit `f011e976` (`agent-doc bugs: respond to parent commit complaint`) without staging unrelated workspace changes.
+
+### 2026-04-22 — Restore ` (HEAD)` Affordance After Commit (`agent-doc-bugs`)
+
+- [x] Reconcile the current commit/boundary implementation with the documented ` (HEAD)` affordance and choose the minimal code path that restores a visible post-commit head marker without reintroducing stale-boundary churn.
+- [x] Patch `src/agent-doc` commit/boundary/plugin code plus the affected specs/docs so the committed blob stays clean while the user-facing post-commit state regains the intended ` (HEAD)` marker behavior.
+- [x] Update focused regression coverage, run the relevant verification, and patch the result back into `tasks/agent-doc/agent-doc-bugs.md`.
+
+Review:
+- The recent clean-post-commit behavior was real implementation/spec drift. `git.rs`, the shared FFI boundary export, and the top-level docs had been changed to remove ` (HEAD)` from the visible post-commit state even though the intended affordance is "clean committed blob, visible current-response head marker."
+- Restored the visible-head behavior in `src/agent-doc` commit/boundary paths by switching post-commit reposition back to the non-clean helper while still staging a clean blob via `strip_head_markers(...)`. The FFI export now uses the same visible-head helper so editor refresh matches the no-listener disk path.
+- Updated `README.md`, `SPEC.md`, `CLAUDE.md`, `specs/06-config.md`, `specs/07-commands.md`, `specs/08-session-routing.md`, and `.claude/skills/agent-doc/SKILL.md` so the contract is explicit.
+- Verified with focused `cargo test` filters for the changed commit/reposition cases, `cargo check`, and the full submodule commit hook path (`cargo clippy -- -D warnings`, full `cargo test`, `cargo run --quiet -- audit-docs`).
+- Committed in `src/agent-doc` as `9fe4c26` (`fix: restore post-commit head marker affordance`).

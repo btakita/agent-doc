@@ -224,15 +224,12 @@ Outcome:
 
 - `agent-doc tasks/claudescore.md` works again without requiring an explicit `run`.
 - Historical committed drift like the `monsterrodholders` report no longer leaves `session-check` red forever once `HEAD` proves the response is already committed.
-<!-- agent:boundary:80494ac0 -->
+<!-- agent:boundary:3e328adc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#cde3] Run an end-to-end Codex closeout check in `agent-loop` that proves both the normal `finalize` + `session-check` path and the `Stop` hook backstop leave no uncommitted patchback.
-- [x] [#cdp4] Patch the verified Codex closeout outcome back into this bug doc, update pending state, and then commit/push in the correct repo boundaries.
-- [x] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 ## Assistant

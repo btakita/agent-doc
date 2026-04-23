@@ -495,13 +495,42 @@ Concrete fix direction:
 - only treat it as a real patchback failure when the response never reached `ipc_file_delivered` / `write_stream_done` or never got a first `commit_success`.
 
 I added that follow-up to pending as `#tgdf`.
-<!-- agent:boundary:9de16282 -->
+❯ do #tgdf. update spec + tests. build + install for local testing. commit + push
+### Re: `#tgdf` stale-snapshot no-op closeout — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- Added an early `HEAD`-equivalence check in `src/git.rs`: when the staged snapshot blob already matches committed `HEAD`, `agent-doc commit` now closes the cycle as `commit_already_current` instead of refreshing boundaries, attempting a duplicate git commit, or logging a false `commit_failed`.
+- Wired that no-op closeout through cycle-state and capture-state updates so interrupted `response_captured` / `write_applied` cleanup can terminate deterministically.
+- Added regressions in `src/git.rs` and `src/preflight.rs`, and updated `README.md` plus `specs/07-commands.md` to document the dedicated no-op closeout path.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_closes_cycle_when_staged_snapshot_already_matches_head -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_closes_response_captured_cycle_when_snapshot_already_matches_head -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `71d0cd9` — `fix: close HEAD-current stale cycles cleanly`
+- pushed to `origin 20260422/codex-agent-backend`
+- parent repo: `496876f6` — `tasks: record head-current closeout fix`
+- pushed to `origin main`
+
+Outcome:
+
+- When a response patchback is already committed and later live-file edits leave the working tree ahead of the stored snapshot, `agent-doc commit` / preflight now close the stale cycle as already committed instead of generating false interrupted-cycle / `commit_failed` churn.
+<!-- agent:boundary:886aa139 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#tgdf] [recommended] Prevent false interrupted-cycle / commit_failed churn when a response patchback already committed but later out-of-band edits leave the live doc ahead of the stored snapshot: if the staged snapshot already matches HEAD, treat closeout as already committed or fail with a specific stale-snapshot/no-op signal instead of leaving response_captured noise.
+- [x] [#tgdf] [recommended] Prevent false interrupted-cycle / commit_failed churn when a response patchback already committed but later out-of-band edits leave the live doc ahead of the stored snapshot: if the staged snapshot already matches HEAD, treat closeout as already committed or fail with a specific stale-snapshot/no-op signal instead of leaving response_captured noise.
 - [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside &lt;!-- agent:exchange --&gt;: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

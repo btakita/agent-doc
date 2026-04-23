@@ -48,8 +48,13 @@ pub fn run(file: &Path) -> Result<()> {
             Ok(())
         }
         None => {
-            eprintln!("[undo] No pre-response snapshot found for {}", file.display());
-            eprintln!("[undo] Nothing to undo — no agent response has been written since the last undo.");
+            eprintln!(
+                "[undo] No pre-response snapshot found for {}",
+                file.display()
+            );
+            eprintln!(
+                "[undo] Nothing to undo — no agent response has been written since the last undo."
+            );
             Ok(())
         }
     }

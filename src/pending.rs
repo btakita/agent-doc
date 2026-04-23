@@ -107,7 +107,9 @@ pub fn validate_transition(from: PendingState, op: PendingOp) -> Result<Transiti
         (S::Gated, Gate) => Ok(NoOp),
         (S::Gated, Ungate) => Ok(Transition(S::Open)),
         (S::Gated, MarkDone) => Ok(Transition(S::Done)),
-        (S::Done, Gate) => bail!("cannot gate Done item: add a new pending item for the follow-up gate"),
+        (S::Done, Gate) => {
+            bail!("cannot gate Done item: add a new pending item for the follow-up gate")
+        }
         (S::Done, Ungate) => bail!("cannot ungate Done item: source must be `[/]`"),
         (S::Done, MarkDone) => Ok(NoOp),
     }
@@ -166,7 +168,10 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
         .rposition(|l| is_item_line(l))
         .unwrap_or(first_item);
 
-    let prelude = join_lines(&lines[..first_item], has_trailing_newline(body) || first_item > 0);
+    let prelude = join_lines(
+        &lines[..first_item],
+        has_trailing_newline(body) || first_item > 0,
+    );
     let postlude = if last_item + 1 < lines.len() {
         join_lines(&lines[last_item + 1..], has_trailing_newline(body))
     } else {
@@ -224,7 +229,11 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         // Typed gate: [/release], [/deploy], etc.
         if let Some(close) = inner.find(']') {
             let gt = &inner[..close];
-            if !gt.is_empty() && gt.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            if !gt.is_empty()
+                && gt
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
                 let r = &inner[close + 1..];
                 (PendingState::Gated, Some(gt.to_lowercase()), r.trim_start())
             } else {
@@ -270,9 +279,7 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
 }
 
 fn is_valid_hash_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 8
-        && s.chars().all(|c| c.is_ascii_alphanumeric())
+    !s.is_empty() && s.len() <= 8 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
@@ -281,7 +288,9 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
         return Ok((None, trimmed.to_string()));
     };
     let Some((raw_id, remainder)) = rest.split_once(char::is_whitespace) else {
-        bail!("pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)");
+        bail!(
+            "pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)"
+        );
     };
     let custom_id = raw_id.trim().trim_start_matches('#');
     if !is_valid_hash_id(custom_id) {
@@ -292,7 +301,9 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
     }
     let remainder = remainder.trim();
     if remainder.is_empty() {
-        bail!("pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)");
+        bail!(
+            "pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)"
+        );
     }
     Ok((Some(custom_id.to_lowercase()), remainder.to_string()))
 }
@@ -511,8 +522,14 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     if text.is_empty() {
         bail!("pending add: text must be non-empty");
     }
-    if text.starts_with("[ ]") || text.starts_with("[/]") || text.starts_with("[x]") || text.starts_with("[X]") {
-        bail!("pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items");
+    if text.starts_with("[ ]")
+        || text.starts_with("[/]")
+        || text.starts_with("[x]")
+        || text.starts_with("[X]")
+    {
+        bail!(
+            "pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items"
+        );
     }
     let (prelude, mut items, postlude) = parse_items(body);
 
@@ -537,12 +554,19 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     };
     taken.insert(id.clone());
 
-    items.insert(0, PendingItem {
-        id: id.clone(),
-        state: if gated { PendingState::Gated } else { PendingState::Open },
-        gate_type: None,
-        text: text.to_string(),
-    });
+    items.insert(
+        0,
+        PendingItem {
+            id: id.clone(),
+            state: if gated {
+                PendingState::Gated
+            } else {
+                PendingState::Open
+            },
+            gate_type: None,
+            text: text.to_string(),
+        },
+    );
     Ok((render_items(&prelude, &items, &postlude), id))
 }
 
@@ -667,7 +691,11 @@ pub fn op_resolve_gate(body: &str, gate_type: &str) -> (String, Vec<String>) {
 pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String> {
     let id = id.trim().to_lowercase();
     let gt = gate_type.trim().to_lowercase();
-    if gt.is_empty() || !gt.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if gt.is_empty()
+        || !gt
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         bail!("invalid gate type: must be alphanumeric/dash/underscore");
     }
     let (prelude, mut items, postlude) = parse_items(body);
@@ -676,7 +704,11 @@ pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String>
         .find(|i| i.id == id)
         .ok_or_else(|| anyhow!("pending set-gate-type: no item with id [#{}]", id))?;
     if item.state != PendingState::Gated {
-        bail!("pending set-gate-type: item [#{}] must be gated ([/]) to set a typed gate, current state: [{}]", id, item.state.box_char());
+        bail!(
+            "pending set-gate-type: item [#{}] must be gated ([/]) to set a typed gate, current state: [{}]",
+            id,
+            item.state.box_char()
+        );
     }
     item.gate_type = Some(gt);
     Ok(render_items(&prelude, &items, &postlude))
@@ -898,8 +930,16 @@ mod tests {
         let body = "- [ ] [#a1b2] existing task\n- [ ] [#c3d4] later task\n";
         let (new_body, _id) = op_add(body, "new first task", DOC_ID, false).unwrap();
         let lines: Vec<&str> = new_body.lines().collect();
-        assert!(lines[0].contains("new first task"), "expected new item first, got: {}", new_body);
-        assert!(lines[1].contains("existing task"), "expected previous first item second, got: {}", new_body);
+        assert!(
+            lines[0].contains("new first task"),
+            "expected new item first, got: {}",
+            new_body
+        );
+        assert!(
+            lines[1].contains("existing task"),
+            "expected previous first item second, got: {}",
+            new_body
+        );
     }
 
     #[test]
@@ -945,7 +985,12 @@ mod tests {
         for marker in &["[ ] task", "[/] task", "[x] task", "[X] task"] {
             let err = op_add("", marker, DOC_ID, false).unwrap_err();
             let msg = format!("{}", err);
-            assert!(msg.contains("state marker"), "expected state marker error for '{}', got: {}", marker, msg);
+            assert!(
+                msg.contains("state marker"),
+                "expected state marker error for '{}', got: {}",
+                marker,
+                msg
+            );
         }
     }
 
@@ -954,7 +999,11 @@ mod tests {
         let (body, _id1) = op_add("", "Wire Sift into corky", DOC_ID, false).unwrap();
         let err = op_add(&body, "Wire Sift into corky", DOC_ID, false).unwrap_err();
         let msg = format!("{}", err);
-        assert!(msg.contains("duplicate"), "expected duplicate error, got: {}", msg);
+        assert!(
+            msg.contains("duplicate"),
+            "expected duplicate error, got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -974,7 +1023,10 @@ mod tests {
         let hash_count = new_body.matches("[#").count();
         assert_eq!(hash_count, 1, "expected exactly one [# in: {}", new_body);
         assert!(new_body.contains("task with placeholder"));
-        assert!(!new_body.contains("[#] task"), "bare [#] should not survive in text");
+        assert!(
+            !new_body.contains("[#] task"),
+            "bare [#] should not survive in text"
+        );
     }
 
     #[test]
@@ -1007,8 +1059,16 @@ mod tests {
         assert!(!items[1].id.is_empty(), "second should have id");
         assert_ne!(items[0].id, items[1].id, "ids should be unique");
         // No residual [#] in text
-        assert!(!items[0].text.contains("[#]"), "first text has residual [#]: {}", items[0].text);
-        assert!(!items[1].text.contains("[#]"), "second text has residual [#]: {}", items[1].text);
+        assert!(
+            !items[0].text.contains("[#]"),
+            "first text has residual [#]: {}",
+            items[0].text
+        );
+        assert!(
+            !items[1].text.contains("[#]"),
+            "second text has residual [#]: {}",
+            items[1].text
+        );
     }
 
     #[test]
@@ -1017,7 +1077,11 @@ mod tests {
         let body = "- [ ] [#] task\n";
         let (first_pass, _) = backfill(body, DOC_ID, &ids());
         let (second_pass, changed) = backfill(&first_pass, DOC_ID, &ids());
-        assert!(!changed, "second backfill should be no-op, got: {}", second_pass);
+        assert!(
+            !changed,
+            "second backfill should be no-op, got: {}",
+            second_pass
+        );
         assert_eq!(first_pass, second_pass);
     }
 
@@ -1087,8 +1151,7 @@ mod tests {
     #[test]
     fn op_reorder_reorders_by_id() {
         let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] second\n- [ ] [#e5f6] third\n";
-        let new_body =
-            op_reorder(body, &["e5f6".to_string(), "a1b2".to_string()]).unwrap();
+        let new_body = op_reorder(body, &["e5f6".to_string(), "a1b2".to_string()]).unwrap();
         let (_, items, _) = parse_items(&new_body);
         assert_eq!(items[0].id, "e5f6");
         assert_eq!(items[1].id, "a1b2");
@@ -1112,12 +1175,21 @@ mod tests {
         // Open
         assert_eq!(validate_transition(Open, Gate).unwrap(), Transition(Gated));
         assert!(validate_transition(Open, Ungate).is_err());
-        assert_eq!(validate_transition(Open, MarkDone).unwrap(), Transition(Done));
+        assert_eq!(
+            validate_transition(Open, MarkDone).unwrap(),
+            Transition(Done)
+        );
 
         // Gated
         assert_eq!(validate_transition(Gated, Gate).unwrap(), NoOp);
-        assert_eq!(validate_transition(Gated, Ungate).unwrap(), Transition(Open));
-        assert_eq!(validate_transition(Gated, MarkDone).unwrap(), Transition(Done));
+        assert_eq!(
+            validate_transition(Gated, Ungate).unwrap(),
+            Transition(Open)
+        );
+        assert_eq!(
+            validate_transition(Gated, MarkDone).unwrap(),
+            Transition(Done)
+        );
 
         // Done
         assert!(validate_transition(Done, Gate).is_err());
@@ -1283,7 +1355,12 @@ mod tests {
         let ids: HashSet<String> = items.iter().map(|i| i.id.clone()).collect();
         assert_eq!(ids.len(), 50, "ids must be unique");
         for id in &ids {
-            assert!((4..=8).contains(&id.len()), "id {} has width {}", id, id.len());
+            assert!(
+                (4..=8).contains(&id.len()),
+                "id {} has width {}",
+                id,
+                id.len()
+            );
         }
     }
 
@@ -1415,7 +1492,8 @@ mod tests {
 
     #[test]
     fn parse_typed_gate_with_hyphens_underscores() {
-        let body = "- [/code-review] [#a1b2] Review PR\n- [/pre_release] [#c3d4] Pre-release check\n";
+        let body =
+            "- [/code-review] [#a1b2] Review PR\n- [/pre_release] [#c3d4] Pre-release check\n";
         let (_, items, _) = parse_items(body);
         assert_eq!(items[0].gate_type, Some("code-review".to_string()));
         assert_eq!(items[1].gate_type, Some("pre_release".to_string()));

@@ -80,7 +80,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::component::{self, find_comment_end, Component};
+use crate::component::{self, Component, find_comment_end};
 use crate::project_config;
 
 /// A parsed patch directive from an agent response.
@@ -154,7 +154,10 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         }
 
         // Skip markers inside code regions
-        if code_ranges.iter().any(|&(start, end)| pos >= start && pos < end) {
+        if code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+        {
             pos += 4;
             continue;
         }
@@ -176,7 +179,8 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         // Recognize two prefix forms:
         //   - `patch:<name>`     — original form (deprecated for pending component)
         //   - `replace:pending`  — canonical form for the pending component (#25ag)
-        let parsed_prefix: Option<(&str, &str)> = if let Some(rest) = trimmed.strip_prefix("patch:") {
+        let parsed_prefix: Option<(&str, &str)> = if let Some(rest) = trimmed.strip_prefix("patch:")
+        {
             Some(("patch", rest))
         } else if let Some(rest) = trimmed.strip_prefix("replace:") {
             // Only `replace:pending` is accepted. Other `replace:*` names fall
@@ -237,7 +241,9 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
             // Find the matching close: <!-- /<prefix>:name --> (skipping code blocks).
             // The close must use the same prefix as the open.
             let close_marker = format!("<!-- /{}:{} -->", prefix_kind, name);
-            if let Some(close_pos) = find_outside_code(&close_marker, response, content_start, &code_ranges) {
+            if let Some(close_pos) =
+                find_outside_code(&close_marker, response, content_start, &code_ranges)
+            {
                 let content = &response[content_start..close_pos];
                 patches.push(PatchBlock {
                     name: name.to_string(),
@@ -290,8 +296,19 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 ///
 /// Returns the modified document. Unmatched content (outside patch blocks)
 /// is appended to `<!-- agent:output -->` if it exists, or creates one at the end.
-pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &Path) -> Result<String> {
-    apply_patches_with_overrides(doc, patches, unmatched, file, &std::collections::HashMap::new())
+pub fn apply_patches(
+    doc: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+    file: &Path,
+) -> Result<String> {
+    apply_patches_with_overrides(
+        doc,
+        patches,
+        unmatched,
+        file,
+        &std::collections::HashMap::new(),
+    )
 }
 
 /// Strip trailing bare `❯` lines from exchange-bound content.
@@ -351,12 +368,14 @@ pub fn apply_patches_with_overrides(
         let content = exchange.content(&result);
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
-        eprintln!("[template] pre-patch boundary {} inserted at end of exchange", id);
+        eprintln!(
+            "[template] pre-patch boundary {} inserted at end of exchange",
+            id
+        );
     }
 
     // Apply patches in reverse order (by position) to preserve byte offsets
-    let components = component::parse(&result)
-        .context("failed to parse components")?;
+    let components = component::parse(&result).context("failed to parse components")?;
 
     // Load component configs
     let configs = load_component_configs(file);
@@ -390,7 +409,8 @@ pub fn apply_patches_with_overrides(
     for (idx, patch) in &ops {
         let comp = &components[*idx];
         // Mode precedence: stream overrides > inline attr > config.toml ([components] section) > built-in default
-        let mode = mode_overrides.get(&patch.name)
+        let mode = mode_overrides
+            .get(&patch.name)
             .map(|s| s.as_str())
             .or_else(|| comp.patch_mode())
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
@@ -428,10 +448,13 @@ pub fn apply_patches_with_overrides(
     // Handle unmatched content
     if !all_unmatched.is_empty() {
         // Re-parse after patches applied
-        let components = component::parse(&result)
-            .context("failed to re-parse components after patching")?;
+        let components =
+            component::parse(&result).context("failed to re-parse components after patching")?;
 
-        if let Some(output_comp) = components.iter().find(|c| c.name == "exchange" || c.name == "output") {
+        if let Some(output_comp) = components
+            .iter()
+            .find(|c| c.name == "exchange" || c.name == "output")
+        {
             // Unmatched content lands in exchange/output — strip trailing bare `❯`
             // lines so a phantom prompt row never precedes the boundary marker.
             let stripped = if output_comp.name == "exchange" {
@@ -442,7 +465,10 @@ pub fn apply_patches_with_overrides(
             let unmatched = &stripped;
             // Try boundary-aware append first (preserves prompt ordering)
             if let Some(bid) = find_boundary_in_component(&result, output_comp) {
-                eprintln!("[template] unmatched content: using boundary {} for insertion", &bid[..bid.len().min(8)]);
+                eprintln!(
+                    "[template] unmatched content: using boundary {} for insertion",
+                    &bid[..bid.len().min(8)]
+                );
                 result = output_comp.append_with_boundary(&result, unmatched, &bid);
             } else {
                 // No boundary — plain append to exchange/output component
@@ -478,7 +504,9 @@ pub fn apply_patches_with_overrides(
     {
         let max_lines_configs = load_max_lines_configs(file);
         'stability: for _ in 0..3 {
-            let Ok(components) = component::parse(&result) else { break };
+            let Ok(components) = component::parse(&result) else {
+                break;
+            };
             for comp in &components {
                 let max_lines = comp
                     .attrs
@@ -517,7 +545,10 @@ pub fn apply_patches_with_overrides(
             let content = exchange.content(&result);
             let new_content = format!("{}\n{}\n", content.trim_end(), marker);
             result = exchange.replace_content(&result, &new_content);
-            eprintln!("[template] re-inserted boundary {} at end of exchange", &id[..id.len().min(8)]);
+            eprintln!(
+                "[template] re-inserted boundary {} at end of exchange",
+                &id[..id.len().min(8)]
+            );
         }
     }
 
@@ -586,9 +617,8 @@ fn strip_transient_head_markers(content: &str) -> String {
             let body = rewritten.trim_end_matches('\n').trim_end_matches('\r');
             let trimmed = body.trim_start();
             let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-            let is_markdown_heading = hash_count > 0
-                && hash_count <= 6
-                && trimmed[hash_count..].starts_with(' ');
+            let is_markdown_heading =
+                hash_count > 0 && hash_count <= 6 && trimmed[hash_count..].starts_with(' ');
             let is_bold_pseudo_header = trimmed.starts_with("**") && trimmed.ends_with("** (HEAD)");
             if (is_markdown_heading || is_bold_pseudo_header)
                 && let Some(stripped) = body.strip_suffix(" (HEAD)")
@@ -712,7 +742,10 @@ pub(crate) fn annotate_re_headings_with_head(
     let code_ranges = component::find_code_ranges(content);
     let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
 
-    let mut lines: Vec<String> = content.split_inclusive('\n').map(|s| s.to_string()).collect();
+    let mut lines: Vec<String> = content
+        .split_inclusive('\n')
+        .map(|s| s.to_string())
+        .collect();
     let mut re_indices: Vec<usize> = Vec::new();
     let mut offset = 0usize;
 
@@ -793,14 +826,17 @@ pub(crate) fn annotate_re_headings_with_head(
     lines.concat()
 }
 
-
 /// Remove all boundary markers from a document (line-level removal).
 /// Skips boundaries inside fenced code blocks (lesson #13).
 fn remove_all_boundaries(doc: &str) -> String {
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
     let code_ranges = component::find_code_ranges(doc);
-    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
     let mut result = String::with_capacity(doc.len());
     let mut offset = 0;
     for line in doc.lines() {
@@ -830,7 +866,10 @@ fn find_boundary_in_component(doc: &str, comp: &Component) -> Option<String> {
     let mut search_from = 0;
     while let Some(start) = content_region[search_from..].find(prefix) {
         let abs_start = comp.open_end + search_from + start;
-        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+        if code_ranges
+            .iter()
+            .any(|&(cs, ce)| abs_start >= cs && abs_start < ce)
+        {
             search_from += start + prefix.len();
             continue;
         }
@@ -861,7 +900,9 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .map(|comp| {
             let content = comp.content(&doc).to_string();
             // Inline attr > config.toml ([components] section) > built-in default
-            let mode = comp.patch_mode().map(|s| s.to_string())
+            let mode = comp
+                .patch_mode()
+                .map(|s| s.to_string())
                 .or_else(|| configs.get(&comp.name).cloned())
                 .unwrap_or_else(|| default_mode(&comp.name).to_string());
             // Compute line number from byte offset
@@ -890,7 +931,9 @@ fn load_component_configs(file: &Path) -> std::collections::HashMap<String, Stri
     proj_cfg
         .components
         .iter()
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| (name.clone(), cfg.patch.clone()))
+        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
+            (name.clone(), cfg.patch.clone())
+        })
         .collect()
 }
 
@@ -902,7 +945,9 @@ fn load_max_lines_configs(file: &Path) -> std::collections::HashMap<String, usiz
         .components
         .iter()
         .filter(|(_, cfg)| cfg.max_lines > 0)
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| (name.clone(), cfg.max_lines))
+        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
+            (name.clone(), cfg.max_lines)
+        })
         .collect()
 }
 
@@ -1024,12 +1069,20 @@ fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
 
 /// Find `needle` in `haystack` starting at `from`, skipping occurrences inside code ranges.
 /// Returns the byte offset of the match within `haystack` (absolute, not relative to `from`).
-fn find_outside_code(needle: &str, haystack: &str, from: usize, code_ranges: &[(usize, usize)]) -> Option<usize> {
+fn find_outside_code(
+    needle: &str,
+    haystack: &str,
+    from: usize,
+    code_ranges: &[(usize, usize)],
+) -> Option<usize> {
     let mut search_start = from;
     loop {
         let rel = haystack[search_start..].find(needle)?;
         let abs = search_start + rel;
-        if code_ranges.iter().any(|&(start, end)| abs >= start && abs < end) {
+        if code_ranges
+            .iter()
+            .any(|&(start, end)| abs >= start && abs < end)
+        {
             // Inside a code block — skip past this occurrence
             search_start = abs + needle.len();
             continue;
@@ -1037,7 +1090,6 @@ fn find_outside_code(needle: &str, haystack: &str, from: usize, code_ranges: &[(
         return Some(abs);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1164,8 +1216,14 @@ All green.
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Missing component content should be routed to exchange
-        assert!(result.contains("overflow data"), "missing patch content should appear in exchange");
-        assert!(result.contains("previous"), "existing exchange content should be preserved");
+        assert!(
+            result.contains("overflow data"),
+            "missing patch content should appear in exchange"
+        );
+        assert!(
+            result.contains("previous"),
+            "existing exchange content should be preserved"
+        );
     }
 
     #[test]
@@ -1182,8 +1240,14 @@ All green.
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Should auto-create exchange component
-        assert!(result.contains("<!-- agent:exchange -->"), "should create exchange component");
-        assert!(result.contains("overflow data"), "overflow content should be in exchange");
+        assert!(
+            result.contains("<!-- agent:exchange -->"),
+            "should create exchange component"
+        );
+        assert!(
+            result.contains("overflow data"),
+            "overflow content should be in exchange"
+        );
     }
 
     #[test]
@@ -1270,7 +1334,10 @@ This is just an example.
         let (patches, unmatched) = parse_patches(response).unwrap();
         assert_eq!(patches.len(), 1, "should only find the outer real patch");
         assert_eq!(patches[0].name, "exchange");
-        assert!(patches[0].content.contains("<!-- patch:fake -->"), "code block content should be preserved");
+        assert!(
+            patches[0].content.contains("<!-- patch:fake -->"),
+            "code block content should be preserved"
+        );
         assert!(unmatched.is_empty());
     }
 
@@ -1344,7 +1411,10 @@ Some real content here.
 This opener has no matching close.
 ";
         let (patches, unmatched) = parse_patches(response).unwrap();
-        assert!(patches.is_empty(), "orphaned opener should not produce a patch");
+        assert!(
+            patches.is_empty(),
+            "orphaned opener should not produce a patch"
+        );
         assert_eq!(
             unmatched, "Some real content here.\nThis opener has no matching close.",
             "unmatched should contain text before and after the orphaned marker, but not the marker itself"
@@ -1383,7 +1453,8 @@ Interstitial text.
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "[components.status]\npatch = \"append\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         // But the inline attr says replace
         let doc = "<!-- agent:status mode=replace -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
@@ -1425,7 +1496,8 @@ Interstitial text.
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "[components.status]\npatch = \"append\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
@@ -1467,7 +1539,8 @@ Interstitial text.
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "[components.status]\npatch = \"append\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         let doc = "<!-- agent:status patch=replace -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
@@ -1486,7 +1559,8 @@ Interstitial text.
         // Both patch= and mode= present; patch= wins
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
-        let doc = "<!-- agent:exchange patch=replace mode=append -->\nold\n<!-- /agent:exchange -->\n";
+        let doc =
+            "<!-- agent:exchange patch=replace mode=append -->\nold\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
         let patches = vec![PatchBlock {
@@ -1507,7 +1581,8 @@ Interstitial text.
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "[components.status]\npatch = \"append\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
@@ -1536,7 +1611,8 @@ Interstitial text.
         }];
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
-        let result = apply_patches_with_overrides(doc, &patches, "", &doc_path, &overrides).unwrap();
+        let result =
+            apply_patches_with_overrides(doc, &patches, "", &doc_path, &overrides).unwrap();
         // Stream override (replace) should win over inline attr (append)
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
@@ -1573,11 +1649,20 @@ real status content
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
 
         // The real component should be patched
-        assert!(result.contains("patched status\n"), "real component should receive the patch");
+        assert!(
+            result.contains("patched status\n"),
+            "real component should receive the patch"
+        );
         // The code block example should be untouched
-        assert!(result.contains("example scaffold content"), "code block content should be preserved");
+        assert!(
+            result.contains("example scaffold content"),
+            "code block content should be preserved"
+        );
         // The code block's markers should still be there
-        assert!(result.contains("```markdown\n<!-- agent:status -->"), "code block markers should be preserved");
+        assert!(
+            result.contains("```markdown\n<!-- agent:status -->"),
+            "code block markers should be preserved"
+        );
     }
 
     #[test]
@@ -1658,7 +1743,8 @@ real status content
         let dir = setup_project();
         let file = dir.path().join("test.md");
         // Document with exchange but NO boundary marker
-        let doc = "<!-- agent:exchange patch=append -->\nUser prompt here.\n<!-- /agent:exchange -->\n";
+        let doc =
+            "<!-- agent:exchange patch=append -->\nUser prompt here.\n<!-- /agent:exchange -->\n";
         std::fs::write(&file, doc).unwrap();
 
         let response = "<!-- patch:exchange -->\nAgent response.\n<!-- /patch:exchange -->\n";
@@ -1684,13 +1770,19 @@ real status content
         let response1 = "<!-- patch:exchange -->\nResponse 1.\n<!-- /patch:exchange -->\n";
         let (patches1, unmatched1) = parse_patches(response1).unwrap();
         let result1 = apply_patches(doc, &patches1, &unmatched1, &file).unwrap();
-        assert!(result1.contains("<!-- agent:boundary:"), "cycle 1 must have boundary");
+        assert!(
+            result1.contains("<!-- agent:boundary:"),
+            "cycle 1 must have boundary"
+        );
 
         // Cycle 2 — use cycle 1's output as the new doc (simulates next write)
         let response2 = "<!-- patch:exchange -->\nResponse 2.\n<!-- /patch:exchange -->\n";
         let (patches2, unmatched2) = parse_patches(response2).unwrap();
         let result2 = apply_patches(&result1, &patches2, &unmatched2, &file).unwrap();
-        assert!(result2.contains("<!-- agent:boundary:"), "cycle 2 must have boundary");
+        assert!(
+            result2.contains("<!-- agent:boundary:"),
+            "cycle 2 must have boundary"
+        );
     }
 
     #[test]
@@ -1721,13 +1813,22 @@ User prompt here.
         // Old boundary should be gone
         assert!(!result.contains("old-id"), "old boundary should be removed");
         // New boundary should exist
-        assert!(result.contains("<!-- agent:boundary:"), "new boundary should be inserted");
+        assert!(
+            result.contains("<!-- agent:boundary:"),
+            "new boundary should be inserted"
+        );
         // New boundary should be after the user prompt, before close tag
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let prompt_pos = result.find("User prompt here.").unwrap();
         let close_pos = result.find("<!-- /agent:exchange -->").unwrap();
-        assert!(boundary_pos > prompt_pos, "boundary should be after user prompt");
-        assert!(boundary_pos < close_pos, "boundary should be before close tag");
+        assert!(
+            boundary_pos > prompt_pos,
+            "boundary should be after user prompt"
+        );
+        assert!(
+            boundary_pos < close_pos,
+            "boundary should be before close tag"
+        );
     }
 
     #[test]
@@ -1737,7 +1838,10 @@ User prompt here.
 Some content.
 <!-- /agent:output -->";
         let result = reposition_boundary_to_end(doc);
-        assert!(!result.contains("<!-- agent:boundary:"), "no boundary should be added to non-exchange");
+        assert!(
+            !result.contains("<!-- agent:boundary:"),
+            "no boundary should be added to non-exchange"
+        );
     }
 
     #[test]
@@ -1780,7 +1884,10 @@ new body
 User text with no response headings.
 <!-- /agent:exchange -->";
         let result = reposition_boundary_to_end(doc);
-        assert!(!result.contains("(HEAD)"), "no heading → no (HEAD); got:\n{result}");
+        assert!(
+            !result.contains("(HEAD)"),
+            "no heading → no (HEAD); got:\n{result}"
+        );
     }
 
     #[test]
@@ -1834,11 +1941,23 @@ body d
         let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
 
         // Both old headings lose (HEAD).
-        assert!(result.contains("### Re: old-1\n"), "old-1 must not have (HEAD); got:\n{result}");
-        assert!(result.contains("### Re: old-2\n"), "old-2 must not have (HEAD); got:\n{result}");
+        assert!(
+            result.contains("### Re: old-1\n"),
+            "old-1 must not have (HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: old-2\n"),
+            "old-2 must not have (HEAD); got:\n{result}"
+        );
         // Both new headings get (HEAD).
-        assert!(result.contains("### Re: new-1 (HEAD)"), "new-1 must get (HEAD); got:\n{result}");
-        assert!(result.contains("### Re: new-2 (HEAD)"), "new-2 must get (HEAD); got:\n{result}");
+        assert!(
+            result.contains("### Re: new-1 (HEAD)"),
+            "new-1 must get (HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: new-2 (HEAD)"),
+            "new-2 must get (HEAD); got:\n{result}"
+        );
         // Exactly two (HEAD)s — one per new heading.
         assert_eq!(
             result.matches("(HEAD)").count(),
@@ -1860,8 +1979,14 @@ b
 <!-- /agent:exchange -->";
         let baseline: std::collections::HashSet<String> = std::collections::HashSet::new();
         let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
-        assert!(result.contains("### Re: first (HEAD)"), "first gets (HEAD); got:\n{result}");
-        assert!(result.contains("### Re: second (HEAD)"), "second gets (HEAD); got:\n{result}");
+        assert!(
+            result.contains("### Re: first (HEAD)"),
+            "first gets (HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: second (HEAD)"),
+            "second gets (HEAD); got:\n{result}"
+        );
         assert_eq!(
             result.matches("(HEAD)").count(),
             2,
@@ -1881,7 +2006,10 @@ more body
 body
 <!-- /agent:exchange -->";
         let set = exchange_baseline_headings(doc);
-        assert!(set.contains("### Re: one"), "stripped one present; got: {set:?}");
+        assert!(
+            set.contains("### Re: one"),
+            "stripped one present; got: {set:?}"
+        );
         assert!(set.contains("### Re: two"), "two present; got: {set:?}");
         assert_eq!(set.len(), 2, "only Re: headings; got: {set:?}");
     }
@@ -1898,8 +2026,14 @@ body
 more
 <!-- /agent:exchange -->";
         let set = exchange_baseline_headings(doc);
-        assert!(set.contains("### Re: indented"), "indented entry normalized; got: {set:?}");
-        assert!(set.contains("### Re: flush"), "flush entry present; got: {set:?}");
+        assert!(
+            set.contains("### Re: indented"),
+            "indented entry normalized; got: {set:?}"
+        );
+        assert!(
+            set.contains("### Re: flush"),
+            "flush entry present; got: {set:?}"
+        );
     }
 
     #[test]
@@ -1921,8 +2055,7 @@ body2
         let mut baseline = std::collections::HashSet::new();
         baseline.insert("### Re: foo".to_string());
         baseline.insert("### Re: bar".to_string());
-        let result =
-            reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+        let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
         // Both headings are in baseline → filter is empty → fallback marks
         // the LAST Re: heading only. "### Re: foo" stays unmarked (proving
         // trim_start normalization worked — without it, foo would be
@@ -1958,8 +2091,7 @@ more
         let mut baseline = std::collections::HashSet::new();
         baseline.insert("### Re: older".to_string());
         baseline.insert("### Re: newer".to_string());
-        let result =
-            reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+        let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
         assert!(
             result.contains("### Re: newer (HEAD)"),
             "last heading retains (HEAD) via fallback; got:\n{result}"
@@ -2107,7 +2239,8 @@ c
 
     #[test]
     fn parse_patch_with_multiple_attrs() {
-        let response = "<!-- patch:output mode=replace max_lines=50 -->\nContent.\n<!-- /patch:output -->\n";
+        let response =
+            "<!-- patch:output mode=replace max_lines=50 -->\nContent.\n<!-- /patch:output -->\n";
         let (patches, _) = parse_patches(response).unwrap();
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].name, "output");
@@ -2138,9 +2271,18 @@ c
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
 
         let count = result.matches("❯ How do I configure .mise.toml?").count();
-        assert_eq!(count, 1, "prompt line should appear exactly once, got:\n{result}");
-        assert!(result.contains("### Re: configure .mise.toml"), "response heading should be present");
-        assert!(result.contains("Use `[env]` section."), "response body should be present");
+        assert_eq!(
+            count, 1,
+            "prompt line should appear exactly once, got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: configure .mise.toml"),
+            "response heading should be present"
+        );
+        assert!(
+            result.contains("Use `[env]` section."),
+            "response body should be present"
+        );
     }
 
     #[test]
@@ -2161,8 +2303,14 @@ Previous response.
             attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
-        assert!(result.contains("Previous response."), "existing content preserved");
-        assert!(result.contains("### Re: something"), "response heading present");
+        assert!(
+            result.contains("Previous response."),
+            "existing content preserved"
+        );
+        assert!(
+            result.contains("### Re: something"),
+            "response heading present"
+        );
         // Multiple blank lines should survive (dedup only targets non-blank)
         assert!(result.contains('\n'), "blank lines preserved");
     }
@@ -2258,7 +2406,10 @@ Previous response.
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         let components = component::parse(&result).unwrap();
         let notes = components.iter().find(|c| c.name == "notes").unwrap();
-        assert!(notes.content(&result).contains("❯"), "non-exchange content retains ❯");
+        assert!(
+            notes.content(&result).contains("❯"),
+            "non-exchange content retains ❯"
+        );
     }
 
     #[test]

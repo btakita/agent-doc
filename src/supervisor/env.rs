@@ -53,7 +53,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use indexmap::IndexMap;
 
-use crate::env::{expand_values, EnvMap};
+use crate::env::{EnvMap, expand_values};
 use crate::frontmatter::Frontmatter;
 
 /// Declarative description of how to build the child env.
@@ -256,10 +256,7 @@ mod tests {
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_BASE", "/parent/base");
         let spec = EnvSpec {
             inherit_parent: true,
-            overrides: env_map(&[(
-                "DERIVED",
-                Some("$AGENT_DOC_ENV_TEST_BASE/child"),
-            )]),
+            overrides: env_map(&[("DERIVED", Some("$AGENT_DOC_ENV_TEST_BASE/child"))]),
         };
         let resolved = spec.resolve().unwrap();
         assert_eq!(

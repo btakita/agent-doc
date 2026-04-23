@@ -232,9 +232,8 @@ pub fn extract_inline_annotations(annotated_diff: &str) -> Vec<String> {
         if is_head_boundary_artifact(content) {
             continue;
         }
-        let has_substantive_agent_after = lines[i + 1..]
-            .iter()
-            .any(|l| is_substantive_agent_line(l));
+        let has_substantive_agent_after =
+            lines[i + 1..].iter().any(|l| is_substantive_agent_line(l));
         if has_substantive_agent_after {
             annotations.push(content.to_string());
         }
@@ -280,11 +279,36 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
 /// Known Claude Code built-in slash command names (without arguments).
 /// These affect Claude Code session state and cannot be invoked via the Skill tool.
 const BUILTIN_COMMAND_NAMES: &[&str] = &[
-    "/help", "/model", "/clear", "/compact", "/cost", "/login", "/logout",
-    "/status", "/config", "/memory", "/review", "/bug", "/fast", "/slow",
-    "/permissions", "/terminal-setup", "/doctor", "/init", "/pr-comments",
-    "/vim", "/diff", "/undo", "/resume", "/listen", "/mcp", "/approved-tools",
-    "/add-dir", "/release-notes", "/hooks", "/btw",
+    "/help",
+    "/model",
+    "/clear",
+    "/compact",
+    "/cost",
+    "/login",
+    "/logout",
+    "/status",
+    "/config",
+    "/memory",
+    "/review",
+    "/bug",
+    "/fast",
+    "/slow",
+    "/permissions",
+    "/terminal-setup",
+    "/doctor",
+    "/init",
+    "/pr-comments",
+    "/vim",
+    "/diff",
+    "/undo",
+    "/resume",
+    "/listen",
+    "/mcp",
+    "/approved-tools",
+    "/add-dir",
+    "/release-notes",
+    "/hooks",
+    "/btw",
 ];
 
 /// Returns true if the command is a Claude Code built-in (not invocable via Skill tool).
@@ -313,7 +337,10 @@ pub fn parse_slash_commands_classified(diff: &str) -> ParsedSlashCommands {
             skill_commands.push(cmd);
         }
     }
-    ParsedSlashCommands { skill_commands, builtin_commands }
+    ParsedSlashCommands {
+        skill_commands,
+        builtin_commands,
+    }
 }
 
 /// Extract slash commands from user-added lines in a unified diff.
@@ -429,10 +456,7 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     // Copy-on-read: capture snapshot mtime at read time so we can detect
     // external modifications before any stale-snapshot recovery write.
     // Fixes #wcf5: IDE watchers and git hooks bypass advisory flock.
-    let snap_mtime_at_read = snap_path
-        .metadata()
-        .and_then(|m| m.modified())
-        .ok();
+    let snap_mtime_at_read = snap_path.metadata().and_then(|m| m.modified()).ok();
 
     // Wait for user to finish typing (truncation detection with delayed rechecks)
     let current = wait_for_stable_content(doc, &previous)?;
@@ -460,12 +484,12 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     );
 
     let diff = TextDiff::from_lines(&previous_stripped, &current_stripped);
-    let has_changes = diff
-        .iter_all_changes()
-        .any(|c| c.tag() != ChangeTag::Equal);
+    let has_changes = diff.iter_all_changes().any(|c| c.tag() != ChangeTag::Equal);
 
     if !has_changes {
-        eprintln!("[diff] no changes detected between snapshot and document (after comment stripping)");
+        eprintln!(
+            "[diff] no changes detected between snapshot and document (after comment stripping)"
+        );
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
             eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
@@ -481,16 +505,15 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     // by an external process (IDE watcher, git hook) since we read it. If it
     // changed, skip recovery — the external update is authoritative.
     if is_stale_snapshot(&previous, &current) {
-        let snap_mtime_now = snap_path
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok();
+        let snap_mtime_now = snap_path.metadata().and_then(|m| m.modified()).ok();
         if snap_mtime_at_read != snap_mtime_now {
             eprintln!(
                 "[snapshot recovery] Skipped — snapshot modified externally since read (copy-on-read guard)"
             );
         } else {
-            eprintln!("[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale");
+            eprintln!(
+                "[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale"
+            );
             snapshot::save(doc, &current)?;
             let elapsed_total = t_total.elapsed().as_millis();
             if elapsed_total > 0 {
@@ -539,7 +562,8 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
     let mut stable_count = 0u32;
 
     for attempt in 0..MAX_RECHECKS {
-        let last_added = extract_last_added_line(&strip_comments(previous), &strip_comments(&current));
+        let last_added =
+            extract_last_added_line(&strip_comments(previous), &strip_comments(&current));
 
         if let Some(line) = &last_added
             && looks_truncated(line)
@@ -560,7 +584,10 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
                 stable_count = 0;
             }
             if stable_count >= STABLE_CHECKS_REQUIRED {
-                eprintln!("[diff] Content stable after {} consecutive checks", STABLE_CHECKS_REQUIRED);
+                eprintln!(
+                    "[diff] Content stable after {} consecutive checks",
+                    STABLE_CHECKS_REQUIRED
+                );
                 break;
             }
             continue;
@@ -640,7 +667,8 @@ fn looks_truncated(line: &str) -> bool {
             let before_dot = &trimmed[..trimmed.len() - 1];
             // Common TLD/domain fragments: if there's a word before the dot that looks
             // like a domain component, it's likely truncated (e.g., "crates." → "crates.io")
-            if !before_dot.is_empty() && before_dot.chars().all(|c| c.is_alphanumeric() || c == '-') {
+            if !before_dot.is_empty() && before_dot.chars().all(|c| c.is_alphanumeric() || c == '-')
+            {
                 return true;
             }
         }
@@ -656,7 +684,10 @@ fn looks_truncated(line: &str) -> bool {
     if last_char == '.' {
         let before_dot = &trimmed[..trimmed.len() - 1];
         // Find the last word (after last space)
-        let last_word = before_dot.rsplit_once(' ').map(|(_, w)| w).unwrap_or(before_dot);
+        let last_word = before_dot
+            .rsplit_once(' ')
+            .map(|(_, w)| w)
+            .unwrap_or(before_dot);
         // If last word contains dots already (e.g., "www.example.") or is a known domain-like
         // pattern, treat as potentially truncated
         if last_word.contains('.') || last_word.ends_with("http") || last_word.ends_with("https") {
@@ -666,7 +697,10 @@ fn looks_truncated(line: &str) -> bool {
         return false;
     }
 
-    let terminal = matches!(last_char, '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|');
+    let terminal = matches!(
+        last_char,
+        '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|'
+    );
 
     !terminal
 }
@@ -814,8 +848,7 @@ pub fn classify_diff(diff_text: &str) -> DiffClassification {
     }
 
     // 3. SimpleQuestion: single added line ending with `?`, no removals
-    if added_content.len() == 1 && removed_content.is_empty() && added_content[0].ends_with('?')
-    {
+    if added_content.len() == 1 && removed_content.is_empty() && added_content[0].ends_with('?') {
         return DiffClassification {
             diff_type: DiffType::SimpleQuestion,
             diff_type_reason: format!(
@@ -942,11 +975,7 @@ fn is_annotation(added: &[&str], removed: &[&str]) -> bool {
 
 /// Truncate a string for use in reason messages.
 fn truncate_for_reason(s: &str) -> &str {
-    if s.len() <= 80 {
-        s
-    } else {
-        &s[..80]
-    }
+    if s.len() <= 80 { s } else { &s[..80] }
 }
 
 /// This exposes the Rust truncation detection to external callers
@@ -977,7 +1006,9 @@ mod tests {
         let previous = "line1\n";
         let current = "line1\nline2\n";
         let diff = TextDiff::from_lines(previous, current);
-        let has_insert = diff.iter_all_changes().any(|c| c.tag() == ChangeTag::Insert);
+        let has_insert = diff
+            .iter_all_changes()
+            .any(|c| c.tag() == ChangeTag::Insert);
         assert!(has_insert);
     }
 
@@ -987,7 +1018,9 @@ mod tests {
         let previous = "line1\nline2\n";
         let current = "line1\n";
         let diff = TextDiff::from_lines(previous, current);
-        let has_delete = diff.iter_all_changes().any(|c| c.tag() == ChangeTag::Delete);
+        let has_delete = diff
+            .iter_all_changes()
+            .any(|c| c.tag() == ChangeTag::Delete);
         assert!(has_delete);
     }
 
@@ -1095,7 +1128,8 @@ mod tests {
     #[test]
     fn stale_snapshot_false_when_user_has_new_content() {
         let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
-        let document = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\nNew question here\n";
+        let document =
+            "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\nNew question here\n";
         assert!(!is_stale_snapshot(snapshot, document));
     }
 
@@ -1123,7 +1157,8 @@ mod tests {
     fn stale_snapshot_with_inline_annotation_not_stale() {
         let snapshot = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\n";
         // User added inline annotation within an existing assistant block
-        let document = "## User\n\nHello\n\n## Assistant\n\nHi there\n\nPlease elaborate\n\n## User\n\n";
+        let document =
+            "## User\n\nHello\n\n## Assistant\n\nHi there\n\nPlease elaborate\n\n## User\n\n";
         // This modifies the snapshot prefix, so starts_with check fails
         assert!(!is_stale_snapshot(snapshot, document));
     }
@@ -1158,7 +1193,10 @@ mod tests {
 
     /// Set up a temp directory with `.agent-doc/snapshots/` and a document file.
     /// Returns (TempDir, doc_path). The TempDir must be kept alive for the test.
-    fn setup_compute_env(doc_content: &str, snap_content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    fn setup_compute_env(
+        doc_content: &str,
+        snap_content: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, doc_content).unwrap();
@@ -1182,7 +1220,10 @@ mod tests {
 
         // compute() should detect stale snapshot and recover (return None)
         let result = compute(&doc).unwrap();
-        assert!(result.is_none(), "stale snapshot recovery should return None");
+        assert!(
+            result.is_none(),
+            "stale snapshot recovery should return None"
+        );
 
         // Verify the snapshot was updated to the document content
         let updated = crate::snapshot::load(&doc).unwrap().unwrap();
@@ -1202,7 +1243,10 @@ mod tests {
 
         // Snapshot should now be synced to the current document
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(snap, document, "snapshot should be synced to document after recovery");
+        assert_eq!(
+            snap, document,
+            "snapshot should be synced to document after recovery"
+        );
     }
 
     #[test]
@@ -1234,7 +1278,8 @@ mod tests {
     #[test]
     fn strip_preserves_comment_syntax_in_inline_backticks() {
         // `<!--` inside backticks should NOT be treated as a comment start
-        let input = "Use `<!--` to start a comment.\n<!-- agent:foo -->\ncontent\n<!-- /agent:foo -->\n";
+        let input =
+            "Use `<!--` to start a comment.\n<!-- agent:foo -->\ncontent\n<!-- /agent:foo -->\n";
         let result = strip_comments(input);
         assert_eq!(
             result,
@@ -1309,9 +1354,16 @@ Please fix the bug.\n\
 
         // Diff should detect the user's new edit
         let diff = compute(&doc).unwrap();
-        assert!(diff.is_some(), "diff should detect user edit after stream write");
+        assert!(
+            diff.is_some(),
+            "diff should detect user edit after stream write"
+        );
         let diff_text = diff.unwrap();
-        assert!(diff_text.contains("New user edit here"), "diff should contain user's new text: {}", diff_text);
+        assert!(
+            diff_text.contains("New user edit here"),
+            "diff should contain user's new text: {}",
+            diff_text
+        );
     }
 
     #[test]
@@ -1357,7 +1409,9 @@ Please fix the bug.\n\
 
     #[test]
     fn truncated_mid_sentence() {
-        assert!(looks_truncated("Also, when I called agent-doc run on this file...and ther"));
+        assert!(looks_truncated(
+            "Also, when I called agent-doc run on this file...and ther"
+        ));
     }
 
     #[test]
@@ -1494,7 +1548,10 @@ Please fix the bug.\n\
 
         assert_eq!(result, content);
         // Should return almost immediately (no recheck needed)
-        assert!(elapsed.as_millis() < 500, "should not delay for complete content");
+        assert!(
+            elapsed.as_millis() < 500,
+            "should not delay for complete content"
+        );
     }
 
     // --- classify_diff tests ---
@@ -1623,7 +1680,8 @@ Please fix the bug.\n\
 
     #[test]
     fn annotate_diff_removals() {
-        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,2 @@\n context\n-removed line\n context\n";
+        let diff =
+            "--- snapshot\n+++ document\n@@ -1,3 +1,2 @@\n context\n-removed line\n context\n";
         let annotated = annotate_diff(diff).unwrap();
         assert!(annotated.contains("[user-] removed line"));
     }
@@ -1692,7 +1750,10 @@ Please fix the bug.\n\
                          [agent] \n\
                          [agent] <!-- agent:pending patch=replace -->";
         let anns = extract_inline_annotations(annotated);
-        assert!(anns.is_empty(), "component markers should not make end-of-exchange input inline");
+        assert!(
+            anns.is_empty(),
+            "component markers should not make end-of-exchange input inline"
+        );
     }
 
     #[test]
@@ -1703,7 +1764,10 @@ Please fix the bug.\n\
                          [agent] response prose\n\
                          [agent] more content";
         let anns = extract_inline_annotations(annotated);
-        assert!(anns.is_empty(), "(HEAD) boundary reposition should not be an inline annotation");
+        assert!(
+            anns.is_empty(),
+            "(HEAD) boundary reposition should not be an inline annotation"
+        );
     }
 
     #[test]
@@ -1755,10 +1819,13 @@ Please fix the bug.\n\
                          [user+] We may need to broaden the gate.\n\
                          [agent] | Total    | 7.5   |";
         let anns = extract_inline_annotations(annotated);
-        assert_eq!(anns, vec![
-            "This is wrong. Do not lower expert scores.",
-            "We may need to broaden the gate.",
-        ]);
+        assert_eq!(
+            anns,
+            vec![
+                "This is wrong. Do not lower expert scores.",
+                "We may need to broaden the gate.",
+            ]
+        );
     }
 
     // parse_slash_commands tests
@@ -1815,8 +1882,7 @@ Please fix the bug.\n\
 
     #[test]
     fn parse_slash_commands_multiple() {
-        let diff =
-            "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+/clear\n+/agent-doc foo.md\n";
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+/clear\n+/agent-doc foo.md\n";
         let cmds = parse_slash_commands(diff);
         assert_eq!(cmds, vec!["/clear", "/agent-doc foo.md"]);
     }

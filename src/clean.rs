@@ -34,9 +34,7 @@ pub fn run(file: &Path, archive: bool) -> Result<()> {
             .unwrap_or_default()
             .as_secs();
         let tag = format!("archive/pre-squash-{}", ts);
-        let status = Command::new("git")
-            .args(["tag", &tag])
-            .status()?;
+        let status = Command::new("git").args(["tag", &tag]).status()?;
         if status.success() {
             eprintln!("[clean] Archived pre-squash state as tag: {}", tag);
         } else {

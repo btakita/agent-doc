@@ -54,10 +54,7 @@ impl HarnessConfig {
         Self {
             binary: "claude".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
-            prompt_patterns: vec![
-                "❯".into(),
-                "⏵".into(),
-            ],
+            prompt_patterns: vec!["❯".into(), "⏵".into()],
             trigger_command_template: "/agent-doc {file}".into(),
             env_remove: vec!["CLAUDECODE".into()],
             supports_no_mcp: true,
@@ -70,14 +67,8 @@ impl HarnessConfig {
     pub fn codex() -> Self {
         Self {
             binary: "codex".into(),
-            restart_behavior: RestartBehavior::Replace(vec![
-                "resume".into(),
-                "--last".into(),
-            ]),
-            prompt_patterns: vec![
-                "❯".into(),
-                ">".into(),
-            ],
+            restart_behavior: RestartBehavior::Replace(vec!["resume".into(), "--last".into()]),
+            prompt_patterns: vec!["❯".into(), ">".into()],
             trigger_command_template: "agent-doc {file}".into(),
             env_remove: vec!["CODEX_CLI".into(), "CODEX".into()],
             supports_no_mcp: false,
@@ -115,9 +106,7 @@ impl HarnessConfig {
                 args.extend(extra.iter().cloned());
                 args
             }
-            RestartBehavior::Replace(new_args) => {
-                new_args.clone()
-            }
+            RestartBehavior::Replace(new_args) => new_args.clone(),
         }
     }
 
@@ -128,9 +117,9 @@ impl HarnessConfig {
 
     /// Check if a trimmed line matches any prompt pattern.
     pub fn matches_prompt(&self, trimmed_line: &str) -> bool {
-        self.prompt_patterns.iter().any(|p| {
-            trimmed_line == p || trimmed_line.ends_with(p)
-        })
+        self.prompt_patterns
+            .iter()
+            .any(|p| trimmed_line == p || trimmed_line.ends_with(p))
     }
 
     /// Check if a line (potentially with ANSI codes) matches a prompt pattern.
@@ -138,9 +127,9 @@ impl HarnessConfig {
     pub fn is_prompt_line(&self, line: &str) -> bool {
         let stripped = crate::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
-        self.prompt_patterns.iter().any(|p| {
-            trimmed == p || trimmed.starts_with(&format!("{} ", p))
-        })
+        self.prompt_patterns
+            .iter()
+            .any(|p| trimmed == p || trimmed.starts_with(&format!("{} ", p)))
     }
 
     /// Check if a process name is recognized as an agent process for this harness.
@@ -436,8 +425,14 @@ mod tests {
         let base = vec!["--flag".to_string()];
         let claude_args = claude.restart_args(&base);
         let codex_args = codex.restart_args(&base);
-        assert!(claude_args.contains(&"--flag".to_string()), "claude appends to base");
-        assert!(!codex_args.contains(&"--flag".to_string()), "codex replaces base");
+        assert!(
+            claude_args.contains(&"--flag".to_string()),
+            "claude appends to base"
+        );
+        assert!(
+            !codex_args.contains(&"--flag".to_string()),
+            "codex replaces base"
+        );
     }
 
     #[test]
@@ -479,7 +474,10 @@ mod tests {
             ..Default::default()
         };
         let h = HarnessConfig::from_context(&fm_claude, &config);
-        assert_eq!(h.binary, "claude", "frontmatter agent overrides config default_agent");
+        assert_eq!(
+            h.binary, "claude",
+            "frontmatter agent overrides config default_agent"
+        );
     }
 
     #[test]

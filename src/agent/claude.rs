@@ -34,7 +34,7 @@ use anyhow::Result;
 use std::io::BufRead;
 use std::process::Command;
 
-use super::streaming::{parse_stream_line, StreamChunk, StreamingAgent};
+use super::streaming::{StreamChunk, StreamingAgent, parse_stream_line};
 use super::{Agent, AgentResponse};
 
 pub struct Claude {

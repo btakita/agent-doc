@@ -91,11 +91,21 @@ fn iso_timestamp() -> String {
 /// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
 ///
 /// Best-effort: silently returns on any I/O error.
-pub fn log_cycle(file: &Path, op: &str, snapshot_content: Option<&str>, file_content: Option<&str>) {
+pub fn log_cycle(
+    file: &Path,
+    op: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) {
     let _ = try_log_cycle(file, op, snapshot_content, file_content);
 }
 
-fn try_log_cycle(file: &Path, op: &str, snapshot_content: Option<&str>, file_content: Option<&str>) -> Option<()> {
+fn try_log_cycle(
+    file: &Path,
+    op: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Option<()> {
     let canonical = file.canonicalize().ok()?;
     let project_root = crate::snapshot::find_project_root(&canonical)?;
     let logs_dir = project_root.join(".agent-doc/logs");
@@ -168,12 +178,24 @@ mod tests {
         let content = fs::read_to_string(&log_path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2, "should have 2 log lines");
-        assert!(lines[0].contains("test_event"), "first line should contain message");
-        assert!(lines[1].contains("second_event"), "second line should contain message");
+        assert!(
+            lines[0].contains("test_event"),
+            "first line should contain message"
+        );
+        assert!(
+            lines[1].contains("second_event"),
+            "second line should contain message"
+        );
 
         // Verify timestamp format [epoch_secs]
-        assert!(lines[0].starts_with('['), "should start with timestamp bracket");
-        assert!(lines[0].contains("] "), "should have ] separator after timestamp");
+        assert!(
+            lines[0].starts_with('['),
+            "should start with timestamp bracket"
+        );
+        assert!(
+            lines[0].contains("] "),
+            "should have ] separator after timestamp"
+        );
     }
 
     #[test]
@@ -190,7 +212,8 @@ mod tests {
         assert!(log_path.exists(), "cycles.jsonl should be created");
 
         let content = fs::read_to_string(&log_path).unwrap();
-        let entry: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+        let entry: serde_json::Value =
+            serde_json::from_str(content.lines().next().unwrap()).unwrap();
         assert_eq!(entry["op"], "write_inline");
         assert!(entry["file"].as_str().unwrap().contains("test.md"));
         assert!(entry["snapshot_hash"].is_string());

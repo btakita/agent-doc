@@ -178,8 +178,8 @@ pub fn generate(doc: &Path, force: bool) -> Result<PathBuf> {
     };
 
     // Atomic write via tempfile + rename.
-    let json = serde_json::to_string_pretty(&sidecar)
-        .context("failed to serialize annotation sidecar")?;
+    let json =
+        serde_json::to_string_pretty(&sidecar).context("failed to serialize annotation sidecar")?;
     let dir = path.parent().unwrap();
     let tmp = tempfile::NamedTempFile::new_in(dir)
         .context("failed to create temp file for annotation")?;

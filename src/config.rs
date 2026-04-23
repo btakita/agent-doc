@@ -29,7 +29,9 @@ use std::path::PathBuf;
 use agent_doc::model_tier::ModelConfig;
 
 // Re-export project-level configuration from the shared module (for convenience)
-pub use crate::project_config::{clear_project_tmux_session, project_tmux_session, update_project_tmux_session};
+pub use crate::project_config::{
+    clear_project_tmux_session, project_tmux_session, update_project_tmux_session,
+};
 
 /// Execution mode for skill-level parallelism.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,9 +119,7 @@ pub fn load() -> Result<Config> {
 }
 
 fn config_path() -> PathBuf {
-    dirs_config_dir()
-        .join("agent-doc")
-        .join("config.toml")
+    dirs_config_dir().join("agent-doc").join("config.toml")
 }
 
 fn dirs_config_dir() -> PathBuf {
@@ -158,10 +158,7 @@ claude_args = "--dangerously-skip-permissions"
 codex_args = "-s danger-full-access"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(
-            cfg.agent_args.as_deref(),
-            Some("--json -s workspace-write")
-        );
+        assert_eq!(cfg.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert_eq!(
             cfg.claude_args.as_deref(),
             Some("--dangerously-skip-permissions")

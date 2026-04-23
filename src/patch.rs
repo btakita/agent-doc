@@ -30,7 +30,7 @@
 //! - pre_patch_hook_transforms: `pre_patch = "tr a-z A-Z"` → content uppercased before write
 //! - post_patch_hook_runs: `post_patch = "touch <file>"` → marker file created after write
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
@@ -105,7 +105,8 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
     }
 
     // Apply mode: inline attr > config.toml [components.<name>] > default ("replace")
-    let mode = comp.patch_mode()
+    let mode = comp
+        .patch_mode()
         .or_else(|| config.map(|c| c.patch.as_str()))
         .unwrap_or("replace");
     let timestamp = config.is_some_and(|c| c.timestamp);
@@ -208,8 +209,7 @@ fn run_pre_hook(script: &str, component_name: &str, file: &Path, content: &str) 
             script
         );
     }
-    String::from_utf8(output.stdout)
-        .context("pre_patch hook produced invalid UTF-8")
+    String::from_utf8(output.stdout).context("pre_patch hook produced invalid UTF-8")
 }
 
 /// Run a post_patch hook (fire-and-forget).
@@ -453,6 +453,9 @@ mod tests {
 
         run(&doc, "x", Some("new\n")).unwrap();
 
-        assert!(marker.exists(), "post_patch hook should have created marker file");
+        assert!(
+            marker.exists(),
+            "post_patch hook should have created marker file"
+        );
     }
 }

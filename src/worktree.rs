@@ -39,7 +39,7 @@
 //! - list_session_empty_when_no_dir: no `.agent-doc/worktrees/` dir → empty vec, no error
 //! - session_short_truncates: 16-char input → 8 chars; 5-char input → 5 chars unchanged
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -77,8 +77,9 @@ pub fn create(project_root: &Path, session_id: &str, index: usize) -> Result<Wor
 
     // Ensure parent directory exists
     if let Some(parent) = wt_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create worktree parent dir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create worktree parent dir {}", parent.display())
+        })?;
     }
 
     let output = Command::new("git")
@@ -319,7 +320,10 @@ mod tests {
             .unwrap();
 
         let d = diff(&info.path).unwrap();
-        assert!(d.contains("hello world"), "diff should contain the new content");
+        assert!(
+            d.contains("hello world"),
+            "diff should contain the new content"
+        );
     }
 
     #[test]

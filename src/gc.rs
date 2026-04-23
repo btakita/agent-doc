@@ -2,7 +2,8 @@
 //!
 //! ## Spec
 //! - Garbage-collects orphaned files in `.agent-doc/` directories.
-//! - Scans snapshots, crdt, pre-response, locks, and baselines for hash-keyed files.
+//! - Scans snapshots, crdt, pre-response, locks, baselines, annotations, and
+//!   durable response captures for hash-keyed files/directories.
 //! - Cross-references hashes against existing documents in the project.
 //! - Removes files whose corresponding document no longer exists.
 //! - `--dry-run` flag shows what would be deleted without deleting.
@@ -10,7 +11,7 @@
 //! ## Agentic Contracts
 //! - `run(root, dry_run)` — scans `.agent-doc/` under `root`, removes orphaned files.
 //!   Returns `Ok(GcResult)` with counts of deleted/skipped files.
-//! - Never deletes files for documents that still exist on disk.
+//! - Never deletes files or capture ledgers for documents that still exist on disk.
 //! - Stale lock files (>1 hour old) are always cleaned regardless of document existence.
 
 use anyhow::{Context, Result};
@@ -37,7 +38,10 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
 
     let agent_doc_dir = project_root.join(".agent-doc");
     if !agent_doc_dir.is_dir() {
-        anyhow::bail!(".agent-doc/ directory not found in {}", project_root.display());
+        anyhow::bail!(
+            ".agent-doc/ directory not found in {}",
+            project_root.display()
+        );
     }
 
     // Collect hashes of all existing documents
@@ -67,10 +71,24 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
         total_skipped += skipped;
     }
 
+    let captures_dir = agent_doc_dir.join("captures");
+    if captures_dir.is_dir() {
+        let (deleted, skipped) =
+            clean_orphaned_capture_dirs(&captures_dir, &known_hashes, dry_run)?;
+        if deleted > 0 || skipped > 0 {
+            eprintln!("[gc] captures: {} deleted, {} kept", deleted, skipped);
+        }
+        total_deleted += deleted;
+        total_skipped += skipped;
+    }
+
     // Clean stale lock files (locks/ and crdt/*.lock)
     let (lock_deleted, lock_kept) = clean_stale_locks(&agent_doc_dir, dry_run)?;
     if lock_deleted > 0 {
-        eprintln!("[gc] locks: {} stale deleted, {} kept", lock_deleted, lock_kept);
+        eprintln!(
+            "[gc] locks: {} stale deleted, {} kept",
+            lock_deleted, lock_kept
+        );
     }
     total_deleted += lock_deleted;
     total_skipped += lock_kept;
@@ -78,12 +96,18 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     // Clean hook event files (hooks/post_write/, hooks/post_commit/)
     let (hook_deleted, hook_kept) = clean_old_hooks(&agent_doc_dir, dry_run)?;
     if hook_deleted > 0 {
-        eprintln!("[gc] hooks: {} old events deleted, {} kept", hook_deleted, hook_kept);
+        eprintln!(
+            "[gc] hooks: {} old events deleted, {} kept",
+            hook_deleted, hook_kept
+        );
     }
     total_deleted += hook_deleted;
     total_skipped += hook_kept;
 
-    eprintln!("[gc] Total: {} deleted, {} kept", total_deleted, total_skipped);
+    eprintln!(
+        "[gc] Total: {} deleted, {} kept",
+        total_deleted, total_skipped
+    );
 
     Ok(GcResult {
         deleted: total_deleted,
@@ -114,13 +138,19 @@ fn walk_for_docs(dir: &Path, hashes: &mut HashSet<String>) -> Result<()> {
         let name_str = name.to_string_lossy();
 
         // Skip hidden dirs and common large dirs
-        if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "bin" {
+        if name_str.starts_with('.')
+            || name_str == "node_modules"
+            || name_str == "target"
+            || name_str == "bin"
+        {
             continue;
         }
 
         if path.is_dir() {
             walk_for_docs(&path, hashes)?;
-        } else if path.extension().is_some_and(|e| e == "md") && let Ok(hash) = snapshot::doc_hash(&path) {
+        } else if path.extension().is_some_and(|e| e == "md")
+            && let Ok(hash) = snapshot::doc_hash(&path)
+        {
             hashes.insert(hash);
         }
     }
@@ -148,7 +178,8 @@ fn clean_orphaned_files(
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();
 
         // Extract hash from filename (e.g., "abc123.md" -> "abc123")
-        let hash = extensions.iter()
+        let hash = extensions
+            .iter()
             .find_map(|ext| file_name.strip_suffix(&format!(".{}", ext)))
             .unwrap_or(&file_name);
 
@@ -165,6 +196,38 @@ fn clean_orphaned_files(
     }
 
     Ok((deleted, skipped))
+}
+
+fn clean_orphaned_capture_dirs(
+    dir: &Path,
+    known_hashes: &HashSet<String>,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    let mut deleted = 0;
+    let mut kept = 0;
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let hash = entry.file_name().to_string_lossy().to_string();
+        if known_hashes.contains(&hash) {
+            kept += 1;
+            continue;
+        }
+
+        if dry_run {
+            eprintln!("[gc] would delete capture ledger: {}", path.display());
+        } else {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+        deleted += 1;
+    }
+
+    Ok((deleted, kept))
 }
 
 /// Clean stale lock files (>1 hour old) from locks/ and crdt/*.lock.
@@ -291,13 +354,15 @@ mod tests {
         std::fs::write(
             root.join(format!(".agent-doc/snapshots/{}.md", hash)),
             "snapshot",
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create an orphaned snapshot (no matching document)
         std::fs::write(
             root.join(".agent-doc/snapshots/orphaned_hash_abc123.md"),
             "orphan",
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = run(Some(root), false).unwrap();
         assert!(result.deleted >= 1, "should delete orphaned snapshot");

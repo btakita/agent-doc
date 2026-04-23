@@ -23,6 +23,8 @@
 //! - Appends the agent response as `## Assistant\n\n<response>\n\n## User\n\n`
 //!   and updates the `resume` ID in frontmatter from the agent's returned
 //!   session ID.
+//! - Captures the final parsed response in the durable response ledger before
+//!   any file mutation so interrupted cycles can be replayed deterministically.
 //! - Acquires an advisory `flock` on a per-document lock file before writing so
 //!   concurrent `agent-doc run` / watch-daemon invocations are serialized.
 //! - Re-reads the file under lock; if the user edited concurrently, performs a
@@ -105,7 +107,10 @@ pub fn run(
             d
         }
         None => {
-            eprintln!("[run] Nothing changed since last run for {}", file.display());
+            eprintln!(
+                "[run] Nothing changed since last run for {}",
+                file.display()
+            );
             return Ok(());
         }
     };
@@ -194,6 +199,7 @@ pub fn run(
         content_ours = frontmatter::set_resume_id(&content_ours, sid)?;
     }
     let response_text = crate::write::strip_assistant_heading(&response.text);
+    crate::recover::save_pending(file, &response_text)?;
     content_ours.push_str("\n## Assistant\n\n");
     content_ours.push_str(&response_text);
     content_ours.push_str("\n\n## User\n\n");
@@ -229,6 +235,7 @@ pub fn run(
     }
 
     drop(doc_lock); // explicit release after both doc and snapshot are written
+    crate::recover::clear_pending(file)?;
 
     eprintln!("Response appended to {}", file.display());
     Ok(())
@@ -425,8 +432,11 @@ mod tests {
 
         let final_content = std::fs::read_to_string(&doc).unwrap();
         // Both writers should have appended (serialized by flock)
-        assert!(final_content.contains("writer-0") && final_content.contains("writer-1"),
-            "Both writes should land (flock serializes): {}", final_content);
+        assert!(
+            final_content.contains("writer-0") && final_content.contains("writer-1"),
+            "Both writes should land (flock serializes): {}",
+            final_content
+        );
     }
 
     /// Verify that a locked document cycle prevents concurrent reads of
@@ -461,7 +471,10 @@ mod tests {
 
         writer.join().unwrap();
         let read_content = reader.join().unwrap();
-        assert_eq!(read_content, "after", "Reader should see completed write, not partial state");
+        assert_eq!(
+            read_content, "after",
+            "Reader should see completed write, not partial state"
+        );
     }
 
     #[test]
@@ -486,10 +499,15 @@ mod tests {
         let output = std::process::Command::new("git")
             .current_dir(dir.path())
             .args([
-                "merge-file", "-p", "--diff3",
-                "-L", "agent-response",
-                "-L", "original",
-                "-L", "your-edits",
+                "merge-file",
+                "-p",
+                "--diff3",
+                "-L",
+                "agent-response",
+                "-L",
+                "original",
+                "-L",
+                "your-edits",
             ])
             .arg(&ours_path)
             .arg(&base_path)

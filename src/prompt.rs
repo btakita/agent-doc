@@ -98,7 +98,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         return Ok(());
     }
 
-    let pane_content = sessions::capture_pane(tmux,&pane_id)?;
+    let pane_content = sessions::capture_pane(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     println!("{}", serde_json::to_string(&info)?);
     Ok(())
@@ -126,16 +126,20 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
     for (session_id, entry) in &registry {
         if !tmux.pane_alive(&entry.pane) {
             if verbose {
-                eprintln!("[prompt] pane {} dead for session {} ({})", entry.pane, session_id, entry.file);
+                eprintln!(
+                    "[prompt] pane {} dead for session {} ({})",
+                    entry.pane, session_id, entry.file
+                );
             }
             continue;
         }
 
-        let prompt = match sessions::capture_pane(tmux,&entry.pane) {
+        let prompt = match sessions::capture_pane(tmux, &entry.pane) {
             Ok(content) => {
                 if verbose {
                     // Log the last 5 non-empty lines for debugging prompt detection
-                    let last_lines: Vec<&str> = content.lines()
+                    let last_lines: Vec<&str> = content
+                        .lines()
                         .rev()
                         .filter(|l| !l.trim().is_empty())
                         .take(5)
@@ -156,8 +160,10 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
         };
 
         if verbose {
-            eprintln!("[prompt] session {} active={} question={:?}",
-                session_id, prompt.active, prompt.question);
+            eprintln!(
+                "[prompt] session {} active={} question={:?}",
+                session_id, prompt.active, prompt.question
+            );
         }
 
         entries.push(PromptAllEntry {
@@ -192,7 +198,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Verify there's actually a prompt active
-    let pane_content = sessions::capture_pane(tmux,&pane_id)?;
+    let pane_content = sessions::capture_pane(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     if !info.active {
         anyhow::bail!("no active prompt detected");
@@ -200,11 +206,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
 
     let options = info.options.as_ref().unwrap();
     if option_index == 0 || option_index > options.len() {
-        anyhow::bail!(
-            "option {} out of range (1-{})",
-            option_index,
-            options.len()
-        );
+        anyhow::bail!("option {} out of range (1-{})", option_index, options.len());
     }
 
     // Navigate to the selected option and press Enter.
@@ -216,25 +218,22 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     if target < current {
         // Move up
         for _ in 0..(current - target) {
-            sessions::send_key(tmux,&pane_id, "Up")?;
+            sessions::send_key(tmux, &pane_id, "Up")?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     } else if target > current {
         // Move down
         for _ in 0..(target - current) {
-            sessions::send_key(tmux,&pane_id, "Down")?;
+            sessions::send_key(tmux, &pane_id, "Down")?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
 
     // Brief pause then press Enter to confirm
     std::thread::sleep(std::time::Duration::from_millis(50));
-    sessions::send_key(tmux,&pane_id, "Enter")?;
+    sessions::send_key(tmux, &pane_id, "Enter")?;
 
-    eprintln!(
-        "Sent option {} to pane {}",
-        option_index, pane_id
-    );
+    eprintln!("Sent option {} to pane {}", option_index, pane_id);
     Ok(())
 }
 
@@ -260,9 +259,7 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
     //   "Esc to cancel" (old format)
     //   "No to cancel" (new format, Claude Code v2.1+)
     //   "to cancel" (catch-all for future variations)
-    let footer_idx = stripped.iter().rposition(|line| {
-        line.contains("to cancel")
-    });
+    let footer_idx = stripped.iter().rposition(|line| line.contains("to cancel"));
 
     let footer_idx = match footer_idx {
         Some(idx) => idx,
@@ -326,10 +323,7 @@ pub fn parse_prompt(content: &str) -> PromptInfo {
 /// - Numbered: `N. label` (Claude Code v2.1+)
 fn parse_option_line(line: &str) -> Option<PromptOption> {
     // Strip leading ❯ or > marker
-    let stripped = line
-        .trim_start_matches('❯')
-        .trim_start_matches('>')
-        .trim();
+    let stripped = line.trim_start_matches('❯').trim_start_matches('>').trim();
 
     // Try bracket format: "[N] label"
     if stripped.starts_with('[') {
@@ -362,15 +356,16 @@ pub(crate) fn strip_ansi(s: &str) -> String {
         if c == '\x1b' {
             // Consume the escape sequence
             if let Some(next) = chars.next()
-                && next == '[' {
-                    // CSI sequence: consume until a letter is found
-                    for c2 in chars.by_ref() {
-                        if c2.is_ascii_alphabetic() {
-                            break;
-                        }
+                && next == '['
+            {
+                // CSI sequence: consume until a letter is found
+                for c2 in chars.by_ref() {
+                    if c2.is_ascii_alphabetic() {
+                        break;
                     }
                 }
-                // Otherwise just skip the next char (two-byte escape)
+            }
+            // Otherwise just skip the next char (two-byte escape)
         } else {
             result.push(c);
         }
@@ -490,9 +485,13 @@ mod tests {
         assert_eq!(opt.index, 1);
         assert_eq!(opt.label, "Yes");
 
-        let opt = parse_option_line("2. Yes, allow reading from agent-loop/ from this project").unwrap();
+        let opt =
+            parse_option_line("2. Yes, allow reading from agent-loop/ from this project").unwrap();
         assert_eq!(opt.index, 2);
-        assert_eq!(opt.label, "Yes, allow reading from agent-loop/ from this project");
+        assert_eq!(
+            opt.label,
+            "Yes, allow reading from agent-loop/ from this project"
+        );
 
         let opt = parse_option_line("❯ 3. No").unwrap();
         assert_eq!(opt.index, 3);
@@ -556,8 +555,14 @@ mod tests {
                 active: true,
                 question: Some("Allow?".to_string()),
                 options: Some(vec![
-                    PromptOption { index: 1, label: "Yes".to_string() },
-                    PromptOption { index: 2, label: "No".to_string() },
+                    PromptOption {
+                        index: 1,
+                        label: "Yes".to_string(),
+                    },
+                    PromptOption {
+                        index: 2,
+                        label: "No".to_string(),
+                    },
                 ]),
                 selected: Some(0),
             },

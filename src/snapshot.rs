@@ -124,11 +124,7 @@ pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
 
 /// Walk up from a path to find the directory containing `.agent-doc/`.
 pub fn find_project_root(path: &Path) -> Option<PathBuf> {
-    let mut current = if path.is_file() {
-        path.parent()?
-    } else {
-        path
-    };
+    let mut current = if path.is_file() { path.parent()? } else { path };
     loop {
         if current.join(".agent-doc").is_dir() {
             return Some(current.to_path_buf());
@@ -166,9 +162,13 @@ impl SnapshotLock {
             .truncate(false)
             .open(&lock_path)
             .with_context(|| format!("failed to open snapshot lock {}", lock_path.display()))?;
-        file.lock_exclusive()
-            .with_context(|| format!("failed to acquire snapshot lock on {}", lock_path.display()))?;
-        Ok(Self { _file: file, lock_path })
+        file.lock_exclusive().with_context(|| {
+            format!("failed to acquire snapshot lock on {}", lock_path.display())
+        })?;
+        Ok(Self {
+            _file: file,
+            lock_path,
+        })
     }
 }
 
@@ -210,11 +210,10 @@ pub fn load(doc: &Path) -> Result<Option<String>> {
 pub fn save(doc: &Path, content: &str) -> Result<()> {
     let _lock = SnapshotLock::acquire(doc)?;
     save_unlocked(doc, content)?;
-    crate::ops_log::log_op(doc, &format!(
-        "snapshot_save file={} len={}",
-        doc.display(),
-        content.len()
-    ));
+    crate::ops_log::log_op(
+        doc,
+        &format!("snapshot_save file={} len={}", doc.display(), content.len()),
+    );
     Ok(())
 }
 
@@ -254,7 +253,9 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
             Some(git_content) => {
                 let current = std::fs::read_to_string(doc).unwrap_or_default();
                 if git_content == current {
-                    eprintln!("[snapshot] No snapshot file, git matches current — treating as first submit");
+                    eprintln!(
+                        "[snapshot] No snapshot file, git matches current — treating as first submit"
+                    );
                     Ok(None)
                 } else {
                     eprintln!("[snapshot] No snapshot file, recovering from git");
@@ -418,7 +419,9 @@ pub fn pre_response_path_for(doc: &Path) -> Result<PathBuf> {
     let canonical = doc.canonicalize()?;
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root.join(PRE_RESPONSE_DIR).join(format!("{}.md", hash)))
+    Ok(project_root
+        .join(PRE_RESPONSE_DIR)
+        .join(format!("{}.md", hash)))
 }
 
 /// Save the pre-response snapshot (the document content before the agent's response).
@@ -435,7 +438,10 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
         .with_context(|| "failed to write pre-response temp file")?;
     tmp.persist(&path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    eprintln!("[snapshot] saved pre-response snapshot for {}", doc.display());
+    eprintln!(
+        "[snapshot] saved pre-response snapshot for {}",
+        doc.display()
+    );
     Ok(())
 }
 
@@ -576,11 +582,7 @@ mod tests {
     /// Otherwise, join relative path with dir.
     fn snapshot_path_in(dir: &Path, doc: &Path) -> PathBuf {
         let p = path_for(doc).unwrap();
-        if p.is_absolute() {
-            p
-        } else {
-            dir.join(&p)
-        }
+        if p.is_absolute() { p } else { dir.join(&p) }
     }
 
     #[test]
@@ -860,8 +862,11 @@ mod tests {
         // Even though the doc file on disk has different content,
         // resolve should return the snapshot file content.
         let resolved = resolve(&doc).unwrap();
-        assert_eq!(resolved.as_deref(), Some(snapshot_content),
-            "resolve() should always prefer snapshot file when it exists");
+        assert_eq!(
+            resolved.as_deref(),
+            Some(snapshot_content),
+            "resolve() should always prefer snapshot file when it exists"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -878,19 +883,25 @@ mod tests {
     #[test]
     fn ensure_session_uuid_assigns_to_template_without_session() {
         let (_dir, doc) = setup_with_frontmatter(
-            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n"
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n",
         );
         let assigned = ensure_session_uuid(&doc).unwrap();
-        assert!(assigned, "should assign UUID to template file without session");
+        assert!(
+            assigned,
+            "should assign UUID to template file without session"
+        );
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("agent_doc_session:"), "file should have session UUID");
+        assert!(
+            content.contains("agent_doc_session:"),
+            "file should have session UUID"
+        );
     }
 
     #[test]
     fn ensure_session_uuid_noop_when_session_exists() {
         let (_dir, doc) = setup_with_frontmatter(
-            "---\nagent_doc_session: existing-uuid\nagent_doc_format: template\n---\n\nBody\n"
+            "---\nagent_doc_session: existing-uuid\nagent_doc_format: template\n---\n\nBody\n",
         );
         let assigned = ensure_session_uuid(&doc).unwrap();
         assert!(!assigned, "should not reassign when session already exists");
@@ -901,9 +912,8 @@ mod tests {
 
     #[test]
     fn ensure_session_uuid_noop_when_no_format() {
-        let (_dir, doc) = setup_with_frontmatter(
-            "---\ntitle: plain doc\n---\n\nNo agent_doc_format\n"
-        );
+        let (_dir, doc) =
+            setup_with_frontmatter("---\ntitle: plain doc\n---\n\nNo agent_doc_format\n");
         let assigned = ensure_session_uuid(&doc).unwrap();
         assert!(!assigned, "should not assign UUID to non-agent-doc files");
     }
@@ -915,7 +925,7 @@ mod tests {
     #[test]
     fn ensure_snapshot_creates_when_missing() {
         let (dir, doc) = setup_with_frontmatter(
-            "---\nagent_doc_session: test-uuid\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\nuser text\n<!-- /agent:exchange -->\n"
+            "---\nagent_doc_session: test-uuid\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\nuser text\n<!-- /agent:exchange -->\n",
         );
         // Create .agent-doc dir so snapshot path resolves
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -927,8 +937,10 @@ mod tests {
         assert!(snap.is_some(), "snapshot file should exist");
         // Exchange content should be stripped
         let snap_content = snap.unwrap();
-        assert!(!snap_content.contains("user text"),
-            "snapshot should have stripped exchange content");
+        assert!(
+            !snap_content.contains("user text"),
+            "snapshot should have stripped exchange content"
+        );
     }
 
     #[test]
@@ -950,7 +962,7 @@ mod tests {
     #[test]
     fn ensure_initialized_assigns_uuid_even_when_snapshot_exists() {
         let (dir, doc) = setup_with_frontmatter(
-            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\nBody\n"
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\nBody\n",
         );
         // Pre-create snapshot so ensure_snapshot is a no-op
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -960,6 +972,9 @@ mod tests {
         assert!(initialized, "should return true when UUID was assigned");
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("agent_doc_session:"), "UUID should be assigned");
+        assert!(
+            content.contains("agent_doc_session:"),
+            "UUID should be assigned"
+        );
     }
 }

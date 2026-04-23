@@ -51,11 +51,17 @@ pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
 
     match target {
         SessionTarget::Attached(name) => {
-            eprintln!("[terminal] session '{}' already has an attached client — skipping", name);
+            eprintln!(
+                "[terminal] session '{}' already has an attached client — skipping",
+                name
+            );
             Ok(())
         }
         SessionTarget::Detached(name) => {
-            eprintln!("[terminal] session '{}' exists but is detached — opening terminal to attach", name);
+            eprintln!(
+                "[terminal] session '{}' exists but is detached — opening terminal to attach",
+                name
+            );
             launch_terminal(&cfg, &name)
         }
         SessionTarget::Create(name) => {
@@ -105,7 +111,10 @@ fn resolve_target_session(
 
     // Scan sessions.json for any live session hosting this project's panes
     if let Some(active_session) = find_active_project_session(tmux)? {
-        eprintln!("[terminal] targeting session '{}' (from registry scan)", active_session);
+        eprintln!(
+            "[terminal] targeting session '{}' (from registry scan)",
+            active_session
+        );
         return Ok(classify_session(tmux, &active_session));
     }
 
@@ -122,7 +131,6 @@ fn classify_session(tmux: &Tmux, name: &str) -> SessionTarget {
         SessionTarget::Detached(name.to_string())
     }
 }
-
 
 /// Scan sessions.json for any live pane, and return the tmux session that pane belongs to.
 ///
@@ -146,13 +154,7 @@ fn find_active_project_session(tmux: &Tmux) -> Result<Option<String>> {
 fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
     let output = tmux
         .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-p",
-            "#{session_name}",
-        ])
+        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
         .output()
         .ok()?;
     if output.status.success() {
@@ -303,7 +305,9 @@ mod tests {
     fn resolve_terminal_no_config_no_env() {
         let cfg = config::Config::default();
         // Clear TERMINAL env var for this test
-        unsafe { std::env::remove_var("TERMINAL"); }
+        unsafe {
+            std::env::remove_var("TERMINAL");
+        }
         let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -331,7 +335,10 @@ mod tests {
 
         // With no explicit session, should return "0" regardless of frontmatter
         let name = resolve_session_name(&doc, None).unwrap();
-        assert_eq!(name, "0", "should default to '0', not read frontmatter tmux_session");
+        assert_eq!(
+            name, "0",
+            "should default to '0', not read frontmatter tmux_session"
+        );
     }
 
     /// Regression: resolve_session_name with explicit flag should use it directly.

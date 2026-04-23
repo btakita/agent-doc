@@ -352,7 +352,8 @@ pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
             continue;
         }
 
-        if line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:") {
+        if line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:")
+        {
             if let Some(prev) = current.take() {
                 sections.push(prev);
             }
@@ -472,10 +473,7 @@ fn build_archive(original_header: &str, exchanges: &[Exchange]) -> String {
     // Add a header noting the source
     archive.push_str("---\n");
     archive.push_str("archived_from: compact\n");
-    archive.push_str(&format!(
-        "archived_at: {}\n",
-        chrono_timestamp()
-    ));
+    archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
     archive.push_str(&format!("exchange_count: {}\n", exchanges.len()));
 
     // Preserve original frontmatter session ID if present
@@ -583,9 +581,7 @@ fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()>
     if !toplevel.status.success() {
         anyhow::bail!("file is not in a git repository");
     }
-    let git_root = std::path::PathBuf::from(
-        String::from_utf8_lossy(&toplevel.stdout).trim(),
-    );
+    let git_root = std::path::PathBuf::from(String::from_utf8_lossy(&toplevel.stdout).trim());
 
     let tag_name = match tag_override {
         Some(name) => name.to_string(),
@@ -645,10 +641,7 @@ fn find_project_root(file: &Path) -> Result<std::path::PathBuf> {
         dir = d.parent();
     }
     // Fallback to file's parent
-    Ok(canonical
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf())
+    Ok(canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
 }
 
 /// Generate a compact timestamp for archive filenames.
@@ -757,8 +750,13 @@ mod tests {
             user: "Recent question".to_string(),
             assistant: "Recent answer".to_string(),
         }];
-        let compacted =
-            build_compacted("---\ntest: true\n---\n\n", "\n", &kept, Path::new("archive.md"), 3);
+        let compacted = build_compacted(
+            "---\ntest: true\n---\n\n",
+            "\n",
+            &kept,
+            Path::new("archive.md"),
+            3,
+        );
         assert!(compacted.contains("3 earlier exchange(s) archived"));
         assert!(compacted.contains("## User\n\nRecent question"));
         assert!(compacted.contains("## Assistant\n\nRecent answer"));
@@ -867,8 +865,7 @@ mod tests {
             .to_string();
 
         // Run compact on exchange only
-        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
-            .unwrap();
+        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
 
         // Read the result and verify non-target components are byte-identical
         let result = std::fs::read_to_string(&file).unwrap();
@@ -950,8 +947,7 @@ mod tests {
             .to_string();
 
         // Run compact with CRDT mode enabled (is_crdt=true)
-        run_component_compact(&file, doc, "exchange", Some("Compacted."), true)
-            .unwrap();
+        run_component_compact(&file, doc, "exchange", Some("Compacted."), true).unwrap();
 
         // Read result and verify pending survives
         let result = std::fs::read_to_string(&file).unwrap();
@@ -1007,8 +1003,7 @@ mod tests {
             .content(doc)
             .to_string();
 
-        run_component_compact(&file, doc, "exchange", Some("Archived."), false)
-            .unwrap();
+        run_component_compact(&file, doc, "exchange", Some("Archived."), false).unwrap();
 
         // Verify ❯ marker preserved in non-target component
         let result = std::fs::read_to_string(&file).unwrap();
@@ -1049,8 +1044,7 @@ mod tests {
 
         let file_before = std::fs::read_to_string(&file).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some("Summary."), false)
-            .unwrap();
+        run_component_compact(&file, doc, "exchange", Some("Summary."), false).unwrap();
 
         // After compact: file and snapshot should match
         let file_after = std::fs::read_to_string(&file).unwrap();

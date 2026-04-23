@@ -3,29 +3,47 @@ use std::path::{Path, PathBuf};
 
 fn platform_lib_name() -> &'static str {
     #[cfg(target_os = "linux")]
-    { "libagent_doc.so" }
+    {
+        "libagent_doc.so"
+    }
     #[cfg(target_os = "macos")]
-    { "libagent_doc.dylib" }
+    {
+        "libagent_doc.dylib"
+    }
     #[cfg(target_os = "windows")]
-    { "agent_doc.dll" }
+    {
+        "agent_doc.dll"
+    }
 }
 
 fn platform_lib_ext() -> &'static str {
     #[cfg(target_os = "linux")]
-    { "so" }
+    {
+        "so"
+    }
     #[cfg(target_os = "macos")]
-    { "dylib" }
+    {
+        "dylib"
+    }
     #[cfg(target_os = "windows")]
-    { "dll" }
+    {
+        "dll"
+    }
 }
 
 pub fn versioned_lib_name(version: &str) -> String {
     #[cfg(target_os = "linux")]
-    { format!("libagent_doc-{}.so", version) }
+    {
+        format!("libagent_doc-{}.so", version)
+    }
     #[cfg(target_os = "macos")]
-    { format!("libagent_doc-{}.dylib", version) }
+    {
+        format!("libagent_doc-{}.dylib", version)
+    }
     #[cfg(target_os = "windows")]
-    { format!("agent_doc-{}.dll", version) }
+    {
+        format!("agent_doc-{}.dll", version)
+    }
 }
 
 pub fn install_versioned(source: &Path, target_dir: &Path, version: &str) -> Result<PathBuf> {
@@ -126,7 +144,14 @@ mod tests {
         // Versioned file exists with correct content
         assert!(installed.exists());
         assert_eq!(fs::read(&installed).unwrap(), b"fake library content");
-        assert!(installed.file_name().unwrap().to_str().unwrap().contains("1.2.3"));
+        assert!(
+            installed
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("1.2.3")
+        );
 
         // Symlink exists and resolves to the versioned file
         let symlink = target_dir.join(platform_lib_name());
@@ -194,7 +219,10 @@ mod tests {
         let ino_after = fs::metadata(&versioned_path).unwrap().ino();
 
         // Atomic rename must produce a new inode — old mmap stays valid on old inode
-        assert_ne!(ino_before, ino_after, "same-version reinstall must create new inode");
+        assert_ne!(
+            ino_before, ino_after,
+            "same-version reinstall must create new inode"
+        );
         assert_eq!(fs::read(&versioned_path).unwrap(), b"updated content");
     }
 

@@ -31,7 +31,7 @@
 //! - restore_into_empty_exchange: restore into empty exchange → content inserted without separator
 //! - restore_nonexistent_commit_fails: bogus commit hash → returns Err
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
@@ -73,16 +73,16 @@ fn resolve_git_paths(file: &Path) -> Result<(std::path::PathBuf, String)> {
         bail!("file is not in a git repository: {}", file.display());
     }
 
-    let git_root = std::path::PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
-    );
+    let git_root = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
     let rel_path = canonical
         .strip_prefix(&git_root)
-        .with_context(|| format!(
-            "file {} is not under git root {}",
-            canonical.display(),
-            git_root.display()
-        ))?
+        .with_context(|| {
+            format!(
+                "file {} is not under git root {}",
+                canonical.display(),
+                git_root.display()
+            )
+        })?
         .to_string_lossy()
         .to_string();
 
@@ -206,11 +206,7 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
         .context("failed to run git show")?;
 
     if !output.status.success() {
-        bail!(
-            "file {} not found in commit {}",
-            file.display(),
-            commit
-        );
+        bail!("file {} not found in commit {}", file.display(), commit);
     }
 
     let old_content = String::from_utf8_lossy(&output.stdout).to_string();
@@ -228,8 +224,8 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     // Parse current document to find exchange component
-    let components = component::parse(&current_content)
-        .with_context(|| "failed to parse current document")?;
+    let components =
+        component::parse(&current_content).with_context(|| "failed to parse current document")?;
 
     let exchange = components
         .iter()
@@ -252,8 +248,7 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
     let parent = file.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, new_doc.as_bytes())
-        .context("failed to write temp file")?;
+    std::io::Write::write_all(&mut tmp, new_doc.as_bytes()).context("failed to write temp file")?;
     tmp.persist(file)
         .with_context(|| format!("failed to persist to {}", file.display()))?;
 
@@ -279,16 +274,18 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
 pub fn log(file: &Path) -> Result<()> {
     let (git_root, rel_path) = resolve_git_paths(file)?;
 
-    let doc_name = file
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("doc");
+    let doc_name = file.file_stem().and_then(|s| s.to_str()).unwrap_or("doc");
 
     // Load pre-compact tags: map commit → tag name
     let pattern = format!("agent-doc/{}/pre-compact-*", doc_name);
     let tag_out = Command::new("git")
         .current_dir(&git_root)
-        .args(["tag", "-l", "--format=%(refname:short) %(objectname:short)", &pattern])
+        .args([
+            "tag",
+            "-l",
+            "--format=%(refname:short) %(objectname:short)",
+            &pattern,
+        ])
         .output()
         .unwrap_or_else(|_| std::process::Output {
             status: std::process::ExitStatus::default(),
@@ -375,12 +372,7 @@ pub fn log(file: &Path) -> Result<()> {
 /// - `tag`: resolve the named tag to its commit
 ///
 /// Prints the full document content to stdout.
-pub fn show(
-    file: &Path,
-    back: Option<usize>,
-    at: Option<usize>,
-    tag: Option<&str>,
-) -> Result<()> {
+pub fn show(file: &Path, back: Option<usize>, at: Option<usize>, tag: Option<&str>) -> Result<()> {
     let (git_root, rel_path) = resolve_git_paths(file)?;
 
     let commit_ref = if let Some(t) = tag {
@@ -409,7 +401,11 @@ pub fn show(
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let commits_owned: Vec<String> = stdout.lines().map(|l| l.to_string()).collect();
         if n >= commits_owned.len() {
-            bail!("--at {} exceeds history length ({})", n, commits_owned.len());
+            bail!(
+                "--at {} exceeds history length ({})",
+                n,
+                commits_owned.len()
+            );
         }
         commits_owned[n].clone()
     } else {
@@ -619,10 +615,7 @@ New exchange content
             restored.contains("New exchange content"),
             "should still contain new content"
         );
-        assert!(
-            restored.contains("---"),
-            "should contain separator"
-        );
+        assert!(restored.contains("---"), "should contain separator");
 
         // Verify order: old content should come before new content
         let old_pos = restored.find("Old exchange content").unwrap();

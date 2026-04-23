@@ -68,7 +68,8 @@ pub fn set(name: &str) -> Result<()> {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 eprintln!(
                     "[session] could not move agent-doc window: {} (config updated, panes will route to '{}' on next claim/route)",
-                    stderr.trim(), name
+                    stderr.trim(),
+                    name
                 );
             }
 
@@ -76,7 +77,13 @@ pub fn set(name: &str) -> Result<()> {
             let stash_source = format!("{}:stash", old);
             let stash_output = tmux
                 .cmd()
-                .args(["move-window", "-s", &stash_source, "-t", &format!("{}:", name)])
+                .args([
+                    "move-window",
+                    "-s",
+                    &stash_source,
+                    "-t",
+                    &format!("{}:", name),
+                ])
                 .output();
             if let Ok(o) = stash_output
                 && o.status.success()
@@ -87,7 +94,10 @@ pub fn set(name: &str) -> Result<()> {
             eprintln!("[session] already configured to '{}'", name);
         }
     } else {
-        eprintln!("[session] configured tmux_session to '{}' (was unset)", name);
+        eprintln!(
+            "[session] configured tmux_session to '{}' (was unset)",
+            name
+        );
     }
 
     Ok(())

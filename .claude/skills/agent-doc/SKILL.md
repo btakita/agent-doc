@@ -44,7 +44,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
-**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, commits the previous cycle, reads claims, and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `effective_tier`, `required_tier`, `model_switch`, `agent_model`, `diff_type`.
+**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, reads claims, and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Print any `claims` to the console as a record.
@@ -62,7 +62,7 @@ Trust the preflight output — do not re-validate code fences or blockquotes.
 
 ### 0c. Model tier gate
 
-Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. Tier handling rules (`required_tier` blocks, `model_switch` is acknowledged, mismatch is advisory): see [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
+Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. `required_tier` is the hard gate, `suggested_tier` is advisory, and `model_switch_tier` is the resolved tier for the user's inline `/model` request. Full gate behavior: [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
 
 ### 1. Respond
 
@@ -71,7 +71,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). Commit-time boundary cleanup only recognizes real headings for transient `(HEAD)` marker cleanup. Use h4-h6 for sub-sections within a response.
 
-**Model attribution:** always append your own model short name with a spaced em dash: `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never omit the suffix.
+**Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
 
 **Streaming checkpoints:** for long multi-topic responses, flush partial content at natural breakpoints so the user sees progress. Full procedure + baseline re-save pattern: [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md).
 

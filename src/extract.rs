@@ -57,8 +57,7 @@ fn check_target_ownership(target: &Path) -> Result<()> {
     let sessions_content = std::fs::read_to_string(&sessions_path).unwrap_or_default();
     let sessions: serde_json::Value = serde_json::from_str(&sessions_content).unwrap_or_default();
 
-    let target_canonical = std::fs::canonicalize(target)
-        .unwrap_or_else(|_| target.to_path_buf());
+    let target_canonical = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
 
     if let Some(obj) = sessions.as_object() {
         for (_id, entry) in obj {
@@ -71,14 +70,15 @@ fn check_target_ownership(target: &Path) -> Result<()> {
                 } else {
                     Path::new(path).to_path_buf()
                 };
-                let entry_canonical = std::fs::canonicalize(&entry_path)
-                    .unwrap_or(entry_path);
+                let entry_canonical = std::fs::canonicalize(&entry_path).unwrap_or(entry_path);
 
                 if entry_canonical == target_canonical && pane != current_pane {
                     anyhow::bail!(
                         "target {} is owned by pane {} (current: {}). \
                          Use --bypass-claim to transfer across panes.",
-                        target.display(), pane, current_pane
+                        target.display(),
+                        pane,
+                        current_pane
                     );
                 }
             }
@@ -124,12 +124,16 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     let comp_name = component_name.unwrap_or("exchange");
 
     // Find the exchange component in source
-    let components = component::parse(&source_content)
-        .context("failed to parse components in source")?;
+    let components =
+        component::parse(&source_content).context("failed to parse components in source")?;
 
     let exchange = components.iter().find(|c| c.name == comp_name);
     let Some(exchange) = exchange else {
-        anyhow::bail!("component '{}' not found in {}", comp_name, source.display());
+        anyhow::bail!(
+            "component '{}' not found in {}",
+            comp_name,
+            source.display()
+        );
     };
 
     let exchange_content = exchange.content(&source_content);
@@ -153,17 +157,32 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     let annotation = format_source_annotation(source, "Extract");
     let annotated_content = format!("{}{}", annotation, extracted.trim_start());
 
-    let target_components = component::parse(&target_content)
-        .context("failed to parse components in target")?;
+    let target_components =
+        component::parse(&target_content).context("failed to parse components in target")?;
 
     let target_exchange = target_components.iter().find(|c| c.name == comp_name);
     let new_target = if let Some(tc) = target_exchange {
         let existing = tc.content(&target_content);
-        let appended = format!("{}{}", existing.trim_end(), if existing.trim().is_empty() { "\n" } else { "\n\n" });
-        tc.replace_content(&target_content, &format!("{}{}\n", appended.trim_end(), annotated_content.trim_end()))
+        let appended = format!(
+            "{}{}",
+            existing.trim_end(),
+            if existing.trim().is_empty() {
+                "\n"
+            } else {
+                "\n\n"
+            }
+        );
+        tc.replace_content(
+            &target_content,
+            &format!("{}{}\n", appended.trim_end(), annotated_content.trim_end()),
+        )
     } else {
         // No matching component in target — append at end
-        format!("{}\n{}\n", target_content.trim_end(), annotated_content.trim_end())
+        format!(
+            "{}\n{}\n",
+            target_content.trim_end(),
+            annotated_content.trim_end()
+        )
     };
 
     write::atomic_write_pub(target, &new_target)?;
@@ -171,7 +190,10 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
 
     eprintln!(
         "[extract] Moved last entry from {}:{} → {}:{}",
-        source.display(), comp_name, target.display(), comp_name
+        source.display(),
+        comp_name,
+        target.display(),
+        comp_name
     );
 
     Ok(())
@@ -204,7 +226,14 @@ fn split_last_entry(content: &str) -> (String, String) {
 /// When `bypass_claim` is false, refuses to write to a target owned by a different pane.
 /// When `items` is Some, only transfers matching pending items (by ID) instead of all content.
 /// When `referral` is true, inserts a referral pointer in the target instead of moving content.
-pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim: bool, items: Option<&[String]>, referral: bool) -> Result<()> {
+pub fn transfer(
+    source: &Path,
+    target: &Path,
+    component_name: &str,
+    bypass_claim: bool,
+    items: Option<&[String]>,
+    referral: bool,
+) -> Result<()> {
     // Validate --items usage before any filesystem operations
     if items.is_some() && component_name != "pending" {
         anyhow::bail!("--items flag is only supported for the 'pending' component");
@@ -268,17 +297,25 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
 
-    let components = component::parse(&source_content)
-        .context("failed to parse components in source")?;
+    let components =
+        component::parse(&source_content).context("failed to parse components in source")?;
 
     let comp = components.iter().find(|c| c.name == component_name);
     let Some(comp) = comp else {
-        anyhow::bail!("component '{}' not found in {}", component_name, source.display());
+        anyhow::bail!(
+            "component '{}' not found in {}",
+            component_name,
+            source.display()
+        );
     };
 
     let content = comp.content(&source_content);
     if content.trim().is_empty() {
-        anyhow::bail!("component '{}' is empty in {}", component_name, source.display());
+        anyhow::bail!(
+            "component '{}' is empty in {}",
+            component_name,
+            source.display()
+        );
     }
 
     // Clear source component
@@ -290,15 +327,22 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
     let annotation = format_source_annotation(source, "Transfer");
     let annotated_content = format!("{}{}", annotation, content.trim_start());
 
-    let target_components = component::parse(&target_content)
-        .context("failed to parse components in target")?;
+    let target_components =
+        component::parse(&target_content).context("failed to parse components in target")?;
 
     let target_comp = target_components.iter().find(|c| c.name == component_name);
     let new_target = if let Some(tc) = target_comp {
         let existing = tc.content(&target_content);
-        tc.replace_content(&target_content, &format!("{}{}\n", existing, annotated_content.trim_end()))
+        tc.replace_content(
+            &target_content,
+            &format!("{}{}\n", existing, annotated_content.trim_end()),
+        )
     } else {
-        format!("{}\n{}\n", target_content.trim_end(), annotated_content.trim_end())
+        format!(
+            "{}\n{}\n",
+            target_content.trim_end(),
+            annotated_content.trim_end()
+        )
     };
 
     write::atomic_write_pub(target, &new_target)?;
@@ -321,7 +365,8 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
                 // Merge: append source pending items to target pending
                 let existing = target_pending.content(&target_refreshed);
                 let merged = format!("{}{}\n", existing, pending_content.trim_end());
-                let new_target_with_pending = target_pending.replace_content(&target_refreshed, &merged);
+                let new_target_with_pending =
+                    target_pending.replace_content(&target_refreshed, &merged);
                 write::atomic_write_pub(target, &new_target_with_pending)?;
                 snapshot::save(target, &new_target_with_pending)?;
 
@@ -342,7 +387,9 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
 
     eprintln!(
         "[transfer] Moved component '{}' from {} → {}",
-        component_name, source.display(), target.display()
+        component_name,
+        source.display(),
+        target.display()
     );
 
     Ok(())
@@ -351,9 +398,17 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str, bypass_claim
 /// Transfer specific pending items by ID from source to target.
 /// Items are identified by `[#id]` patterns in pending lines.
 /// Matching items are removed from source and appended to target's pending.
-fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_claim: bool) -> Result<()> {
+fn transfer_pending_items(
+    source: &Path,
+    target: &Path,
+    ids: &[String],
+    _bypass_claim: bool,
+) -> Result<()> {
     if !target.exists() {
-        anyhow::bail!("target file not found: {} (auto-create not supported for --items)", target.display());
+        anyhow::bail!(
+            "target file not found: {} (auto-create not supported for --items)",
+            target.display()
+        );
     }
 
     let source_content = std::fs::read_to_string(source)
@@ -361,10 +416,10 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
 
-    let source_comps = component::parse(&source_content)
-        .context("failed to parse components in source")?;
-    let target_comps = component::parse(&target_content)
-        .context("failed to parse components in target")?;
+    let source_comps =
+        component::parse(&source_content).context("failed to parse components in source")?;
+    let target_comps =
+        component::parse(&target_content).context("failed to parse components in target")?;
 
     let source_pending = source_comps.iter().find(|c| c.name == "pending");
     let Some(source_pending) = source_pending else {
@@ -419,7 +474,11 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
         let appended = format!("{}{}\n", existing, matched_lines.join("\n"));
         tp.replace_content(&target_content, &appended)
     } else {
-        format!("{}\n{}\n", target_content.trim_end(), matched_lines.join("\n"))
+        format!(
+            "{}\n{}\n",
+            target_content.trim_end(),
+            matched_lines.join("\n")
+        )
     };
 
     write::atomic_write_pub(target, &new_target)?;
@@ -430,7 +489,11 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
     eprintln!(
         "[transfer] Moved {} pending item(s) ({}) from {} → {}",
         matched_lines.len(),
-        matched_ids.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(", "),
+        matched_ids
+            .iter()
+            .map(|id| format!("#{}", id))
+            .collect::<Vec<_>>()
+            .join(", "),
         source.display(),
         target.display()
     );
@@ -441,7 +504,11 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
         eprintln!(
             "[transfer] WARNING: {} ID(s) not found in source: {}",
             unmatched.len(),
-            unmatched.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(", ")
+            unmatched
+                .iter()
+                .map(|id| format!("#{}", id))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 
@@ -452,7 +519,8 @@ fn transfer_pending_items(source: &Path, target: &Path, ids: &[String], _bypass_
 /// Falls back to the source path as-is if canonicalization fails.
 fn make_relative(source: &Path, target: &Path) -> PathBuf {
     let source_abs = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-    let target_dir = target.parent()
+    let target_dir = target
+        .parent()
         .and_then(|p| std::fs::canonicalize(p).ok())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -460,7 +528,9 @@ fn make_relative(source: &Path, target: &Path) -> PathBuf {
     let source_components: Vec<_> = source_abs.components().collect();
     let target_components: Vec<_> = target_dir.components().collect();
 
-    let common_len = source_components.iter().zip(target_components.iter())
+    let common_len = source_components
+        .iter()
+        .zip(target_components.iter())
         .take_while(|(a, b)| a == b)
         .count();
 
@@ -484,14 +554,17 @@ fn make_relative(source: &Path, target: &Path) -> PathBuf {
 /// preflight can resolve to provide context on demand.
 fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Result<()> {
     if !target.exists() {
-        anyhow::bail!("target file not found: {} (auto-create not supported for --referral)", target.display());
+        anyhow::bail!(
+            "target file not found: {} (auto-create not supported for --referral)",
+            target.display()
+        );
     }
 
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
 
-    let target_comps = component::parse(&target_content)
-        .context("failed to parse components in target")?;
+    let target_comps =
+        component::parse(&target_content).context("failed to parse components in target")?;
 
     // Compute relative path from target's directory to source
     let source_rel = make_relative(source, target);
@@ -528,7 +601,9 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
 
     eprintln!(
         "[transfer] Inserted referral to {}:{} in {}",
-        source.display(), component_name, target.display()
+        source.display(),
+        component_name,
+        target.display()
     );
 
     Ok(())
@@ -571,16 +646,25 @@ mod tests {
 
         let merged = format!("{}{}\n", target_pending, source_pending.trim_end());
 
-        assert!(merged.contains("Existing target item"), "target items preserved");
+        assert!(
+            merged.contains("Existing target item"),
+            "target items preserved"
+        );
         assert!(merged.contains("Item from source"), "source items appended");
-        assert!(merged.contains("Another source item"), "all source items appended");
+        assert!(
+            merged.contains("Another source item"),
+            "all source items appended"
+        );
     }
 
     /// Empty source pending should not modify target pending.
     #[test]
     fn pending_merge_skips_empty_source() {
         let source_pending = "\n";
-        assert!(source_pending.trim().is_empty(), "empty source should be skipped");
+        assert!(
+            source_pending.trim().is_empty(),
+            "empty source should be skipped"
+        );
     }
 
     /// When TMUX_PANE is not set, ownership check always passes.
@@ -604,7 +688,8 @@ mod tests {
     /// Selective pending item matching by ID pattern.
     #[test]
     fn pending_item_selection_by_id() {
-        let pending = "- [ ] [#abc1] First item\n- [ ] [#def2] Second item\n- [ ] [#ghi3] Third item\n";
+        let pending =
+            "- [ ] [#abc1] First item\n- [ ] [#def2] Second item\n- [ ] [#ghi3] Third item\n";
         let ids = vec!["abc1".to_string(), "ghi3".to_string()];
 
         let mut matched: Vec<String> = Vec::new();
@@ -641,7 +726,12 @@ mod tests {
         let ids = vec!["abc".to_string()];
         let result = transfer(source, target, "exchange", false, Some(&ids), false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("only supported for the 'pending' component"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only supported for the 'pending' component")
+        );
     }
 
     /// --referral and --items are mutually exclusive.
@@ -652,7 +742,12 @@ mod tests {
         let ids = vec!["abc".to_string()];
         let result = transfer(source, target, "pending", false, Some(&ids), true);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("--referral and --items cannot be used together"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--referral and --items cannot be used together")
+        );
     }
 
     /// make_relative doesn't panic on non-existent paths.

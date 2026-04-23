@@ -3,20 +3,32 @@ use std::path::{Path, PathBuf};
 
 fn platform_lib_name() -> &'static str {
     #[cfg(target_os = "linux")]
-    { "libagent_doc.so" }
+    {
+        "libagent_doc.so"
+    }
     #[cfg(target_os = "macos")]
-    { "libagent_doc.dylib" }
+    {
+        "libagent_doc.dylib"
+    }
     #[cfg(target_os = "windows")]
-    { "agent_doc.dll" }
+    {
+        "agent_doc.dll"
+    }
 }
 
 fn is_versioned_lib(name: &str) -> bool {
     #[cfg(target_os = "linux")]
-    { name.starts_with("libagent_doc-") && name.ends_with(".so") }
+    {
+        name.starts_with("libagent_doc-") && name.ends_with(".so")
+    }
     #[cfg(target_os = "macos")]
-    { name.starts_with("libagent_doc-") && name.ends_with(".dylib") }
+    {
+        name.starts_with("libagent_doc-") && name.ends_with(".dylib")
+    }
     #[cfg(target_os = "windows")]
-    { name.starts_with("agent_doc-") && name.ends_with(".dll") }
+    {
+        name.starts_with("agent_doc-") && name.ends_with(".dll")
+    }
 }
 
 fn is_pid_lock(name: &str, lib_name: &str) -> Option<u32> {
@@ -173,7 +185,10 @@ mod tests {
         ));
         // Fix: lock name should be <so_name>.pid.<pid>
         let so_name = so_path.file_name().unwrap().to_str().unwrap();
-        let lock = so_path.parent().unwrap().join(format!("{}.pid.{}", so_name, pid));
+        let lock = so_path
+            .parent()
+            .unwrap()
+            .join(format!("{}.pid.{}", so_name, pid));
         fs::write(&lock, "").unwrap();
         lock
     }

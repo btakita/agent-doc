@@ -74,10 +74,7 @@ pub fn parse_stream_line(line: &str) -> Result<StreamChunk> {
     let json: serde_json::Value = serde_json::from_str(line)
         .map_err(|e| anyhow::anyhow!("failed to parse stream JSON: {}: {}", e, line))?;
 
-    let msg_type = json
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let msg_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match msg_type {
         "result" => {
@@ -223,7 +220,10 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me reason about this..."},{"type":"text","text":"Here is the answer."}]}}"#;
         let chunk = parse_stream_line(line).unwrap();
         assert_eq!(chunk.text, "Here is the answer.");
-        assert_eq!(chunk.thinking.as_deref(), Some("Let me reason about this..."));
+        assert_eq!(
+            chunk.thinking.as_deref(),
+            Some("Let me reason about this...")
+        );
         assert!(!chunk.is_final);
     }
 
@@ -237,7 +237,8 @@ mod tests {
 
     #[test]
     fn parse_no_thinking_returns_none() {
-        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Just text"}]}}"#;
+        let line =
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Just text"}]}}"#;
         let chunk = parse_stream_line(line).unwrap();
         assert!(chunk.thinking.is_none());
     }

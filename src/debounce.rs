@@ -64,7 +64,10 @@ pub fn document_changed(file: &str) {
     });
     // Write cross-process typing indicator (best-effort, never block)
     if let Err(e) = write_typing_indicator(file) {
-        eprintln!("[debounce] typing indicator write failed for {:?}: {}", file, e);
+        eprintln!(
+            "[debounce] typing indicator write failed for {:?}: {}",
+            file, e
+        );
     }
 }
 
@@ -152,7 +155,10 @@ fn typing_indicator_path(file: &str) -> PathBuf {
         }
         if !dir.pop() {
             // Fallback: use file's parent directory
-            let parent = PathBuf::from(file).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
             return parent.join(TYPING_DIR).join(format!("{:016x}", hash));
         }
     }
@@ -238,7 +244,9 @@ pub fn get_status_via_file(file: &str) -> String {
         Ok(content) => {
             // Format: "status:timestamp_ms"
             let parts: Vec<&str> = content.trim().splitn(2, ':').collect();
-            if parts.len() == 2 && let Ok(ts) = parts[1].parse::<u128>() {
+            if parts.len() == 2
+                && let Ok(ts) = parts[1].parse::<u128>()
+            {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -282,7 +290,10 @@ fn status_file_path(file: &str) -> PathBuf {
             return dir.join(STATUS_DIR).join(format!("{:016x}", hash));
         }
         if !dir.pop() {
-            let parent = PathBuf::from(file).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
             return parent.join(STATUS_DIR).join(format!("{:016x}", hash));
         }
     }

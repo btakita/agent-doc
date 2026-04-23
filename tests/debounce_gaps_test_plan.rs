@@ -78,17 +78,23 @@ fn test_mtime_granularity_100ms_rapid_edits() {
     eprintln!("10 edits took {} ms", elapsed);
 
     // Validation 1: is_idle should return false for 1500ms window
-    assert!(!agent_doc::debounce::is_idle(&doc_str, 1500),
-        "is_idle() should be false immediately after edits");
+    assert!(
+        !agent_doc::debounce::is_idle(&doc_str, 1500),
+        "is_idle() should be false immediately after edits"
+    );
 
     // Validation 2: is_typing_via_file should also return true
-    assert!(agent_doc::debounce::is_typing_via_file(&doc_str, 1500),
-        "is_typing_via_file() should detect active typing despite mtime granularity");
+    assert!(
+        agent_doc::debounce::is_typing_via_file(&doc_str, 1500),
+        "is_typing_via_file() should detect active typing despite mtime granularity"
+    );
 
     // Validation 3: After 1500ms, should be idle
     std::thread::sleep(Duration::from_millis(1500));
-    assert!(agent_doc::debounce::is_idle(&doc_str, 100),
-        "is_idle() should be true after debounce period");
+    assert!(
+        agent_doc::debounce::is_idle(&doc_str, 100),
+        "is_idle() should be true after debounce period"
+    );
 }
 
 /// Test that 1-second mtime granularity systems (HFS+) don't skip the debounce.
@@ -120,8 +126,10 @@ fn test_mtime_granularity_1s_coarse_system() {
     agent_doc::debounce::document_changed(&doc_str);
 
     // Validation: Both should still be captured despite mtime appearing to be the same
-    assert!(!agent_doc::debounce::is_idle(&doc_str, 1500),
-        "is_idle() should track both edits in LAST_CHANGE, not rely on file mtime");
+    assert!(
+        !agent_doc::debounce::is_idle(&doc_str, 1500),
+        "is_idle() should track both edits in LAST_CHANGE, not rely on file mtime"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,8 +176,10 @@ fn test_untracked_file_is_idle_returns_true() {
     let untracked_file = "/tmp/never-tracked-test.md";
 
     // Validation: is_idle returns true for untracked files
-    assert!(agent_doc::debounce::is_idle(untracked_file, 1500),
-        "is_idle() must return true for untracked files to prevent infinite wait");
+    assert!(
+        agent_doc::debounce::is_idle(untracked_file, 1500),
+        "is_idle() must return true for untracked files to prevent infinite wait"
+    );
 }
 
 /// Test that is_tracked() correctly returns false for never-seen files.
@@ -181,8 +191,10 @@ fn test_untracked_file_is_idle_returns_true() {
 fn test_untracked_file_is_tracked_returns_false() {
     let untracked_file = "/tmp/never-tracked-test2.md";
 
-    assert!(!agent_doc::debounce::is_tracked(untracked_file),
-        "is_tracked() must return false for files with no document_changed() calls");
+    assert!(
+        !agent_doc::debounce::is_tracked(untracked_file),
+        "is_tracked() must return false for files with no document_changed() calls"
+    );
 }
 
 /// Test that is_tracked() correctly returns true after a change.
@@ -192,8 +204,10 @@ fn test_tracked_file_is_tracked_returns_true() {
     let tracked_file = "/tmp/just-tracked.md";
     agent_doc::debounce::document_changed(tracked_file);
 
-    assert!(agent_doc::debounce::is_tracked(tracked_file),
-        "is_tracked() must return true after document_changed() is called");
+    assert!(
+        agent_doc::debounce::is_tracked(tracked_file),
+        "is_tracked() must return true after document_changed() is called"
+    );
 }
 
 /// Test that a probe uses is_tracked() to avoid unnecessary awaits.
@@ -210,7 +224,10 @@ fn test_probe_pattern_untracked_skips_await() {
     // Probe pattern: check is_tracked first
     if !agent_doc::debounce::is_tracked(untracked) {
         // Skip await_idle for untracked files
-        assert!(true, "Probe correctly skipped await_idle for untracked file");
+        assert!(
+            true,
+            "Probe correctly skipped await_idle for untracked file"
+        );
         return;
     }
 
@@ -283,8 +300,11 @@ fn test_hash_collision_no_collisions_for_common_paths() {
     }
 
     // Validation: no collisions (or accept bounded collisions with warning)
-    assert_eq!(collision_count, 0,
-        "Hash collisions detected: {} files hashed to same values", collision_count);
+    assert_eq!(
+        collision_count, 0,
+        "Hash collisions detected: {} files hashed to same values",
+        collision_count
+    );
 }
 
 /// Test that typing indicator cleanup removes stale files correctly.
@@ -501,20 +521,26 @@ fn test_status_file_staleness_30s_timeout() {
     // Test case 1: 29 seconds old → still busy
     write_status_at_time(&status_file, "generating", 29_000);
     let status = agent_doc::debounce::get_status_via_file(&doc_str);
-    assert_eq!(status, "generating",
-        "Status 29s old should still be returned, not timed out");
+    assert_eq!(
+        status, "generating",
+        "Status 29s old should still be returned, not timed out"
+    );
 
     // Test case 2: exactly 30 seconds old → timed out
     write_status_at_time(&status_file, "generating", 30_000);
     let status = agent_doc::debounce::get_status_via_file(&doc_str);
-    assert_eq!(status, "idle",
-        "Status exactly 30s old should be considered timed out");
+    assert_eq!(
+        status, "idle",
+        "Status exactly 30s old should be considered timed out"
+    );
 
     // Test case 3: 31 seconds old → definitely timed out
     write_status_at_time(&status_file, "generating", 31_000);
     let status = agent_doc::debounce::get_status_via_file(&doc_str);
-    assert_eq!(status, "idle",
-        "Status 31s old should definitely be timed out");
+    assert_eq!(
+        status, "idle",
+        "Status 31s old should definitely be timed out"
+    );
 }
 
 /// Test that set_status() writes the timestamp correctly.

@@ -61,7 +61,8 @@ fn try_connect(project_root: &Path) -> Result<interprocess::local_socket::Stream
     let path = socket_path(project_root);
     let name = path.to_fs_name::<GenericFilePath>()?;
     let opts = interprocess::local_socket::ConnectOptions::new().name(name);
-    let stream = opts.connect_sync()
+    let stream = opts
+        .connect_sync()
         .context("failed to connect to IPC socket")?;
     Ok(stream)
 }
@@ -90,11 +91,17 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     });
 
     match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok((Ok(0), _)) => Err(anyhow::anyhow!("IPC ack: plugin closed connection without responding")),
+        Ok((Ok(0), _)) => Err(anyhow::anyhow!(
+            "IPC ack: plugin closed connection without responding"
+        )),
         Ok((Ok(_), line)) => Ok(Some(line.trim().to_string())),
         Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!("IPC ack timeout (2s)")),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(anyhow::anyhow!("IPC reader thread disconnected")),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(anyhow::anyhow!("IPC ack timeout (2s)"))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(anyhow::anyhow!("IPC reader thread disconnected"))
+        }
     }
 }
 

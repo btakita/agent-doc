@@ -80,8 +80,8 @@ pub fn expand_values(env: &EnvMap) -> Result<Vec<(String, Option<String>)>> {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("env expansion failed: {}", stderr.trim());
         }
-        let stdout = String::from_utf8(output.stdout)
-            .context("env expansion output is not valid UTF-8")?;
+        let stdout =
+            String::from_utf8(output.stdout).context("env expansion output is not valid UTF-8")?;
         stdout
             .split('\0')
             .take(set_keys.len())
@@ -166,7 +166,10 @@ mod tests {
             .collect();
         let result = expand_values(&env).unwrap();
         assert_eq!(result[0], ("BASE".to_string(), Some("world".to_string())));
-        assert_eq!(result[1], ("DERIVED".to_string(), Some("world".to_string())));
+        assert_eq!(
+            result[1],
+            ("DERIVED".to_string(), Some("world".to_string()))
+        );
     }
 
     #[test]
@@ -188,10 +191,7 @@ mod tests {
         let result = expand_values(&env).unwrap();
         assert_eq!(result[0], ("FIRST".to_string(), Some("1".to_string())));
         assert_eq!(result[1], ("MIDDLE".to_string(), None));
-        assert_eq!(
-            result[2],
-            ("LAST".to_string(), Some("1-tail".to_string()))
-        );
+        assert_eq!(result[2], ("LAST".to_string(), Some("1-tail".to_string())));
     }
 
     #[test]

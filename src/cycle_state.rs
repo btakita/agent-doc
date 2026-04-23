@@ -3,12 +3,14 @@
 //! ## Spec
 //! - Persists per-document cycle state under `.agent-doc/state/cycles/<doc-hash>.json`.
 //! - Tracks the exact phase of the current or most recent response cycle:
-//!   `preflight_started` → `write_applied` → `committed`.
+//!   `preflight_started` → `response_captured` → `write_applied` → `committed`.
 //! - Stores cycle-scoped snapshot/file content hashes so callers can reason
 //!   about exact cycle state instead of inferring from file-size drift or only
 //!   the last `ops.log` line.
 //! - `start_preflight()` opens a new cycle for a document and overwrites any
 //!   prior committed state for that document.
+//! - `mark_response_captured()` advances the open cycle to `response_captured`
+//!   once the final parsed response has been durably stored.
 //! - `mark_write_applied()` advances the open cycle to `write_applied` (or
 //!   creates a synthetic cycle if a write lands without a prior preflight).
 //! - `mark_committed()` advances the cycle to `committed` (or creates a
@@ -23,6 +25,7 @@
 //!
 //! ## Evals
 //! - `start_preflight_persists_open_cycle`
+//! - `mark_response_captured_sets_capture_metadata`
 //! - `mark_write_applied_advances_existing_cycle`
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
@@ -35,6 +38,7 @@ use std::path::{Path, PathBuf};
 #[serde(rename_all = "snake_case")]
 pub enum CyclePhase {
     PreflightStarted,
+    ResponseCaptured,
     WriteApplied,
     Committed,
 }
@@ -51,6 +55,10 @@ pub struct CycleState {
     pub snapshot_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_sha256: Option<String>,
 }
 
 impl CycleState {
@@ -87,6 +95,8 @@ pub fn start_preflight(
         updated_at: now,
         snapshot_hash: snapshot_content.map(crate::ops_log::content_hash),
         file_hash: file_content.map(crate::ops_log::content_hash),
+        capture_id: None,
+        response_sha256: None,
     };
     save(file, &state)?;
     Ok(state)
@@ -98,12 +108,35 @@ pub fn mark_write_applied(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    let mut state = load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    let mut state =
+        load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
     state.phase = CyclePhase::WriteApplied;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
     state.file_hash = file_content.map(crate::ops_log::content_hash);
+    save(file, &state)?;
+    Ok(state)
+}
+
+pub fn mark_response_captured(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    response_sha256: &str,
+    cycle_id_hint: Option<&str>,
+) -> Result<CycleState> {
+    let mut state = load(file)?.unwrap_or_else(|| {
+        synthetic_state_with_id(file, CyclePhase::PreflightStarted, cycle_id_hint)
+    });
+    state.phase = CyclePhase::ResponseCaptured;
+    state.last_event = event.to_string();
+    state.updated_at = now_secs();
+    state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
+    state.file_hash = file_content.map(crate::ops_log::content_hash);
+    state.capture_id = Some(state.cycle_id.clone());
+    state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
     Ok(state)
 }
@@ -149,13 +182,26 @@ fn state_path(file: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(&canonical)?;
-    Ok(Some(root.join(".agent-doc/state/cycles").join(format!("{hash}.json"))))
+    Ok(Some(
+        root.join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json")),
+    ))
 }
 
 fn synthetic_state(file: &Path, phase: CyclePhase) -> CycleState {
+    synthetic_state_with_id(file, phase, None)
+}
+
+fn synthetic_state_with_id(
+    file: &Path,
+    phase: CyclePhase,
+    cycle_id_hint: Option<&str>,
+) -> CycleState {
     let now = now_secs();
     CycleState {
-        cycle_id: format!("synthetic-{}", now_millis()),
+        cycle_id: cycle_id_hint
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("synthetic-{}", now_millis())),
         file: file.display().to_string(),
         phase,
         last_event: "synthetic_state".to_string(),
@@ -163,6 +209,8 @@ fn synthetic_state(file: &Path, phase: CyclePhase) -> CycleState {
         updated_at: now,
         snapshot_hash: None,
         file_hash: None,
+        capture_id: None,
+        response_sha256: None,
     }
 }
 
@@ -199,7 +247,10 @@ mod tests {
 
         let state = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert_eq!(state.phase, CyclePhase::PreflightStarted);
-        assert_eq!(load(&doc).unwrap().unwrap().phase, CyclePhase::PreflightStarted);
+        assert_eq!(
+            load(&doc).unwrap().unwrap().phase,
+            CyclePhase::PreflightStarted
+        );
         assert!(load(&doc).unwrap().unwrap().is_open());
     }
 
@@ -214,6 +265,27 @@ mod tests {
         assert_eq!(state.phase, CyclePhase::WriteApplied);
         assert_eq!(state.last_event, "write_template");
         assert!(state.snapshot_hash.is_some());
+    }
+
+    #[test]
+    fn mark_response_captured_sets_capture_metadata() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "abc",
+            None,
+        )
+        .unwrap();
+        assert_eq!(state.phase, CyclePhase::ResponseCaptured);
+        assert_eq!(state.capture_id.as_deref(), Some(state.cycle_id.as_str()));
+        assert_eq!(state.response_sha256.as_deref(), Some("abc"));
     }
 
     #[test]

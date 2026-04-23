@@ -46,12 +46,20 @@ pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
             "append" => (AgentDocFormat::Append, AgentDocWrite::Crdt),
             "template" => (AgentDocFormat::Template, AgentDocWrite::Crdt),
             "stream" => (AgentDocFormat::Template, AgentDocWrite::Crdt),
-            _ => anyhow::bail!("invalid mode: {} (expected 'append', 'template', or 'stream')", mode),
+            _ => anyhow::bail!(
+                "invalid mode: {} (expected 'append', 'template', or 'stream')",
+                mode
+            ),
         };
         let updated = frontmatter::set_format_and_write(&content, format, write)?;
         std::fs::write(file, &updated)
             .with_context(|| format!("failed to write {}", file.display()))?;
-        eprintln!("set agent_doc_format={}, agent_doc_write={} in {}", format, write, file.display());
+        eprintln!(
+            "set agent_doc_format={}, agent_doc_write={} in {}",
+            format,
+            write,
+            file.display()
+        );
     } else {
         let resolved = fm.resolve_mode();
         // Show new fields
@@ -59,7 +67,10 @@ pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
         println!("write: {}", resolved.write);
         // Show deprecation note if legacy mode field is present
         if let Some(ref legacy) = fm.mode {
-            eprintln!("note: deprecated agent_doc_mode={} is present; migrate to agent_doc_format + agent_doc_write", legacy);
+            eprintln!(
+                "note: deprecated agent_doc_mode={} is present; migrate to agent_doc_format + agent_doc_write",
+                legacy
+            );
         }
     }
 

@@ -269,7 +269,7 @@ Result:
 
 - `agent-doc tasks/claudescore.md` works again through the bare-path alias instead of failing with `unrecognized subcommand`.
 - `agent-doc commit` / `agent-doc session-check` now self-heal already-committed historical snapshot drift when `HEAD` proves the response is no longer out-of-band, which mitigates the stale `monsterrodholders` shape without widening selective commit into general drift absorption.
-<!-- agent:boundary:7d2d5126 -->
+<!-- agent:boundary:b7c61c34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

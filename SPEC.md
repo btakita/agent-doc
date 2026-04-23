@@ -7,6 +7,7 @@ Individual specs are in `specs/`. This file is the index.
 
 Notable invariants:
 - `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree.
+- Extreme snapshot/file drift does not relax that rule for tracked documents. Wholesale snapshot re-sync from the live file is reserved for bootstrap scaffold snapshots on files with no `HEAD` entry yet; tracked documents stay selective so unanswered prompts cannot be committed during preflight.
 - Post-commit cleanup normalizes the snapshot and working tree to a clean single-boundary shape with transient `(HEAD)` markers removed. When no live editor IPC listener exists, the CLI performs that working-tree rewrite itself instead of leaving boundary-only dirtiness behind.
 
 | # | File | Description |

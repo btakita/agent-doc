@@ -188,6 +188,7 @@ Exits with error if the pane is dead or no session is registered.
    c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>`
    d. Result: snapshot content (agent response) is committed; plain user edits in the working tree stay uncommitted
    e. Narrow repair path: if the live document is ahead of the snapshot due to a missed agent-doc mutation, `commit` first refreshes the snapshot from the live file, then stages it. The repair only triggers when the redacted component structure is unchanged and the drift looks like an agent-owned `status` change and/or an appended `### Re:` block and/or a `pending` stable-ID superset. Plain user-prompt drift is not absorbed.
+   f. Extreme drift guard: when the file is vastly larger than the snapshot, `commit` may auto-resync only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents still do NOT wholesale re-sync from the live file, because that would risk absorbing unanswered user prompts.
 3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
 4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
 5. On successful commit: clean the on-disk snapshot, then either

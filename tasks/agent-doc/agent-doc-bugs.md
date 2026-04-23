@@ -210,7 +210,9 @@ No. `codex_args` is not supported in frontmatter for `agent: codex`.
 Use `agent_args` instead, for example `agent_args: "-s danger-full-access"`.
 
 `agent-doc` only parses harness-neutral `agent_args` plus the legacy Claude-only alias `claude_args`. On the start path, Codex resolves arguments from `agent_args` only and ignores `claude_args`; there is no `codex_args` field.
-<!-- agent:boundary:26604434 -->
+
+Please implement `codex_args` for 
+<!-- agent:boundary:7ad67549 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

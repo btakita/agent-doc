@@ -192,8 +192,9 @@ Exits with error if the pane is dead or no session is registered.
    e. Narrow repair path: if the live document is ahead of the snapshot due to a missed agent-doc mutation, `commit` first refreshes the snapshot from the live file, then stages it. The repair only triggers when the redacted component structure is unchanged and the drift looks like an agent-owned `status` change and/or an appended `### Re:` block and/or a `pending` stable-ID superset. Plain user-prompt drift is not absorbed.
    f. Extreme drift guard: when the file is vastly larger than the snapshot, `commit` may auto-resync only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents still do NOT wholesale re-sync from the live file, because that would risk absorbing unanswered user prompts.
 3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
-4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
-5. On successful commit: keep the on-disk snapshot / visible document in the post-commit affordance shape, then either
+4. If the fully staged index already matches `HEAD`, close the cycle as `commit_already_current` and return success without creating a duplicate git commit
+5. Otherwise run `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
+6. On successful commit: keep the on-disk snapshot / visible document in the post-commit affordance shape, then either
    - rewrite the working tree locally to that single-boundary + single-`(HEAD)` shape when no live editor IPC listener exists, or
    - send reposition + VCS-refresh IPC signals so the plugin applies that same visible rewrite via the Document API
 
@@ -468,6 +469,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 **Steps (in order):**
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
    - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If that `commit` path finds the staged snapshot already matches `HEAD`, it closes the cycle as already committed instead of logging `commit_failed`
    - If the prior cycle is `preflight_started`, preflight only auto-closes when `recover` replays a pending/captured response first; otherwise it fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Recover orphaned pending/captured responses (`agent-doc recover`)
@@ -516,6 +518,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 - Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
 - Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
 - Narrow self-heal: if that marker is only historical drift already committed in `HEAD`, and the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers, `session-check` repairs the stale snapshot first and exits `0`
+- A cycle closed by `agent-doc commit` as `commit_already_current` counts as terminal / committed: it means the staged snapshot was already identical to `HEAD`, so no duplicate git commit was necessary
 - Exit `0` when the cycle state is committed or no state/log file exists
 - Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.
 

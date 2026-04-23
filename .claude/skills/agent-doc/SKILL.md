@@ -69,7 +69,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, inline annotations (blockquotes, comments, edits to previous responses), and structural changes.
 
-**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4-h6 for sub-sections within a response.
+**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). Commit-time boundary cleanup only recognizes real headings for transient `(HEAD)` marker cleanup. Use h4-h6 for sub-sections within a response.
 
 **Model attribution:** always append your own model short name with a spaced em dash: `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never omit the suffix.
 
@@ -107,7 +107,7 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 
 ### 3. Commit (MANDATORY — never skip)
 
-Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
+Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches, then normalizes transient `(HEAD)` / boundary cleanup through the plugin when a live IPC listener exists or directly on disk when one does not. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
 
 **Never use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`.
 

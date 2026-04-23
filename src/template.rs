@@ -535,12 +535,76 @@ pub fn reposition_boundary_to_end(doc: &str) -> String {
     reposition_boundary_to_end_with_summary(doc, None)
 }
 
+/// Reposition the boundary marker without adding any ` (HEAD)` annotations.
+///
+/// Used by commit-time cleanup and editor-side boundary refresh so the
+/// working tree can be brought back to the same clean shape as the committed
+/// blob instead of introducing boundary-only dirtiness.
+pub fn reposition_boundary_to_end_clean(doc: &str) -> String {
+    reposition_boundary_to_end_clean_with_summary(doc, None)
+}
+
 /// Reposition boundary with an optional human-readable summary suffix.
 ///
 /// The summary is slugified and appended to the boundary ID:
 /// `a0cfeb34:agent-doc` instead of just `a0cfeb34`.
 pub fn reposition_boundary_to_end_with_summary(doc: &str, summary: Option<&str>) -> String {
     reposition_boundary_to_end_with_baseline(doc, summary, None)
+}
+
+/// Reposition boundary with an optional human-readable summary suffix, but do
+/// not add any ` (HEAD)` heading annotations.
+pub fn reposition_boundary_to_end_clean_with_summary(doc: &str, summary: Option<&str>) -> String {
+    let mut result = strip_transient_head_markers(&remove_all_boundaries(doc));
+    if let Ok(components) = component::parse(&result)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        let id = crate::new_boundary_id_with_summary(summary);
+        let marker = crate::format_boundary_marker(&id);
+        let content = exchange.content(&result).to_string();
+        let new_content = format!("{}\n{}\n", content.trim_end(), marker);
+        result = exchange.replace_content(&result, &new_content);
+    }
+    result
+}
+
+/// Strip transient ` (HEAD)` suffixes from markdown headings and bold-text
+/// pseudo-headers, skipping fenced code blocks.
+fn strip_transient_head_markers(content: &str) -> String {
+    let code_ranges = component::find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
+
+    let mut result = String::with_capacity(content.len());
+    let mut offset = 0usize;
+    for line in content.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+
+        let mut rewritten = line.to_string();
+        if !in_code(line_start) {
+            let had_newline = rewritten.ends_with('\n');
+            let body = rewritten.trim_end_matches('\n').trim_end_matches('\r');
+            let trimmed = body.trim_start();
+            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+            let is_markdown_heading = hash_count > 0
+                && hash_count <= 6
+                && trimmed[hash_count..].starts_with(' ');
+            let is_bold_pseudo_header = trimmed.starts_with("**") && trimmed.ends_with("** (HEAD)");
+            if (is_markdown_heading || is_bold_pseudo_header)
+                && let Some(stripped) = body.strip_suffix(" (HEAD)")
+            {
+                rewritten = if had_newline {
+                    format!("{stripped}\n")
+                } else {
+                    stripped.to_string()
+                };
+            }
+        }
+
+        result.push_str(&rewritten);
+    }
+
+    result
 }
 
 /// Reposition boundary, with an optional set of baseline `### Re:` headings

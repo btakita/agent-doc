@@ -57,6 +57,27 @@ Current state:
 
 - `src/agent-doc` commit created: `01d56cb` — `fix: absorb status drift in commit self-heal`
 - Verified through the real pre-commit path: `cargo clippy -- -D warnings`, full `cargo test`, and `cargo run --quiet -- audit-docs`
+
+### Re: commit it and fix the bugs / what was still uncommitted — codex
+
+Committed.
+
+`src/agent-doc` fix commit: `01d56cb`
+Parent repo commit for the repaired patchbacks: `50d7b98f`
+Plan cleanup commit: `fdc986c5`
+
+Why they were still uncommitted:
+
+- There was a real bug in `agent-doc commit`: it self-healed `exchange` / `pending` drift but not `status+exchange`, so that patchback stayed dirty.
+- After fixing that in `src/agent-doc`, the parent `agent-loop` repo still had the submodule pointer and `tasks/agent-doc/agent-doc-bugs.md` uncommitted.
+
+I also checked the remaining dirty `tasks/agent-doc/*.md` files. Those are not missed response patchbacks. They are only boundary-marker / `(HEAD)` working-tree diffs in:
+
+- `tasks/agent-doc/agent-doc-cursor.md`
+- `tasks/agent-doc/agent-doc-feat.md`
+- `tasks/agent-doc/agent-doc-model.md`
+
+So the real patchback bug is fixed and the actual missed patchbacks are committed. The only remaining dirtiness in that area is the current boundary-marker behavior.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

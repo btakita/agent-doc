@@ -1973,14 +1973,12 @@ Commit / push:
 
 - No new `src/agent-doc` commit or push was needed for `#cdi2`; this step was workspace installation/activation in `agent-loop`.
 - I am not claiming end-to-end closeout success yet. That still needs `#cde3`.
-<!-- agent:boundary:07fbc2b8 -->
+<!-- agent:boundary:14cc8093 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#cdv1] Verify the current Codex closeout WIP in `src/agent-doc` with focused hook/session tests and `make -C src/agent-doc check`, so the next action is based on the live tree rather than prior turn assumptions.
-- [x] [#cdi2] Install the updated `agent-doc` skill/artifacts into `agent-loop` and confirm the repo-local `.codex/hooks.json` and `.codex/config.toml` backstop are actually present here.
 - [ ] [#cde3] Run an end-to-end Codex closeout check in `agent-loop` that proves both the normal `finalize` + `session-check` path and the `Stop` hook backstop leave no uncommitted patchback.
 - [ ] [#cdp4] Patch the verified Codex closeout outcome back into this bug doc, update pending state, and then commit/push in the correct repo boundaries.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.

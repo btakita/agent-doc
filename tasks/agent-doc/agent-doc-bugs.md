@@ -1114,15 +1114,12 @@ Verification completed in the current `src/agent-doc` tree:
 - `make check`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:d8b33d16 -->
+<!-- agent:boundary:a7947922 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#drc1] [recommended] Build a durable response-capture ledger: persist the final parsed agent response plus cycle metadata before write/hook emission, add deterministic replay for open cycles with captured-but-unwritten output, and expose hook payload refs/hashes instead of relying on reconstructing text from history.
-- [x] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
-- [x] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

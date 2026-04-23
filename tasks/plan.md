@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-23 — agent-doc systemic Codex/runbook compliance diagnosis
+
+- [x] Audit the active Codex-facing instruction surfaces (`.codex/AGENTS.md`, bundled runbooks, task history) to separate context loss from contract duplication / enforcement gaps.
+- [x] Patch back a direct answer into `tasks/agent-doc/agent-doc-bugs.md`, including the document-local recommended follow-up in `agent:pending`.
+- [x] Verify the patchback crossed the normal `agent-doc` write/commit boundary and record the exact commit result (`78a693bc`).
+
 ### 2026-04-22 — agent-doc `#mdl1` response-header model attribution
 
 - [x] Audit the current response-header attribution contract across `preflight`, the bundled skill, installed harness runbooks, and docs so any harness-label drift is explicit before changing code.

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook codex-stop",
+            "statusMessage": "Checking agent-doc completion boundary",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook codex-user-prompt-submit",
+            "statusMessage": "Tracking active agent-doc session",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

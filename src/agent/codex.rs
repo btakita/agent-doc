@@ -4,7 +4,10 @@
 //! - Wraps the `codex` CLI binary as an `Agent` and `StreamingAgent` backend.
 //! - Default invocation: `codex exec --json -s workspace-write`.
 //! - Session resumption: uses `codex exec resume <id> --json` subcommand.
-//! - Session fork: uses `codex exec resume --last --json` (no non-interactive fork in Codex).
+//!   Legacy sandbox flags (`-s/--sandbox`) are translated to `-c sandbox_mode="..."`
+//!   because current `codex exec resume` no longer accepts `-s` directly.
+//! - Session fork: falls back to a fresh `codex exec` session because Codex has no
+//!   non-interactive fork equivalent.
 //! - Model override: appends `-m <model>`.
 //! - `CODEX_CLI` and `CODEX` env vars are removed from the child process to prevent recursive detection.
 //! - Non-streaming: spawns child, writes prompt to stdin, collects JSONL output, extracts
@@ -74,27 +77,39 @@ impl Codex {
         self
     }
 
-    fn build_command(&self, session_id: Option<&str>, fork: bool, model: Option<&str>) -> Command {
+    fn append_resume_args(cmd: &mut Command, base_args: &[String]) {
+        let mut args = base_args.iter().peekable();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "exec" | "--json" => {}
+                "-s" | "--sandbox" => {
+                    if let Some(mode) = args.next() {
+                        cmd.arg("-c").arg(format!("sandbox_mode={mode:?}"));
+                    } else {
+                        cmd.arg(arg);
+                    }
+                }
+                _ if arg.starts_with("--sandbox=") => {
+                    let mode = &arg["--sandbox=".len()..];
+                    cmd.arg("-c").arg(format!("sandbox_mode={mode:?}"));
+                }
+                _ => {
+                    cmd.arg(arg);
+                }
+            }
+        }
+    }
+
+    fn build_command(&self, session_id: Option<&str>, _fork: bool, model: Option<&str>) -> Command {
         let mut cmd = Command::new(&self.command);
 
         if let Some(sid) = session_id {
-            // codex exec resume <id> --json -s workspace-write
+            // codex exec resume <id> --json -c sandbox_mode="workspace-write"
             cmd.arg("exec").arg("resume").arg(sid).arg("--json");
-            // Add remaining base_args that aren't "exec" or "--json"
-            for arg in &self.base_args {
-                if arg != "exec" && arg != "--json" {
-                    cmd.arg(arg);
-                }
-            }
-        } else if fork {
-            // codex exec resume --last --json -s workspace-write
-            cmd.arg("exec").arg("resume").arg("--last").arg("--json");
-            for arg in &self.base_args {
-                if arg != "exec" && arg != "--json" {
-                    cmd.arg(arg);
-                }
-            }
+            Self::append_resume_args(&mut cmd, &self.base_args);
         } else {
+            // Fresh exec is also the fallback for `fork=true`: Codex has no
+            // non-interactive "fork latest session" equivalent.
             cmd.args(&self.base_args);
         }
 
@@ -345,6 +360,14 @@ impl Iterator for CodexStreamIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(OsStr::to_string_lossy)
+            .map(|s| s.into_owned())
+            .collect()
+    }
 
     #[test]
     fn parse_thread_started() {
@@ -461,5 +484,70 @@ mod tests {
         assert!(!chunks[0].is_final);
         assert!(chunks[1].is_final);
         assert_eq!(chunks[1].session_id.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn build_command_exec_preserves_default_sandbox_flag() {
+        let codex = Codex::new(None, None);
+        let cmd = codex.build_command(None, false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec!["exec", "--json", "-s", "workspace-write"]
+        );
+    }
+
+    #[test]
+    fn build_command_resume_translates_short_sandbox_flag() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "-s".into(),
+                "workspace-write".into(),
+                "--skip-git-repo-check".into(),
+            ]),
+        );
+        let cmd = codex.build_command(Some("thread-123"), false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "resume",
+                "thread-123",
+                "--json",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
+                "--skip-git-repo-check",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_command_fork_starts_fresh_exec_session() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "--sandbox=danger-full-access".into(),
+                "--ignore-user-config".into(),
+            ]),
+        );
+        let cmd = codex.build_command(None, true, Some("gpt-5.4"));
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "--json",
+                "--sandbox=danger-full-access",
+                "--ignore-user-config",
+                "-m",
+                "gpt-5.4",
+            ]
+        );
     }
 }

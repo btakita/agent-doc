@@ -12,6 +12,9 @@
 //! - Install is idempotent: calling it multiple times with identical content is a no-op.
 //! - When CWD is inside a git submodule, resolves to the superproject root so that
 //!   the skill file lands in the workspace root that Claude Code actually reads.
+//! - Claude/Codex installed instructions are rendered from one shared source
+//!   surface; only harness-specific invocation wording and frontmatter
+//!   description may differ.
 //!
 //! ## Agentic Contracts
 //! - `install()` and `check()` never require arguments; resolution is automatic.
@@ -26,16 +29,52 @@
 //! - install_idempotent: install twice → file content unchanged, no error
 //! - install_overwrites_outdated: stale "old content" present → replaced with bundled content
 //! - check_not_installed: no SKILL.md present → path does not exist (check would return false)
-//! - bundled_skill_is_not_empty: `BUNDLED_SKILL` length > 0 at compile time
+//! - bundled_skill_is_not_empty: shared skill template length > 0 at compile time
 //! - bundled_skill_contains_agent_doc: bundled content references "agent-doc"
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use agent_kit::skill::SkillConfig;
 
-/// The SKILL.md content bundled at build time.
-const BUNDLED_SKILL: &str = include_str!("../SKILL.md");
+/// The shared SKILL.md source bundled at build time.
+const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
+
+const CLAUDE_DESCRIPTION: &str = "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception.";
+
+const CODEX_DESCRIPTION: &str = "Interactive document session for Codex — respond to user edits in a markdown file. TRIGGER: user writes agent-doc <file> as a normal Codex message. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception. Do not use slash commands; Codex rejects project-defined /agent-doc.";
+
+const CLAUDE_INVOCATION_SECTION: &str = r#"## Invocation
+
+```
+/agent-doc <FILE>
+/agent-doc claim <FILE>
+/agent-doc compact <FILE>
+/agent-doc compact exchange <FILE>
+```
+
+Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+
+**Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
+"#;
+
+const CODEX_INVOCATION_SECTION: &str = r#"## Invocation
+
+Codex does not support project-defined slash commands. Do **not** type `/agent-doc`; the Codex CLI will reject it before these instructions run.
+
+In Codex, invoke agent-doc by writing one of these as a normal message:
+
+```
+agent-doc <FILE>
+agent-doc claim <FILE>
+agent-doc compact <FILE>
+agent-doc compact exchange <FILE>
+```
+
+Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+
+Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
+"#;
 
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
@@ -73,6 +112,8 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
 
 /// Current binary version (from Cargo.toml).
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit";
+const CODEX_STOP_COMMAND: &str = "agent-doc hook codex-stop";
 
 fn config() -> SkillConfig {
     let env = agent_kit::detect::Environment::detect();
@@ -85,22 +126,81 @@ fn config_for_env(env: agent_kit::detect::Environment) -> SkillConfig {
 
 fn content_for_env(env: agent_kit::detect::Environment) -> String {
     use agent_kit::detect::Environment;
-    match env {
-        Environment::Codex => codex_content(),
-        _ => BUNDLED_SKILL.to_string(),
-    }
+    let (description, invocation_section) = match env {
+        Environment::Codex => (CODEX_DESCRIPTION, CODEX_INVOCATION_SECTION),
+        _ => (CLAUDE_DESCRIPTION, CLAUDE_INVOCATION_SECTION),
+    };
+    render_skill(description, invocation_section)
 }
 
-fn codex_content() -> String {
-    BUNDLED_SKILL
-        .replace(
-            "description: \"Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception.\"",
-            "description: \"Interactive document session for Codex — respond to user edits in a markdown file. TRIGGER: user writes agent-doc <file> as a normal Codex message. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception. Do not use slash commands; Codex rejects project-defined /agent-doc.\"",
-        )
-        .replace(
-            "## Invocation\n\n```\n/agent-doc <FILE>\n/agent-doc claim <FILE>\n/agent-doc compact <FILE>\n/agent-doc compact exchange <FILE>\n```\n\nArguments: `FILE` — path to the session document (e.g., `plan.md`).\n\n**Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.",
-            "## Invocation\n\nCodex does not support project-defined slash commands. Do **not** type `/agent-doc`; the Codex CLI will reject it before these instructions run.\n\nIn Codex, invoke agent-doc by writing one of these as a normal message:\n\n```\nagent-doc <FILE>\nagent-doc claim <FILE>\nagent-doc compact <FILE>\nagent-doc compact exchange <FILE>\n```\n\nArguments: `FILE` — path to the session document (e.g., `plan.md`).\n\nClaude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.",
-        )
+fn render_skill(description: &str, invocation_section: &str) -> String {
+    let rendered = replace_frontmatter_field(SKILL_TEMPLATE, "description", description)
+        .expect("SKILL.md must contain a description field in frontmatter");
+    replace_markdown_section(&rendered, "## Invocation", invocation_section)
+        .expect("SKILL.md must contain an ## Invocation section")
+}
+
+fn replace_frontmatter_field(content: &str, field: &str, value: &str) -> Option<String> {
+    let mut replaced = false;
+    let mut in_frontmatter = false;
+    let mut rendered = String::new();
+
+    for line in content.lines() {
+        if line == "---" {
+            in_frontmatter = !in_frontmatter;
+            rendered.push_str(line);
+            rendered.push('\n');
+            continue;
+        }
+
+        if in_frontmatter && line.starts_with(&format!("{field}: ")) {
+            rendered.push_str(&format!("{field}: \"{value}\"\n"));
+            replaced = true;
+            continue;
+        }
+
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
+
+    if !content.ends_with('\n') {
+        rendered.pop();
+    }
+
+    replaced.then_some(rendered)
+}
+
+fn replace_markdown_section(content: &str, heading: &str, replacement: &str) -> Option<String> {
+    let start = content.find(heading)?;
+    let after_heading = &content[start + heading.len()..];
+    let next_heading = after_heading.find("\n## ");
+    let end = next_heading
+        .map(|idx| start + heading.len() + idx + 1)
+        .unwrap_or(content.len());
+
+    let mut rendered = String::new();
+    rendered.push_str(&content[..start]);
+    rendered.push_str(replacement.trim_end());
+    rendered.push('\n');
+    rendered.push_str(&content[end..]);
+    Some(rendered)
+}
+
+#[cfg(test)]
+fn remove_markdown_section(content: &str, heading: &str) -> String {
+    let Some(start) = content.find(heading) else {
+        return content.to_string();
+    };
+    let after_heading = &content[start + heading.len()..];
+    let next_heading = after_heading.find("\n## ");
+    let end = next_heading
+        .map(|idx| start + heading.len() + idx + 1)
+        .unwrap_or(content.len());
+
+    let mut rendered = String::new();
+    rendered.push_str(&content[..start]);
+    rendered.push_str(&content[end..]);
+    rendered
 }
 
 /// Resolve the project root for skill installation.
@@ -178,13 +278,142 @@ fn install_runbooks_all(root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn install_env_artifacts(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
+    if matches!(env, agent_kit::detect::Environment::Codex) {
+        install_codex_hook_artifacts(root)?;
+    }
+    Ok(())
+}
+
+fn install_env_artifacts_all(root: Option<&Path>) -> Result<()> {
+    for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
+        install_env_artifacts(env, root)?;
+    }
+    Ok(())
+}
+
+fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let codex_dir = base.join(".codex");
+    std::fs::create_dir_all(&codex_dir)?;
+    merge_codex_hooks_json(&codex_dir.join("hooks.json"))?;
+    merge_codex_config(&codex_dir.join("config.toml"))?;
+    Ok(())
+}
+
+fn merge_codex_hooks_json(path: &Path) -> Result<()> {
+    let mut root = if path.exists() {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
+        serde_json::from_str::<serde_json::Value>(&content)
+            .with_context(|| format!("parse {}", path.display()))?
+    } else {
+        serde_json::json!({})
+    };
+
+    let hooks = root
+        .as_object_mut()
+        .context("Codex hooks.json root must be an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks_map = hooks
+        .as_object_mut()
+        .context("Codex hooks.json `hooks` must be an object")?;
+
+    ensure_codex_hook_command(
+        hooks_map,
+        "UserPromptSubmit",
+        CODEX_USER_PROMPT_COMMAND,
+        Some("Tracking active agent-doc session"),
+    );
+    ensure_codex_hook_command(
+        hooks_map,
+        "Stop",
+        CODEX_STOP_COMMAND,
+        Some("Checking agent-doc completion boundary"),
+    );
+
+    let rendered = serde_json::to_string_pretty(&root)?;
+    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+fn ensure_codex_hook_command(
+    hooks_map: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    command: &str,
+    status_message: Option<&str>,
+) {
+    let entries = hooks_map
+        .entry(event.to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(entry_array) = entries.as_array_mut() else {
+        *entries = serde_json::json!([]);
+        return ensure_codex_hook_command(hooks_map, event, command, status_message);
+    };
+
+    let already_present = entry_array.iter().any(|entry| {
+        entry.get("hooks")
+            .and_then(|hooks| hooks.as_array())
+            .map(|hooks| {
+                hooks.iter().any(|hook| {
+                    hook.get("type").and_then(|v| v.as_str()) == Some("command")
+                        && hook.get("command").and_then(|v| v.as_str()) == Some(command)
+                })
+            })
+            .unwrap_or(false)
+    });
+    if already_present {
+        return;
+    }
+
+    let mut hook = serde_json::Map::new();
+    hook.insert("type".to_string(), serde_json::json!("command"));
+    hook.insert("command".to_string(), serde_json::json!(command));
+    if let Some(status) = status_message {
+        hook.insert("statusMessage".to_string(), serde_json::json!(status));
+    }
+    entry_array.push(serde_json::json!({ "hooks": [hook] }));
+}
+
+fn merge_codex_config(path: &Path) -> Result<()> {
+    let mut root = if path.exists() {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
+        toml::from_str::<toml::Value>(&content).with_context(|| format!("parse {}", path.display()))?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    if !root.is_table() {
+        anyhow::bail!("Codex config at {} must be a TOML table", path.display());
+    }
+
+    let features = root
+        .as_table_mut()
+        .expect("checked table")
+        .entry("features".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let features_table = features
+        .as_table_mut()
+        .context("Codex config `features` must be a table")?;
+    features_table.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
+
+    std::fs::write(path, toml::to_string_pretty(&root)?)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
 /// Install the bundled SKILL.md to the project.
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 #[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let env = agent_kit::detect::Environment::detect();
     config().install(resolved.as_deref())?;
-    install_runbooks(resolved.as_deref())
+    install_runbooks(resolved.as_deref())?;
+    install_env_artifacts(env, resolved.as_deref())
 }
 
 /// Public entry point (resolves to superproject root, called from main).
@@ -207,6 +436,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 
     cfg.install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
+    install_env_artifacts(agent_kit::detect::Environment::detect(), resolved.as_deref())?;
     Ok(!was_current)
 }
 
@@ -214,7 +444,8 @@ pub fn install_and_check_updated() -> Result<bool> {
 pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
     let resolved = resolve_root();
     config_for_env(env).install_for(env, resolved.as_deref())?;
-    install_runbooks_for(env, resolved.as_deref())
+    install_runbooks_for(env, resolved.as_deref())?;
+    install_env_artifacts(env, resolved.as_deref())
 }
 
 /// Install the skill for all supported harnesses.
@@ -223,7 +454,8 @@ pub fn install_all() -> Result<()> {
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
         config_for_env(env).install_for(env, resolved.as_deref())?;
     }
-    install_runbooks_all(resolved.as_deref())
+    install_runbooks_all(resolved.as_deref())?;
+    install_env_artifacts_all(resolved.as_deref())
 }
 
 /// Check if the installed skill matches the bundled version.
@@ -249,18 +481,23 @@ mod tests {
 
     #[test]
     fn bundled_skill_is_not_empty() {
-        assert!(!BUNDLED_SKILL.is_empty());
+        assert!(!SKILL_TEMPLATE.is_empty());
     }
 
     #[test]
     fn bundled_skill_contains_agent_doc() {
-        assert!(BUNDLED_SKILL.contains("agent-doc"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc"));
     }
 
     /// Use an explicit ClaudeCode environment for deterministic test paths.
     /// Environment::detect() is non-deterministic in CI (depends on env vars).
     fn test_config() -> SkillConfig {
-        SkillConfig::with_environment("agent-doc", BUNDLED_SKILL, VERSION, Environment::ClaudeCode)
+        SkillConfig::with_environment(
+            "agent-doc",
+            content_for_env(Environment::ClaudeCode),
+            VERSION,
+            Environment::ClaudeCode,
+        )
     }
 
     /// Resolve expected skill path using the explicit test environment.
@@ -281,7 +518,7 @@ mod tests {
         let path = expected_path(dir.path());
         assert!(path.exists(), "skill not found at {}", path.display());
         let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, BUNDLED_SKILL);
+        assert_eq!(content, content_for_env(Environment::ClaudeCode));
     }
 
     #[test]
@@ -293,7 +530,7 @@ mod tests {
 
         let path = expected_path(dir.path());
         let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, BUNDLED_SKILL);
+        assert_eq!(content, content_for_env(Environment::ClaudeCode));
     }
 
     #[test]
@@ -353,6 +590,7 @@ mod tests {
             assert!(content.contains("Every appended `agent-doc` response must be committed"));
             assert!(content.contains("agent-doc finalize <FILE>"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
+            assert!(content.contains("agent-doc session-check <FILE>"));
             assert!(content.contains("bare `agent-doc write`"));
         }
     }
@@ -379,6 +617,8 @@ mod tests {
             assert!(content.contains("agent-doc write --commit <FILE>"));
             assert!(content.contains("bare `agent-doc write`"));
         }
+        assert!(codex.contains("agent-doc session-check <FILE>"));
+        assert!(codex.contains("Do **not** report success or stop"));
     }
 
     #[test]
@@ -396,6 +636,94 @@ mod tests {
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+    }
+
+    #[test]
+    fn install_for_codex_writes_hooks_json_and_feature_flag() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::config_for_env(Environment::Codex)
+            .install_for(Environment::Codex, Some(dir.path()))
+            .unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
+
+        let hooks_path = dir.path().join(".codex/hooks.json");
+        let config_path = dir.path().join(".codex/config.toml");
+        assert!(hooks_path.exists(), "missing {}", hooks_path.display());
+        assert!(config_path.exists(), "missing {}", config_path.display());
+
+        let hooks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();
+        let stop_hooks = hooks["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
+        assert!(stop_hooks.iter().any(|hook| {
+            hook["command"].as_str() == Some(CODEX_STOP_COMMAND)
+                && hook["type"].as_str() == Some("command")
+        }));
+        let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
+            .as_array()
+            .unwrap();
+        assert!(submit_hooks
+            .iter()
+            .any(|hook| hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND)));
+
+        let config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn install_for_codex_preserves_existing_hook_and_config_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                { "type": "command", "command": "echo existing-stop" }
+                            ]
+                        }
+                    ]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".codex/config.toml"),
+            "[sandbox]\ndefault = \"workspace-write\"\n",
+        )
+        .unwrap();
+
+        super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
+
+        let hooks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap())
+                .unwrap();
+        let stop_hooks = hooks["hooks"]["Stop"].as_array().unwrap();
+        assert!(stop_hooks.iter().any(|entry| {
+            entry["hooks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hook| hook["command"].as_str() == Some("echo existing-stop"))
+        }));
+        assert!(stop_hooks.iter().any(|entry| {
+            entry["hooks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hook| hook["command"].as_str() == Some(CODEX_STOP_COMMAND))
+        }));
+
+        let config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(config["sandbox"]["default"].as_str(), Some("workspace-write"));
+        assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
     }
 
     #[test]
@@ -428,41 +756,47 @@ mod tests {
 
     #[test]
     fn bundled_skill_contains_harness_preamble() {
-        assert!(BUNDLED_SKILL.contains("Harness Compatibility"));
-        assert!(BUNDLED_SKILL.contains("harness-invocation.md"));
-        assert!(BUNDLED_SKILL.contains("runbooks/commit.md"));
+        assert!(SKILL_TEMPLATE.contains("Harness Compatibility"));
+        assert!(SKILL_TEMPLATE.contains("harness-invocation.md"));
+        assert!(SKILL_TEMPLATE.contains("runbooks/commit.md"));
     }
 
     #[test]
     fn bundled_skill_contains_pending_capture_rules() {
-        assert!(BUNDLED_SKILL.contains("Pending capture rule"));
-        assert!(BUNDLED_SKILL.contains("[recommended]"));
-        assert!(BUNDLED_SKILL.contains("beginning of `agent:pending`"));
+        assert!(SKILL_TEMPLATE.contains("Pending capture rule"));
+        assert!(SKILL_TEMPLATE.contains("[recommended]"));
+        assert!(SKILL_TEMPLATE.contains("beginning of `agent:pending`"));
     }
 
     #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
-        assert!(BUNDLED_SKILL.contains("Manual repair / missed patchback rule (all harnesses)"));
+        assert!(SKILL_TEMPLATE.contains("Manual repair / missed patchback rule (all harnesses)"));
         assert!(
-            BUNDLED_SKILL
+            SKILL_TEMPLATE
                 .contains("do **not** patch the assistant response directly into the file")
         );
-        assert!(BUNDLED_SKILL.contains("Use `agent-doc write --commit <FILE>`"));
-        assert!(BUNDLED_SKILL.contains("bare `agent-doc write`"));
+        assert!(SKILL_TEMPLATE.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(SKILL_TEMPLATE.contains("bare `agent-doc write`"));
     }
 
     #[test]
     fn bundled_skill_contains_finalize_commit_invariant() {
-        assert!(BUNDLED_SKILL.contains("agent-doc finalize <FILE>"));
-        assert!(BUNDLED_SKILL.contains("unless the user explicitly told you to leave the response uncommitted"));
-        assert!(BUNDLED_SKILL.contains("requires the cycle to reach `committed`"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc finalize <FILE>"));
+        assert!(SKILL_TEMPLATE
+            .contains("unless the user explicitly told you to leave the response uncommitted"));
+        assert!(SKILL_TEMPLATE.contains("requires the cycle to reach `committed`"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc session-check <FILE>"));
+        assert!(SKILL_TEMPLATE.contains("final document-mutation boundary for the cycle"));
+        assert!(SKILL_TEMPLATE.contains(
+            "After `finalize` / `write --commit`, do not start more long-running task work"
+        ));
     }
 
     #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
-        assert!(BUNDLED_SKILL.contains("### Re: topic — gpt-5"));
-        assert!(BUNDLED_SKILL.contains("### Re: topic — opus-4-6"));
-        assert!(BUNDLED_SKILL.contains("Never use the harness label (`codex`, `claude`)"));
+        assert!(SKILL_TEMPLATE.contains("### Re: topic — gpt-5"));
+        assert!(SKILL_TEMPLATE.contains("### Re: topic — opus-4-6"));
+        assert!(SKILL_TEMPLATE.contains("Never use the harness label (`codex`, `claude`)"));
     }
 
     #[test]
@@ -473,6 +807,12 @@ mod tests {
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(content.contains("agent-doc session-check <FILE>"));
+        assert!(content.contains("final document-mutation boundary for the cycle"));
+        assert!(content.contains("do not start more long-running task work for that same turn"));
+        assert!(content.contains(".codex/hooks.json"));
+        assert!(content.contains("UserPromptSubmit"));
+        assert!(content.contains("last_assistant_message"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
@@ -484,6 +824,20 @@ mod tests {
 
         assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("TRIGGER: user invokes /agent-doc <file>"));
+    }
+
+    #[test]
+    fn generated_harness_content_shares_hot_path_outside_invocation() {
+        let claude = super::content_for_env(Environment::ClaudeCode);
+        let codex = super::content_for_env(Environment::Codex);
+
+        let claude_shared = super::remove_markdown_section(&claude, "## Invocation");
+        let codex_shared = super::remove_markdown_section(&codex, "## Invocation");
+
+        assert_eq!(
+            claude_shared.replace(CLAUDE_DESCRIPTION, "<DESC>"),
+            codex_shared.replace(CODEX_DESCRIPTION, "<DESC>")
+        );
     }
 
     #[test]
@@ -525,6 +879,11 @@ mod tests {
         assert!(content.contains("### Re: topic — claude"));
         assert!(content.contains("Manual repair / missed patchback"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
+        assert!(content.contains("agent-doc session-check <FILE>"));
+        assert!(content.contains("Do not patch the document early and then keep working for the same turn"));
+        assert!(content.contains(".codex/hooks.json"));
+        assert!(content.contains("UserPromptSubmit"));
+        assert!(content.contains("agent-doc hook codex-stop"));
     }
 
     #[test]
@@ -572,6 +931,34 @@ mod tests {
         install_test(Some(dir.path())).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, BUNDLED_SKILL);
+        assert_eq!(content, content_for_env(Environment::ClaudeCode));
+    }
+
+    #[test]
+    fn installed_harness_skill_content_shares_completion_boundary_text() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::config_for_env(Environment::ClaudeCode)
+            .install_for(Environment::ClaudeCode, Some(dir.path()))
+            .unwrap();
+        super::config_for_env(Environment::Codex)
+            .install_for(Environment::Codex, Some(dir.path()))
+            .unwrap();
+
+        let claude = std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/SKILL.md"))
+            .unwrap();
+        let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
+
+        for content in [&claude, &codex] {
+            assert!(content.contains("agent-doc finalize <FILE>"));
+            assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+            assert!(content.contains("requires the cycle to reach `committed`"));
+            assert!(content.contains("agent-doc session-check <FILE>"));
+            assert!(content.contains("final document-mutation boundary for the cycle"));
+            assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
+        }
+        assert!(claude.contains("final document-mutation boundary for the cycle"));
+        assert!(codex.contains(".codex/hooks.json"));
+        assert!(codex.contains("last_assistant_message"));
     }
 }

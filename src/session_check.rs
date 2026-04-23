@@ -41,66 +41,82 @@ use std::path::Path;
 /// ops.log, the previous cycle did not complete.
 pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionCheckStatus {
+    Ok(String),
+    Interrupted(String),
+}
+
 /// CLI entry: check the end-of-cycle write invariant for `file`.
 ///
 /// Prints a short status line to stdout and exits with:
 /// - `0` — log empty/missing, or last entry is a terminal event
 /// - `1` — last entry is `preflight_diff_start` (interrupted cycle)
 pub fn run(file: &Path) -> Result<()> {
+    match inspect(file)? {
+        SessionCheckStatus::Ok(message) => {
+            println!("{}", message);
+            Ok(())
+        }
+        SessionCheckStatus::Interrupted(message) => {
+            println!("{}", message);
+            std::process::exit(1);
+        }
+    }
+}
+
+pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
-            println!(
+            return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is still `{}` — no terminal commit followed",
                 state.cycle_id,
                 phase_name(state.phase)
-            );
-            std::process::exit(1);
+            )));
         }
-        println!(
+        if let Some(marker) = detect_bypassed_response_write(file)? {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                marker
+            )));
+        }
+        return Ok(SessionCheckStatus::Ok(format!(
             "[session-check] ok — cycle `{}` is `{}` ({})",
             state.cycle_id,
             phase_name(state.phase),
             state.last_event
-        );
-        if let Some(marker) = detect_bypassed_response_write(file)? {
-            println!(
-                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
-                marker
-            );
-            std::process::exit(1);
-        }
-        return Ok(());
+        )));
     }
 
     match last_ops_event(file)? {
         None => {
             if let Some(marker) = detect_bypassed_response_write(file)? {
-                println!(
+                return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
                     marker
-                );
-                std::process::exit(1);
+                )));
             }
-            println!("[session-check] no cycle state or ops.log — ok");
-            Ok(())
+            Ok(SessionCheckStatus::Ok(
+                "[session-check] no cycle state or ops.log — ok".to_string(),
+            ))
         }
         Some(event) if event.starts_with(PREFLIGHT_START_EVENT) => {
-            println!(
+            Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: last ops.log entry is `{}` — no write/commit followed",
                 PREFLIGHT_START_EVENT
-            );
-            std::process::exit(1);
+            )))
         }
         Some(event) => {
             if let Some(marker) = detect_bypassed_response_write(file)? {
-                println!(
+                return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
                     marker
-                );
-                std::process::exit(1);
+                )));
             }
-            println!("[session-check] ok — last event: {}", event);
-            Ok(())
+            Ok(SessionCheckStatus::Ok(format!(
+                "[session-check] ok — last event: {}",
+                event
+            )))
         }
     }
 }

@@ -563,6 +563,54 @@ fn test_skill_md_contains_required_steps() {
         content.contains("agent-doc finalize <FILE>"),
         "SKILL.md should use finalize for the normal response cycle"
     );
+    assert!(
+        content.contains("agent-doc session-check <FILE>"),
+        "SKILL.md should require session-check after final response persistence"
+    );
+    assert!(
+        content.contains("The response persistence command is the final document-mutation boundary for the cycle"),
+        "SKILL.md should treat response persistence as the close-out boundary"
+    );
+}
+
+#[test]
+fn test_codex_skill_install_writes_hook_artifacts() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.env("CODEX_CLI", "1");
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let hooks_path = tmp.path().join(".codex/hooks.json");
+    let config_path = tmp.path().join(".codex/config.toml");
+    assert!(hooks_path.exists(), "missing {}", hooks_path.display());
+    assert!(config_path.exists(), "missing {}", config_path.display());
+
+    let hooks: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();
+    assert!(hooks["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| {
+            entry["hooks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hook| hook["command"].as_str() == Some("agent-doc hook codex-user-prompt-submit"))
+        }));
+    assert!(hooks["hooks"]["Stop"].as_array().unwrap().iter().any(|entry| {
+        entry["hooks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|hook| hook["command"].as_str() == Some("agent-doc hook codex-stop"))
+    }));
+
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
 }
 
 #[test]

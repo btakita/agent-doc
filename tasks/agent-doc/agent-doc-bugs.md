@@ -11,7 +11,9 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-✅ Confirmed the current missed-commit report in `agent-loop` is a live workspace/install gap, not a new `src/agent-doc` regression. `tasks/agent-doc/agent-doc-bugs.md` currently contains a direct assistant patchback that never opened a fresh `agent-doc` cycle, `agent-doc session-check` fails on that bypassed write, and this repo still does not have the repo-local `.codex/hooks.json` / `.codex/config.toml` files that the `#cshk` Codex Stop-hook backstop depends on. No additional `src/agent-doc` code change was required for this turn.
+
+✅ Closed the `agent-loop` workspace install gap for Codex: `agent-doc skill install --harness codex` now installed repo-local `.codex/hooks.json` and `.codex/config.toml` with the `UserPromptSubmit` / `Stop` hook bridge enabled.
+The remaining open work is end-to-end closeout proof (`#cde3`): this document still contains earlier bypassed patchbacks, and `agent-doc session-check tasks/agent-doc/agent-doc-bugs.md` still reports an interrupted cycle until that path is exercised and repaired through the normal closeout flow.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1874,7 +1876,7 @@ Immediate remediation in this repo:
 I am not adding a new product pending item for this specific follow-up because `#cshk` already covers the shipped binary/backstop work; the gap exposed here is that this workspace has not picked up the installed Codex hook artifacts yet.
 
 Why is the response patchback not committed? We have gone through >10 rounds and this is still an issue. What more needs to be done? Is this a skill issue? Can we make the commit deterministic? Should agent-doc have defensive logic in case the harness does not behave correctly? The first priority is to make the harness behave correctly.
-### Re: why I went off-task / what the priority should be — gpt-5 (HEAD)
+### Re: why I went off-task / what the priority should be — gpt-5
 
 You are right. I moved in the wrong direction.
 
@@ -1897,7 +1899,7 @@ What more needs to be done, in priority order:
 
 So the first priority you gave is the right one: make the harness behave correctly first. The repeated misses mean I should have stayed on that diagnosis instead of treating this as another open-ended implementation turn.
 
-Plan the next steps to address the priorities.
+❯ Plan the next steps to address the priorities.
 ### Re: plan to address the harness-first priorities — codex
 
 Priority order should be:
@@ -1941,14 +1943,44 @@ Commit / push:
 
 - `src/agent-doc`: `6972cd1` — `fix: auto-close codex stop hook`
 - pushed to `origin 20260422/codex-agent-backend`
-<!-- agent:boundary:9254946b -->
+
+do #cdi2. update spec + tests. build + install for local testing. commit + push
+### Re: `#cdi2` install Codex hook artifacts in `agent-loop` — codex
+
+Completed the workspace install step in `agent-loop`.
+
+What I verified:
+
+- `agent-doc --version` is `0.33.12`, so this workspace is using the build that already includes `6972cd1` (`fix: auto-close codex stop hook`).
+- Before install, `.codex/` had only `AGENTS.md` plus runbooks; the repo-local `.codex/hooks.json` and `.codex/config.toml` files were absent.
+- Ran `agent-doc skill install --harness codex` in `agent-loop`.
+- After install, `.codex/hooks.json` exists and wires:
+  - `UserPromptSubmit` -> `agent-doc hook codex-user-prompt-submit`
+  - `Stop` -> `agent-doc hook codex-stop`
+- After install, `.codex/config.toml` exists with:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+Implication:
+
+- The workspace/runtime gap identified in the previous analysis is now closed in this repo. Codex now has the repo-local hook/config backstop that `#cshk` / `#cdv1` depend on.
+- The document itself is still in an interrupted state from earlier direct patchbacks; `agent-doc session-check tasks/agent-doc/agent-doc-bugs.md` still fails on the older bypassed response, so `#cde3` remains the next required proof step.
+
+Commit / push:
+
+- No new `src/agent-doc` commit or push was needed for `#cdi2`; this step was workspace installation/activation in `agent-loop`.
+- I am not claiming end-to-end closeout success yet. That still needs `#cde3`.
+<!-- agent:boundary:07fbc2b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] [#cdv1] Verify the current Codex closeout WIP in `src/agent-doc` with focused hook/session tests and `make -C src/agent-doc check`, so the next action is based on the live tree rather than prior turn assumptions.
-- [ ] [#cdi2] Install the updated `agent-doc` skill/artifacts into `agent-loop` and confirm the repo-local `.codex/hooks.json` and `.codex/config.toml` backstop are actually present here.
+- [x] [#cdi2] Install the updated `agent-doc` skill/artifacts into `agent-loop` and confirm the repo-local `.codex/hooks.json` and `.codex/config.toml` backstop are actually present here.
 - [ ] [#cde3] Run an end-to-end Codex closeout check in `agent-loop` that proves both the normal `finalize` + `session-check` path and the `Stop` hook backstop leave no uncommitted patchback.
 - [ ] [#cdp4] Patch the verified Codex closeout outcome back into this bug doc, update pending state, and then commit/push in the correct repo boundaries.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.

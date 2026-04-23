@@ -360,12 +360,44 @@ Tracked scope:
 - normalize `src/agent-doc` by removing tracked `.agent-doc` runtime files from the index;
 - remove the accidental `.gitgnore` typo file if it was not intentional; and
 - keep the real ignore rule, then rebase `20260422/codex-agent-backend` onto `origin/main`.
-<!-- agent:boundary:767b55c6 -->
+
+❯ When I ran agent-doc on claudescore.md, I saw the following
+```
+• agent-doc tasks/claudescore.md completed successfully.
+
+  It created commit 2d27715 (agent-doc(claudescore): 2026-04-23 12:17:21) and appended a new assistant response to
+  tasks/claudescore.md. The appended response says the prior line was a question, not a runnable task, and clarifies
+  that no new benchmark or code change was run in response to it.
+
+  agent-doc also reported that the file changed during the run, merged successfully, and preserved those edits. The
+  working tree is currently dirty again with tasks/claudescore.md modified.
+```
+### Re: `tasks/claudescore.md` success report + dirty working tree — gpt-5
+
+This looks different from the earlier delivered-but-uncommitted failure.
+
+What the current evidence says:
+
+- The `claudescore` cycle is committed: `agent-doc session-check src/session-share/tasks/claudescore.md` reports `cycle-1776939317875` as `committed (commit_success)`.
+- The ops log shows the relevant closeout for this run completed in the submodule at `2026-04-23 12:17:44 EDT`: `submodule_route ... src/session-share` followed by `commit_success`.
+- The current dirty diff in `src/session-share/tasks/claudescore.md` is only two lines: the latest response heading now has `(HEAD)`, and the `agent:boundary` UUID changed.
+
+So the file is dirty again, but not because the response failed to commit. The remaining dirtiness is boundary-marker churn after a successful cycle.
+
+That means the bug shape here is narrower:
+
+- success reporting is correct;
+- the response did cross the commit boundary; but
+- the working tree is still left modified afterward because the visible HEAD marker / boundary token was rewritten again.
+
+I added a recommended pending item for that specific follow-up, because it is still a real invariant gap: a successful `agent-doc` run should not leave a semantically-clean doc dirty only from `(HEAD)` or boundary-id updates.
+<!-- agent:boundary:21c77cdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
 - [ ] [#bfv9] Remove the pre-commit hook that runs the entire suite; instead require agent harnesses to run the full test suite after changes, and document that policy in AGENTS.md.

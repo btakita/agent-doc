@@ -922,7 +922,33 @@ Why that shape matters:
 So `agent-doc tasks/claudescore-2.md` reached the legacy `run` closeout path, not the template `finalize` / `write_template` path. On a template doc, that means the assistant text is appended at EOF as an inline `## Assistant` block, which is exactly the corruption you see.
 
 That also explains the uncommitted state: `run.rs` does a pre-send commit, then writes the response, but it does not cross the template response-commit boundary that `finalize` enforces.
-<!-- agent:boundary:24d01a59 -->
+
+Why was the legacy `run` closeout path used? 
+### Re: why the legacy `run` closeout path was used — gpt-5
+
+Because the bare-path compatibility alias is implemented as a literal CLI rewrite to `run`.
+
+The dispatch is in `src/agent-doc/src/main.rs`:
+
+- `rewrite_bare_file_invocation()` checks whether the first argument looks like a document path and is not a known subcommand.
+- When that matches, it does `args.insert(1, OsString::from("run"))`.
+- Then `main()` parses the rewritten argv and dispatches `Commands::Run { .. } => run::run(...)`.
+
+So after `0.33.13`, `agent-doc tasks/claudescore-2.md` did not mean “use the modern template/finalize closeout for this doc shape.” It meant exactly:
+
+- rewrite to `agent-doc run tasks/claudescore-2.md`
+- execute `src/agent-doc/src/run.rs`
+- use the legacy append/full-content write path
+
+That is why the template doc still went through the old closeout path. The alias restored command acceptance, but it restored it specifically by mapping bare-path invocations onto the old `run` subcommand, which is append-mode oriented and not template-aware.
+
+So the bug is really in the alias target:
+
+- the compatibility fix solved “unrecognized subcommand”
+- but it aliased bare-path invocation to the wrong execution model for template docs
+
+That is the exact reason `claudescore-2.md` used legacy closeout instead of template `finalize` / `write_template` behavior.
+<!-- agent:boundary:6a4bd6da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

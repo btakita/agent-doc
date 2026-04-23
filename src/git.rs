@@ -40,9 +40,10 @@
 //! - `show_head` and `last_commit_mtime` return `Ok(None)` (not `Err`) when the file has no git
 //!   history.
 //! - Safe out-of-band absorb is narrow: only component-local drift that leaves the redacted
-//!   document structure unchanged and looks like an agent-owned `status` change and/or an
-//!   appended `### Re:` block and/or a pending-ID superset is absorbed. Free-form user edits
-//!   remain uncommitted.
+//!   document structure unchanged and looks like an agent-owned `status` change and/or a
+//!   `### Re:` response-block insertion and/or a pending-ID superset is absorbed. Free-form user
+//!   edits remain uncommitted. Historical response-block insertions that are already committed in
+//!   `HEAD` may also repair the snapshot even when they are no longer appended at the tail.
 //!
 //! ## Evals
 //! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
@@ -55,6 +56,7 @@
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
 //! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
+//! - commit_repairs_committed_historical_snapshot_drift: historical direct response already committed in `HEAD` repairs the stale snapshot without creating a duplicate commit
 
 use anyhow::Result;
 use fs2::FileExt;
@@ -341,8 +343,12 @@ fn strip_boundary_markers(content: &str) -> String {
         .join("\n")
 }
 
-fn normalize_component_content_for_absorb(content: &str) -> String {
+pub(crate) fn normalize_transient_agent_doc_markers(content: &str) -> String {
     strip_head_markers(&strip_boundary_markers(content))
+}
+
+fn normalize_component_content_for_absorb(content: &str) -> String {
+    normalize_transient_agent_doc_markers(content)
         .trim()
         .to_string()
 }
@@ -366,6 +372,43 @@ fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_content: &st
     }
     let suffix = file_content[snapshot_content.len()..].trim();
     !suffix.is_empty() && suffix.starts_with("### Re:")
+}
+
+fn flush_exchange_insert_block(block: &mut String) -> bool {
+    let trimmed = block.trim();
+    if trimmed.is_empty() {
+        block.clear();
+        return true;
+    }
+    let ok = trimmed
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim_start().starts_with("### Re:"));
+    block.clear();
+    ok
+}
+
+fn is_safe_historical_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
+    let diff = similar::TextDiff::from_lines(snapshot_content, file_content);
+    let mut insert_block = String::new();
+    let mut saw_insert = false;
+
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            similar::ChangeTag::Equal => {
+                if !flush_exchange_insert_block(&mut insert_block) {
+                    return false;
+                }
+            }
+            similar::ChangeTag::Delete => return false,
+            similar::ChangeTag::Insert => {
+                saw_insert = true;
+                insert_block.push_str(change.value());
+            }
+        }
+    }
+
+    saw_insert && flush_exchange_insert_block(&mut insert_block)
 }
 
 fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &str) -> bool {
@@ -419,9 +462,10 @@ fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
     })
 }
 
-fn classify_safe_out_of_band_agent_doc_mutation(
+fn classify_safe_agent_doc_mutation(
     snapshot_doc: &str,
     file_doc: &str,
+    allow_historical_exchange_growth: bool,
 ) -> Option<&'static str> {
     if snapshot_doc == file_doc {
         return None;
@@ -463,7 +507,11 @@ fn classify_safe_out_of_band_agent_doc_mutation(
 
         match snap_comp.name.as_str() {
             "exchange" => {
-                if !is_safe_out_of_band_exchange_growth(&snap_content, &file_content) {
+                let safe_exchange =
+                    is_safe_out_of_band_exchange_growth(&snap_content, &file_content)
+                        || (allow_historical_exchange_growth
+                            && is_safe_historical_exchange_growth(&snap_content, &file_content));
+                if !safe_exchange {
                     return None;
                 }
                 saw_exchange = true;
@@ -494,6 +542,61 @@ fn classify_safe_out_of_band_agent_doc_mutation(
         (false, false, true) => Some("pending"),
         (false, false, false) => None,
     }
+}
+
+fn classify_safe_out_of_band_agent_doc_mutation(
+    snapshot_doc: &str,
+    file_doc: &str,
+) -> Option<&'static str> {
+    classify_safe_agent_doc_mutation(snapshot_doc, file_doc, false)
+}
+
+fn classify_safe_committed_historical_agent_doc_mutation(
+    snapshot_doc: &str,
+    file_doc: &str,
+) -> Option<&'static str> {
+    classify_safe_agent_doc_mutation(snapshot_doc, file_doc, true)
+}
+
+pub(crate) fn repair_committed_historical_snapshot_drift(
+    file: &Path,
+) -> Result<Option<&'static str>> {
+    let Some(snapshot_doc) = crate::snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let current_doc = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    if current_doc == snapshot_doc {
+        return Ok(None);
+    }
+
+    let Some(head_doc) = show_head(file)? else {
+        return Ok(None);
+    };
+    if normalize_transient_agent_doc_markers(&current_doc)
+        != normalize_transient_agent_doc_markers(&head_doc)
+    {
+        return Ok(None);
+    }
+
+    let Some(reason) =
+        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &current_doc)
+    else {
+        return Ok(None);
+    };
+
+    crate::snapshot::save(file, &current_doc)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "snapshot_repair file={} reason={} basis=head",
+            file.display(),
+            reason
+        ),
+    );
+    Ok(Some(reason))
 }
 
 /// Commit a file with an auto-generated message. Skips hooks.
@@ -557,6 +660,15 @@ pub fn commit(file: &Path) -> Result<bool> {
             file_len
         ),
     );
+
+    if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {
+        eprintln!(
+            "[commit] repaired committed historical {} drift into snapshot for {}",
+            reason,
+            file.display()
+        );
+        snapshot_content = Some(file_content.clone());
+    }
 
     if let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
@@ -1536,6 +1648,35 @@ mod tests {
     }
 
     #[test]
+    fn classify_safe_committed_historical_agent_doc_mutation_exchange() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        let file = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: historical\n\
+            repaired body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            classify_safe_committed_historical_agent_doc_mutation(snapshot, file),
+            Some("exchange")
+        );
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+
+    #[test]
     fn write_commit_lifecycle() {
         // Full lifecycle: git repo + snapshot + commit → verify commit in log.
         use std::fs;
@@ -2293,6 +2434,99 @@ mod tests {
         assert!(
             snap.contains("### Re: newer (HEAD)\n"),
             "snapshot should advance to absorbed response:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn commit_repairs_committed_historical_snapshot_drift() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let tracked = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, tracked).unwrap();
+        crate::snapshot::save(&doc, tracked).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let historical = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: historical\n\
+            repaired body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, historical).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual repair", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, tracked).unwrap();
+
+        commit(&doc).expect("commit should repair the stale snapshot");
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: historical\n"),
+            "snapshot should repair to the committed historical response:\n{snap}"
+        );
+
+        let committed = show_head(&doc).unwrap().unwrap();
+        assert!(
+            committed.contains("### Re: historical\n"),
+            "committed blob should keep the historical response after repair:\n{committed}"
         );
     }
 

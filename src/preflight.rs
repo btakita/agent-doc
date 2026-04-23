@@ -490,7 +490,11 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         false
     });
 
-    if matches!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted) && !recovered {
+    if matches!(
+        state.phase,
+        crate::cycle_state::CyclePhase::PreflightStarted
+    ) && !recovered
+    {
         let bypassed_marker = crate::session_check::detect_bypassed_response_write(file)?;
         let marker_note = bypassed_marker
             .map(|marker| format!("; found likely direct response patchback: {}", marker))

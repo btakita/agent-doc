@@ -14,6 +14,7 @@ Notable invariants:
 - Harness-specific arg aliases are explicit: `agent_args` is generic, `claude_args` applies only to Claude, and `codex_args` applies only to Codex.
 - `### Re:` response headers must use the resolved model short name for attribution (for example `gpt-5`, `opus-4-6`), never the harness label (`codex`, `claude`).
 - Bundled skill/install content is part of the external contract: Codex/manual-repair instructions must distinguish adding a missing user prompt from repairing a missed assistant response, and the missed-response repair path should use `agent-doc write --commit <file>` rather than direct file patching.
+- Route readiness/trigger acceptance is a binary responsibility: pane prompt detection must be robust to shell startup noise and must wait for actual prompt state rather than treating echoed command text as readiness.
 
 | # | File | Description |
 |---|------|-------------|

@@ -609,6 +609,22 @@ fn evict_previous_stash_pane(
     let Ok(Some(previous)) = sessions::lookup_entry(session_id) else {
         return;
     };
+    evict_previous_stash_pane_entry(
+        tmux,
+        session_id,
+        &previous,
+        replacement_pane,
+        target_session,
+    );
+}
+
+fn evict_previous_stash_pane_entry(
+    tmux: &Tmux,
+    session_id: &str,
+    previous: &sessions::SessionEntry,
+    replacement_pane: &str,
+    target_session: &str,
+) {
     if previous.pane.is_empty()
         || previous.pane == replacement_pane
         || !tmux.pane_alive(&previous.pane)
@@ -1121,6 +1137,45 @@ mod tests {
     // Serialize env var mutations across parallel test threads.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn test_cwd() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn wait_for_pane_contains(
+        iso: &IsolatedTmux,
+        pane: &str,
+        needle: &str,
+        timeout: std::time::Duration,
+    ) -> String {
+        let start = std::time::Instant::now();
+        let poll = std::time::Duration::from_millis(100);
+        let mut last = String::new();
+        while start.elapsed() < timeout {
+            last = sessions::capture_pane(iso, pane).unwrap_or_default();
+            if last.contains(needle) {
+                return last;
+            }
+            std::thread::sleep(poll);
+        }
+        last
+    }
+
+    fn wait_for_pane_exit(
+        iso: &IsolatedTmux,
+        pane: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        let poll = std::time::Duration::from_millis(50);
+        while start.elapsed() < timeout {
+            if !iso.pane_alive(pane) {
+                return true;
+            }
+            std::thread::sleep(poll);
+        }
+        !iso.pane_alive(pane)
+    }
+
     // --- rewrite_start_path tests ---
 
     #[test]
@@ -1335,7 +1390,7 @@ mod tests {
     /// Uses `cat` to keep the process alive after showing the prompt.
     fn mock_agent_script(delay_ms: u64) -> String {
         format!(
-            r#"PS1='$ '; echo "Starting agent..."; sleep {}; echo '❯ '; cat"#,
+            r#"exec /bin/sh -c 'printf "Starting agent...\n"; sleep {}; printf "❯ \n"; cat'"#,
             delay_ms as f64 / 1000.0
         )
     }
@@ -1344,7 +1399,7 @@ mod tests {
     fn wait_for_agent_ready_detects_prompt() {
         let iso = IsolatedTmux::new("route-test-ready");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         iso.send_keys(&pane, &mock_agent_script(500)).unwrap();
@@ -1358,7 +1413,7 @@ mod tests {
     fn wait_for_agent_ready_times_out_without_prompt() {
         let iso = IsolatedTmux::new("route-test-timeout");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
 
         let pane_id = iso
             .cmd()
@@ -1388,11 +1443,11 @@ mod tests {
     fn wait_for_agent_ready_codex_prompt() {
         let iso = IsolatedTmux::new("route-test-codex-ready");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Codex uses > as prompt
-        let script = r#"PS1='$ '; echo "Starting codex..."; sleep 0.5; echo '> '; cat"#;
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
         iso.send_keys(&pane, script).unwrap();
 
         let harness = HarnessConfig::codex();
@@ -1436,20 +1491,27 @@ history line
     fn send_keys_delivers_claude_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Start a shell that reads a line and echoes it back with a marker
-        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#)
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
             .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
         let trigger = HarnessConfig::claude().trigger_command("test.md");
         iso.send_keys(&pane, &trigger).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1500));
 
         // Capture and verify the command was received
-        let content = sessions::capture_pane(&iso, &pane).unwrap();
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("GOT:{}", trigger),
+            std::time::Duration::from_secs(3),
+        );
         assert!(
             content.contains(&format!("GOT:{}", trigger)),
             "command should be delivered and echoed back, got: {}",
@@ -1461,18 +1523,25 @@ history line
     fn send_keys_delivers_codex_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send-codex");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#)
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
             .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
         let trigger = HarnessConfig::codex().trigger_command("test.md");
         iso.send_keys(&pane, &trigger).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1500));
 
-        let content = sessions::capture_pane(&iso, &pane).unwrap();
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("GOT:{}", trigger),
+            std::time::Duration::from_secs(3),
+        );
         assert!(
             content.contains(&format!("GOT:{}", trigger)),
             "command should be delivered and echoed back, got: {}",
@@ -1484,17 +1553,15 @@ history line
     fn pane_has_prompt_detects_unicode() {
         let iso = IsolatedTmux::new("route-test-has-prompt");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        // Use exec to replace the shell entirely, then use bash -c to print ❯ and block
-        iso.send_keys(&pane, "exec bash -c 'echo ❯; cat'").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(2500));
-
+        iso.send_keys(&pane, &mock_agent_script(100)).unwrap();
         let harness = HarnessConfig::claude();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
-            pane_has_prompt(&iso, &pane, &harness),
+            ready && pane_has_prompt(&iso, &pane, &harness),
             "should detect ❯ in pane content, got: {}",
             content
         );
@@ -1504,7 +1571,7 @@ history line
     fn full_auto_start_flow() {
         let iso = IsolatedTmux::new("route-test-e2e");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         iso.send_keys(&pane, &mock_agent_script(300)).unwrap();
@@ -1514,9 +1581,13 @@ history line
         assert!(ready, "mock agent should become ready");
 
         iso.send_keys(&pane, "HELLO_FROM_TEST").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
 
-        let content = sessions::capture_pane(&iso, &pane).unwrap();
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "HELLO_FROM_TEST",
+            std::time::Duration::from_secs(3),
+        );
         assert!(
             content.contains("HELLO_FROM_TEST"),
             "command should appear in pane after send, got: {}",
@@ -1877,42 +1948,45 @@ history line
 
     #[test]
     fn evicts_replaced_stash_pane_for_same_session() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
         let iso = IsolatedTmux::new("route-test-evict-stash");
-        let session = "test";
-        let old_cwd = std::env::current_dir().unwrap();
+        let session = "route-evict";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
 
         let result = (|| -> anyhow::Result<()> {
             let old_pane = iso.auto_start(session, dir.path())?;
             iso.stash_pane(&old_pane, session)?;
-            sessions::register("session-123", &old_pane, "doc.md")?;
 
             let replacement_pane = iso.auto_start(session, dir.path())?;
             iso.stash_pane(&replacement_pane, session)?;
 
-            evict_previous_stash_pane(&iso, "session-123", &replacement_pane, session);
-            sessions::register("session-123", &replacement_pane, "doc.md")?;
+            let previous = sessions::SessionEntry {
+                pane: old_pane.clone(),
+                pid: std::process::id(),
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                file: "doc.md".to_string(),
+                window: iso.pane_window(&old_pane)?,
+            };
+            evict_previous_stash_pane_entry(
+                &iso,
+                "session-123",
+                &previous,
+                &replacement_pane,
+                session,
+            );
 
             assert!(
-                !iso.pane_alive(&old_pane),
+                wait_for_pane_exit(&iso, &old_pane, std::time::Duration::from_secs(1)),
                 "previous stash pane should be evicted"
             );
             assert!(
                 iso.pane_alive(&replacement_pane),
                 "replacement pane should stay alive"
             );
-            assert_eq!(
-                sessions::lookup("session-123")?,
-                Some(replacement_pane.clone()),
-                "registry should point at the replacement pane"
-            );
             Ok(())
         })();
 
-        std::env::set_current_dir(old_cwd).unwrap();
         result.unwrap();
     }
 

@@ -423,12 +423,12 @@ Note:
 - The submodule commit also carried forward two changes that were already staged in `src/agent-doc` before the retry: deleting tracked `.agent-doc/logs/ops.log` and adding `.gitgnore`. I did not mark `#ndyy` done, because the broader merge-normalization work is still not complete.
 - `make -C src/agent-doc precommit` initially failed before hook removal because the installed hook was still active and `audit-docs` flagged stale mirrored instruction files; I updated those surfaces. A later standalone `audit-docs` invocation in this environment hung after printing `Auditing docs...`, so I do **not** have a clean final zero-exit result for that standalone step.
 
-❯ agent-doc claudescore.md was writing the patchback to the end of the document. Plan on how to make this less brittle.
+agent-doc claudescore.md was writing the patchback to the end of the document. Plan on how to make this less brittle.
 ```
 • I shouldn’t be. That is a structure bug.
 
-  tasks/claudescore.md is supposed to keep the conversation inside the <!-- agent:exchange ... --> block, with <!-- /
-  agent:exchange --> after the latest ## User / ## Assistant turn. In the current file, the closing marker is at tasks/
+  tasks/claudescore.md is supposed to keep the conversation inside the &lt;!-- agent:exchange ... --&gt; block, with &lt;!-- /
+  agent:exchange --&gt; after the latest ## User / ## Assistant turn. In the current file, the closing marker is at tasks/
   claudescore.md:866, but later ## Assistant blocks are below it. That means the patchback landed outside the exchange
   region.
 
@@ -473,12 +473,14 @@ Spec/tests I would add with that work:
 - session-check/preflight: malformed exchange boundary cannot return green / no-changes success
 
 Sequence I’d recommend: land the validator + fail-closed backstop first, then the safe auto-repair, then the component-aware merge refactor.
+Add to pending.
+<!-- agent:boundary:567f5ff3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside <!-- agent:exchange -->: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
+- [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside &lt;!-- agent:exchange --&gt;: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.

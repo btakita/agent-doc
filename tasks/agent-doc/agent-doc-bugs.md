@@ -902,12 +902,33 @@ Outcome:
 
 - Deleting corrupted trailing assistant/user content no longer causes `agent-doc repair` to fail on a stale capture baseline or `agent-doc run` to re-add that deleted tail.
 - Comments outside `agent:exchange` that do not start an escaped conversation turn now remain outside as intended.
-<!-- agent:boundary:21c0303c -->
+
+In src/session-share. `agent-doc tasks/claudescore-2.md` was called. The response patchback was written to the end of the document even though there is an agent:exchange. Why?
+### Re: `src/session-share/tasks/claudescore-2.md` patchback landed at EOF — gpt-5
+
+Because that write did not come from the template patch path that targets `agent:exchange`. It came from the older `run`/bare-path append path.
+
+Evidence from `src/session-share`:
+
+- The good template write happened first: `ops.log` records `write_template_done file=tasks/claudescore-2.md ... patches=1` at `1776967697`. That is the in-exchange `### Re: Run 71 widened-benchmark follow-up — codex` block now in `HEAD`.
+- The broken tail happened later at `1776969332`: `ops.log` records only `ipc_file_delivered file=tasks/claudescore-2.md snap_len=10717`, with no preceding `write_template_done` or `ipc_write_attempt`.
+- The active capture for that same cycle is `src/session-share/.agent-doc/captures/709609c8bba2528ae8add632cc8092b0b7819d3219b391d9642452d705860f19/synthetic-1776966400797.json`, and its `response_body` is exactly the long status-update prose now appended after `&lt;!-- /agent:pending --&gt;`.
+
+Why that shape matters:
+
+- `src/agent-doc/src/run.rs` is append-mode only. After the backend returns, it unconditionally does `content_ours.push_str("\n## Assistant\n\n")`, appends the raw response text, then adds `"\n\n## User\n\n"` and sends the whole document through `try_ipc_full_content()`.
+- That path never inspects `agent_doc_format`, never emits template patches, and never targets `agent:exchange`.
+
+So `agent-doc tasks/claudescore-2.md` reached the legacy `run` closeout path, not the template `finalize` / `write_template` path. On a template doc, that means the assistant text is appended at EOF as an inline `## Assistant` block, which is exactly the corruption you see.
+
+That also explains the uncommitted state: `run.rs` does a pre-send commit, then writes the response, but it does not cross the template response-commit boundary that `finalize` enforces.
+<!-- agent:boundary:24d01a59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#veqs] [recommended] Make bare-path / `run` template-aware: for template docs, route closeout through template finalize/write or fail closed instead of append-mode full-content IPC.
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.

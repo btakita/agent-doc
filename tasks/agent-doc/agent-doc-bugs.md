@@ -236,7 +236,7 @@ Verification:
 Commit:
 
 - `src/agent-doc`: `870d769` — `feat: add codex_args support`
-<!-- agent:boundary:f3967a01 -->
+<!-- agent:boundary:7f55a677 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

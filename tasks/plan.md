@@ -321,3 +321,15 @@ Review:
 - Added four regressions in `src/agent-doc/src/git.rs`: classifier accepts exchange+pending drift, classifier rejects user-prompt drift, commit absorbs missed response+pending changes, and commit still leaves a raw user prompt in the working tree/snapshot-old state.
 - Updated `src/agent-doc/specs/03-snapshot-system.md` and `src/agent-doc/specs/07-commands.md` so the new absorb behavior and its safety boundary are explicit.
 - Verified with `cargo test --manifest-path src/agent-doc/Cargo.toml git::tests -- --nocapture`, `cargo check`, `cargo build --release`, `cargo install --path .`, and `agent-doc --version` (`0.33.12`).
+
+### 2026-04-22 — Codex `codex_args` Frontmatter Support (`agent-doc-bugs`)
+
+- [x] Add `codex_args` support to `src/agent-doc` frontmatter/start-time argument resolution for the Codex harness without changing Claude behavior.
+- [x] Update the relevant config/format/Codex docs and regression tests so the precedence rules are explicit.
+- [x] Verify with targeted tests plus build/install, then patch the result back into `tasks/agent-doc/agent-doc-bugs.md`.
+
+Review:
+- Added `codex_args` as a Codex-only alias in both frontmatter and global config. Start-time resolution now uses `agent_args > codex_args` for Codex while leaving Claude on its existing `agent_args > claude_args` chain.
+- Updated `src/frontmatter.rs`, `src/config.rs`, and `src/start.rs` with parsing/merge/runtime support, plus regression coverage for frontmatter merge/roundtrip, config fallback, and Codex-vs-Claude precedence.
+- Updated `specs/02-document-format.md`, `specs/06-config.md`, and `specs/codex-support.md` so the new Codex alias and exact precedence rules are documented.
+- Verified with `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_agent_args -- --nocapture`, `cargo test --manifest-path src/agent-doc/Cargo.toml agent_args -- --nocapture`, `cargo test --manifest-path src/agent-doc/Cargo.toml codex_args -- --nocapture`, `cargo check --manifest-path src/agent-doc/Cargo.toml`, `cargo build --manifest-path src/agent-doc/Cargo.toml --release`, `cargo install --path src/agent-doc`, and `make check` in `src/agent-doc`.

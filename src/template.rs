@@ -319,6 +319,66 @@ fn is_exchange_turn_heading(trimmed: &str) -> bool {
         || trimmed.starts_with("## Re:")
 }
 
+fn preamble_belongs_to_exchange(preamble: &str) -> bool {
+    let mut saw_nonempty = false;
+    for line in preamble.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        saw_nonempty = true;
+        if trimmed.starts_with("[//]:")
+            || trimmed.starts_with("<!--")
+            || trimmed.starts_with('#')
+            || trimmed.starts_with('-')
+            || trimmed.starts_with('*')
+            || trimmed.starts_with('>')
+        {
+            return false;
+        }
+    }
+    saw_nonempty
+}
+
+fn conversation_tail_start(doc: &str, trailing_search_start: usize) -> Option<usize> {
+    let code_ranges = component::find_code_ranges(doc);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
+
+    let mut first_nonempty_after = None;
+    let mut first_heading_start = None;
+    let mut offset = 0usize;
+    for line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        if line_start < trailing_search_start || in_code(line_start) {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        first_nonempty_after.get_or_insert(line_start);
+        if is_exchange_turn_heading(trimmed) {
+            first_heading_start = Some(line_start);
+            break;
+        }
+    }
+
+    let heading_start = first_heading_start?;
+    let first_nonempty_after = first_nonempty_after.unwrap_or(heading_start);
+    if first_nonempty_after < heading_start
+        && preamble_belongs_to_exchange(&doc[first_nonempty_after..heading_start])
+    {
+        Some(first_nonempty_after)
+    } else {
+        Some(heading_start)
+    }
+}
+
 fn tail_is_safe_exchange_content(tail: &str) -> bool {
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
@@ -390,13 +450,6 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
         return Ok(None);
     };
 
-    let code_ranges = component::find_code_ranges(doc);
-    let in_code = |pos: usize| {
-        code_ranges
-            .iter()
-            .any(|&(start, end)| pos >= start && pos < end)
-    };
-
     let trailing_search_start = components
         .iter()
         .map(|c| c.close_end)
@@ -404,20 +457,7 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
         .unwrap_or(exchange.close_end)
         .max(exchange.close_end);
 
-    let mut tail_start = None;
-    let mut offset = 0usize;
-    for line in doc.split_inclusive('\n') {
-        let line_start = offset;
-        offset += line.len();
-        if line_start < trailing_search_start || in_code(line_start) {
-            continue;
-        }
-        if !line.trim().is_empty() {
-            tail_start = Some(line_start);
-            break;
-        }
-    }
-
+    let tail_start = conversation_tail_start(doc, trailing_search_start);
     let Some(tail_start) = tail_start else {
         return Ok(None);
     };
@@ -452,6 +492,37 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
     };
 
     Ok(Some(repaired))
+}
+
+/// Remove a safe escaped conversation tail below `<!-- /agent:exchange -->`.
+///
+/// This is used when the user manually deletes a malformed trailing assistant/user
+/// block and recovery should respect that edit instead of reapplying a stale
+/// captured response.
+pub fn strip_conversation_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
+    let components = component::parse(doc).context("failed to parse components")?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+
+    let trailing_search_start = components
+        .iter()
+        .map(|c| c.close_end)
+        .max()
+        .unwrap_or(exchange.close_end)
+        .max(exchange.close_end);
+
+    let Some(tail_start) = conversation_tail_start(doc, trailing_search_start) else {
+        return Ok(None);
+    };
+    let tail = &doc[tail_start..];
+    if !tail_is_safe_exchange_content(tail) {
+        anyhow::bail!(
+            "conversation content escaped `agent:exchange`, but the trailing document structure is ambiguous"
+        );
+    }
+
+    Ok(Some(doc[..tail_start].to_string()))
 }
 
 /// Strip trailing bare `❯` lines from exchange-bound content.
@@ -2673,6 +2744,50 @@ Previous response.
             repaired.matches("<!-- agent:boundary:").count(),
             1,
             "repair should leave exactly one boundary marker"
+        );
+    }
+
+    #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_comment_only_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "[//]: # (leave this note outside exchange)\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "comment-only suffix should stay outside exchange"
+        );
+    }
+
+    #[test]
+    fn strip_conversation_tail_outside_exchange_removes_escaped_heading_tail_only() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "[//]: # (leave this note outside exchange)\n\n",
+            "## Assistant\n\n",
+            "Escaped answer.\n"
+        );
+
+        let stripped = strip_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("escaped heading tail should be removable");
+        assert!(
+            stripped.contains("[//]: # (leave this note outside exchange)"),
+            "comment-only note should remain outside exchange:\n{stripped}"
+        );
+        assert!(
+            !stripped.contains("## Assistant"),
+            "escaped assistant tail should be removed:\n{stripped}"
         );
     }
 }

@@ -106,6 +106,76 @@ fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<Stri
     }
 }
 
+fn same_content_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
+    left.trim_end_matches('\n') == right.trim_end_matches('\n')
+}
+
+fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> Result<()> {
+    let pending_path = snapshot::pending_path_for(file)?;
+    if pending_path.exists() {
+        std::fs::remove_file(&pending_path).with_context(|| {
+            format!(
+                "failed to remove pending response after manual repair {}",
+                pending_path.display()
+            )
+        })?;
+    }
+    if let Err(e) = snapshot::delete_pre_response(file) {
+        eprintln!("[recover] warning: failed to delete pre-response: {}", e);
+    }
+    crate::capture::mark_discarded(file)?;
+    snapshot::save(file, current_doc)?;
+    crate::cycle_state::mark_committed(
+        file,
+        "recover_respect_manual_exchange_tail_removal",
+        Some(current_doc),
+        Some(current_doc),
+    )?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "recover_discard_stale_capture_after_manual_tail_removal file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[recover] respected manual removal of escaped conversation tail in {}",
+        file.display()
+    );
+    Ok(())
+}
+
+fn respect_manual_exchange_tail_removal_if_safe(
+    file: &Path,
+    doc_content: &str,
+    capture: &crate::capture::CaptureRecord,
+) -> Result<bool> {
+    let (fm, _) = frontmatter::parse(doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    if !fm.resolve_mode().is_template() {
+        return Ok(false);
+    }
+
+    let Some(snapshot_content) = snapshot::load(file)? else {
+        return Ok(false);
+    };
+    if capture.snapshot_hash != Some(crate::ops_log::content_hash(&snapshot_content)) {
+        return Ok(false);
+    }
+
+    let Some(stripped_snapshot) =
+        crate::template::strip_conversation_tail_outside_exchange(&snapshot_content)?
+    else {
+        return Ok(false);
+    };
+    if !same_content_ignoring_trailing_newlines(&stripped_snapshot, doc_content) {
+        return Ok(false);
+    }
+
+    discard_pending_capture_for_manual_repair(file, doc_content)?;
+    Ok(true)
+}
+
 /// Check for a pending response and apply it if found.
 ///
 /// Returns `true` if a pending response was recovered, `false` otherwise.
@@ -168,6 +238,9 @@ pub fn run(file: &Path) -> Result<bool> {
     }
 
     if let Some(ref capture) = capture {
+        if respect_manual_exchange_tail_removal_if_safe(&canonical, &doc_content, capture)? {
+            return Ok(true);
+        }
         crate::capture::validate_replay(&canonical, capture)?;
     }
 
@@ -348,7 +421,11 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        save_pending(&doc, "Exchange compacted. No new work was run in this turn.").unwrap();
+        save_pending(
+            &doc,
+            "Exchange compacted. No new work was run in this turn.",
+        )
+        .unwrap();
 
         let recovered = run(&doc).unwrap();
         assert!(recovered);
@@ -449,6 +526,71 @@ mod tests {
             err.to_string().contains("baseline no longer matches"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn recover_respects_manual_removal_of_escaped_exchange_tail() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let malformed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- [ ] keep\n",
+            "<!-- /agent:pending -->\n\n",
+            "[//]: # (leave this note outside exchange)\n\n",
+            "## Assistant\n\n",
+            "Escaped answer.\n"
+        );
+        std::fs::write(&doc, malformed).unwrap();
+        snapshot::save(&doc, malformed).unwrap();
+
+        save_pending(&doc, "Escaped answer.").unwrap();
+
+        let repaired = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- [ ] keep\n",
+            "<!-- /agent:pending -->\n\n",
+            "[//]: # (leave this note outside exchange)\n"
+        );
+        std::fs::write(&doc, repaired).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert!(
+            recovered,
+            "manual deletion of the escaped tail should be treated as a repair"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, repaired);
+        assert!(
+            !result.contains("## Assistant"),
+            "stale assistant tail must not be re-added:\n{result}"
+        );
+
+        let pending = snapshot::pending_path_for(&doc).unwrap();
+        assert!(!pending.exists(), "pending file should be cleared");
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(
+            state.last_event,
+            "recover_respect_manual_exchange_tail_removal"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, repaired, "snapshot should follow the user repair");
+
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
     }
 
     #[test]

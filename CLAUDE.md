@@ -82,6 +82,7 @@ src/
   hooks.rs          # Cross-session hook integration (fire_post_write, fire_post_commit, etc.)
   hook_cmd.rs       # CLI subcommands: agent-doc hook fire/poll/listen/gc
   ops_log.rs        # Best-effort operational logging to .agent-doc/logs/ops.log
+  cycle_state.rs    # Persisted per-document cycle phase/hash state for interrupted-cycle enforcement
   sync.rs           # Sync pane state between editor and tmux (reconciler always runs, no early exits, column memory)
   preflight.rs      # Pre-agent checks: layout check, recover, commit, claims, diff, document read → JSON
   model_tier.rs     # Harness-agnostic model tier selection (Tier enum, config, heuristic, scanner, composition)

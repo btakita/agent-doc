@@ -133,12 +133,39 @@ Verification that cleared before the commit:
 - `cargo check --manifest-path src/agent-doc/Cargo.toml`
 - `make check`
 Commit all uncommitted repo content. Let's start with a clean slate. Revisit the restriction that prevents commits. We should never leave uncommitted content when we would normally commit the content.
-<!-- agent:boundary:e0fffc07 -->
+❯ You missed my prompt. Why?
+❯ > Commit all uncommitted repo content. Let's start with a clean slate. Revisit the restriction that prevents commits. We should never leave uncommitted content when we would normally commit the content.
+### Re: why your prompt was missed — codex
+
+I missed it because the previous turn's `agent-doc preflight` committed the document before diffing, and that commit hit the extreme-drift resync branch:
+
+- snapshot: `1237` bytes
+- file: `9918` bytes
+- log: `Extreme drift detected (8x) — re-syncing snapshot from file content`
+
+That path re-synced the snapshot from the full live file and staged it, so your line:
+
+❯ > Commit all uncommitted repo content. Let's start with a clean slate. Revisit the restriction that prevents commits. We should never leave uncommitted content when we would normally commit the content.
+
+was pulled into the committed snapshot before I ever answered it. After that, the diff saw no new user changes, so I incorrectly stopped.
+
+I also compounded it by ending the cycle after preflight/diff without doing a write-back; this turn's preflight reported exactly that:
+
+- `WARNING: previous cycle ended at preflight_diff_start without a write — interrupted cycle detected`
+
+So the real bug here is narrower and clearer now:
+
+- `agent-doc commit`/preflight's extreme-drift resync path can absorb an unanswered user prompt into the committed snapshot when the snapshot is badly stale
+- I then failed to write a response in that cycle, which made the miss user-visible
+
+Your prompt is visible in the current diff now, and I added a concrete pending follow-up for hardening that drift-resync path so unanswered prompts cannot be swallowed into a commit.
+<!-- agent:boundary:5fb0518c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#ke5p] Tighten extreme-drift snapshot resync so preflight commit cannot absorb unanswered user prompts into the committed snapshot.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 <!-- /agent:pending -->

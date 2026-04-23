@@ -506,12 +506,14 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 
 ## session-check
 
-`agent-doc session-check <FILE>` — verify that the previous cycle reached a terminal committed state.
+`agent-doc session-check <FILE>` — verify that the previous cycle reached a terminal committed state and that no likely assistant patchback bypassed `agent-doc write` / `finalize`.
 
 - Primary source of truth: `.agent-doc/state/cycles/<doc-hash>.json`
 - Fallback for older repos: last non-empty `.agent-doc/logs/ops.log` line
 - Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
+- Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
 - Exit `0` when the cycle state is committed or no state/log file exists
+- Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.
 
 **URL link processing:**
 - URLs (`http://`/`https://`) in `links` frontmatter are fetched with a 10s timeout

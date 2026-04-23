@@ -7,10 +7,15 @@
 //!   `write_applied`).
 //! - Falls back to the last `ops.log` event only when no cycle-state file
 //!   exists yet, preserving compatibility for older repos.
+//! - Also fails closed when the current document diverges from its snapshot in
+//!   a way that looks like a direct assistant patchback (`### Re:` or
+//!   `## Assistant`) without a corresponding `agent-doc` cycle.
 //! - Exit 0 when the current cycle state is committed, when state/log files
-//!   are missing, or when the fallback `ops.log` event is terminal.
-//! - Exit 1 when the current cycle state is still open or the fallback last
-//!   `ops.log` event is `preflight_diff_start`.
+//!   are missing, or when the fallback `ops.log` event is terminal and no
+//!   likely bypassed patchback is present.
+//! - Exit 1 when the current cycle state is still open, when the fallback last
+//!   `ops.log` event is `preflight_diff_start`, or when a likely direct
+//!   assistant patchback bypassed `agent-doc write` / `finalize`.
 //! - Exit 2 on unexpected I/O errors.
 //!
 //! ## Agentic Contracts
@@ -23,6 +28,9 @@
 //! - `session_check_empty_log_exits_zero`
 //! - `session_check_open_cycle_state_exits_one`
 //! - `session_check_committed_cycle_state_exits_zero`
+//! - `detect_bypassed_response_write_flags_template_heading`
+//! - `detect_bypassed_response_write_flags_inline_assistant_heading`
+//! - `detect_bypassed_response_write_ignores_plain_user_prompt`
 //! - `session_check_missing_log_exits_zero`
 
 use anyhow::Result;
@@ -54,11 +62,25 @@ pub fn run(file: &Path) -> Result<()> {
             phase_name(state.phase),
             state.last_event
         );
+        if let Some(marker) = detect_bypassed_response_write(file)? {
+            println!(
+                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                marker
+            );
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
     match last_ops_event(file)? {
         None => {
+            if let Some(marker) = detect_bypassed_response_write(file)? {
+                println!(
+                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                );
+                std::process::exit(1);
+            }
             println!("[session-check] no cycle state or ops.log — ok");
             Ok(())
         }
@@ -70,6 +92,13 @@ pub fn run(file: &Path) -> Result<()> {
             std::process::exit(1);
         }
         Some(event) => {
+            if let Some(marker) = detect_bypassed_response_write(file)? {
+                println!(
+                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                );
+                std::process::exit(1);
+            }
             println!("[session-check] ok — last event: {}", event);
             Ok(())
         }
@@ -117,6 +146,31 @@ fn strip_timestamp_prefix(line: &str) -> &str {
         return &rest[close + 2..];
     }
     line
+}
+
+fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let current = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    if current == snapshot {
+        return Ok(None);
+    }
+
+    let diff = similar::TextDiff::from_lines(&snapshot, &current);
+    for change in diff.iter_all_changes() {
+        if change.tag() != similar::ChangeTag::Insert {
+            continue;
+        }
+        let trimmed = change.value().trim();
+        if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -206,5 +260,51 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert!(!state.is_open());
         assert_eq!(phase_name(state.phase), "committed");
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_flags_template_heading() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot = "---\nagent_doc_format: template\n---\n\n## Exchange\n\nHello\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            &doc,
+            format!("{snapshot}### Re: test — gpt-5\n\nBody\n"),
+        )
+        .unwrap();
+
+        let marker = detect_bypassed_response_write(&doc).unwrap();
+        assert_eq!(marker.as_deref(), Some("### Re: test — gpt-5"));
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_flags_inline_assistant_heading() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot = "## User\n\nHello\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            &doc,
+            format!("{snapshot}\n## Assistant\n\nResponse\n"),
+        )
+        .unwrap();
+
+        let marker = detect_bypassed_response_write(&doc).unwrap();
+        assert_eq!(marker.as_deref(), Some("## Assistant"));
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_ignores_plain_user_prompt() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot = "## User\n\nHello\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(&doc, format!("{snapshot}\nWhy is this still dirty?\n")).unwrap();
+
+        assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
     }
 }

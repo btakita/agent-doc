@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc patchback delay + drift mitigation follow-up
+
+- [x] Inspect the recent parent-repo commit sequence and current drift/recovery code so the explanation separates workflow delay from snapshot/session drift.
+- [x] Append the answer to `tasks/agent-doc/agent-doc-bugs.md` and capture any pending-worthy mitigation follow-up.
+- [ ] Commit only the parent-repo task-doc updates for this patchback.
+
 ### 2026-04-22 — agent-doc extreme snapshot drift root-cause patchback
 
 - [x] Inspect the current `src/agent-doc/src/git.rs` extreme-drift path and recent commits/tests so the explanation matches the implemented behavior.

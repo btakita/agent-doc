@@ -325,11 +325,37 @@ That is why the current code now separates the cases explicitly:
 - it still warns/logs on drift for diagnosis
 - it only auto-resyncs when there is **no HEAD entry** and the snapshot is recognized as the **empty scaffold template**
 - it explicitly refuses to re-sync tracked/non-scaffold snapshots, so extreme drift on a real session remains visible instead of being silently absorbed
+
+Why was the response patchback uncommited for ~20-30s?
+What can we do to address the root cause of "extreme session drift"?
+### Re: short uncommitted patchback window / addressing extreme session drift — codex
+
+The short uncommitted window was not another `agent-doc commit` bug. It was a parent-repo workflow gap in my turn sequencing.
+
+What happened:
+
+- I wrote the response patchback into `tasks/agent-doc/agent-doc-bugs.md` first, so the content existed in the root working tree.
+- Before creating the parent commit, I also updated `tasks/plan.md`, checked the diff, and only then staged/committed the task-doc changes.
+- The actual parent commit for that response was `bd1e6454` at `2026-04-22 21:41:11 -0400`, with the follow-up plan-close commit `638503ed` at `2026-04-22 21:41:31 -0400`.
+
+So the ~20-30s gap was simply: response already patched into the file, but still sitting as an uncommitted root-repo diff while I finished the bookkeeping. That is an execution-ordering problem on my side, not selective-commit drift inside `src/agent-doc`.
+
+On the broader "extreme session drift" question: the right fix is to stop relying on loose heuristics and make cycle completion explicit and recoverable.
+
+What I would do:
+
+- **Promote interrupted-cycle detection from warning to enforced recovery.** `preflight` already checks `session_check::last_ops_event(...)`, but today it only warns. A previous cycle that ended at `preflight_diff_start` should either auto-run the relevant recovery/commit path or fail closed before diffing again.
+- **Make cycle completion transactional.** The invariant should be: do not report success until document write, snapshot save, pending cleanup, and the parent/submodule commit boundary for that cycle are finished. Right now those pieces are durable individually, but the cycle boundary is still too procedural.
+- **Use exact cycle state instead of size-based drift inference.** The existing `ops_log::log_cycle(...)`, pending store, snapshot, and baseline files give enough structure to reconcile by content/hash and cycle stage. That is safer than inferring "drift" from file-size deltas.
+- **Shrink the working-tree-only window.** For task-doc patchbacks like this one, the parent `git add`/`git commit` should happen immediately after the write-back succeeds, before any secondary plan cleanup or narrative reporting.
+
+The concrete follow-up I would track is: add a cycle-scoped completion record and make preflight refuse to continue quietly when the previous cycle has no terminal write/commit event. That addresses both classes of drift: stale snapshot state and "response exists but completion boundary was never crossed."
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

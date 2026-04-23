@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc last-two patchback delay explanation
+
+- [x] Check the recent parent-repo commit timestamps so the answer uses exact timing for the last two patchback cycles.
+- [x] Append the explanation to `tasks/agent-doc/agent-doc-bugs.md` and avoid duplicating pending work already covered by `#cyc1`.
+- [ ] Commit only the parent-repo task-doc updates for this patchback.
+
 ### 2026-04-22 — agent-doc pending capture + model attribution drift patchback
 
 - [x] Confirm the current model-attribution contract in `src/agent-doc/SKILL.md` / specs and distinguish harness label vs model label in the answer.

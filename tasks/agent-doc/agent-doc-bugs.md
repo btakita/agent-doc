@@ -372,6 +372,27 @@ The correct boundary is:
 - model attribution in the response header: actual model short name, e.g. `gpt-5` or whatever `preflight.agent_model` resolved to for that session
 
 So your concern is valid: this is exactly the kind of subtle drift that happens when behavior is carried procedurally instead of being enforced tightly enough. The immediate document-level correction is: yes, `#cyc1` is in `agent:pending`, and I am also adding a separate pending follow-up for enforcing model-attribution compliance so this does not keep depending on agent discipline.
+
+Why did  the 2 last response patchbacks take to long to be committed into git?
+### Re: why the last two response patchbacks were slow to commit — gpt-5
+
+For the last two response patchbacks, the delay was the same basic failure pattern in a milder form: I still treated the parent commit as the last step in a small local workflow instead of as the immediate next action after the write-back landed.
+
+The concrete timings from the root repo are:
+
+- extreme-drift explanation patchback: response commit `bd1e6454` at `2026-04-22 21:41:11 -0400`, then the plan-close commit `638503ed` at `21:41:31` — about 20 seconds later
+- pending/model-attribution patchback: response commit `f7aedc39` at `2026-04-22 21:49:28 -0400`, then the plan-close commit `45a33236` at `21:49:43` — about 15 seconds later
+
+So there was no hidden git slowdown. The delay came from me doing extra bookkeeping around the patchback cycle:
+
+- update `tasks/plan.md`
+- review the diff / staged stat
+- create the parent response commit
+- then do the separate plan-close commit
+
+That sequencing is still too slow for this workflow because the response had already been written into the task doc before the parent commit boundary was crossed. The latest two cases were shorter than the earlier misses, but they were the same class of error: I left a nonzero working-tree-only window when I should have committed immediately.
+
+The fix is still the one already tracked in `#cyc1`: tighten cycle completion so the parent commit boundary is treated as part of the response write path, not as optional cleanup after local bookkeeping. I am not adding a new pending item here because `#cyc1` already covers the underlying fix.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

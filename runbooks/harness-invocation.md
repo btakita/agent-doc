@@ -3,6 +3,12 @@
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, write, commit) is identical across all harnesses.
 
+## Manual Repair Default
+
+- For both **Claude Code** and **Codex**, the default documented manual-repair path is `agent-doc write --commit <FILE>` once the user prompt is already present in the document.
+- Do **not** document or follow a manual-repair flow that stops after bare `agent-doc write`; that leaves the response on the wrong side of the commit boundary.
+- If the user prompt itself is missing, insert that prompt into `exchange` first, then return to `agent-doc write --commit <FILE>` for the assistant response.
+
 ## Response Header Attribution
 
 - Always attribute `### Re:` headings with the resolved model short name, for example `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`.
@@ -25,6 +31,7 @@ Identify your harness from your environment:
 - **Slash commands:** Execute via the `Skill` tool. Strip the leading `/`; pass remaining args.
 - **Auto-update prompt:** Use `AskUserQuestion` to prompt the user to run `/compact`.
 - **Write-back:** Pipe via `Bash` tool using heredoc (`cat <<'RESPONSE' | agent-doc write ...`).
+- **Manual repair / missed patchback:** Use the shared default above. In Claude Code that still means piping the response through `Bash`, but the command should be `agent-doc write --commit <FILE>` once the prompt already exists in the document.
 - **Built-in commands** (e.g., `/compact`, `/clear`): Cannot invoke via Skill. Write a document note instructing the user to run it at the terminal.
 
 ## Codex
@@ -34,7 +41,7 @@ Identify your harness from your environment:
 - **Slash commands:** Codex has no slash commands. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
 - **Auto-update prompt:** Print a message asking the user to restart.
 - **Write-back:** Execute `agent-doc write` directly (Codex runs shell commands natively).
-- **Manual repair / missed patchback:** If the prompt is already in the document and you are repairing a missed assistant response, use `agent-doc write --commit <FILE>` for the response itself. Do **not** patch the assistant response directly into the file. If the user prompt is missing, insert that prompt into `exchange` first, then return to `agent-doc write --commit <FILE>` for the response path.
+- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file.
 - **Session resume:** Codex uses `codex resume --last` instead of `--continue`.
 
 ## Cursor / Generic

@@ -6,11 +6,11 @@
 
 `agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
 
-1. Compute diff → 2. Build prompt (diff + full doc) → 3. Branch if `-b` → 4. Send to agent → 5. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 6. Update session ID → 7. Append response → 8. Save snapshot → 9. `git add -f` + commit
+1. Compute diff → 2. Resolve document mode from frontmatter (`resolve_mode()`, default template) → 3. Build the matching append/template prompt (diff + full doc) → 4. Branch if `-b` → 5. Send to agent → 6. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 7. Apply the response through the matching append/template write path → 8. Update session resume ID → 9. Save snapshot → 10. Commit the response write
 
 First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
 
-Bare `agent-doc <FILE>` remains accepted as a compatibility alias for `agent-doc run <FILE>`.
+`agent-doc <FILE>` and `agent-doc run <FILE>` are equivalent. Both dispatch by document mode from frontmatter, with template as the default when no explicit format is present.
 
 ## init
 

@@ -1085,13 +1085,42 @@ Verification passed:
 - `cargo install --path src/agent-doc`
 
 The broader `#drc1` durable response-capture issue is still not fixed; it remains pending in this document. What is fixed is the immediate `resync` test failure, and this previously-missed response patchback is now being written through `agent-doc write --commit` rather than left as a plain terminal-only reply.
-<!-- agent:boundary:28cb0a3d -->
+
+❯ complete the broader #drc1 durable response-capture. add spec + tests. build + install for local testing
+❯ Write last response callback. Would the implementation of #drc1 fix the lack of a response patchback?
+### Re: `#drc1` durable response capture / would it fix missed patchbacks? — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- Added a durable capture ledger at `.agent-doc/captures/<doc-hash>/<cycle-id>.json` plus an explicit `response_captured` cycle phase.
+- `recover` and `preflight` now replay captured-but-unwritten responses only when the current file and snapshot hashes still match the captured baseline; otherwise they fail closed.
+- `post_write` and `post_commit` now emit `capture_id` and `response_sha256` so hooks can refer to the captured response deterministically.
+- `gc` now understands `captures/`, and the docs/spec text were updated to make the ledger part of the product contract.
+
+Would this fix the lack of a response patchback?
+
+- **Yes** for the product-side failure mode where `agent-doc` already has the final response but the cycle is interrupted before write-back or commit. In that case the response is now durably captured and can be replayed deterministically on recovery/preflight.
+- **No** for the workflow failure mode where I answer in the terminal and never invoke `agent-doc write` at all. In that case `agent-doc` never sees the response, so `#drc1` has nothing to capture or replay.
+
+So `#drc1` closes the binary-side durability gap, but it does not by itself fix a plain operator/workflow miss. That remaining guardrail is still: if the response exists only in chat output, it must be written back through `agent-doc write --commit` instead of assuming the binary can reconstruct it later.
+
+Verification completed in the current `src/agent-doc` tree:
+
+- `cargo test response_captured -- --nocapture`
+- `cargo test recover_replays_capture_without_pending -- --nocapture`
+- `cargo test post_write_includes_capture_metadata_when_available -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:d8b33d16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#drc1] [recommended] Build a durable response-capture ledger: persist the final parsed agent response plus cycle metadata before write/hook emission, add deterministic replay for open cycles with captured-but-unwritten output, and expose hook payload refs/hashes instead of relying on reconstructing text from history.
+- [x] [#drc1] [recommended] Build a durable response-capture ledger: persist the final parsed agent response plus cycle metadata before write/hook emission, add deterministic replay for open cycles with captured-but-unwritten output, and expose hook payload refs/hashes instead of relying on reconstructing text from history.
 - [x] [#wrtc1] [recommended] Harden Codex/manual-repair patchback guidance: require `agent-doc write --commit <file>` for response write-back when the prompt is already in the document, add skill/runbook wording plus regression coverage, and only consider a hook if workflow drift persists.
 - [x] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.

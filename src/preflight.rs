@@ -7,10 +7,13 @@
 //! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
 //!   problems (window index, session drift); issues are
 //!   included in output but do not abort the run.
-//! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state,
-//!   auto-attempts `recover::run(file)` + `git::commit(file)` for an open prior
-//!   cycle (`preflight_started`, `response_captured`, or `write_applied`), and
-//!   fails closed if that cycle still cannot reach a terminal committed state.
+//! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
+//!   For an open prior `response_captured` / `write_applied` cycle, preflight
+//!   auto-attempts `recover::run(file)` + `git::commit(file)`. For an open
+//!   `preflight_started` cycle, preflight only auto-closes when `recover`
+//!   replays a pending/captured response first; otherwise it fails closed
+//!   instead of letting a stale snapshot commit silently revert newer live
+//!   document content.
 //! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
@@ -486,6 +489,19 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         eprintln!("[preflight] interrupted-cycle recover warning: {}", e);
         false
     });
+
+    if matches!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted) && !recovered {
+        let bypassed_marker = crate::session_check::detect_bypassed_response_write(file)?;
+        let marker_note = bypassed_marker
+            .map(|marker| format!("; found likely direct response patchback: {}", marker))
+            .unwrap_or_default();
+        anyhow::bail!(
+            "previous cycle `{}` is still `preflight_started` with no recoverable response{}",
+            state.cycle_id,
+            marker_note
+        );
+    }
+
     let committed = match git::commit(file) {
         Ok(did_commit) => did_commit,
         Err(e) => {
@@ -1542,6 +1558,74 @@ mod tests {
         assert!(
             err.to_string().contains("previous cycle"),
             "unexpected error: {err}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
+    fn preflight_started_cycle_does_not_revert_stale_snapshot_head() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = "---\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = "---\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n### Re: newer\nnew body\n❯ follow-up question\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, live).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`preflight_started` with no recoverable response"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.to_string().contains("### Re: newer"),
+            "error should mention likely bypassed patchback: {err}"
+        );
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed.contains("### Re: newer"),
+            "HEAD should stay at the newer manual content instead of reverting:\n{committed}"
+        );
+        assert!(
+            committed.contains("❯ follow-up question"),
+            "HEAD should keep the live follow-up question instead of reverting:\n{committed}"
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();

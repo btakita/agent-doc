@@ -465,7 +465,8 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
 
 **Steps (in order):**
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
-   - If the prior cycle is still `preflight_started`, `response_captured`, or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If the prior cycle is `preflight_started`, preflight only auto-closes when `recover` replays a pending/captured response first; otherwise it fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Recover orphaned pending/captured responses (`agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)

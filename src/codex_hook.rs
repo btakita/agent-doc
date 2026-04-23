@@ -180,7 +180,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                         return Ok(StopResponse::Block {
                             decision: "block",
                             reason: format!(
-                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. {}{} Do not send the final answer yet. If the response is missing from the document, run `agent-doc recover {}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
+                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. {}{} Do not send the final answer yet. If the response is missing from the document, run `agent-doc repair {}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
                                 file.display(),
                                 reason,
                                 note,
@@ -210,7 +210,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             Ok(StopResponse::Block {
                 decision: "block",
                 reason: format!(
-                    "agent-doc Stop hook intercepted an unfinished document cycle for {display}. {reason}{capture_note} Do not send the final answer yet. If the response is missing from the document, run `agent-doc recover {display}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {display}`."
+                    "agent-doc Stop hook intercepted an unfinished document cycle for {display}. {reason}{capture_note} Do not send the final answer yet. If the response is missing from the document, run `agent-doc repair {display}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {display}`."
                 ),
             })
         }
@@ -497,7 +497,7 @@ mod tests {
         match response {
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("unfinished document cycle"));
-                assert!(reason.contains("agent-doc recover"));
+                assert!(reason.contains("agent-doc repair"));
             }
             other => panic!("expected block response, got {other:?}"),
         }

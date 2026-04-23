@@ -397,15 +397,22 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
             .any(|&(start, end)| pos >= start && pos < end)
     };
 
+    let trailing_search_start = components
+        .iter()
+        .map(|c| c.close_end)
+        .max()
+        .unwrap_or(exchange.close_end)
+        .max(exchange.close_end);
+
     let mut tail_start = None;
     let mut offset = 0usize;
     for line in doc.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
-        if line_start < exchange.close_end || in_code(line_start) {
+        if line_start < trailing_search_start || in_code(line_start) {
             continue;
         }
-        if is_exchange_turn_heading(line.trim()) {
+        if !line.trim().is_empty() {
             tail_start = Some(line_start);
             break;
         }
@@ -2618,6 +2625,54 @@ Previous response.
         assert!(
             err.to_string().contains("escaped `agent:exchange`"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_plain_trailing_suffix_after_todo() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n",
+            "compact exchange\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:todo patch=replace -->\n",
+            "- [ ] backlog\n",
+            "<!-- /agent:todo -->\n\n",
+            "Exchange compacted. No new work was run in this turn.\n\n",
+            "## Assistant\n\n",
+            "Exchange compacted. No new work was run in this turn.\n\n",
+            "## User\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let pending_open = repaired
+            .find("<!-- agent:pending patch=replace -->")
+            .unwrap();
+        let todo_open = repaired.find("<!-- agent:todo patch=replace -->").unwrap();
+        let trailing_summary = repaired
+            .rfind("Exchange compacted. No new work was run in this turn.")
+            .unwrap();
+
+        assert!(
+            trailing_summary < exchange_close,
+            "plain trailing suffix should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            pending_open > exchange_close && todo_open > exchange_close,
+            "sibling components should stay outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "repair should leave exactly one boundary marker"
         );
     }
 }

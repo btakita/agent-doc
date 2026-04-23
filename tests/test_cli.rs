@@ -132,6 +132,26 @@ fn test_cli_bare_file_path_aliases_to_run() {
 }
 
 #[test]
+fn test_cli_repair_aliases_legacy_recover() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let missing = tmp.path().join("missing.md");
+
+    let mut repair = agent_doc_cmd();
+    repair.arg("repair").arg(&missing);
+    repair
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+
+    let mut recover = agent_doc_cmd();
+    recover.arg("recover").arg(&missing);
+    recover
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
 fn test_cli_init_no_file_runs_project_init() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();

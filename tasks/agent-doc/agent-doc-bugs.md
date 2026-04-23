@@ -159,7 +159,7 @@ So the real bug here is narrower and clearer now:
 - I then failed to write a response in that cycle, which made the miss user-visible
 
 Your prompt is visible in the current diff now, and I added a concrete pending follow-up for hardening that drift-resync path so unanswered prompts cannot be swallowed into a commit.
-<!-- agent:boundary:5fb0518c -->
+<!-- agent:boundary:575c037b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

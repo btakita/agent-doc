@@ -1108,7 +1108,57 @@ Outcome:
 
 - `#veqs` is done.
 - Bare-path and explicit `run` now behave the same way, and template/default-template docs no longer fall back to the old append-mode patchback path.
-<!-- agent:boundary:8dff5c49 -->
+
+In src/session-share, agent-doc tasks/claudescore-3.md had an uncommitted patchback. Why?
+
+```
+• Because that agent-doc run committed only the pre-response snapshot, then wrote the Codex response back into the
+  working tree afterward and stopped there.
+
+  The evidence is local:
+
+  - .agent-doc/state/cycles/a8cd...json shows the cycle ended at phase: "response_captured", not a later commit phase.
+  - .agent-doc/captures/.../synthetic-1776969401288.json shows state: "write_applied", which means the response was
+    patched into the file but not committed.
+  - git log shows the last auto-commit was 0048267 (agent-doc(claudescore-3): 2026-04-23 14:57:29), while git diff
+    still shows the later patchback sitting unstaged in tasks/claudescore-3.md.
+
+  So the sequence was:
+
+  1. agent-doc made snapshot commit 0048267.
+  2. Codex generated a response.
+  3. agent-doc patched that response into tasks/claudescore-3.md.
+  4. The run ended at response_captured instead of doing another commit.
+
+  That is why the patchback was left uncommitted. The stale parent-process behavior is part of the same failure mode,
+  but the direct cause is simpler: the tool never performed a post-write commit for that response.
+```
+### Re: `src/session-share/tasks/claudescore-3.md` uncommitted patchback — gpt-5
+
+Mostly yes, but the exact boundary is slightly later than the summary in the document.
+
+What the local evidence shows:
+
+- `src/session-share/.agent-doc/state/cycles/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac.json` is still on the open cycle, and `agent-doc session-check src/session-share/tasks/claudescore-3.md` currently reports `synthetic-1776969401288` as `write_applied`, not committed.
+- The last actual git commit touching `src/session-share/tasks/claudescore-3.md` is still `0048267` (`agent-doc(claudescore-3): 2026-04-23 14:57:29 EDT`).
+- The captured response body in `src/session-share/.agent-doc/captures/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac/synthetic-1776969401288.json` matches the uncommitted tail now sitting in the working tree.
+
+The important correction is this:
+
+- there **were** later write/commit events after `0048267`, but they were intermediate normalize/rewrite passes before the final captured response was delivered;
+- in `src/session-share/.agent-doc/logs/ops.log`, the final delivery of this response is `ipc_file_delivered file=tasks/claudescore-3.md snap_len=9446` at `1776970740`; and
+- there is no later `commit_success` for `tasks/claudescore-3.md` after that delivery.
+
+So the precise sequence was:
+
+1. `agent-doc` committed the pre-response snapshot in `0048267`.
+2. It ran some intermediate normalize/write passes and committed those transient states.
+3. It then delivered the final Codex response into `tasks/claudescore-3.md` at `1776970740`.
+4. That final delivery never crossed another commit boundary.
+5. The file was left dirty with the appended `## Assistant` / `## User` tail, and the cycle stayed open as `write_applied`.
+
+So the root cause is still: the final patchback was written but not committed. The narrower correction is that `0048267` was not the only commit attempt in that run; the missing step was specifically the commit after the final `ipc_file_delivered`, not every post-write commit.
+<!-- agent:boundary:ddbd3d97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1120,3 +1170,10 @@ Outcome:
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
+<!--
+Why id `agent-doc repair` not commit ?
+• You ran agent-doc repair tasks/claudescore-3.md
+  └ [recover] Response already present in document — skipping apply, cleaning up pending file
+    [recover] repaired escaped conversation tail in tasks/claudescore-3.md
+    [recover] No pending response found for tasks/claudescore-3.md
+-->

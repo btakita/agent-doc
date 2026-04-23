@@ -302,6 +302,17 @@ Review:
 - The first push attempt did not include that commit because `git commit` and `git push` were incorrectly launched in parallel; the push raced ahead on the pre-commit branch tip and only advanced the remote to `dfe0845a`.
 - The fix is to run the follow-up push sequentially from local `main` after the commit exists, and record that exact failure mode in `tasks/agent-doc/agent-doc-bugs.md`.
 
+### 2026-04-23 — Explain `src/agent-doc` Dirty Tree In `agent-doc-bugs`
+
+- [x] Inspect the current `src/agent-doc` staged vs unstaged state and identify whether the large dirty tree is one coherent change set or multiple abandoned partial steps.
+- [x] Trace the recent `src/agent-doc` commit history against the dirty paths to explain why repeated commit requests still left this branch dirty.
+- [x] Patch the exact root-cause explanation into `tasks/agent-doc/agent-doc-bugs.md`, then commit and push only the parent-repo task-doc updates.
+
+Review:
+- `src/agent-doc` is dirty mostly because later real feature work was left staged in the submodule after repeated verification/document patchback cycles; the parent repo was being committed while the submodule commit boundary was skipped.
+- The current dirty set is large and mostly staged (`90` files, `7580` insertions, `2902` deletions), not a small accidental leftover. The only unstaged layer is a separate `Cargo.lock` flip on top of the staged version.
+- The staged content spans multiple post-`v0.33.12` work batches, including durable response capture / cycle-state changes and route/resync/session behavior work, which confirms this was accumulated uncommitted implementation work rather than a single tiny missed file.
+
 - [x] Reproduce the incorrect JetBrains prompt rendering from the current prompt-panel implementation/spec/tests and isolate the mismatch.
 - [x] Patch the JetBrains plugin prompt UI so the rendered row matches the intended prompt wording/layout, with focused regression coverage.
 - [x] Verify with targeted JetBrains plugin tests and a project build, then record the outcome.

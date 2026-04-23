@@ -1370,7 +1370,7 @@ So the enforceable version is:
 That turns the instruction set into an auditable completion boundary instead of a prose promise. I should have been doing that already.
 
 There seems to be a systemic issue having Codex follow the skills/runbooks. Are we losing context? Are there too many skills/runbooks?
-### Re: systemic Codex/runbook compliance diagnosis — gpt-5 (HEAD)
+### Re: systemic Codex/runbook compliance diagnosis — gpt-5
 
 Not primarily context loss. The repeated misses happened while the relevant rule was already present in the live task doc and in the installed Codex instructions (`.codex/AGENTS.md`, `.codex/runbooks/harness-invocation.md`). That points more to execution-boundary failures than to the model forgetting long-range context.
 
@@ -1497,7 +1497,9 @@ The distinction I would keep is:
 - **normal happy-path session workflow:** longer-term this should converge on a binary-owned `agent-doc finalize <FILE>` or equivalent, rather than teaching either harness a more procedural multi-command sequence than necessary
 
 So I would broaden `#wcmp` from "Codex patchbacks" to "manual-repair patchbacks across harnesses," while still keeping the larger product direction under `#finz` / `#schk` / `#instr1`.
-<!-- agent:boundary:45d8062b -->
+
+do #wcmp. add spec + tests. build + install for local testing
+<!-- agent:boundary:20b99eae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

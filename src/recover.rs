@@ -60,6 +60,14 @@ pub fn run(file: &Path) -> Result<bool> {
         eprintln!(
             "[recover] Response already present in document — skipping apply, cleaning up pending file"
         );
+        if let Err(e) = crate::cycle_state::mark_write_applied(
+            file,
+            "recover_already_applied",
+            Some(&doc_content),
+            Some(&doc_content),
+        ) {
+            eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
+        }
         std::fs::remove_file(&pending_path)
             .with_context(|| format!("failed to remove pending file {}", pending_path.display()))?;
         return Ok(false);
@@ -84,6 +92,16 @@ pub fn run(file: &Path) -> Result<bool> {
         .with_context(|| format!("failed to remove pending file {}", pending_path.display()))?;
 
     eprintln!("[recover] Response recovered and written to {}", file.display());
+    let final_doc = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
+    if let Err(e) = crate::cycle_state::mark_write_applied(
+        file,
+        "recover_applied",
+        Some(&final_doc),
+        Some(&final_doc),
+    ) {
+        eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
+    }
     Ok(true)
 }
 

@@ -1,15 +1,15 @@
 //! # Module: session_check
 //!
 //! ## Spec
-//! - `run(file)` inspects `.agent-doc/logs/ops.log` and exits nonzero
-//!   if the last log entry is `preflight_diff_start` — i.e. a preflight
-//!   cycle started but never reached a write/commit. This signals an
-//!   interrupted cycle (agent killed, session lost, or pending response
-//!   that never landed).
-//! - Exit 0 when the last entry is a terminal event (`ipc_write_consumed`,
-//!   `disk_write`, `commit`, `recover_...`), when the log is empty, or when
-//!   the log file does not exist.
-//! - Exit 1 when the last entry is `preflight_diff_start`.
+//! - `run(file)` inspects the persisted per-document cycle state in
+//!   `.agent-doc/state/cycles/<hash>.json` and exits nonzero when the most
+//!   recent cycle is still open (`preflight_started` or `write_applied`).
+//! - Falls back to the last `ops.log` event only when no cycle-state file
+//!   exists yet, preserving compatibility for older repos.
+//! - Exit 0 when the current cycle state is committed, when state/log files
+//!   are missing, or when the fallback `ops.log` event is terminal.
+//! - Exit 1 when the current cycle state is still open or the fallback last
+//!   `ops.log` event is `preflight_diff_start`.
 //! - Exit 2 on unexpected I/O errors.
 //!
 //! ## Agentic Contracts
@@ -20,8 +20,8 @@
 //!
 //! ## Evals
 //! - `session_check_empty_log_exits_zero`
-//! - `session_check_last_preflight_start_exits_one`
-//! - `session_check_last_write_consumed_exits_zero`
+//! - `session_check_open_cycle_state_exits_one`
+//! - `session_check_committed_cycle_state_exits_zero`
 //! - `session_check_missing_log_exits_zero`
 
 use anyhow::Result;
@@ -38,9 +38,27 @@ pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
 /// - `0` — log empty/missing, or last entry is a terminal event
 /// - `1` — last entry is `preflight_diff_start` (interrupted cycle)
 pub fn run(file: &Path) -> Result<()> {
+    if let Some(state) = crate::cycle_state::load(file)? {
+        if state.is_open() {
+            println!(
+                "[session-check] INTERRUPTED: cycle `{}` is still `{}` — no terminal commit followed",
+                state.cycle_id,
+                phase_name(state.phase)
+            );
+            std::process::exit(1);
+        }
+        println!(
+            "[session-check] ok — cycle `{}` is `{}` ({})",
+            state.cycle_id,
+            phase_name(state.phase),
+            state.last_event
+        );
+        return Ok(());
+    }
+
     match last_ops_event(file)? {
         None => {
-            println!("[session-check] ops.log is empty or missing — ok");
+            println!("[session-check] no cycle state or ops.log — ok");
             Ok(())
         }
         Some(event) if event.starts_with(PREFLIGHT_START_EVENT) => {
@@ -54,6 +72,14 @@ pub fn run(file: &Path) -> Result<()> {
             println!("[session-check] ok — last event: {}", event);
             Ok(())
         }
+    }
+}
+
+fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
     }
 }
 
@@ -98,6 +124,7 @@ mod tests {
 
     fn make_project(tmp: &Path) -> std::path::PathBuf {
         fs::create_dir_all(tmp.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(tmp.join(".agent-doc/snapshots")).unwrap();
         let doc = tmp.join("doc.md");
         fs::write(&doc, "body").unwrap();
         doc
@@ -157,5 +184,25 @@ mod tests {
         .unwrap();
         let last = last_ops_event(&doc).unwrap().unwrap();
         assert!(last.starts_with(PREFLIGHT_START_EVENT));
+    }
+
+    #[test]
+    fn session_check_open_cycle_state_exits_one() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(state.is_open());
+    }
+
+    #[test]
+    fn session_check_committed_cycle_state_exits_zero() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(!state.is_open());
+        assert_eq!(phase_name(state.phase), "committed");
     }
 }

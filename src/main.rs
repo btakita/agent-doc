@@ -53,6 +53,7 @@ mod commands;
 mod compact;
 mod config;
 mod convert;
+mod cycle_state;
 mod pending;
 mod pending_cmd;
 mod status_cmd;
@@ -1077,7 +1078,7 @@ fn main() -> anyhow::Result<()> {
                 None => prompt::run(&file),
             }
         }
-        Commands::Commit { file } => git::commit(&file),
+        Commands::Commit { file } => git::commit(&file).map(|_| ()),
         Commands::Dedupe { file } => dedupe::run(&file),
         Commands::Claim { file, position, pane, window, force, isolate } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force, isolate),
         Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),

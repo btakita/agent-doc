@@ -962,6 +962,12 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
+        let _ = crate::cycle_state::mark_write_applied(
+            file,
+            "write_inline_dedup",
+            Some(&content_current),
+            Some(&content_current),
+        );
         drop(doc_lock);
         recover::clear_pending(file)?;
         return Ok(());
@@ -980,6 +986,14 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         "write_inline_done file={} snap_len={}",
         file.display(), final_content.len()
     ));
+    if let Err(e) = crate::cycle_state::mark_write_applied(
+        file,
+        "write_inline",
+        Some(&final_content),
+        Some(&final_content),
+    ) {
+        eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
+    }
 
     drop(doc_lock);
 
@@ -1058,6 +1072,12 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
+        let _ = crate::cycle_state::mark_write_applied(
+            file,
+            "write_template_dedup",
+            Some(&content_current),
+            Some(&content_current),
+        );
         drop(doc_lock);
         recover::clear_pending(file)?;
         return Ok(());
@@ -1076,6 +1096,14 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         "write_template_done file={} snap_len={} patches={}",
         file.display(), final_content.len(), patches.len()
     ));
+    if let Err(e) = crate::cycle_state::mark_write_applied(
+        file,
+        "write_template",
+        Some(&final_content),
+        Some(&final_content),
+    ) {
+        eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
+    }
 
     drop(doc_lock);
 
@@ -1478,6 +1506,12 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
+        let _ = crate::cycle_state::mark_write_applied(
+            file,
+            "write_stream_dedup",
+            Some(&content_current),
+            Some(&content_current),
+        );
         drop(doc_lock);
         recover::clear_pending(file)?;
         let elapsed_total = t_total.elapsed().as_millis();
@@ -1503,6 +1537,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         "write_stream_done file={} snap_len={}",
         file.display(), final_content.len()
     ));
+    if let Err(e) = crate::cycle_state::mark_write_applied(
+        file,
+        "write_stream",
+        Some(&final_content),
+        Some(&final_content),
+    ) {
+        eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
+    }
 
     drop(doc_lock);
 

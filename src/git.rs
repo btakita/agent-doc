@@ -16,7 +16,8 @@
 //!   the boundary marker in the snapshot and fires an IPC reposition signal
 //!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
 //!   via the plugin's Document API when a live listener exists; otherwise the file is rewritten
-//!   locally to the same clean shape as the committed blob.
+//!   locally to the same clean shape as the committed blob. Returns `true` when a git commit was
+//!   created and `false` when there was nothing to commit.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
@@ -475,7 +476,7 @@ fn classify_safe_out_of_band_agent_doc_mutation(snapshot_doc: &str, file_doc: &s
 /// Commit a file with an auto-generated message. Skips hooks.
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
-pub fn commit(file: &Path) -> Result<()> {
+pub fn commit(file: &Path) -> Result<bool> {
     let t_total = std::time::Instant::now();
 
     // Serialize concurrent preflight runs against each other: without this,
@@ -721,10 +722,22 @@ pub fn commit(file: &Path) -> Result<()> {
     }
 
     // Log commit result
+    let mut did_commit = false;
     match &commit_status {
         Ok(s) if s.success() => {
+            did_commit = true;
             crate::ops_log::log_cycle(file, "commit", None, None);
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+            let snap = crate::snapshot::load(file).ok().flatten();
+            let file_content = std::fs::read_to_string(file).ok();
+            if let Err(e) = crate::cycle_state::mark_committed(
+                file,
+                "commit_success",
+                snap.as_deref(),
+                file_content.as_deref(),
+            ) {
+                eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
+            }
             // Fire post_commit hook for cross-session coordination
             let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();
             crate::hooks::fire_post_commit(file, &session_id);
@@ -788,7 +801,7 @@ pub fn commit(file: &Path) -> Result<()> {
         eprintln!("[perf] commit total: {}ms", elapsed_total);
     }
 
-    Ok(())
+    Ok(did_commit)
 }
 
 /// Reposition boundary in snapshot AND working tree deterministically.

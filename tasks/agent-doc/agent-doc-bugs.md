@@ -20,7 +20,7 @@ The remaining open work is end-to-end closeout proof (`#cde3`): verify in `agent
 
 <!-- agent:exchange patch=append -->
 Compacted recent Codex closeout discussion. Established that the deterministic closeout / recover / capture / commit / session-check behavior is binary-owned in agent-doc, while repo-local .codex/hooks.json plus .codex/config.toml are required only to register Codex UserPromptSubmit/Stop lifecycle events to that binary logic. Completed: #cdv1 verified and landed the Codex stop-hook auto-close work in src/agent-doc (commit 6972cd1), and #cdi2 installed the repo-local Codex hook artifacts in agent-loop. Open work remains #cde3 end-to-end proof that both finalize+session-check and the Stop-hook backstop leave no uncommitted patchback, plus #cdp4 patchback of that verified outcome, #bndy live editor boundary-cleanup validation, and #ha3h multi-user pending auto-create policy follow-up.
-<!-- agent:boundary:bd2f2e1d -->
+<!-- agent:boundary:a9c6c252 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

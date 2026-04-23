@@ -1525,7 +1525,7 @@ Installed-content checks passed for:
 - `.claude/skills/agent-doc/runbooks/harness-invocation.md`
 - `.codex/AGENTS.md`
 - `.codex/runbooks/harness-invocation.md`
-<!-- agent:boundary:6d90302d -->
+<!-- agent:boundary:8d1f71b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

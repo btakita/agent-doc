@@ -755,7 +755,30 @@ Outcome:
 - raw template recoveries like the `claudescore.md` `compact exchange` closeout no longer fall back to append-mode patchback
 - safe trailing raw suffixes after sibling components are repaired back into `agent:exchange`
 - `agent-doc repair` now matches the actual user-facing role of the command while preserving `recover` compatibility
-<!-- agent:boundary:5337fa98 -->
+
+claudescore.md is still reverted back to the corrupted state. If there is an agent:exchange component, any `Assistant` or `User` header should be automatically placed inside agent:exchange. update spec + tests. build + install for local testing. commit + push
+
+```
+• agent-doc tasks/claudescore.md ran and reproduced the same failure again.
+
+  It created commit 8a6e3bb (agent-doc(claudescore): 2026-04-23 13:58:26), then appended another response and left the
+  session open. agent-doc session-check tasks/claudescore.md still fails with:
+
+  [session-check] INTERRUPTED: cycle `cycle-1776939317875` is still `response_captured` — no terminal commit followed
+
+  The tail is malformed again, now with repeated compact exchange user turns and repeated Exchange compacted...
+  assistant text, plus a final ## Assistant / ## User appended outside the intended flow.
+
+  The working tree is dirty in two files now:
+
+  - tasks/claudescore.md
+  - tasks/claudescore-2.md
+```
+[//]: agent-doc recover should be renamed to agent-doc repair. Alias recover to repair. agent-doc repair should repair any preflight locks that were caused by cancelling a previous run during `agent-doc preflight`. In an agent-doc run on this document, I canceled during `agent-doc preflight`. A recent run had issues with an uncleared preflight lock. `agent-doc repair` does not repair preflight locks. Then the previous patchback to the recent run went from a committed to an uncommitted state. The repair command must repair stale preflight locks. Also investigate why the previous patchback went from a committed to an uncommitted state. `agent-doc repair` should also repair the document itself from any corruption. The document must be runnable with a clean slate and the exchange + pending contents preserved.
+[//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
+[//]: # (Please diagnose why audit-docs is hanging.)
+[//]: # Fix test suite warnings ignored tests
+<!-- agent:boundary:26deea89 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -767,7 +790,3 @@ Outcome:
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 
-[//]: agent-doc recover should be renamed to agent-doc repair. Alias recover to repair. agent-doc repair should repair any preflight locks that were caused by cancelling a previous run during `agent-doc preflight`. In an agent-doc run on this document, I canceled during `agent-doc preflight`. A recent run had issues with an uncleared preflight lock. `agent-doc repair` does not repair preflight locks. Then the previous patchback to the recent run went from a committed to an uncommitted state. The repair command must repair stale preflight locks. Also investigate why the previous patchback went from a committed to an uncommitted state. `agent-doc repair` should also repair the document itself from any corruption. The document must be runnable with a clean slate and the exchange + pending contents preserved.
-[//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
-[//]: # (Please diagnose why audit-docs is hanging.)
-[//]: # Fix test suite warnings ignored tests

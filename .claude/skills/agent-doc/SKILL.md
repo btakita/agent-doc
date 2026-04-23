@@ -68,7 +68,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, inline annotations (blockquotes, comments, edits to previous responses), and structural changes.
 
-**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
+**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). Exchange ordering and model attribution expect real headings. Use h4–h6 for sub-sections within a response.
 
 **Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
 

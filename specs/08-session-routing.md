@@ -69,11 +69,11 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 
-**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. The committed blob stays clean, but the visible post-commit document keeps a single ` (HEAD)` marker on the current response heading. When a live editor IPC listener exists, that visible rewrite is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so the affordance still lands and stale boundary churn is removed.
+**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. The committed blob, snapshot, and post-commit document should converge back to the same clean shape. When a live editor IPC listener exists, that cleanup is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so stale boundary / `(HEAD)` churn is removed instead of left as working-tree dirtiness.
 
-**Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same visible post-commit shape as the user-facing document: ALL stale boundaries are stripped, a single fresh 8-char boundary is inserted at end-of-exchange, and a single ` (HEAD)` marker is preserved on the current response heading.
+**Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same clean post-commit shape as the user-facing document: ALL stale boundaries are stripped, heading-level transient ` (HEAD)` markers are removed, and a single fresh 8-char boundary is inserted at end-of-exchange.
 
-**Editor cleanup invariant:** The editor-side reposition helpers (JetBrains and VS Code) must preserve that single visible ` (HEAD)` marker while collapsing stale boundaries. Boundary-only cleanup must not create a follow-up diff that is only old boundary IDs or ` (HEAD)` churn.
+**Editor cleanup invariant:** The editor-side reposition helpers (JetBrains and VS Code) must collapse stale boundaries and strip transient heading-level ` (HEAD)` markers. Boundary-only cleanup must not create a follow-up diff that is only old boundary IDs or ` (HEAD)` churn.
 
 **Boundary reposition lifecycle:**
 1. **Before IPC patch JSON (clean boundary reposition):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and normalize boundaries in memory before extracting `boundary_id` values. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.

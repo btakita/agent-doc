@@ -509,10 +509,10 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
 
 /// Reposition boundary marker to end of exchange component.
 ///
-/// Removes all existing boundary markers from the document and inserts a single
-/// fresh one at the end of the exchange component, preserving the visible
-/// ` (HEAD)` heading affordance in the user-facing document state. Returns the
-/// document unchanged if no exchange component exists.
+/// Removes all existing boundary markers from the document, strips transient
+/// heading-level ` (HEAD)` suffixes, and inserts a single fresh boundary at the
+/// end of the exchange component. Returns the document unchanged if no exchange
+/// component exists.
 ///
 /// # Safety
 ///
@@ -531,7 +531,7 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end(
         Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
     };
 
-    let result = template::reposition_boundary_to_end(doc_str);
+    let result = template::reposition_boundary_to_end_clean(doc_str);
     FfiPatchResult {
         text: CString::new(result).unwrap_or_default().into_raw(),
         error: ptr::null_mut(),

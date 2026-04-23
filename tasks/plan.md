@@ -230,8 +230,8 @@ Review:
 ### 2026-04-22 — Commit Parent Patchbacks After Self-Heal Fix
 
 - [x] Confirm the remaining dirty state is in the parent `agent-loop` repo, not the `src/agent-doc` submodule worktree.
-- [ ] Commit the parent repo changes that correspond to the repaired patchbacks (`src/agent-doc` submodule pointer plus `tasks/agent-doc/agent-doc-bugs.md`).
-- [ ] If the parent commit path exposes another selective-commit gap, patch `agent-doc` again and re-verify.
+- [x] Commit the parent repo changes that correspond to the repaired patchbacks (`src/agent-doc` submodule pointer plus `tasks/agent-doc/agent-doc-bugs.md`).
+- [x] Verify the remaining `tasks/agent-doc/*.md` dirtiness is boundary-only `(HEAD)` state, not another missed response-patchback bug.
 
 Review:
 - Updated `src/agent-doc/src/pending.rs` so `pending::op_add` accepts a leading `id=<custom> ` prefix, validates 1-8 ASCII alphanumeric ids, strips an optional leading `#`, rejects duplicates, and preserves the provided id instead of generating one.

@@ -2,8 +2,16 @@
 //!
 //! ## Spec
 //! - Guards against response loss caused by context compaction interrupting the write-back phase (between agent respond and `agent-doc write`).
-//! - Pending responses are stored in `.agent-doc/pending/<hash>.md` before the write attempt, making them durable across process restarts.
-//! - `run(file)` — canonicalizes the path, checks for a pending file, and applies it if found. Before applying, reads the current document and checks if the response is already present (dedup guard). If already present, removes the pending file without writing (returns `Ok(false)`). Detection of `<!-- patch:` in the pending content selects template-patch write (`write::apply_template_from_string`); otherwise plain append is used (`write::apply_append_from_string`). Removes the pending file on successful write.
+//! - Pending responses are stored in `.agent-doc/pending/<hash>.md` before the write attempt, and
+//!   the same response is also captured in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`.
+//! - `run(file)` — canonicalizes the path, checks for a pending file or active durable capture, and
+//!   applies it if found. Before applying, reads the current document and checks if the response is
+//!   already present (dedup guard). If already present, removes the pending file without writing
+//!   (returns `Ok(false)`). When replaying from a durable capture, requires the current document and
+//!   snapshot hashes to still match the captured baseline; otherwise fails closed.
+//!   Detection of `<!-- patch:` in the response selects template-patch write
+//!   (`write::apply_template_from_string`); otherwise plain append is used (`write::apply_append_from_string`).
+//!   Removes the pending file on successful write.
 //! - Empty pending files are cleaned up without triggering a write; `run` returns `false`.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
@@ -16,11 +24,13 @@
 //! - Callers (e.g., `preflight`) invoke `run` at session start to surface any orphaned responses before proceeding.
 //!
 //! ## Evals
-//! - no_pending_returns_false: document with no pending file → run returns Ok(false)
+//! - no_pending_returns_false: document with no pending file or capture → run returns Ok(false)
 //! - save_and_clear_pending: save then clear → pending file created then removed
 //! - recover_append_response: pending plain text response → applied as Assistant section, file updated, pending file removed, run returns Ok(true)
 //! - empty_pending_cleaned_up: pending file with only whitespace → run returns Ok(false), pending file removed
 //! - recover_skips_duplicate_apply: pending response already present in document → run returns Ok(false), pending file removed, document unchanged
+//! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
+//! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -32,21 +42,33 @@ use crate::{snapshot, write};
 /// Returns `true` if a pending response was recovered, `false` otherwise.
 pub fn run(file: &Path) -> Result<bool> {
     // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule)
-    let canonical = file.canonicalize().map_err(|_| {
-        anyhow::anyhow!("file not found: {}", file.display())
-    })?;
+    let canonical = file
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     let pending_path = snapshot::pending_path_for(&canonical)?;
-    if !pending_path.exists() {
+    let capture = crate::capture::load_active(&canonical)?;
+    if !pending_path.exists() && capture.is_none() {
         return Ok(false);
     }
 
-    let response = std::fs::read_to_string(&pending_path)
-        .with_context(|| format!("failed to read pending response {}", pending_path.display()))?;
+    let pending_response = if pending_path.exists() {
+        Some(std::fs::read_to_string(&pending_path).with_context(|| {
+            format!("failed to read pending response {}", pending_path.display())
+        })?)
+    } else {
+        None
+    };
+    let response = capture
+        .as_ref()
+        .map(|r| r.response_body.clone())
+        .or(pending_response.clone())
+        .unwrap_or_default();
 
     if response.trim().is_empty() {
         // Empty pending file — just clean up
         let _ = std::fs::remove_file(&pending_path);
+        let _ = crate::capture::mark_discarded(&canonical);
         return Ok(false);
     }
 
@@ -68,9 +90,12 @@ pub fn run(file: &Path) -> Result<bool> {
         ) {
             eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
         }
-        std::fs::remove_file(&pending_path)
-            .with_context(|| format!("failed to remove pending file {}", pending_path.display()))?;
+        clear_pending(&canonical)?;
         return Ok(false);
+    }
+
+    if let Some(ref capture) = capture {
+        crate::capture::validate_replay(&canonical, capture)?;
     }
 
     eprintln!(
@@ -88,10 +113,12 @@ pub fn run(file: &Path) -> Result<bool> {
     }
 
     // Remove the pending file after successful write
-    std::fs::remove_file(&pending_path)
-        .with_context(|| format!("failed to remove pending file {}", pending_path.display()))?;
+    clear_pending(&canonical)?;
 
-    eprintln!("[recover] Response recovered and written to {}", file.display());
+    eprintln!(
+        "[recover] Response recovered and written to {}",
+        file.display()
+    );
     let final_doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read recovered document {}", file.display()))?;
     if let Err(e) = crate::cycle_state::mark_write_applied(
@@ -101,6 +128,9 @@ pub fn run(file: &Path) -> Result<bool> {
         Some(&final_doc),
     ) {
         eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
+    }
+    if let Err(e) = crate::capture::mark_replayed(&canonical) {
+        eprintln!("[recover] capture-state update failed: {} (non-fatal)", e);
     }
     Ok(true)
 }
@@ -141,6 +171,7 @@ fn fingerprint_lines(response: &str) -> Vec<String> {
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
+    crate::capture::capture_response(file, response)?;
     let pending_path = snapshot::pending_path_for(file)?;
     if let Some(parent) = pending_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -160,6 +191,9 @@ pub fn clear_pending(file: &Path) -> Result<()> {
     // Without this, pre-response files accumulate indefinitely after successful writes.
     if let Err(e) = snapshot::delete_pre_response(file) {
         eprintln!("[recover] warning: failed to delete pre-response: {}", e);
+    }
+    if let Err(e) = crate::capture::mark_write_applied(file) {
+        eprintln!("[recover] warning: failed to update capture state: {}", e);
     }
     Ok(())
 }
@@ -266,6 +300,47 @@ mod tests {
     }
 
     #[test]
+    fn recover_replays_capture_without_pending() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(&doc, "Recovered from capture.").unwrap();
+        clear_pending(&doc).unwrap();
+        let pending = snapshot::pending_path_for(&doc).unwrap();
+        assert!(!pending.exists());
+        // Re-arm capture as if the write never happened.
+        crate::capture::capture_response(&doc, "Recovered from capture.").unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert!(recovered);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("Recovered from capture."));
+    }
+
+    #[test]
+    fn recover_fails_closed_on_capture_hash_mismatch() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        save_pending(&doc, "Recovered from capture.").unwrap();
+        let pending = snapshot::pending_path_for(&doc).unwrap();
+        std::fs::remove_file(&pending).unwrap();
+        std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("baseline no longer matches"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn recover_dedup_with_blank_lines_and_boundary() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
@@ -278,7 +353,10 @@ mod tests {
         save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
-        assert!(!recovered, "should detect content as already applied despite (HEAD) suffix and blank lines");
+        assert!(
+            !recovered,
+            "should detect content as already applied despite (HEAD) suffix and blank lines"
+        );
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, content);

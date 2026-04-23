@@ -70,8 +70,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::supervisor::{
-    cwd, env::EnvSpec, ipc::{IpcMethod, IpcResponse, SupervisorIpc},
-    pty::PtySpawnConfig, resize, state::{CrashPolicy, RestartAction, SupervisorState},
+    cwd,
+    env::EnvSpec,
+    ipc::{IpcMethod, IpcResponse, SupervisorIpc},
+    pty::PtySpawnConfig,
+    resize,
+    state::{CrashPolicy, RestartAction, SupervisorState},
 };
 use crate::{config, frontmatter, sessions, snapshot};
 
@@ -167,7 +171,9 @@ struct RawMode;
 
 #[cfg(not(unix))]
 impl RawMode {
-    fn enable() -> Self { Self }
+    fn enable() -> Self {
+        Self
+    }
     fn suspend(&self) {}
     fn resume(&self) {}
 }
@@ -223,7 +229,9 @@ struct StopSignal;
 
 #[cfg(not(unix))]
 impl StopSignal {
-    fn new() -> Result<Self> { Ok(Self) }
+    fn new() -> Result<Self> {
+        Ok(Self)
+    }
     fn signal(&self) {}
 }
 
@@ -374,7 +382,10 @@ fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread
                                     display.push_str(&format!("\\x{b:02x}"));
                                 }
                             }
-                            eprintln!("[pty-filter] filtered ({} bytes): {display}", filtered.len());
+                            eprintln!(
+                                "[pty-filter] filtered ({} bytes): {display}",
+                                filtered.len()
+                            );
                         }
                         if filtered.is_empty() {
                             continue;
@@ -566,11 +577,7 @@ pub fn run(file: &Path) -> Result<()> {
     // Register session → pane (with relative file path)
     let file_str = file.to_string_lossy();
     sessions::register(&session_id, &pane_id, &file_str)?;
-    eprintln!(
-        "Registered session {} → pane {}",
-        &session_id[..8],
-        pane_id
-    );
+    eprintln!("Registered session {} → pane {}", &session_id[..8], pane_id);
 
     // Open session log
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
@@ -586,7 +593,14 @@ pub fn run(file: &Path) -> Result<()> {
     );
 
     // Fire document-level session_start hooks
-    crate::hooks::fire_doc_hooks(&fm.hooks, "session_start", file, &session_id, &fm.agent, &fm.model);
+    crate::hooks::fire_doc_hooks(
+        &fm.hooks,
+        "session_start",
+        file,
+        &session_id,
+        &fm.agent,
+        &fm.model,
+    );
 
     // --- Supervisor setup ---
 
@@ -647,8 +661,8 @@ pub fn run(file: &Path) -> Result<()> {
     };
 
     // Find project root for IPC socket placement
-    let project_root = snapshot::find_project_root(&canonical)
-        .unwrap_or_else(|| resolved_cwd.path.clone());
+    let project_root =
+        snapshot::find_project_root(&canonical).unwrap_or_else(|| resolved_cwd.path.clone());
 
     // Create shared state for IPC handler
     let shared = Arc::new(SupervisorShared::new(resolved_cwd.source.as_str()));
@@ -686,7 +700,10 @@ pub fn run(file: &Path) -> Result<()> {
             eprintln!("Restarting {} (continue)...", harness.binary);
             log_event(
                 &mut session_log,
-                &format!("{}_restart mode=continue restart_count={}", harness.binary, restart_count),
+                &format!(
+                    "{}_restart mode=continue restart_count={}",
+                    harness.binary, restart_count
+                ),
             );
             restart_args
         } else {
@@ -717,9 +734,8 @@ pub fn run(file: &Path) -> Result<()> {
             env: resolved_env.clone(),
             size: initial_size,
         };
-        let mut session =
-            crate::supervisor::pty::PtySession::spawn(cfg)
-                .with_context(|| format!("failed to spawn {}", harness.binary))?;
+        let mut session = crate::supervisor::pty::PtySession::spawn(cfg)
+            .with_context(|| format!("failed to spawn {}", harness.binary))?;
 
         // Extract writer and reader for shared I/O
         let pty_writer = session.take_writer()?;
@@ -732,9 +748,7 @@ pub fn run(file: &Path) -> Result<()> {
             .child_pid
             .store(session.process_id().unwrap_or(0), Ordering::Relaxed);
         shared.running.store(true, Ordering::Relaxed);
-        shared
-            .restart_count
-            .store(restart_count, Ordering::Relaxed);
+        shared.restart_count.store(restart_count, Ordering::Relaxed);
         shared.restart_requested.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
 
@@ -782,8 +796,15 @@ pub fn run(file: &Path) -> Result<()> {
                     {
                         let text = String::from_utf8_lossy(&output.stdout);
                         let lines: Vec<&str> = text.lines().collect();
-                        let tail = if lines.len() > 20 { &lines[lines.len() - 20..] } else { &lines };
-                        if tail.iter().any(|l| trigger_harness.matches_prompt(l.trim())) {
+                        let tail = if lines.len() > 20 {
+                            &lines[lines.len() - 20..]
+                        } else {
+                            &lines
+                        };
+                        if tail
+                            .iter()
+                            .any(|l| trigger_harness.matches_prompt(l.trim()))
+                        {
                             ready = true;
                             break;
                         }
@@ -797,7 +818,10 @@ pub fn run(file: &Path) -> Result<()> {
                             .as_secs();
                         let _ = writeln!(f, "[{}] auto_trigger_timeout (no prompt after 30s)", ts);
                     }
-                    eprintln!("[agent-doc] auto-trigger: timed out waiting for {} prompt", trigger_harness.binary);
+                    eprintln!(
+                        "[agent-doc] auto-trigger: timed out waiting for {} prompt",
+                        trigger_harness.binary
+                    );
                     return;
                 }
 
@@ -831,7 +855,8 @@ pub fn run(file: &Path) -> Result<()> {
         }
 
         // Block until child exits
-        let status = session.wait()
+        let status = session
+            .wait()
             .with_context(|| format!("failed waiting on {}", harness.binary))?;
         first_run = false;
 
@@ -882,7 +907,10 @@ pub fn run(file: &Path) -> Result<()> {
         let code = status.exit_code() as i32;
         log_event(
             &mut session_log,
-            &format!("{}_exit code={} restart_count={}", harness.binary, code, restart_count),
+            &format!(
+                "{}_exit code={} restart_count={}",
+                harness.binary, code, restart_count
+            ),
         );
 
         let action = policy.on_exit(code);
@@ -1007,7 +1035,10 @@ pub(crate) fn relocate_if_wrong_session(
             .join("-dh")
         {
             Ok(()) => {
-                eprintln!("[start] relocated pane {} → session '{}'", pane_id, expected_session);
+                eprintln!(
+                    "[start] relocated pane {} → session '{}'",
+                    pane_id, expected_session
+                );
                 true
             }
             Err(e) => {
@@ -1049,10 +1080,7 @@ mod tests {
         };
         let harness = crate::harness::HarnessConfig::claude();
         let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(
-            resolved.as_deref(),
-            Some("--dangerously-skip-permissions")
-        );
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
     }
 
     #[test]
@@ -1137,10 +1165,15 @@ mod tests {
     #[test]
     fn relocate_noop_when_already_correct_session() {
         let iso = IsolatedTmux::new("start-reloc-noop");
-        let pane = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
+        let pane = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
         // pane is already in sess-a; no relocation needed
         let result = relocate_if_wrong_session(&iso, &pane, "sess-a");
-        assert!(result, "should return true (noop — already in correct session)");
+        assert!(
+            result,
+            "should return true (noop — already in correct session)"
+        );
         // Verify pane is still in sess-a
         let sess = iso.pane_session(&pane).unwrap();
         assert_eq!(sess, "sess-a");
@@ -1149,8 +1182,12 @@ mod tests {
     #[test]
     fn relocate_succeeds_cross_session() {
         let iso = IsolatedTmux::new("start-reloc-cross");
-        let _pane_a = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
-        let pane_b = iso.new_session("sess-b", std::path::Path::new("/tmp")).unwrap();
+        let _pane_a = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
+        let pane_b = iso
+            .new_session("sess-b", std::path::Path::new("/tmp"))
+            .unwrap();
         // pane_b is in sess-b; expected is sess-a — should auto-relocate
         let result = relocate_if_wrong_session(&iso, &pane_b, "sess-a");
         assert!(result, "should return true after successful relocation");
@@ -1161,19 +1198,31 @@ mod tests {
     #[test]
     fn relocate_fails_gracefully_when_no_anchor() {
         let iso = IsolatedTmux::new("start-reloc-noanchor");
-        let pane = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
+        let pane = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
         // Expected session "sess-nonexistent" has no active pane — relocation should fail gracefully
         let result = relocate_if_wrong_session(&iso, &pane, "sess-nonexistent");
-        assert!(!result, "should return false when no anchor pane exists in expected session");
+        assert!(
+            !result,
+            "should return false when no anchor pane exists in expected session"
+        );
         // pane should still be in original session
         let sess = iso.pane_session(&pane).unwrap();
-        assert_eq!(sess, "sess-a", "pane should remain in original session on failure");
+        assert_eq!(
+            sess, "sess-a",
+            "pane should remain in original session on failure"
+        );
     }
 
     #[test]
     fn fire_doc_hooks_substitutes_template_vars() {
-        let tmp = std::env::temp_dir().join(format!("agent-doc-hook-test-{}.txt", std::process::id()));
-        let cmd = format!("echo '{{{{session_id}}}}:{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
+        let tmp =
+            std::env::temp_dir().join(format!("agent-doc-hook-test-{}.txt", std::process::id()));
+        let cmd = format!(
+            "echo '{{{{session_id}}}}:{{{{agent}}}}:{{{{model}}}}' > {}",
+            tmp.display()
+        );
         let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
         hooks.insert("session_start".to_string(), vec![cmd]);
         fire_doc_hooks(
@@ -1185,8 +1234,16 @@ mod tests {
             &Some("opus".to_string()),
         );
         let output = std::fs::read_to_string(&tmp).unwrap_or_default();
-        assert!(output.contains("abc-123"), "session_id not substituted: {}", output);
-        assert!(output.contains("claude"), "agent not substituted: {}", output);
+        assert!(
+            output.contains("abc-123"),
+            "session_id not substituted: {}",
+            output
+        );
+        assert!(
+            output.contains("claude"),
+            "agent not substituted: {}",
+            output
+        );
         assert!(output.contains("opus"), "model not substituted: {}", output);
         let _ = std::fs::remove_file(&tmp);
     }
@@ -1194,23 +1251,47 @@ mod tests {
     #[test]
     fn fire_doc_hooks_noop_for_missing_event() {
         let hooks: HashMap<String, Vec<String>> = HashMap::new();
-        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
     }
 
     #[test]
     fn fire_doc_hooks_noop_for_empty_event() {
         let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
         hooks.insert("session_start".to_string(), vec![]);
-        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
     }
 
     #[test]
     fn fire_doc_hooks_handles_none_agent_model() {
-        let tmp = std::env::temp_dir().join(format!("agent-doc-hook-none-test-{}.txt", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-doc-hook-none-test-{}.txt",
+            std::process::id()
+        ));
         let cmd = format!("printf '{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
         let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
         hooks.insert("session_start".to_string(), vec![cmd]);
-        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
         let output = std::fs::read_to_string(&tmp).unwrap_or_default();
         assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
         let _ = std::fs::remove_file(&tmp);
@@ -1248,9 +1329,8 @@ mod tests {
         struct FdWriter(i32);
         impl Write for FdWriter {
             fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let n = unsafe {
-                    libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len())
-                };
+                let n =
+                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
                 if n < 0 {
                     Err(std::io::Error::last_os_error())
                 } else {
@@ -1274,7 +1354,10 @@ mod tests {
         // Signal stop — thread should exit promptly
         stop.signal();
         let result = handle.join();
-        assert!(result.is_ok(), "writer thread should exit cleanly on stop signal");
+        assert!(
+            result.is_ok(),
+            "writer thread should exit cleanly on stop signal"
+        );
 
         // Clean up pipe fds
         unsafe {
@@ -1296,9 +1379,8 @@ mod tests {
         struct FdWriter(i32);
         impl Write for FdWriter {
             fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let n = unsafe {
-                    libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len())
-                };
+                let n =
+                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
                 if n < 0 {
                     Err(std::io::Error::last_os_error())
                 } else {
@@ -1324,7 +1406,10 @@ mod tests {
         stop.signal();
 
         let result = handle.join();
-        assert!(result.is_ok(), "writer thread should exit on write failure or stop");
+        assert!(
+            result.is_ok(),
+            "writer thread should exit on write failure or stop"
+        );
 
         unsafe { libc::close(pty_fds[1]) };
     }
@@ -1340,9 +1425,8 @@ mod tests {
         struct FdReader(i32);
         impl std::io::Read for FdReader {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let n = unsafe {
-                    libc::read(self.0, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-                };
+                let n =
+                    unsafe { libc::read(self.0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
                 if n < 0 {
                     Err(std::io::Error::last_os_error())
                 } else {

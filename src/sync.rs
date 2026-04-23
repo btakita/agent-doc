@@ -176,8 +176,14 @@ pub fn write_rename_debounce(file_path: &str) {
     }
     let marker = debounce_dir.join(format!("{}.marker", hash));
     let _ = std::fs::write(&marker, file_path);
-    eprintln!("[sync] rename debounce marker set for {} ({})", file_path, hash);
-    sync_log(&format!("rename-debounce: set marker for {} hash={}", file_path, hash));
+    eprintln!(
+        "[sync] rename debounce marker set for {} ({})",
+        file_path, hash
+    );
+    sync_log(&format!(
+        "rename-debounce: set marker for {} hash={}",
+        file_path, hash
+    ));
 }
 
 /// Check if a file has an active rename debounce marker (within TTL).
@@ -190,7 +196,8 @@ fn has_rename_debounce(file_path: &Path) -> bool {
     if !marker.exists() {
         return false;
     }
-    let expired = marker.metadata()
+    let expired = marker
+        .metadata()
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.elapsed().ok())
@@ -206,7 +213,11 @@ fn has_rename_debounce(file_path: &Path) -> bool {
 /// Run sync without auto-starting sessions. Used when called from route
 /// (route already handled the target file — auto-start would create duplicates).
 #[allow(dead_code)]
-pub fn run_layout_only(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
+pub fn run_layout_only(
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
     run_with_options(col_args, window, focus, false, &Tmux::default_server())
 }
 
@@ -228,7 +239,11 @@ pub fn run_with_tmux(
 /// Phase 2: Ensure the target window exists — if missing, break a registered
 /// alive pane out of the stash to recreate it.
 pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
-    tracing::debug!(session_name, target_window_name, "sync::repair_layout start");
+    tracing::debug!(
+        session_name,
+        target_window_name,
+        "sync::repair_layout start"
+    );
     // List all windows in the session: window_id, window_name, pane count
     let output = tmux.raw_cmd(&[
         "list-windows",
@@ -240,7 +255,10 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     let window_list = match output {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[repair] failed to list windows for session {}: {}", session_name, e);
+            eprintln!(
+                "[repair] failed to list windows for session {}: {}",
+                session_name, e
+            );
             return Ok(());
         }
     };
@@ -258,73 +276,83 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
             let id = parts.next()?.to_string();
             let name = parts.next()?.to_string();
             let pane_count: usize = parts.next()?.parse().ok()?;
-            Some(WinInfo { id, name, _pane_count: pane_count })
+            Some(WinInfo {
+                id,
+                name,
+                _pane_count: pane_count,
+            })
         })
         .collect();
 
     // ── Fast path: if layout is already correct, skip repair ──
     let has_target = windows.iter().any(|w| w.name == target_window_name);
-    let stash_count = windows.iter().filter(|w| w.name == "stash" || w.name.starts_with("stash-")).count();
+    let stash_count = windows
+        .iter()
+        .filter(|w| w.name == "stash" || w.name.starts_with("stash-"))
+        .count();
     // Check if Phase 1+2 can be skipped (target exists, single stash)
     let skip_phase_1_2 = has_target && stash_count <= 1;
     if skip_phase_1_2 {
         // Target exists and stash is consolidated. Skip Phases 1+2,
         // but still run Phase 3 (index normalization) below.
     } else {
-    eprintln!("[repair] layout needs repair: target={} stash_count={}", has_target, stash_count);
+        eprintln!(
+            "[repair] layout needs repair: target={} stash_count={}",
+            has_target, stash_count
+        );
 
-    // ── Phase 1: Stash consolidation ──
+        // ── Phase 1: Stash consolidation ──
 
-    // Find the primary stash window (first one named exactly "stash")
-    let primary_stash = windows.iter().find(|w| w.name == "stash");
+        // Find the primary stash window (first one named exactly "stash")
+        let primary_stash = windows.iter().find(|w| w.name == "stash");
 
-    // Collect secondary stash windows: named "stash-*" OR extra "stash" windows
-    // (after the first)
-    let mut secondary_stash_ids: Vec<String> = Vec::new();
-    let mut seen_primary = false;
-    for w in &windows {
-        if w.name == "stash" {
-            if seen_primary {
+        // Collect secondary stash windows: named "stash-*" OR extra "stash" windows
+        // (after the first)
+        let mut secondary_stash_ids: Vec<String> = Vec::new();
+        let mut seen_primary = false;
+        for w in &windows {
+            if w.name == "stash" {
+                if seen_primary {
+                    secondary_stash_ids.push(w.id.clone());
+                }
+                seen_primary = true;
+            } else if w.name.starts_with("stash-") {
                 secondary_stash_ids.push(w.id.clone());
             }
-            seen_primary = true;
-        } else if w.name.starts_with("stash-") {
-            secondary_stash_ids.push(w.id.clone());
         }
-    }
 
-    if !secondary_stash_ids.is_empty() {
-        // Ensure we have a primary stash to consolidate into
-        let primary_id = if let Some(p) = primary_stash {
-            p.id.clone()
-        } else {
-            // No primary stash — create one
-            match tmux.ensure_stash_window(session_name) {
-                Ok(id) => {
-                    eprintln!("[repair] created primary stash window {}", id);
-                    id
+        if !secondary_stash_ids.is_empty() {
+            // Ensure we have a primary stash to consolidate into
+            let primary_id = if let Some(p) = primary_stash {
+                p.id.clone()
+            } else {
+                // No primary stash — create one
+                match tmux.ensure_stash_window(session_name) {
+                    Ok(id) => {
+                        eprintln!("[repair] created primary stash window {}", id);
+                        id
+                    }
+                    Err(e) => {
+                        eprintln!("[repair] failed to create stash window: {}", e);
+                        return Ok(());
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[repair] failed to create stash window: {}", e);
-                    return Ok(());
-                }
-            }
-        };
+            };
 
-        for sec_id in &secondary_stash_ids {
-            eprintln!("[repair] consolidating stash window {} into {}", sec_id, primary_id);
+            for sec_id in &secondary_stash_ids {
+                eprintln!(
+                    "[repair] consolidating stash window {} into {}",
+                    sec_id, primary_id
+                );
 
-            // List panes in the secondary window
-            let panes = tmux.list_window_panes(sec_id).unwrap_or_default();
-            for pane in &panes {
-                // Resize stash to 1000 rows before each join to prevent "too small"
-                let _ = tmux.raw_cmd(&[
-                    "resize-window", "-t", &primary_id, "-y", "1000",
-                ]);
+                // List panes in the secondary window
+                let panes = tmux.list_window_panes(sec_id).unwrap_or_default();
+                for pane in &panes {
+                    // Resize stash to 1000 rows before each join to prevent "too small"
+                    let _ = tmux.raw_cmd(&["resize-window", "-t", &primary_id, "-y", "1000"]);
 
-                // Find the largest pane in primary stash as join target
-                let target = tmux.largest_pane_in_window(&primary_id)
-                    .unwrap_or_else(|| {
+                    // Find the largest pane in primary stash as join target
+                    let target = tmux.largest_pane_in_window(&primary_id).unwrap_or_else(|| {
                         // Fallback: first pane in primary
                         tmux.list_window_panes(&primary_id)
                             .unwrap_or_default()
@@ -332,104 +360,117 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                             .next()
                             .unwrap_or_default()
                     });
-                if target.is_empty() {
-                    eprintln!("[repair] no target pane in primary stash, skipping {}", pane);
-                    continue;
-                }
-
-                sync_log(&format!(
-                    "stash_consolidate_action=join-pane src={} dst={} primary_stash={}",
-                    pane, target, primary_id
-                ));
-                match PaneMoveOp::new(tmux, pane, &target).join("-dv") {
-                    Ok(()) => {
-                        eprintln!("[repair] joined pane {} → stash {}", pane, primary_id);
-                        sync_log(&format!(
-                            "stash_consolidate_result=join-pane ok=true src={} dst={}",
-                            pane, target
-                        ));
+                    if target.is_empty() {
+                        eprintln!(
+                            "[repair] no target pane in primary stash, skipping {}",
+                            pane
+                        );
+                        continue;
                     }
-                    Err(e) => {
-                        eprintln!("[repair] join-pane {} → {} failed: {}, leaving in place", pane, target, e);
-                        sync_log(&format!(
-                            "stash_consolidate_result=join-pane ok=false src={} dst={} err={}",
-                            pane, target, e
-                        ));
-                    }
-                }
-            }
 
-            // After moving all panes, the empty window should auto-delete.
-            // If it still exists (e.g. join failed for some panes), kill it only
-            // if it has no panes left.
-            let remaining = tmux.list_window_panes(sec_id).unwrap_or_default();
-            if remaining.is_empty() {
-                // Window should have auto-deleted, but try to kill just in case
-                let _ = tmux.raw_cmd(&["kill-window", "-t", sec_id]);
-                eprintln!("[repair] killed empty stash window {}", sec_id);
-            }
-        }
-    }
-
-    // ── Phase 2: Ensure agent-doc window exists ──
-
-    let target_exists = windows.iter().any(|w| w.name == target_window_name);
-    if !target_exists {
-        eprintln!(
-            "[repair] target window '{}' not found, attempting to rescue a pane from stash",
-            target_window_name
-        );
-
-        // Load the registry and find any alive registered pane
-        if let Ok(registry) = sessions::load() {
-            let mut rescued = false;
-            for entry in registry.values() {
-                if tmux.pane_alive(&entry.pane) {
-                    eprintln!("[repair] rescuing pane {} from stash", entry.pane);
-                    match tmux.break_pane(&entry.pane) {
+                    sync_log(&format!(
+                        "stash_consolidate_action=join-pane src={} dst={} primary_stash={}",
+                        pane, target, primary_id
+                    ));
+                    match PaneMoveOp::new(tmux, pane, &target).join("-dv") {
                         Ok(()) => {
-                            if let Ok(new_win) = tmux.pane_window(&entry.pane) {
-                                let _ = tmux.raw_cmd(&[
-                                    "rename-window", "-t", &new_win, target_window_name,
-                                ]);
-                                eprintln!(
-                                    "[repair] recreated window {} as '{}'",
-                                    new_win, target_window_name
-                                );
-                            }
-                            rescued = true;
-                            break;
+                            eprintln!("[repair] joined pane {} → stash {}", pane, primary_id);
+                            sync_log(&format!(
+                                "stash_consolidate_result=join-pane ok=true src={} dst={}",
+                                pane, target
+                            ));
                         }
                         Err(e) => {
-                            eprintln!("[repair] break-pane {} failed: {}", entry.pane, e);
+                            eprintln!(
+                                "[repair] join-pane {} → {} failed: {}, leaving in place",
+                                pane, target, e
+                            );
+                            sync_log(&format!(
+                                "stash_consolidate_result=join-pane ok=false src={} dst={} err={}",
+                                pane, target, e
+                            ));
                         }
                     }
                 }
-            }
-            if !rescued {
-                eprintln!("[repair] no alive registered panes found, sync will auto-start later");
+
+                // After moving all panes, the empty window should auto-delete.
+                // If it still exists (e.g. join failed for some panes), kill it only
+                // if it has no panes left.
+                let remaining = tmux.list_window_panes(sec_id).unwrap_or_default();
+                if remaining.is_empty() {
+                    // Window should have auto-deleted, but try to kill just in case
+                    let _ = tmux.raw_cmd(&["kill-window", "-t", sec_id]);
+                    eprintln!("[repair] killed empty stash window {}", sec_id);
+                }
             }
         }
-    }
+
+        // ── Phase 2: Ensure agent-doc window exists ──
+
+        let target_exists = windows.iter().any(|w| w.name == target_window_name);
+        if !target_exists {
+            eprintln!(
+                "[repair] target window '{}' not found, attempting to rescue a pane from stash",
+                target_window_name
+            );
+
+            // Load the registry and find any alive registered pane
+            if let Ok(registry) = sessions::load() {
+                let mut rescued = false;
+                for entry in registry.values() {
+                    if tmux.pane_alive(&entry.pane) {
+                        eprintln!("[repair] rescuing pane {} from stash", entry.pane);
+                        match tmux.break_pane(&entry.pane) {
+                            Ok(()) => {
+                                if let Ok(new_win) = tmux.pane_window(&entry.pane) {
+                                    let _ = tmux.raw_cmd(&[
+                                        "rename-window",
+                                        "-t",
+                                        &new_win,
+                                        target_window_name,
+                                    ]);
+                                    eprintln!(
+                                        "[repair] recreated window {} as '{}'",
+                                        new_win, target_window_name
+                                    );
+                                }
+                                rescued = true;
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("[repair] break-pane {} failed: {}", entry.pane, e);
+                            }
+                        }
+                    }
+                }
+                if !rescued {
+                    eprintln!(
+                        "[repair] no alive registered panes found, sync will auto-start later"
+                    );
+                }
+            }
+        }
     } // end skip_phase_1_2 else
 
     // ── Phase 3: Normalize window indices (always runs) ──
     // agent-doc should be at index 0, stash at index 1+
     // Re-list windows after repairs
     let output = tmux.raw_cmd(&[
-        "list-windows", "-t", &format!("{}:", session_name),
-        "-F", "#{window_index} #{window_name}",
+        "list-windows",
+        "-t",
+        &format!("{}:", session_name),
+        "-F",
+        "#{window_index} #{window_name}",
     ]);
     if let Ok(ref listing) = output {
         // Check if window 0 exists (occupied by another window)
-        let window_0_exists = listing.lines().any(|line| {
-            line.starts_with("0 ")
-        });
+        let window_0_exists = listing.lines().any(|line| line.starts_with("0 "));
 
         for line in listing.lines() {
             let mut parts = line.splitn(2, ' ');
             if let (Some(idx), Some(name)) = (parts.next(), parts.next())
-                && name == target_window_name && idx != "0"
+                && name == target_window_name
+                && idx != "0"
             {
                 if window_0_exists {
                     // Window 0 is occupied — swap to preserve both windows
@@ -440,12 +481,15 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     ));
                     let result = tmux.raw_cmd(&[
                         "swap-window",
-                        "-s", &format!("{}:{}", session_name, idx),
-                        "-t", &format!("{}:0", session_name),
+                        "-s",
+                        &format!("{}:{}", session_name, idx),
+                        "-t",
+                        &format!("{}:0", session_name),
                     ]);
                     sync_log(&format!(
                         "repair_result=swap-window src_idx={} dst_idx=0 ok={}",
-                        idx, result.is_ok()
+                        idx,
+                        result.is_ok()
                     ));
                     let _ = result;
                 } else {
@@ -457,12 +501,15 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     ));
                     let result = tmux.raw_cmd(&[
                         "move-window",
-                        "-s", &format!("{}:{}", session_name, idx),
-                        "-t", &format!("{}:0", session_name),
+                        "-s",
+                        &format!("{}:{}", session_name, idx),
+                        "-t",
+                        &format!("{}:0", session_name),
                     ]);
                     sync_log(&format!(
                         "repair_result=move-window src_idx={} dst_idx=0 ok={}",
-                        idx, result.is_ok()
+                        idx,
+                        result.is_ok()
                     ));
                     let _ = result;
                 }
@@ -477,7 +524,8 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
 fn sync_log(msg: &str) {
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open("/tmp/agent-doc-sync.log")
     {
         let ts = std::time::SystemTime::now()
@@ -502,14 +550,23 @@ fn check_build_stamp() {
     if stored.trim() == build_ts {
         return; // Same build
     }
-    eprintln!("[sync] new build detected ({}→{}), clearing stale caches", stored.trim(), build_ts);
+    eprintln!(
+        "[sync] new build detected ({}→{}), clearing stale caches",
+        stored.trim(),
+        build_ts
+    );
     // Clear startup locks
     let starting_dir = cwd.join(".agent-doc/starting");
     if starting_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&starting_dir)
     {
         for entry in entries.flatten() {
-            if entry.path().extension().map(|e| e == "lock").unwrap_or(false) {
+            if entry
+                .path()
+                .extension()
+                .map(|e| e == "lock")
+                .unwrap_or(false)
+            {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
@@ -562,7 +619,8 @@ fn run_with_options(
     check_build_stamp();
 
     // Filter empty col_args — the JetBrains plugin sometimes sends phantom empty columns.
-    let col_args: Vec<String> = col_args.iter()
+    let col_args: Vec<String> = col_args
+        .iter()
         .filter(|s| !s.trim().is_empty())
         .cloned()
         .collect();
@@ -575,32 +633,45 @@ fn run_with_options(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    let col_args: Vec<String> = col_args.iter().enumerate().map(|(i, col)| {
-        // Check if this column has an agent doc (any file with session UUID)
-        let has_agent_doc = col.split(',').any(|f| {
-            let f = f.trim();
-            if f.is_empty() { return false; }
-            if let Ok(content) = std::fs::read_to_string(f)
-                && let Ok((fm, _)) = frontmatter::parse(&content) {
+    let col_args: Vec<String> = col_args
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            // Check if this column has an agent doc (any file with session UUID)
+            let has_agent_doc = col.split(',').any(|f| {
+                let f = f.trim();
+                if f.is_empty() {
+                    return false;
+                }
+                if let Ok(content) = std::fs::read_to_string(f)
+                    && let Ok((fm, _)) = frontmatter::parse(&content)
+                {
                     return fm.session.is_some();
                 }
-            false
-        });
-        if has_agent_doc {
-            col.clone()
-        } else if let Some(remembered) = saved_layout.get(i) {
-            if !remembered.is_empty() {
-                sync_log(&format!("column {} has no agent doc, substituting remembered: {}", i, remembered));
-                remembered.clone()
+                false
+            });
+            if has_agent_doc {
+                col.clone()
+            } else if let Some(remembered) = saved_layout.get(i) {
+                if !remembered.is_empty() {
+                    sync_log(&format!(
+                        "column {} has no agent doc, substituting remembered: {}",
+                        i, remembered
+                    ));
+                    remembered.clone()
+                } else {
+                    col.clone()
+                }
             } else {
                 col.clone()
             }
-        } else {
-            col.clone()
-        }
-    }).collect();
+        })
+        .collect();
     let col_args = col_args.as_slice();
-    sync_log(&format!("=== sync start: col_args={:?} window={:?} focus={:?} auto_start={}", col_args, window, focus, auto_start));
+    sync_log(&format!(
+        "=== sync start: col_args={:?} window={:?} focus={:?} auto_start={}",
+        col_args, window, focus, auto_start
+    ));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
     // Resolve session name from --window arg, or fall back to current session.
@@ -618,7 +689,8 @@ fn run_with_options(
                 // Fall back to current session
                 tmux.cmd()
                     .args(["display-message", "-p", "#{session_name}"])
-                    .output().ok()
+                    .output()
+                    .ok()
                     .filter(|o| o.status.success())
                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             })
@@ -628,8 +700,11 @@ fn run_with_options(
             sync_log("repair_layout completed");
             // After repair, the window ID may have changed. Re-resolve by name.
             let resolved = tmux.raw_cmd(&[
-                "list-windows", "-t", &format!("{}:", session_name),
-                "-F", "#{window_id} #{window_name}",
+                "list-windows",
+                "-t",
+                &format!("{}:", session_name),
+                "-F",
+                "#{window_id} #{window_name}",
             ]);
             if let Ok(ref output) = resolved {
                 for line in output.lines() {
@@ -653,14 +728,22 @@ fn run_with_options(
     if let Some(w) = window {
         let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
-        sync_log(&format!("checkpoint:post-repair window={} panes={} list={:?}", w, pane_count, pane_list));
+        sync_log(&format!(
+            "checkpoint:post-repair window={} panes={} list={:?}",
+            w, pane_count, pane_list
+        ));
     }
 
     let _ = resync::prune(); // Clean stale entries before layout calculation
 
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
-        sync_log(&format!("checkpoint:post-prune window={} panes={} list={:?}", w, pane_list.len(), pane_list));
+        sync_log(&format!(
+            "checkpoint:post-prune window={} panes={} list={:?}",
+            w,
+            pane_list.len(),
+            pane_list
+        ));
     }
 
     let registry_path = sessions::registry_path();
@@ -682,18 +765,30 @@ fn run_with_options(
                     session_id
                 );
                 if let Err(e) = std::fs::write(path, &scaffold) {
-                    eprintln!("[sync] warning: failed to scaffold {}: {}", path.display(), e);
+                    eprintln!(
+                        "[sync] warning: failed to scaffold {}: {}",
+                        path.display(),
+                        e
+                    );
                     return Some(FileResolution::Unmanaged);
                 }
                 // Save snapshot BEFORE committing — git::commit() uses the snapshot
                 // to determine what to stage. Without this, the snapshot has stale
                 // content and the commit fails with a drift warning.
                 if let Err(e) = crate::snapshot::save(path, &scaffold) {
-                    eprintln!("[sync] warning: failed to save scaffold snapshot for {}: {}", path.display(), e);
+                    eprintln!(
+                        "[sync] warning: failed to save scaffold snapshot for {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
                 // Commit the scaffolded file immediately.
                 if let Err(e) = crate::git::commit(path) {
-                    eprintln!("[sync] warning: failed to commit scaffold for {}: {}", path.display(), e);
+                    eprintln!(
+                        "[sync] warning: failed to commit scaffold for {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -702,7 +797,11 @@ fn run_with_options(
         // For scaffolded files, this creates the snapshot and git tracking.
         // For files with agent_doc_format but no session, this assigns a UUID.
         if let Err(e) = crate::snapshot::ensure_initialized(path) {
-            eprintln!("[sync] warning: ensure_initialized failed for {}: {}", path.display(), e);
+            eprintln!(
+                "[sync] warning: ensure_initialized failed for {}: {}",
+                path.display(),
+                e
+            );
         }
 
         // Step 3: Read content and resolve.
@@ -712,7 +811,11 @@ fn run_with_options(
         match fm.session {
             Some(ref key) => {
                 let has_registry = sessions::lookup(key).ok().flatten().is_some();
-                let registry_str = if has_registry { "yes" } else { "no (will auto-start)" };
+                let registry_str = if has_registry {
+                    "yes"
+                } else {
+                    "no (will auto-start)"
+                };
                 tracing::debug!(
                     file = %path.display(),
                     session = &key[..8.min(key.len())],
@@ -721,7 +824,9 @@ fn run_with_options(
                 );
                 eprintln!(
                     "[sync] resolve_file: {} → Registered (session={}, registry={})",
-                    path.display(), &key[..8.min(key.len())], registry_str
+                    path.display(),
+                    &key[..8.min(key.len())],
+                    registry_str
                 );
                 session_files
                     .borrow_mut()
@@ -731,18 +836,22 @@ fn run_with_options(
                     tmux_session: None,
                 })
             }
-            None => {
-                Some(FileResolution::Unmanaged)
-            }
+            None => Some(FileResolution::Unmanaged),
         }
     };
 
     // Self-healing: if the target window doesn't exist (was deleted when all panes
     // were stashed), recreate it by breaking a registered pane out of the stash.
     if let Some(w) = window {
-        let window_exists = tmux.list_window_panes(w).map(|p| !p.is_empty()).unwrap_or(false);
+        let window_exists = tmux
+            .list_window_panes(w)
+            .map(|p| !p.is_empty())
+            .unwrap_or(false);
         if !window_exists {
-            eprintln!("[sync] target window {} does not exist, attempting to recreate from stash", w);
+            eprintln!(
+                "[sync] target window {} does not exist, attempting to recreate from stash",
+                w
+            );
             // Find any registered pane that's alive (even in stash)
             let all_files: Vec<PathBuf> = col_args
                 .iter()
@@ -756,7 +865,11 @@ fn run_with_options(
                     && let Ok(Some(pane)) = sessions::lookup(sid)
                     && tmux.pane_alive(&pane)
                 {
-                    eprintln!("[sync] rescuing pane {} for {} from stash", pane, file_path.display());
+                    eprintln!(
+                        "[sync] rescuing pane {} for {} from stash",
+                        pane,
+                        file_path.display()
+                    );
                     // break-pane creates a new window with this pane
                     if tmux.break_pane(&pane).is_ok() {
                         // Rename the new window to "agent-doc"
@@ -788,20 +901,19 @@ fn run_with_options(
         // 1. From frontmatter tmux_session (if alive)
         // 2. From --window argument
         // 3. Falls back to None (current session)
-        let context_session: Option<String> = window
-            .and_then(|w| {
-                let output = tmux
-                    .cmd()
-                    .args(["display-message", "-t", w, "-p", "#{session_name}"])
-                    .output()
-                    .ok()?;
-                if output.status.success() {
-                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !name.is_empty() { Some(name) } else { None }
-                } else {
-                    None
-                }
-            });
+        let context_session: Option<String> = window.and_then(|w| {
+            let output = tmux
+                .cmd()
+                .args(["display-message", "-t", w, "-p", "#{session_name}"])
+                .output()
+                .ok()?;
+            if output.status.success() {
+                let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !name.is_empty() { Some(name) } else { None }
+            } else {
+                None
+            }
+        });
         for file_path in &all_files {
             if !file_path.exists() {
                 continue;
@@ -819,9 +931,7 @@ fn run_with_options(
                 None => continue,
             };
 
-            let registered_pane = sessions::lookup(&session_id)
-                .ok()
-                .flatten();
+            let registered_pane = sessions::lookup(&session_id).ok().flatten();
 
             // Files with session UUIDs but no registry entry are auto-started.
             // The registry was likely pruned when the pane died. The user's intent
@@ -965,7 +1075,10 @@ fn run_with_options(
                     if is_file_rename(&entry.file, &current_file) {
                         eprintln!(
                             "[sync] file renamed: {} → {} — reusing pane {} (session {})",
-                            entry.file, file_path.display(), pane, session_id
+                            entry.file,
+                            file_path.display(),
+                            pane,
+                            session_id
                         );
                         if let Err(e) = sessions::register(&session_id, pane, &current_file) {
                             eprintln!("[sync] warning: re-register failed: {}", e);
@@ -983,12 +1096,14 @@ fn run_with_options(
             if let Some(existing) = find_alive_pane_for_file(tmux, &file_str) {
                 eprintln!(
                     "[sync] found alive pane {} for {} (re-registering)",
-                    existing, file_path.display()
+                    existing,
+                    file_path.display()
                 );
                 if let Err(e) = sessions::register(&session_id, &existing, &file_str) {
                     eprintln!(
                         "[sync] warning: re-register failed for {}: {}",
-                        file_path.display(), e
+                        file_path.display(),
+                        e
                     );
                 }
                 // If the found pane is in stash, rescue it to the agent-doc window
@@ -1007,7 +1122,11 @@ fn run_with_options(
                         let rescue_win = window.map(|w| w.to_string()).or_else(|| {
                             if !target_sess.is_empty() {
                                 let candidate = format!("{}:agent-doc", target_sess);
-                                if !tmux.list_window_panes(&candidate).unwrap_or_default().is_empty() {
+                                if !tmux
+                                    .list_window_panes(&candidate)
+                                    .unwrap_or_default()
+                                    .is_empty()
+                                {
                                     Some(candidate)
                                 } else {
                                     None
@@ -1017,7 +1136,8 @@ fn run_with_options(
                             }
                         });
                         if let Some(ref target_win) = rescue_win {
-                            let target_panes = tmux.list_panes_ordered(target_win).unwrap_or_default();
+                            let target_panes =
+                                tmux.list_panes_ordered(target_win).unwrap_or_default();
                             let target = if crate::route::is_first_column(file_path, col_args) {
                                 target_panes.first()
                             } else {
@@ -1026,12 +1146,25 @@ fn run_with_options(
                             if let Some(target) = target {
                                 eprintln!(
                                     "[sync] rescuing stashed pane {} for {} to window {}",
-                                    existing, file_path.display(), target_win
+                                    existing,
+                                    file_path.display(),
+                                    target_win
                                 );
-                                if sessions::swap_pane_guarded(tmux, &existing, target, target_sess).is_ok() {
-                                    eprintln!("[sync] rescued stashed pane {} via swap-pane", existing);
-                                } else if PaneMoveOp::new(tmux, &existing, target).join("-dh").is_ok() {
-                                    eprintln!("[sync] rescued stashed pane {} via join-pane", existing);
+                                if sessions::swap_pane_guarded(tmux, &existing, target, target_sess)
+                                    .is_ok()
+                                {
+                                    eprintln!(
+                                        "[sync] rescued stashed pane {} via swap-pane",
+                                        existing
+                                    );
+                                } else if PaneMoveOp::new(tmux, &existing, target)
+                                    .join("-dh")
+                                    .is_ok()
+                                {
+                                    eprintln!(
+                                        "[sync] rescued stashed pane {} via join-pane",
+                                        existing
+                                    );
                                 } else {
                                     eprintln!("[sync] stash rescue failed for pane {}", existing);
                                 }
@@ -1047,22 +1180,40 @@ fn run_with_options(
                     "[sync] skipping auto-start for {} (rename debounce active)",
                     file_path.display()
                 );
-                sync_log(&format!("rename-debounce: skipped auto-start for {}", file_path.display()));
+                sync_log(&format!(
+                    "rename-debounce: skipped auto-start for {}",
+                    file_path.display()
+                ));
                 continue;
             }
 
-            sync_log(&format!("auto-starting session for {} (no alive pane)", file_path.display()));
+            sync_log(&format!(
+                "auto-starting session for {} (no alive pane)",
+                file_path.display()
+            ));
             eprintln!(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
             );
-            match route::provision_pane(tmux, file_path, &session_id, &file_str, context_session.as_deref(), col_args) {
+            match route::provision_pane(
+                tmux,
+                file_path,
+                &session_id,
+                &file_str,
+                context_session.as_deref(),
+                col_args,
+            ) {
                 Ok(pane_id) => {
                     eprintln!(
                         "[sync] auto-started {} for {}",
-                        pane_id, file_path.display()
+                        pane_id,
+                        file_path.display()
                     );
-                    sync_log(&format!("auto-started {} for {}", pane_id, file_path.display()));
+                    sync_log(&format!(
+                        "auto-started {} for {}",
+                        pane_id,
+                        file_path.display()
+                    ));
                     auto_started_panes.push((pane_id, file_str.clone()));
                 }
                 Err(e) => {
@@ -1076,11 +1227,20 @@ fn run_with_options(
         }
 
         if auto_started_panes.len() > 1 {
-            let summary: Vec<String> = auto_started_panes.iter()
+            let summary: Vec<String> = auto_started_panes
+                .iter()
                 .map(|(pane, file)| format!("{}→{}", pane, file))
                 .collect();
-            eprintln!("[sync] auto-started {} panes: {}", auto_started_panes.len(), summary.join(", "));
-            sync_log(&format!("batch: auto-started {} panes: {}", auto_started_panes.len(), summary.join(", ")));
+            eprintln!(
+                "[sync] auto-started {} panes: {}",
+                auto_started_panes.len(),
+                summary.join(", ")
+            );
+            sync_log(&format!(
+                "batch: auto-started {} panes: {}",
+                auto_started_panes.len(),
+                summary.join(", ")
+            ));
         }
 
         // Post-auto_start stash removed: the tmux_router reconciler now always runs
@@ -1090,7 +1250,12 @@ fn run_with_options(
     // Log pane count before tmux_router::sync
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
-        sync_log(&format!("checkpoint:pre-tmux_router window={} panes={} list={:?}", w, pane_list.len(), pane_list));
+        sync_log(&format!(
+            "checkpoint:pre-tmux_router window={} panes={} list={:?}",
+            w,
+            pane_list.len(),
+            pane_list
+        ));
     }
 
     // NOTE: The busy pane guard (protect_pane) was removed from DETACH because it caused
@@ -1098,31 +1263,45 @@ fn run_with_options(
     // prevented stashing panes with active sessions, but when a new document replaces the
     // old one in a column, the old pane must give way. Column memory + stash rescue handle
     // session preservation for the non-agent-file case.
-    let result =
-        tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
+    let result = tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
         let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
-        sync_log(&format!("post-tmux_router::sync: window={} panes={} file_panes={}", w, pane_count, result.file_panes.len()));
-        tracing::debug!(window = w, pane_count, file_panes = result.file_panes.len(), "post-sync pane count");
+        sync_log(&format!(
+            "post-tmux_router::sync: window={} panes={} file_panes={}",
+            w,
+            pane_count,
+            result.file_panes.len()
+        ));
+        tracing::debug!(
+            window = w,
+            pane_count,
+            file_panes = result.file_panes.len(),
+            "post-sync pane count"
+        );
 
         // Session health check: verify the session still exists after sync.
         // If the session was destroyed (e.g., all windows stashed), log a critical warning.
-        if let Ok(session) = tmux.cmd()
+        if let Ok(session) = tmux
+            .cmd()
             .args(["display-message", "-t", w, "-p", "#{session_name}"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             && !session.is_empty()
         {
-            let session_alive = tmux.cmd()
+            let session_alive = tmux
+                .cmd()
                 .args(["has-session", "-t", &session])
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
             if !session_alive {
                 tracing::error!(session = %session, "SESSION DESTROYED after sync — tmux session no longer exists");
-                eprintln!("[sync] CRITICAL: session '{}' was destroyed during sync!", session);
+                eprintln!(
+                    "[sync] CRITICAL: session '{}' was destroyed during sync!",
+                    session
+                );
             }
         }
     }
@@ -1130,23 +1309,30 @@ fn run_with_options(
     // Save column layout state: for each column that has an agent doc,
     // record it so future syncs can substitute it when the column has a non-agent file.
     {
-        let layout_state: Vec<String> = col_args.iter().map(|col| {
-            // Find the first agent doc file in this column
-            for f in col.split(',').map(|f| f.trim()) {
-                if f.is_empty() { continue; }
-                if let Ok(content) = std::fs::read_to_string(f)
-                    && let Ok((fm, _)) = frontmatter::parse(&content)
-                    && fm.session.is_some() {
+        let layout_state: Vec<String> = col_args
+            .iter()
+            .map(|col| {
+                // Find the first agent doc file in this column
+                for f in col.split(',').map(|f| f.trim()) {
+                    if f.is_empty() {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(f)
+                        && let Ok((fm, _)) = frontmatter::parse(&content)
+                        && fm.session.is_some()
+                    {
                         return f.to_string();
                     }
-            }
-            String::new()
-        }).collect();
+                }
+                String::new()
+            })
+            .collect();
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
-            && let Ok(json) = serde_json::to_string(&layout_state) {
-                let _ = std::fs::write(layout_state_path, json);
-            }
+            && let Ok(json) = serde_json::to_string(&layout_state)
+        {
+            let _ = std::fs::write(layout_state_path, json);
+        }
     }
 
     // tmux_session frontmatter write-back removed (deprecated).
@@ -1172,10 +1358,7 @@ fn run_with_options(
 /// Uses the file→pane assignments from `SyncResult::file_panes` to create
 /// registry entries for files that don't have one yet, and update file paths
 /// for existing entries.
-fn register_synced_files(
-    session_files: &[(String, PathBuf)],
-    file_panes: &[(PathBuf, String)],
-) {
+fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(PathBuf, String)]) {
     if session_files.is_empty() || file_panes.is_empty() {
         return;
     }
@@ -1262,7 +1445,8 @@ fn register_synced_files(
 ///
 /// Uses `ps -p <pid> -o command=` for cross-platform compatibility (Linux + macOS).
 fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
-    let output = tmux.cmd()
+    let output = tmux
+        .cmd()
         .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
         .output()
         .ok()?;
@@ -1316,13 +1500,12 @@ fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
 /// Checks the pane's PID and its child processes for agent process names in the command line.
 #[allow(dead_code)]
 fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
-    let output = tmux.cmd()
+    let output = tmux
+        .cmd()
         .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
         .output();
     let pid_str = match output {
-        Ok(ref o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        }
+        Ok(ref o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => return false,
     };
     if pid_str.is_empty() {
@@ -1372,7 +1555,8 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
         _ => return false,
     };
     let cmdline = String::from_utf8_lossy(&output.stdout);
-    let has_agent = cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex");
+    let has_agent =
+        cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex");
     let has_file = cmdline.contains(file_path);
     has_agent && has_file
 }
@@ -1426,7 +1610,10 @@ mod tests {
         repair_layout(&iso, "test", "agent-doc").unwrap();
 
         let windows_after = list_windows(&iso, "test");
-        assert_eq!(windows_before, windows_after, "layout was already correct — nothing should change");
+        assert_eq!(
+            windows_before, windows_after,
+            "layout was already correct — nothing should change"
+        );
     }
 
     #[test]
@@ -1439,13 +1626,9 @@ mod tests {
         // This leaves agent-doc at a non-zero index with index 0 free.
         let _pane0 = iso.new_session("test", tmp.path()).unwrap();
         // Create stash at index 1
-        let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "stash", "-d",
-        ]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
         // Create agent-doc at index 2
-        let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
-        ]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "agent-doc", "-d"]);
         // Kill the placeholder at index 0 to free it
         let _ = iso.raw_cmd(&["kill-window", "-t", "test:0"]);
 
@@ -1453,7 +1636,11 @@ mod tests {
         let windows_before = list_windows(&iso, "test");
         let ad_before = windows_before.iter().find(|(_, n)| n == "agent-doc");
         assert!(ad_before.is_some(), "agent-doc window should exist");
-        assert_ne!(ad_before.unwrap().0, "0", "agent-doc should NOT be at index 0 before repair");
+        assert_ne!(
+            ad_before.unwrap().0,
+            "0",
+            "agent-doc should NOT be at index 0 before repair"
+        );
 
         repair_layout(&iso, "test", "agent-doc").unwrap();
 
@@ -1461,7 +1648,11 @@ mod tests {
         let windows_after = list_windows(&iso, "test");
         let ad_after = windows_after.iter().find(|(_, n)| n == "agent-doc");
         assert!(ad_after.is_some(), "agent-doc window should still exist");
-        assert_eq!(ad_after.unwrap().0, "0", "agent-doc should be at index 0 after repair");
+        assert_eq!(
+            ad_after.unwrap().0,
+            "0",
+            "agent-doc should be at index 0 after repair"
+        );
     }
 
     #[test]
@@ -1516,14 +1707,29 @@ mod tests {
         // The first stash_pane creates the stash window. For the second and third,
         // create new windows named "stash" manually to simulate overflow.
         let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "stash", "-d", "-P", "-F", "#{window_id}",
+            "new-window",
+            "-t",
+            "test:",
+            "-n",
+            "stash",
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id}",
         ]);
 
         let stash_windows: Vec<String> = {
-            let output = iso.raw_cmd(&[
-                "list-windows", "-t", "test:", "-F", "#{window_id} #{window_name}",
-            ]).unwrap();
-            output.lines()
+            let output = iso
+                .raw_cmd(&[
+                    "list-windows",
+                    "-t",
+                    "test:",
+                    "-F",
+                    "#{window_id} #{window_name}",
+                ])
+                .unwrap();
+            output
+                .lines()
                 .filter_map(|line| {
                     let mut parts = line.splitn(2, ' ');
                     let id = parts.next()?;
@@ -1538,20 +1744,30 @@ mod tests {
         };
 
         // We should have at least 2 stash windows now
-        assert!(stash_windows.len() >= 2, "should have multiple stash windows, got {}", stash_windows.len());
+        assert!(
+            stash_windows.len() >= 2,
+            "should have multiple stash windows, got {}",
+            stash_windows.len()
+        );
 
         // Count total stash windows before repair
         let windows_before = list_windows(&iso, "test");
-        let stash_count_before = windows_before.iter()
+        let stash_count_before = windows_before
+            .iter()
             .filter(|(_, n)| n == "stash" || n.starts_with("stash-"))
             .count();
-        assert!(stash_count_before >= 2, "should have >=2 stash windows before repair, got {}", stash_count_before);
+        assert!(
+            stash_count_before >= 2,
+            "should have >=2 stash windows before repair, got {}",
+            stash_count_before
+        );
 
         repair_layout(&iso, "test", "agent-doc").unwrap();
 
         // After repair, should have at most 1 stash window
         let windows_after = list_windows(&iso, "test");
-        let stash_count_after = windows_after.iter()
+        let stash_count_after = windows_after
+            .iter()
             .filter(|(_, n)| n == "stash" || n.starts_with("stash-"))
             .count();
         assert!(
@@ -1579,18 +1795,20 @@ mod tests {
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "corky"]);
 
         // Create stash at index 1
-        let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "stash", "-d",
-        ]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
         // Create agent-doc at index 2
-        let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
-        ]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "agent-doc", "-d"]);
 
         // Verify: corky at 0, stash at 1, agent-doc at 2
         let windows_before = list_windows(&iso, "test");
-        assert_eq!(windows_before.iter().find(|(i, _)| i == "0").unwrap().1, "corky");
-        assert_eq!(windows_before.iter().find(|(i, _)| i == "2").unwrap().1, "agent-doc");
+        assert_eq!(
+            windows_before.iter().find(|(i, _)| i == "0").unwrap().1,
+            "corky"
+        );
+        assert_eq!(
+            windows_before.iter().find(|(i, _)| i == "2").unwrap().1,
+            "agent-doc"
+        );
 
         repair_layout(&iso, "test", "agent-doc").unwrap();
 
@@ -1598,14 +1816,30 @@ mod tests {
         let windows_after = list_windows(&iso, "test");
         let ad = windows_after.iter().find(|(_, n)| n == "agent-doc");
         assert!(ad.is_some(), "agent-doc window should still exist");
-        assert_eq!(ad.unwrap().0, "0", "agent-doc should be at index 0 after swap");
+        assert_eq!(
+            ad.unwrap().0,
+            "0",
+            "agent-doc should be at index 0 after swap"
+        );
 
         let corky = windows_after.iter().find(|(_, n)| n == "corky");
-        assert!(corky.is_some(), "corky window should still exist (not destroyed)");
-        assert_ne!(corky.unwrap().0, "0", "corky should have moved away from index 0");
+        assert!(
+            corky.is_some(),
+            "corky window should still exist (not destroyed)"
+        );
+        assert_ne!(
+            corky.unwrap().0,
+            "0",
+            "corky should have moved away from index 0"
+        );
 
         // All 3 windows should still exist
-        assert_eq!(windows_after.len(), 3, "no windows should be destroyed, got {:?}", windows_after);
+        assert_eq!(
+            windows_after.len(),
+            3,
+            "no windows should be destroyed, got {:?}",
+            windows_after
+        );
     }
 
     /// Regression: sync must never write tmux_session back to document frontmatter.
@@ -1617,12 +1851,19 @@ mod tests {
         let doc = tmp.path().join("test.md");
 
         // Write a doc WITHOUT tmux_session
-        std::fs::write(&doc, "---\nagent_doc_session: test-123\n---\n\n## User\n\nHello\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: test-123\n---\n\n## User\n\nHello\n",
+        )
+        .unwrap();
 
         // Read it back — tmux_session should be None
         let content = std::fs::read_to_string(&doc).unwrap();
         let (fm, _) = crate::frontmatter::parse(&content).unwrap();
-        assert!(fm.tmux_session.is_none(), "tmux_session should not be set initially");
+        assert!(
+            fm.tmux_session.is_none(),
+            "tmux_session should not be set initially"
+        );
 
         // Write a doc WITH tmux_session already set
         let doc2 = tmp.path().join("test2.md");
@@ -1632,8 +1873,11 @@ mod tests {
         let (fm2, _) = crate::frontmatter::parse(&content2).unwrap();
         // Frontmatter still parses it (for backward compat reading), but resolve_file
         // must NOT propagate it to FileResolution
-        assert_eq!(fm2.tmux_session, Some("old-session".to_string()),
-            "frontmatter parser should still read tmux_session for backward compat");
+        assert_eq!(
+            fm2.tmux_session,
+            Some("old-session".to_string()),
+            "frontmatter parser should still read tmux_session for backward compat"
+        );
     }
 
     /// Verify resolve_file closure always passes tmux_session: None regardless of frontmatter.
@@ -1643,7 +1887,11 @@ mod tests {
         let doc = tmp.path().join("test.md");
 
         // File with tmux_session in frontmatter
-        std::fs::write(&doc, "---\nagent_doc_session: sess-1\ntmux_session: stale-session\n---\n\nbody\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: sess-1\ntmux_session: stale-session\n---\n\nbody\n",
+        )
+        .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
         let (fm, _) = crate::frontmatter::parse(&content).unwrap();
@@ -1659,8 +1907,10 @@ mod tests {
 
         match resolution {
             FileResolution::Registered { tmux_session, .. } => {
-                assert!(tmux_session.is_none(),
-                    "FileResolution must never carry tmux_session from frontmatter");
+                assert!(
+                    tmux_session.is_none(),
+                    "FileResolution must never carry tmux_session from frontmatter"
+                );
             }
             _ => panic!("expected Registered"),
         }
@@ -1697,26 +1947,23 @@ mod tests {
 
         // Create an empty registry
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        std::fs::write(
-            tmp.path().join(".agent-doc/sessions.json"),
-            "{}",
-        ).unwrap();
+        std::fs::write(tmp.path().join(".agent-doc/sessions.json"), "{}").unwrap();
 
         // Create a file with a session UUID but no matching registry entry
         let doc = tmp.path().join("stale-claim.md");
         std::fs::write(
             &doc,
             "---\nagent_doc_session: orphan-uuid-123\n---\n\n## User\n\nHello\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
         let (fm, _) = crate::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("orphan-uuid-123".to_string()));
 
         // Load registry directly from the temp path (avoid CWD dependency)
-        let reg_content = std::fs::read_to_string(
-            tmp.path().join(".agent-doc/sessions.json"),
-        ).unwrap();
+        let reg_content =
+            std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
         let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
         let has_registry_entry = registry.contains_key("orphan-uuid-123");
         assert!(!has_registry_entry, "should NOT have a registry entry");
@@ -1756,23 +2003,24 @@ mod tests {
         std::fs::write(
             tmp.path().join(".agent-doc/sessions.json"),
             serde_json::to_string_pretty(&registry_content).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create a file with a session UUID that matches the registry
         let doc = tmp.path().join("claimed.md");
         std::fs::write(
             &doc,
             "---\nagent_doc_session: claimed-uuid-456\n---\n\n## User\n\nHello\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
         let (fm, _) = crate::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("claimed-uuid-456".to_string()));
 
         // Load registry directly from the temp path (avoid CWD dependency)
-        let reg_content = std::fs::read_to_string(
-            tmp.path().join(".agent-doc/sessions.json"),
-        ).unwrap();
+        let reg_content =
+            std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
         let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
         let has_registry_entry = registry.contains_key("claimed-uuid-456");
         assert!(has_registry_entry, "should have a registry entry");
@@ -1836,9 +2084,15 @@ mod tests {
         // Verify scaffolded content has frontmatter
         let content = std::fs::read_to_string(&doc).unwrap();
         let (fm, _) = crate::frontmatter::parse(&content).unwrap();
-        assert!(fm.session.is_some(), "should have session UUID after scaffold");
+        assert!(
+            fm.session.is_some(),
+            "should have session UUID after scaffold"
+        );
         assert!(fm.format.is_some(), "should have format after scaffold");
-        assert!(content.contains("<!-- agent:exchange"), "should have exchange component");
+        assert!(
+            content.contains("<!-- agent:exchange"),
+            "should have exchange component"
+        );
     }
 
     /// Non-empty .md files without frontmatter should NOT be auto-scaffolded.
@@ -1881,14 +2135,32 @@ mod tests {
         assert!(fm.format.is_some(), "must have format set");
 
         // Verify all three components
-        assert!(content.contains("<!-- agent:status patch=replace -->"), "must have status component");
-        assert!(content.contains("<!-- agent:exchange patch=append -->"), "must have exchange component");
-        assert!(content.contains("<!-- agent:pending patch=replace -->"), "must have pending component");
+        assert!(
+            content.contains("<!-- agent:status patch=replace -->"),
+            "must have status component"
+        );
+        assert!(
+            content.contains("<!-- agent:exchange patch=append -->"),
+            "must have exchange component"
+        );
+        assert!(
+            content.contains("<!-- agent:pending patch=replace -->"),
+            "must have pending component"
+        );
 
         // Verify components are properly closed
-        assert!(content.contains("<!-- /agent:status -->"), "status must be closed");
-        assert!(content.contains("<!-- /agent:exchange -->"), "exchange must be closed");
-        assert!(content.contains("<!-- /agent:pending -->"), "pending must be closed");
+        assert!(
+            content.contains("<!-- /agent:status -->"),
+            "status must be closed"
+        );
+        assert!(
+            content.contains("<!-- /agent:exchange -->"),
+            "exchange must be closed"
+        );
+        assert!(
+            content.contains("<!-- /agent:pending -->"),
+            "pending must be closed"
+        );
     }
 
     /// Non-.md files should never be scaffolded even if empty.
@@ -1913,7 +2185,10 @@ mod tests {
         std::fs::write(&doc, "   \n\n  \n").unwrap();
 
         let raw = std::fs::read_to_string(&doc).unwrap();
-        assert!(raw.trim().is_empty(), "whitespace-only should be treated as empty");
+        assert!(
+            raw.trim().is_empty(),
+            "whitespace-only should be treated as empty"
+        );
     }
 
     /// Files that already have frontmatter (even minimal) should NOT be re-scaffolded.
@@ -1939,9 +2214,7 @@ mod tests {
 
         // Create session: placeholder at 0, then agent-doc at 1+ after killing placeholder
         let _pane0 = iso.new_session("test", tmp.path()).unwrap();
-        let _ = iso.raw_cmd(&[
-            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
-        ]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "agent-doc", "-d"]);
         // Kill index 0 so agent-doc is at index 1 with 0 free → triggers move-window
         let _ = iso.raw_cmd(&["kill-window", "-t", "test:0"]);
 
@@ -1955,7 +2228,8 @@ mod tests {
         let log_content = std::fs::read_to_string(log_path).unwrap_or_default();
         let new_content = &log_content[before_len.min(log_content.len() as u64) as usize..];
         assert!(
-            new_content.contains("repair_action=move-window") || new_content.contains("repair_action=swap-window"),
+            new_content.contains("repair_action=move-window")
+                || new_content.contains("repair_action=swap-window"),
             "repair_layout should log a move-window or swap-window action, got:\n{new_content}"
         );
     }
@@ -2016,10 +2290,7 @@ mod tests {
         std::fs::write(&old_path, "content").unwrap();
         std::fs::write(&new_path, "content").unwrap();
         assert!(
-            !is_file_rename(
-                &old_path.to_string_lossy(),
-                &new_path.to_string_lossy()
-            ),
+            !is_file_rename(&old_path.to_string_lossy(), &new_path.to_string_lossy()),
             "should not detect rename when old path still exists (both files present)"
         );
     }
@@ -2058,7 +2329,8 @@ mod tests {
         std::fs::write(
             project.join(".agent-doc/sessions.json"),
             serde_json::to_string_pretty(&registry_content).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Verify detection
         assert!(
@@ -2068,8 +2340,9 @@ mod tests {
 
         // Verify we can load the entry and see the old path
         let reg: sessions::SessionRegistry = serde_json::from_str(
-            &std::fs::read_to_string(project.join(".agent-doc/sessions.json")).unwrap()
-        ).unwrap();
+            &std::fs::read_to_string(project.join(".agent-doc/sessions.json")).unwrap(),
+        )
+        .unwrap();
         let entry = reg.get(session_id).unwrap();
         assert_eq!(entry.file, old_file);
         assert_eq!(entry.pane, "%42");
@@ -2084,10 +2357,15 @@ mod tests {
             ("%81".to_string(), "tasks/feat.md".to_string()),
             ("%82".to_string(), "tasks/agent-loop.md".to_string()),
         ];
-        let summary: Vec<String> = auto_started_panes.iter()
+        let summary: Vec<String> = auto_started_panes
+            .iter()
             .map(|(pane, file)| format!("{}→{}", pane, file))
             .collect();
-        let msg = format!("[sync] auto-started {} panes: {}", auto_started_panes.len(), summary.join(", "));
+        let msg = format!(
+            "[sync] auto-started {} panes: {}",
+            auto_started_panes.len(),
+            summary.join(", ")
+        );
         assert!(msg.contains("3 panes"));
         assert!(msg.contains("%80→tasks/cursor.md"));
         assert!(msg.contains("%81→tasks/feat.md"));
@@ -2096,11 +2374,12 @@ mod tests {
 
     #[test]
     fn batch_summary_not_printed_for_single_pane() {
-        let auto_started_panes = vec![
-            ("%84".to_string(), "tasks/file.md".to_string()),
-        ];
+        let auto_started_panes = vec![("%84".to_string(), "tasks/file.md".to_string())];
         // Batch summary only prints when len > 1
-        assert!(auto_started_panes.len() <= 1, "single pane should not trigger batch summary");
+        assert!(
+            auto_started_panes.len() <= 1,
+            "single pane should not trigger batch summary"
+        );
     }
 
     // --- Rename debounce tests ---
@@ -2124,8 +2403,17 @@ mod tests {
         // (We test the marker file existence and freshness directly since
         // has_rename_debounce uses a hardcoded path relative to cwd)
         assert!(marker.exists(), "marker should exist after write");
-        let age = marker.metadata().unwrap().modified().unwrap().elapsed().unwrap();
-        assert!(age.as_secs() < RENAME_DEBOUNCE_TTL_SECS, "marker should be fresh");
+        let age = marker
+            .metadata()
+            .unwrap()
+            .modified()
+            .unwrap()
+            .elapsed()
+            .unwrap();
+        assert!(
+            age.as_secs() < RENAME_DEBOUNCE_TTL_SECS,
+            "marker should be fresh"
+        );
     }
 
     #[test]
@@ -2139,8 +2427,14 @@ mod tests {
         let fresh_age = now.duration_since(fresh).unwrap().as_secs();
         let expired_age = now.duration_since(expired).unwrap().as_secs();
 
-        assert!(fresh_age < RENAME_DEBOUNCE_TTL_SECS, "fresh marker should be within TTL");
-        assert!(expired_age >= RENAME_DEBOUNCE_TTL_SECS, "expired marker should exceed TTL");
+        assert!(
+            fresh_age < RENAME_DEBOUNCE_TTL_SECS,
+            "fresh marker should be within TTL"
+        );
+        assert!(
+            expired_age >= RENAME_DEBOUNCE_TTL_SECS,
+            "expired marker should exceed TTL"
+        );
     }
 
     #[test]
@@ -2162,7 +2456,10 @@ mod tests {
         // file_b should have a different hash, no marker
         let hash_b = crate::snapshot::doc_hash(&file_b).unwrap();
         let marker_b = debounce_dir.join(format!("{}.marker", hash_b));
-        assert_ne!(hash_a, hash_b, "different files should have different hashes");
+        assert_ne!(
+            hash_a, hash_b,
+            "different files should have different hashes"
+        );
         assert!(!marker_b.exists(), "no marker should exist for file_b");
     }
 
@@ -2191,7 +2488,8 @@ mod tests {
             .unwrap_or_default();
         assert!(
             win_name == "stash" || win_name.starts_with("stash-"),
-            "pane should be in stash window, got: {}", win_name
+            "pane should be in stash window, got: {}",
+            win_name
         );
 
         // Simulate what the fix does: discover agent-doc window from session name
@@ -2209,21 +2507,29 @@ mod tests {
         let rescue_result = sessions::swap_pane_guarded(&iso, &pane1, target, target_sess);
         assert!(
             rescue_result.is_ok(),
-            "swap-pane rescue should succeed: {:?}", rescue_result.err()
+            "swap-pane rescue should succeed: {:?}",
+            rescue_result.err()
         );
 
         // Verify pane1 is no longer in stash
         let post_win_id = iso.pane_window(&pane1).unwrap();
         let post_win_name = iso
             .cmd()
-            .args(["display-message", "-t", &post_win_id, "-p", "#{window_name}"])
+            .args([
+                "display-message",
+                "-t",
+                &post_win_id,
+                "-p",
+                "#{window_name}",
+            ])
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
         assert_eq!(
             post_win_name, "agent-doc",
-            "pane should be in agent-doc window after rescue, got: {}", post_win_name
+            "pane should be in agent-doc window after rescue, got: {}",
+            post_win_name
         );
     }
 }

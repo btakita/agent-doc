@@ -3,6 +3,11 @@
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, write, commit) is identical across all harnesses.
 
+## Response Header Attribution
+
+- Always attribute `### Re:` headings with the resolved model short name, for example `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`.
+- Never use the harness label as the suffix. `### Re: topic — codex` and `### Re: topic — claude` are wrong.
+
 ## Harness Detection
 
 Identify your harness from your environment:

@@ -112,7 +112,13 @@ use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
     let output = tmux
         .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_current_command}"])
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-p",
+            "#{pane_current_command}",
+        ])
         .output();
     match output {
         Ok(o) if o.status.success() => {
@@ -143,7 +149,13 @@ pub fn run(file: &Path, pane: Option<&str>, debounce_ms: u64, col_args: &[String
     run_with_tmux(file, &Tmux::default_server(), pane, debounce_ms, col_args)
 }
 
-pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: u64, col_args: &[String]) -> Result<()> {
+pub fn run_with_tmux(
+    file: &Path,
+    tmux: &Tmux,
+    pane: Option<&str>,
+    debounce_ms: u64,
+    col_args: &[String],
+) -> Result<()> {
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune(); // Clean stale entries before lookup
 
@@ -182,19 +194,36 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     // is added to one path but missed on others.
 
     // Snapshot panes before route so we can clean up orphans on failure.
-    let window_arg = col_args.first()
-        .and_then(|_| tmux.cmd()
-            .args(["display-message", "-t", &format!("{}:agent-doc", target_session), "-p", "#{window_id}"])
-            .output().ok())
+    let window_arg = col_args
+        .first()
+        .and_then(|_| {
+            tmux.cmd()
+                .args([
+                    "display-message",
+                    "-t",
+                    &format!("{}:agent-doc", target_session),
+                    "-p",
+                    "#{window_id}",
+                ])
+                .output()
+                .ok()
+        })
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let panes_before: Vec<String> = window_arg.as_deref()
+    let panes_before: Vec<String> = window_arg
+        .as_deref()
         .and_then(|w| tmux.list_window_panes(w).ok())
         .unwrap_or_default();
 
     let pane_id = resolve_or_create_pane(
-        tmux, file, pane, col_args,
-        &session_id, &file_path, &target_session, &harness,
+        tmux,
+        file,
+        pane,
+        col_args,
+        &session_id,
+        &file_path,
+        &target_session,
+        &harness,
     );
 
     match pane_id {
@@ -210,10 +239,15 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         Err(e) => {
             // Clean up orphaned panes created during the failed route attempt.
             // Compare current panes to the snapshot and kill any new ones.
-            if let Some(w) = window_arg.as_deref() && let Ok(panes_after) = tmux.list_window_panes(w) {
+            if let Some(w) = window_arg.as_deref()
+                && let Ok(panes_after) = tmux.list_window_panes(w)
+            {
                 for p in &panes_after {
                     if !panes_before.contains(p) {
-                        eprintln!("[route] cleaning up orphaned pane {} (created during failed route)", p);
+                        eprintln!(
+                            "[route] cleaning up orphaned pane {} (created during failed route)",
+                            p
+                        );
                         tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
                         let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
                     }
@@ -297,7 +331,16 @@ fn resolve_or_create_pane(
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
     let split_before = is_first_column(file, col_args);
-    auto_start_in_session(tmux, file, session_id, file_path, target_session, false, split_before, harness)?;
+    auto_start_in_session(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        target_session,
+        false,
+        split_before,
+        harness,
+    )?;
 
     // Look up the pane that was just created
     sessions::lookup(session_id)?
@@ -314,13 +357,7 @@ fn rescue_from_stash(
     target_session: &str,
 ) {
     // Session guard: only rescue within the target session
-    let pane_session = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+    let pane_session = pane_session_name(tmux, pane_id).unwrap_or_default();
     if pane_session != target_session {
         eprintln!(
             "[route] Pane {} is in session '{}', not target '{}' — skipping stash rescue",
@@ -329,24 +366,18 @@ fn rescue_from_stash(
         return;
     }
 
-    let pane_win_name = tmux.pane_window(pane_id).ok()
-        .and_then(|wid| {
-            tmux.cmd()
-                .args(["display-message", "-t", &wid, "-p", "#{window_name}"])
-                .output().ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        })
-        .unwrap_or_default();
+    let pane_win_name = pane_window_name(tmux, pane_id).unwrap_or_default();
 
-    if pane_win_name == "stash" || pane_win_name.starts_with("stash-") {
+    if is_stash_window_name(&pane_win_name) {
         tracing::debug!(pane_id, window = %pane_win_name, target_session, "route: rescuing pane from stash");
         eprintln!(
             "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
             pane_id, pane_win_name
         );
         let agent_doc_window = format!("{}:agent-doc", target_session);
-        let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
+        let target_panes = tmux
+            .list_window_panes(&agent_doc_window)
+            .unwrap_or_default();
         if let Some(target) = target_panes.first() {
             match sessions::swap_pane_guarded(tmux, pane_id, target, target_session) {
                 Ok(()) => eprintln!("[route] Rescued pane {} via swap-pane", pane_id),
@@ -496,8 +527,8 @@ fn resolve_target_session(
         return configured.unwrap();
     }
 
-    let resolved = current_tmux_session(tmux)
-        .unwrap_or_else(|| harness.tmux_session_fallback.clone());
+    let resolved =
+        current_tmux_session(tmux).unwrap_or_else(|| harness.tmux_session_fallback.clone());
 
     // Auto-update config.toml when the configured session is stale.
     // This prevents resync from killing panes in the actual session
@@ -505,7 +536,8 @@ fn resolve_target_session(
     if configured.as_ref().is_some_and(|s| s != &resolved) {
         eprintln!(
             "[route] configured tmux_session '{}' is not alive, updating config to '{}'",
-            configured.as_ref().unwrap(), resolved
+            configured.as_ref().unwrap(),
+            resolved
         );
         if let Err(e) = crate::config::update_project_tmux_session(&resolved) {
             eprintln!("[route] warning: failed to update config.toml: {}", e);
@@ -533,13 +565,7 @@ fn find_target_pane(
 fn has_named_window(tmux: &Tmux, session_name: &str, window_name: &str) -> bool {
     let output = tmux
         .cmd()
-        .args([
-            "list-windows",
-            "-t",
-            session_name,
-            "-F",
-            "#{window_name}",
-        ])
+        .args(["list-windows", "-t", session_name, "-F", "#{window_name}"])
         .output();
     match output {
         Ok(out) if out.status.success() => {
@@ -550,9 +576,75 @@ fn has_named_window(tmux: &Tmux, session_name: &str, window_name: &str) -> bool 
     }
 }
 
+fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
+    tmux.pane_window(pane_id).ok().and_then(|window_id| {
+        tmux.cmd()
+            .args(["display-message", "-t", &window_id, "-p", "#{window_name}"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    })
+}
+
+fn is_stash_window_name(window_name: &str) -> bool {
+    window_name == "stash" || window_name.starts_with("stash-")
+}
+
+fn evict_previous_stash_pane(
+    tmux: &Tmux,
+    session_id: &str,
+    replacement_pane: &str,
+    target_session: &str,
+) {
+    let Ok(Some(previous)) = sessions::lookup_entry(session_id) else {
+        return;
+    };
+    if previous.pane.is_empty()
+        || previous.pane == replacement_pane
+        || !tmux.pane_alive(&previous.pane)
+    {
+        return;
+    }
+    if pane_session_name(tmux, &previous.pane).as_deref() != Some(target_session) {
+        return;
+    }
+    let Some(window_name) = pane_window_name(tmux, &previous.pane) else {
+        return;
+    };
+    if !is_stash_window_name(&window_name) {
+        return;
+    }
+
+    eprintln!(
+        "[route] evicting replaced stash pane {} for session {}",
+        previous.pane,
+        &session_id[..std::cmp::min(8, session_id.len())]
+    );
+    if let Err(e) = tmux.raw_cmd(&["kill-pane", "-t", &previous.pane]) {
+        eprintln!(
+            "[route] warning: failed to evict replaced stash pane {}: {}",
+            previous.pane, e
+        );
+    }
+}
+
 /// Find a registered agent-doc pane in the target tmux session.
 /// Used by auto_start to join alongside an existing agent-doc pane (not any random pane).
-fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane: &str) -> Option<String> {
+fn find_registered_pane_in_session(
+    tmux: &Tmux,
+    session_name: &str,
+    exclude_pane: &str,
+) -> Option<String> {
     let registry = sessions::load().ok()?;
     for entry in registry.values() {
         if entry.pane == exclude_pane || entry.pane.is_empty() {
@@ -564,7 +656,13 @@ fn find_registered_pane_in_session(tmux: &Tmux, session_name: &str, exclude_pane
         // Check if this pane is in the target session
         if let Ok(output) = tmux
             .cmd()
-            .args(["display-message", "-t", &entry.pane, "-p", "#{session_name}"])
+            .args([
+                "display-message",
+                "-t",
+                &entry.pane,
+                "-p",
+                "#{session_name}",
+            ])
             .output()
         {
             let pane_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -591,7 +689,15 @@ pub fn auto_start(
     file_path: &str,
     context_session: Option<&str>,
 ) -> Result<String> {
-    auto_start_ext(tmux, file, session_id, file_path, context_session, false, false)
+    auto_start_ext(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        context_session,
+        false,
+        false,
+    )
 }
 
 /// Rewrite `file_path` to be relative to `cwd` so `agent-doc start <path>` resolves
@@ -630,7 +736,15 @@ pub fn provision_pane(
     col_args: &[String],
 ) -> Result<String> {
     let split_before = is_first_column(file, col_args);
-    auto_start_ext(tmux, file, session_id, file_path, context_session, true, split_before)
+    auto_start_ext(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        context_session,
+        true,
+        split_before,
+    )
 }
 
 fn auto_start_ext(
@@ -644,7 +758,16 @@ fn auto_start_ext(
 ) -> Result<String> {
     let harness = resolve_harness_for_file(file);
     let session_name = resolve_target_session(tmux, context_session, &harness);
-    auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before, &harness)
+    auto_start_in_session(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        &session_name,
+        skip_wait,
+        split_before,
+        &harness,
+    )
 }
 
 /// Resolve HarnessConfig from a file's frontmatter + global config.
@@ -668,7 +791,16 @@ fn resolve_harness_for_file(file: &Path) -> HarnessConfig {
 /// When `skip_wait` is true, skips `wait_for_agent_ready` and `send_command`.
 /// Used by sync which only needs the pane to exist with the agent starting.
 #[allow(clippy::too_many_arguments)]
-fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool, harness: &HarnessConfig) -> Result<String> {
+fn auto_start_in_session(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    session_name: &str,
+    skip_wait: bool,
+    split_before: bool,
+    harness: &HarnessConfig,
+) -> Result<String> {
     // Startup lock: prevent double-spawn when sync fires twice in quick succession.
     // Check for a lock file; if it exists and is < 5s old, skip this auto-start.
     // Best-effort: skip lock entirely if file doesn't exist or hash fails.
@@ -686,7 +818,8 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         {
             eprintln!(
                 "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
-                file_path, age.as_secs_f64()
+                file_path,
+                age.as_secs_f64()
             );
             return Err(anyhow::anyhow!("startup lock active for {}", file_path));
         }
@@ -712,13 +845,13 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     // over stash panes — splitting in the stash creates invisible panes.
     let existing_pane = if skip_wait {
         // Sync path: find a pane in the agent-doc window (not stash)
-        let window_panes = tmux.list_panes_ordered(
-            &format!("{}:agent-doc", session_name)
-        ).unwrap_or_default();
+        let window_panes = tmux
+            .list_panes_ordered(&format!("{}:agent-doc", session_name))
+            .unwrap_or_default();
         let positional = if split_before {
-            window_panes.into_iter().next()       // leftmost by screen position
+            window_panes.into_iter().next() // leftmost by screen position
         } else {
-            window_panes.into_iter().last()       // rightmost by screen position
+            window_panes.into_iter().last() // rightmost by screen position
         };
         positional.or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
     } else {
@@ -769,14 +902,22 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
                     stash_err, pane
                 );
             } else {
-                eprintln!("[route] stashed new pane {} to avoid window proliferation", pane);
+                eprintln!(
+                    "[route] stashed new pane {} to avoid window proliferation",
+                    pane
+                );
             }
             pane
         } else {
-            eprintln!("[route] no registered pane found in session '{}', creating new window", session_name);
+            eprintln!(
+                "[route] no registered pane found in session '{}', creating new window",
+                session_name
+            );
             tmux.auto_start(session_name, &cwd)?
         }
     };
+
+    evict_previous_stash_pane(tmux, session_id, &new_pane, session_name);
 
     // Register immediately so subsequent route calls find this pane
     sessions::register(session_id, &new_pane, file_path)?;
@@ -807,7 +948,10 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     );
 
     if skip_wait {
-        eprintln!("[route] skip_wait=true — pane created, {} starting (sync path)", harness.binary);
+        eprintln!(
+            "[route] skip_wait=true — pane created, {} starting (sync path)",
+            harness.binary
+        );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
         if wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness) {
@@ -829,7 +973,12 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
 ///
 /// Uses the harness's prompt patterns for detection.
 /// Strips ANSI escape codes before matching. Polls every 500ms up to the given timeout.
-fn wait_for_agent_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duration, harness: &HarnessConfig) -> bool {
+fn wait_for_agent_ready(
+    tmux: &Tmux,
+    pane_id: &str,
+    timeout: std::time::Duration,
+    harness: &HarnessConfig,
+) -> bool {
     let start = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(500);
     let mut poll_count = 0u32;
@@ -847,20 +996,21 @@ fn wait_for_agent_ready(tmux: &Tmux, pane_id: &str, timeout: std::time::Duration
 
         poll_count += 1;
         if poll_count.is_multiple_of(10)
-            && let Ok(content) = sessions::capture_pane(tmux, pane_id) {
-                let last_line = content
-                    .lines()
-                    .rev()
-                    .find(|l| !l.trim().is_empty())
-                    .map(prompt::strip_ansi)
-                    .unwrap_or_default();
-                eprintln!(
-                    "[route] Still waiting for {} ({:.0}s)... last line: {}",
-                    harness.binary,
-                    start.elapsed().as_secs_f64(),
-                    &last_line[..std::cmp::min(60, last_line.len())]
-                );
-            }
+            && let Ok(content) = sessions::capture_pane(tmux, pane_id)
+        {
+            let last_line = content
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .map(prompt::strip_ansi)
+                .unwrap_or_default();
+            eprintln!(
+                "[route] Still waiting for {} ({:.0}s)... last line: {}",
+                harness.binary,
+                start.elapsed().as_secs_f64(),
+                &last_line[..std::cmp::min(60, last_line.len())]
+            );
+        }
         std::thread::sleep(poll_interval);
     }
     false
@@ -922,7 +1072,10 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
     if let Err(e) = sync::run(&effective_col_args, Some(&window_id), None) {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
-        eprintln!("[route] Auto-synced {} files in window {}", file_count, window_id);
+        eprintln!(
+            "[route] Auto-synced {} files in window {}",
+            file_count, window_id
+        );
     }
 }
 
@@ -986,7 +1139,10 @@ mod tests {
 
         let original = "src/sub/tasks/foo.md";
         let rewritten = rewrite_start_path(&doc, &sub_root, original);
-        assert_eq!(rewritten, format!("tasks{}foo.md", std::path::MAIN_SEPARATOR));
+        assert_eq!(
+            rewritten,
+            format!("tasks{}foo.md", std::path::MAIN_SEPARATOR)
+        );
     }
 
     #[test]
@@ -1206,7 +1362,19 @@ mod tests {
 
         let pane_id = iso
             .cmd()
-            .args(["new-session", "-d", "-s", session, "-c", &cwd.to_string_lossy(), "-P", "-F", "#{pane_id}", "sleep", "30"])
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                session,
+                "-c",
+                &cwd.to_string_lossy(),
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "sleep",
+                "30",
+            ])
             .output()
             .expect("failed to create tmux session");
         let pane = String::from_utf8_lossy(&pane_id.stdout).trim().to_string();
@@ -1254,8 +1422,14 @@ history line
 
     #[test]
     fn line_contains_trigger_rejects_codex_substring_inside_claude_trigger() {
-        assert!(line_contains_trigger("❯ /agent-doc test.md", "/agent-doc test.md"));
-        assert!(!line_contains_trigger("❯ /agent-doc test.md", "agent-doc test.md"));
+        assert!(line_contains_trigger(
+            "❯ /agent-doc test.md",
+            "/agent-doc test.md"
+        ));
+        assert!(!line_contains_trigger(
+            "❯ /agent-doc test.md",
+            "agent-doc test.md"
+        ));
     }
 
     #[test]
@@ -1266,7 +1440,8 @@ history line
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Start a shell that reads a line and echoes it back with a marker
-        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#).unwrap();
+        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#)
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
         let trigger = HarnessConfig::claude().trigger_command("test.md");
@@ -1289,7 +1464,8 @@ history line
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#).unwrap();
+        iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#)
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
         let trigger = HarnessConfig::codex().trigger_command("test.md");
@@ -1371,13 +1547,7 @@ history line
         // Verify pane1 is now the active pane
         let active = iso
             .cmd()
-            .args([
-                "display-message",
-                "-t",
-                session,
-                "-p",
-                "#{pane_id}",
-            ])
+            .args(["display-message", "-t", session, "-p", "#{pane_id}"])
             .output()
             .unwrap();
         let active_pane = String::from_utf8_lossy(&active.stdout).trim().to_string();
@@ -1437,7 +1607,8 @@ history line
         let detected_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
         assert_eq!(
             detected_session, session,
-            "pane should be in session '{}'", session
+            "pane should be in session '{}'",
+            session
         );
     }
 
@@ -1456,20 +1627,35 @@ history line
         // Verify they're in different sessions
         let correct_session = iso
             .cmd()
-            .args(["display-message", "-t", &correct_pane, "-p", "#{session_name}"])
+            .args([
+                "display-message",
+                "-t",
+                &correct_pane,
+                "-p",
+                "#{session_name}",
+            ])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap();
         let wrong_session = iso
             .cmd()
-            .args(["display-message", "-t", &wrong_pane, "-p", "#{session_name}"])
+            .args([
+                "display-message",
+                "-t",
+                &wrong_pane,
+                "-p",
+                "#{session_name}",
+            ])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap();
 
         assert_eq!(correct_session, "correct");
         assert_eq!(wrong_session, "wrong");
-        assert_ne!(correct_session, wrong_session, "panes should be in different sessions");
+        assert_ne!(
+            correct_session, wrong_session,
+            "panes should be in different sessions"
+        );
     }
 
     // --- auto_start_in_session tests ---
@@ -1572,7 +1758,11 @@ history line
 
         // Verify the window now has 2 panes
         let panes = iso.list_window_panes(&w1).unwrap();
-        assert_eq!(panes.len(), 2, "window should have exactly 2 panes after split");
+        assert_eq!(
+            panes.len(),
+            2,
+            "window should have exactly 2 panes after split"
+        );
     }
 
     #[test]
@@ -1591,7 +1781,10 @@ history line
         // Before stash: pane and fallback_pane are in different windows
         let w1 = iso.pane_window(&pane).unwrap();
         let w_fb_before = iso.pane_window(&fallback_pane).unwrap();
-        assert_ne!(w1, w_fb_before, "fallback should be in a new window initially");
+        assert_ne!(
+            w1, w_fb_before,
+            "fallback should be in a new window initially"
+        );
 
         // Stash the fallback pane (simulating what the route.rs fallback does)
         iso.stash_pane(&fallback_pane, session).unwrap();
@@ -1682,6 +1875,47 @@ history line
         );
     }
 
+    #[test]
+    fn evicts_replaced_stash_pane_for_same_session() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let iso = IsolatedTmux::new("route-test-evict-stash");
+        let session = "test";
+        let old_cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = (|| -> anyhow::Result<()> {
+            let old_pane = iso.auto_start(session, dir.path())?;
+            iso.stash_pane(&old_pane, session)?;
+            sessions::register("session-123", &old_pane, "doc.md")?;
+
+            let replacement_pane = iso.auto_start(session, dir.path())?;
+            iso.stash_pane(&replacement_pane, session)?;
+
+            evict_previous_stash_pane(&iso, "session-123", &replacement_pane, session);
+            sessions::register("session-123", &replacement_pane, "doc.md")?;
+
+            assert!(
+                !iso.pane_alive(&old_pane),
+                "previous stash pane should be evicted"
+            );
+            assert!(
+                iso.pane_alive(&replacement_pane),
+                "replacement pane should stay alive"
+            );
+            assert_eq!(
+                sessions::lookup("session-123")?,
+                Some(replacement_pane.clone()),
+                "registry should point at the replacement pane"
+            );
+            Ok(())
+        })();
+
+        std::env::set_current_dir(old_cwd).unwrap();
+        result.unwrap();
+    }
+
     // --- tmux_session validation tests ---
 
     #[test]
@@ -1713,9 +1947,13 @@ history line
         // but we can verify the session was never created
         let result = {
             let _env_guard = ENV_MUTEX.lock().unwrap();
-            unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
+            unsafe {
+                std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
+            }
             let r = run_with_tmux(&file, &iso, None, 0, &[]);
-            unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
+            unsafe {
+                std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
+            }
             r
         };
 
@@ -1757,9 +1995,13 @@ history line
         // but we can inspect the validation behavior
         let _result = {
             let _env_guard = ENV_MUTEX.lock().unwrap();
-            unsafe { std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1"); }
+            unsafe {
+                std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
+            }
             let r = run_with_tmux(&file, &iso, None, 0, &[]);
-            unsafe { std::env::remove_var("AGENT_DOC_NO_AUTOSTART"); }
+            unsafe {
+                std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
+            }
             r
         };
 
@@ -1806,7 +2048,10 @@ history line
         // Now rescue: swap the stashed pane with a pane in the agent-doc window
         let agent_doc_window = format!("{}:agent-doc", session);
         let target_panes = iso.list_window_panes(&agent_doc_window).unwrap_or_default();
-        assert!(!target_panes.is_empty(), "agent-doc window should have panes");
+        assert!(
+            !target_panes.is_empty(),
+            "agent-doc window should have panes"
+        );
 
         if let Some(target) = target_panes.first() {
             // This is the same swap logic as route.rs:88
@@ -1817,12 +2062,18 @@ history line
                     let _agent_doc_win_id = iso.pane_window(&pane1).unwrap_or_default();
                     // After swap, the stashed pane should be in agent-doc window
                     // and pane1 should be in stash
-                    assert!(iso.pane_alive(&stashed_pane), "rescued pane should be alive");
+                    assert!(
+                        iso.pane_alive(&stashed_pane),
+                        "rescued pane should be alive"
+                    );
                 }
                 Err(_e) => {
                     // Fallback to join-pane (same as route.rs:94)
                     iso.join_pane(&stashed_pane, target, "-dh").unwrap();
-                    assert!(iso.pane_alive(&stashed_pane), "pane should survive join rescue");
+                    assert!(
+                        iso.pane_alive(&stashed_pane),
+                        "pane should survive join rescue"
+                    );
                 }
             }
         }
@@ -1885,7 +2136,10 @@ history line
         sync_after_claim(&iso, &pane_a, &[]);
 
         // Pane should still be alive and in the same window — no unintended stashing
-        assert!(iso.pane_alive(&pane_a), "pane should survive sync_after_claim");
+        assert!(
+            iso.pane_alive(&pane_a),
+            "pane should survive sync_after_claim"
+        );
         assert_eq!(
             iso.pane_window(&pane_a).unwrap(),
             window_id,
@@ -1898,7 +2152,10 @@ history line
         sync_after_claim(&iso, &pane_a, &col_args);
 
         // Pane should still be alive
-        assert!(iso.pane_alive(&pane_a), "pane should survive sync with unresolved files");
+        assert!(
+            iso.pane_alive(&pane_a),
+            "pane should survive sync with unresolved files"
+        );
     }
 
     // --- split_before positional target tests ---
@@ -1924,7 +2181,9 @@ history line
         let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
 
         // Verify setup: 2 panes, left then right
-        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let ordered = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(ordered.len(), 2, "should have 2 panes");
         assert_eq!(ordered[0], pane_left, "first pane should be leftmost");
         assert_eq!(ordered[1], pane_right, "second pane should be rightmost");
@@ -1940,7 +2199,9 @@ history line
         );
 
         // Verify the new pane is to the LEFT of the original leftmost pane
-        let final_order = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let final_order = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(final_order.len(), 3, "should have 3 panes now");
         assert_eq!(
             final_order[0], new_pane,
@@ -1967,7 +2228,9 @@ history line
         let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
 
         // Verify setup
-        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let ordered = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(ordered.len(), 2);
         assert_eq!(ordered[0], pane_left);
         assert_eq!(ordered[1], pane_right);
@@ -1983,7 +2246,9 @@ history line
         );
 
         // Verify the new pane is to the RIGHT of the original rightmost pane
-        let final_order = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let final_order = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(final_order.len(), 3, "should have 3 panes now");
         assert_eq!(
             final_order[2], new_pane,
@@ -2008,28 +2273,38 @@ history line
         let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
 
         // Verify 2-pane setup
-        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let ordered = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(ordered.len(), 2, "should start with 2 panes");
 
         // col_args: file_a is in first column, file_b in second
-        let col_args = vec![
-            "tasks/file_a.md".to_string(),
-            "tasks/file_b.md".to_string(),
-        ];
+        let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
 
         // Call provision_pane with file in the FIRST column
         let file_a = Path::new("tasks/file_a.md");
         let result = provision_pane(
-            &iso, file_a, "session-a", "tasks/file_a.md",
-            Some(session), &col_args,
+            &iso,
+            file_a,
+            "session-a",
+            "tasks/file_a.md",
+            Some(session),
+            &col_args,
         );
-        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "provision_pane should succeed: {:?}",
+            result.err()
+        );
 
         // The new pane should be leftmost (split_before=true picks first pane, splits -dbh)
-        let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let after = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
         // The new pane is NOT one of the original two — find it
-        let new_pane: Vec<_> = after.iter()
+        let new_pane: Vec<_> = after
+            .iter()
             .filter(|p| *p != &pane_left && *p != &pane_right)
             .collect();
         assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
@@ -2056,33 +2331,44 @@ history line
         let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
 
         // Verify 2-pane setup
-        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let ordered = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(ordered.len(), 2, "should start with 2 panes");
 
         // col_args: file_a is in first column, file_b in second
-        let col_args = vec![
-            "tasks/file_a.md".to_string(),
-            "tasks/file_b.md".to_string(),
-        ];
+        let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
 
         // Call provision_pane with file in the SECOND column
         let file_b = Path::new("tasks/file_b.md");
         let result = provision_pane(
-            &iso, file_b, "session-b", "tasks/file_b.md",
-            Some(session), &col_args,
+            &iso,
+            file_b,
+            "session-b",
+            "tasks/file_b.md",
+            Some(session),
+            &col_args,
         );
-        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "provision_pane should succeed: {:?}",
+            result.err()
+        );
 
         // The new pane should be rightmost (split_before=false picks last pane, splits -dh)
-        let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        let after = iso
+            .list_window_panes(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
         // Find the new pane (not one of the original two)
-        let new_pane: Vec<_> = after.iter()
+        let new_pane: Vec<_> = after
+            .iter()
             .filter(|p| *p != &pane_left && *p != &pane_right)
             .collect();
         assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
         assert_eq!(
-            after.last().unwrap(), new_pane[0],
+            after.last().unwrap(),
+            new_pane[0],
             "second-column file should produce rightmost pane (split_before=false)"
         );
     }
@@ -2102,7 +2388,8 @@ history line
         std::fs::write(
             sessions_path.join("sessions.json"),
             r#"{"sessions": [{"bad": "format"}]}"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         // sync_after_claim should not panic — it handles errors gracefully
         // (returns early on load failure)
@@ -2124,7 +2411,11 @@ history line
         sync_after_claim(&iso, &pane, &[]);
         let after = iso.list_window_panes(&window).unwrap();
 
-        assert_eq!(before.len(), after.len(), "no panes should be created when no registry exists");
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "no panes should be created when no registry exists"
+        );
     }
 
     #[test]
@@ -2143,13 +2434,11 @@ history line
 
         // Rearrange: break pane_b out, rejoin to the LEFT of pane_a.
         let _ = iso.raw_cmd(&["break-pane", "-d", "-t", &pane_b]);
-        let _ = iso.raw_cmd(&[
-            "join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a,
-        ]);
+        let _ = iso.raw_cmd(&["join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a]);
 
-        let screen_order = iso.list_panes_ordered(
-            &format!("{}:agent-doc", session),
-        ).unwrap();
+        let screen_order = iso
+            .list_panes_ordered(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(screen_order.len(), 2);
         assert_eq!(
             screen_order[0], pane_b,
@@ -2179,34 +2468,39 @@ history line
         // Rearrange: break pane_b, rejoin LEFT of pane_a.
         // Screen: [pane_b, pane_a]. pane_a is now rightmost.
         let _ = iso.raw_cmd(&["break-pane", "-d", "-t", &pane_b]);
-        let _ = iso.raw_cmd(&[
-            "join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a,
-        ]);
+        let _ = iso.raw_cmd(&["join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a]);
 
         // Provision a right-column file — should split from pane_a (rightmost by screen).
-        let col_args = vec![
-            "tasks/file_a.md".to_string(),
-            "tasks/file_b.md".to_string(),
-        ];
+        let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
         let file_b = Path::new("tasks/file_b.md");
         let result = provision_pane(
-            &iso, file_b, "session-b", "tasks/file_b.md",
-            Some(session), &col_args,
+            &iso,
+            file_b,
+            "session-b",
+            "tasks/file_b.md",
+            Some(session),
+            &col_args,
         );
-        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "provision_pane should succeed: {:?}",
+            result.err()
+        );
 
-        let after = iso.list_panes_ordered(
-            &format!("{}:agent-doc", session),
-        ).unwrap();
+        let after = iso
+            .list_panes_ordered(&format!("{}:agent-doc", session))
+            .unwrap();
         assert_eq!(after.len(), 3, "should have 3 panes");
 
         // The new pane should be rightmost (split after pane_a which is rightmost).
-        let new_pane: Vec<_> = after.iter()
+        let new_pane: Vec<_> = after
+            .iter()
             .filter(|p| *p != &pane_a && *p != &pane_b)
             .collect();
         assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
         assert_eq!(
-            after.last().unwrap(), new_pane[0],
+            after.last().unwrap(),
+            new_pane[0],
             "right-column file should produce rightmost pane even after rearrangement"
         );
     }

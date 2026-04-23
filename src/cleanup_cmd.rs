@@ -30,8 +30,10 @@ pub fn run(
         timeout_secs + 10, // TTL slightly longer than timeout
     )?;
 
-    eprintln!("[cleanup] polling for response (timeout: {}s, interval: {}ms)",
-        timeout_secs, poll_interval_ms);
+    eprintln!(
+        "[cleanup] polling for response (timeout: {}s, interval: {}ms)",
+        timeout_secs, poll_interval_ms
+    );
 
     // Step 2: Poll for response
     let deadline = SystemTime::now()
@@ -71,7 +73,10 @@ pub fn run(
 
 /// Spawn a claude --print subprocess for summarization fallback.
 fn spawn_fallback_agent(file: &Path, model: &str) -> Result<String> {
-    eprintln!("[cleanup] spawning fallback agent: claude --print --model {}", model);
+    eprintln!(
+        "[cleanup] spawning fallback agent: claude --print --model {}",
+        model
+    );
 
     let content = std::fs::read_to_string(file)
         .context("could not read document for fallback summarization")?;

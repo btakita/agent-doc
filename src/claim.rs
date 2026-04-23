@@ -135,7 +135,14 @@ pub(crate) fn cross_session_decision(
     CrossSessionDecision::Reject
 }
 
-pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool, isolate: bool) -> Result<()> {
+pub fn run(
+    file: &Path,
+    position: Option<&str>,
+    pane: Option<&str>,
+    window: Option<&str>,
+    force: bool,
+    isolate: bool,
+) -> Result<()> {
     // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
     // the nearest git repo root for this document (#8jzg).
     if isolate {
@@ -147,9 +154,9 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     validate_file_claim(file);
 
     // Canonicalize to handle CWD drift (e.g., when CWD is in a submodule)
-    let file = &file.canonicalize().map_err(|_| {
-        anyhow::anyhow!("file not found: {}", file.display())
-    })?;
+    let file = &file
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     // Validate --window if provided: if dead, fall back to a live project window
     let effective_window: Option<String> = if let Some(win) = window {
@@ -157,7 +164,10 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         if alive {
             Some(win.to_string())
         } else {
-            eprintln!("warning: window {} is dead, searching for alive window", win);
+            eprintln!(
+                "warning: window {} is dead, searching for alive window",
+                win
+            );
             find_alive_project_window()
         }
     } else {
@@ -250,19 +260,25 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     {
         let registry = sessions::load().unwrap_or_default();
         for (existing_id, entry) in &registry {
-            if entry.pane == pane_id && *existing_id != session_id
-                && tmux.pane_alive(&pane_id)
-            {
+            if entry.pane == pane_id && *existing_id != session_id && tmux.pane_alive(&pane_id) {
                 if force {
-                    eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
+                    eprintln!(
+                        "warning: overwriting claim on pane {} (was {} → {})",
+                        pane_id,
+                        &existing_id[..8],
+                        &session_id[..8]
+                    );
                 } else {
                     // Pane is occupied — provision a new pane instead of erroring.
                     // This enforces the Binding invariant: never commandeer.
                     eprintln!(
                         "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
-                        pane_id, &existing_id[..8], entry.file
+                        pane_id,
+                        &existing_id[..8],
+                        entry.file
                     );
-                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[]).map(|_| ())?;
+                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[])
+                        .map(|_| ())?;
                     return Ok(());
                 }
             }
@@ -288,9 +304,16 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
                 frontmatter::AgentDocWrite::Crdt,
             )?;
             if updated != content {
-                std::fs::write(file, &updated)
-                    .with_context(|| format!("failed to write agent_doc_format/write to {}", file.display()))?;
-                eprintln!("set agent_doc_format=template, agent_doc_write=crdt in {}", file.display());
+                std::fs::write(file, &updated).with_context(|| {
+                    format!(
+                        "failed to write agent_doc_format/write to {}",
+                        file.display()
+                    )
+                })?;
+                eprintln!(
+                    "set agent_doc_format=template, agent_doc_write=crdt in {}",
+                    file.display()
+                );
             }
         }
     }
@@ -302,15 +325,23 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         let (fm, _) = frontmatter::parse(&content)?;
         let resolved = fm.resolve_mode();
         let has_components = crate::component::parse(&content)
-            .map(|comps| comps.iter().any(|c| c.name == "status" || c.name == "exchange"))
+            .map(|comps| {
+                comps
+                    .iter()
+                    .any(|c| c.name == "status" || c.name == "exchange")
+            })
             .unwrap_or(false);
         if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
             let scaffolded = format!(
                 "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
                 content.trim_end()
             );
-            std::fs::write(file, &scaffolded)
-                .with_context(|| format!("failed to write component scaffolding to {}", file.display()))?;
+            std::fs::write(file, &scaffolded).with_context(|| {
+                format!(
+                    "failed to write component scaffolding to {}",
+                    file.display()
+                )
+            })?;
             eprintln!("scaffolded default components in {}", file.display());
         }
 
@@ -319,17 +350,23 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             let mut proj_cfg = project_config::load_project();
 
             // Add default components if not already present
-            proj_cfg.components.entry("exchange".to_string())
+            proj_cfg
+                .components
+                .entry("exchange".to_string())
                 .or_insert_with(|| project_config::ComponentConfig {
                     patch: "append".to_string(),
                     ..Default::default()
                 });
-            proj_cfg.components.entry("findings".to_string())
+            proj_cfg
+                .components
+                .entry("findings".to_string())
                 .or_insert_with(|| project_config::ComponentConfig {
                     patch: "append".to_string(),
                     ..Default::default()
                 });
-            proj_cfg.components.entry("status".to_string())
+            proj_cfg
+                .components
+                .entry("status".to_string())
                 .or_insert_with(|| project_config::ComponentConfig {
                     patch: "replace".to_string(),
                     ..Default::default()
@@ -348,7 +385,10 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // drift when claiming submodule-hosted documents (#tw4a).
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     let resolved_cwd = crate::git::resolve_pane_cwd(file);
-    eprintln!("[claim] using cwd={} for registry entry", resolved_cwd.display());
+    eprintln!(
+        "[claim] using cwd={} for registry entry",
+        resolved_cwd.display()
+    );
     sessions::register_with_pid_and_cwd(
         &session_id,
         &pane_id,
@@ -447,9 +487,7 @@ fn validate_file_claim(file: &Path) {
     // Find entries pointing to this file with dead panes
     let stale_keys: Vec<(String, String)> = registry
         .iter()
-        .filter(|(_, entry)| {
-            entry.file == file_str.as_ref() && !tmux.pane_alive(&entry.pane)
-        })
+        .filter(|(_, entry)| entry.file == file_str.as_ref() && !tmux.pane_alive(&entry.pane))
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();
 
@@ -506,9 +544,9 @@ fn find_alive_project_window() -> Option<String> {
 fn run_isolate(file: &Path) -> Result<()> {
     use std::process::Command;
 
-    let file = &file.canonicalize().map_err(|_| {
-        anyhow::anyhow!("file not found: {}", file.display())
-    })?;
+    let file = &file
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     // Resolve nearest git root for the document
     let cwd = crate::git::resolve_pane_cwd(file);
@@ -516,7 +554,8 @@ fn run_isolate(file: &Path) -> Result<()> {
 
     eprintln!(
         "[claim --isolate] spawning Claude in new window: cwd={} file={}",
-        cwd.display(), file_str
+        cwd.display(),
+        file_str
     );
 
     // Resolve the agent-doc binary path (same binary currently running)
@@ -536,8 +575,10 @@ fn run_isolate(file: &Path) -> Result<()> {
     let status = Command::new("tmux")
         .args([
             "new-window",
-            "-c", &cwd.to_string_lossy(),
-            "-n", "agent-doc",
+            "-c",
+            &cwd.to_string_lossy(),
+            "-n",
+            "agent-doc",
             &shell_cmd,
         ])
         .status()
@@ -608,7 +649,8 @@ mod tests {
         registry.insert("s1".into(), make_entry("/other-project", "@5"));
         registry.insert("s2".into(), make_entry("/project", "@6"));
 
-        let result = find_alive_window_in_registry(&registry, "/project", |w| w == "@5" || w == "@6");
+        let result =
+            find_alive_window_in_registry(&registry, "/project", |w| w == "@5" || w == "@6");
         assert_eq!(result, Some("@6".to_string()));
     }
 

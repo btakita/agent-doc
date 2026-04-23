@@ -3,7 +3,8 @@
 //! ## Spec
 //! - `run(file)` inspects the persisted per-document cycle state in
 //!   `.agent-doc/state/cycles/<hash>.json` and exits nonzero when the most
-//!   recent cycle is still open (`preflight_started` or `write_applied`).
+//!   recent cycle is still open (`preflight_started`, `response_captured`, or
+//!   `write_applied`).
 //! - Falls back to the last `ops.log` event only when no cycle-state file
 //!   exists yet, preserving compatibility for older repos.
 //! - Exit 0 when the current cycle state is committed, when state/log files
@@ -78,6 +79,7 @@ pub fn run(file: &Path) -> Result<()> {
 fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     match phase {
         crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
     }

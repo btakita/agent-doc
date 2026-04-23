@@ -41,8 +41,14 @@ fn which(bin: &str) -> bool {
 /// Check prerequisites and print status. Does not fail — only warns.
 pub fn check_prereqs() {
     let prereqs = [
-        ("tmux", "Install tmux: https://github.com/tmux/tmux/wiki/Installing"),
-        ("claude", "Install Claude Code CLI: https://docs.anthropic.com/en/docs/claude-code"),
+        (
+            "tmux",
+            "Install tmux: https://github.com/tmux/tmux/wiki/Installing",
+        ),
+        (
+            "claude",
+            "Install Claude Code CLI: https://docs.anthropic.com/en/docs/claude-code",
+        ),
     ];
 
     for (bin, install_hint) in &prereqs {

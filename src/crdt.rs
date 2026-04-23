@@ -135,8 +135,7 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
 
     // Bootstrap base doc from state or empty
     let base_doc = if let Some(bytes) = base_state {
-        CrdtDoc::decode_state(bytes)
-            .context("failed to decode base CRDT state")?
+        CrdtDoc::decode_state(bytes).context("failed to decode base CRDT state")?
     } else {
         CrdtDoc::from_text("")
     };
@@ -205,8 +204,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     //     theirs = "header + prompt + boundary + footer"
     //   Both diverge from base at "header", but share "prompt" beyond it.
     let mutual_prefix = common_prefix_len(ours_text, theirs_text);
-    let base_diverge = common_prefix_len(&base_text, ours_text)
-        .max(common_prefix_len(&base_text, theirs_text));
+    let base_diverge =
+        common_prefix_len(&base_text, ours_text).max(common_prefix_len(&base_text, theirs_text));
     if mutual_prefix > base_diverge {
         // Snap to a line boundary to avoid splitting mid-line/mid-word.
         // Without this, the shared prefix can include partial formatting
@@ -222,8 +221,7 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         if snapped > base_diverge {
             eprintln!(
                 "[crdt] Advancing base to shared prefix (diverge={} → {})",
-                base_diverge,
-                snapped
+                base_diverge, snapped
             );
             base_text = ours_text[..snapped].to_string();
         }
@@ -246,8 +244,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     // Yrs orders concurrent inserts by client ID: lower client ID goes first.
     let ours_doc = Doc::with_client_id(1);
     {
-        let update = Update::decode_v1(&base_encoded)
-            .map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
+        let update =
+            Update::decode_v1(&base_encoded).map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
         let mut txn = ours_doc.transact_mut();
         txn.apply_update(update)
             .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
@@ -255,8 +253,8 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
 
     let theirs_doc = Doc::with_client_id(2);
     {
-        let update = Update::decode_v1(&base_encoded)
-            .map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
+        let update =
+            Update::decode_v1(&base_encoded).map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
         let mut txn = theirs_doc.transact_mut();
         txn.apply_update(update)
             .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
@@ -327,7 +325,10 @@ pub fn dedup_adjacent_blocks(text: &str) -> String {
             && let Some(prev) = result.last()
             && prev.trim() == trimmed
         {
-            eprintln!("[crdt] dedup: removed duplicate block ({} lines)", non_empty_lines);
+            eprintln!(
+                "[crdt] dedup: removed duplicate block ({} lines)",
+                non_empty_lines
+            );
             continue;
         }
         result.push(*block);
@@ -363,7 +364,11 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
 
 /// Count the number of bytes in the common suffix of two strings.
 fn common_suffix_len(a: &str, b: &str) -> usize {
-    a.bytes().rev().zip(b.bytes().rev()).take_while(|(x, y)| x == y).count()
+    a.bytes()
+        .rev()
+        .zip(b.bytes().rev())
+        .take_while(|(x, y)| x == y)
+        .count()
 }
 
 /// Edit operation for replaying diffs onto a CRDT text.
@@ -619,19 +624,25 @@ Closing video b then reopening video b starts and shows video b. video b is visi
 ";
 
         // content_ours: base + user prompt + agent response (from run_stream with full exchange)
-        let ours = format!("\
+        let ours = format!(
+            "\
 {}{}### Re: Close A → Open B still hidden
 
 Added explicit height and visibility reset.
 
 Committed and pushed.
 
-", base_content, user_prompt);
+",
+            base_content, user_prompt
+        );
 
         // content_current: base + user prompt + minor user edit (e.g., added a blank line)
-        let theirs = format!("\
+        let theirs = format!(
+            "\
 {}{}
-", base_content, user_prompt);
+",
+            base_content, user_prompt
+        );
 
         let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
 
@@ -646,7 +657,8 @@ Committed and pushed.
         // Agent response should be present
         assert!(
             merged.contains("### Re: Close A → Open B still hidden"),
-            "Agent response missing from merge:\n{}", merged
+            "Agent response missing from merge:\n{}",
+            merged
         );
     }
 
@@ -671,7 +683,11 @@ Committed and pushed.
             "Shared text duplicated! Appeared {} times in:\n{}",
             count, merged
         );
-        assert!(merged.contains("Agent response."), "Agent text missing:\n{}", merged);
+        assert!(
+            merged.contains("Agent response."),
+            "Agent text missing:\n{}",
+            merged
+        );
     }
 
     /// Regression test: Character-level interleaving bug.
@@ -825,20 +841,25 @@ Please comprehensively test adherence to the spec.
 
         // Agent's replacement text should be contiguous (no interleaving)
         assert!(
-            merged.contains("- **AGENTS.md** — architecture, key decisions, commands, related projects"),
-            "Agent text garbled (mid-word split). Got:\n{}", merged
+            merged.contains(
+                "- **AGENTS.md** — architecture, key decisions, commands, related projects"
+            ),
+            "Agent text garbled (mid-word split). Got:\n{}",
+            merged
         );
 
         // User's addition should be preserved
         assert!(
             merged.contains("Please add tests."),
-            "User addition missing. Got:\n{}", merged
+            "User addition missing. Got:\n{}",
+            merged
         );
 
         // No fragments of old content mixed into agent's new content
         assert!(
             !merged.contains("key deAdd") && !merged.contains("key de\n"),
-            "Old content interleaved into agent text. Got:\n{}", merged
+            "Old content interleaved into agent text. Got:\n{}",
+            merged
         );
     }
 
@@ -882,13 +903,15 @@ All committed and pushed.
         // Agent text should be contiguous
         assert!(
             merged.contains("key decisions, commands, related projects"),
-            "Agent text garbled. Got:\n{}", merged
+            "Agent text garbled. Got:\n{}",
+            merged
         );
 
         // User addition preserved
         assert!(
             merged.contains("Please add tests."),
-            "User addition missing. Got:\n{}", merged
+            "User addition missing. Got:\n{}",
+            merged
         );
     }
 
@@ -956,7 +979,8 @@ commit and push all rappstack packages.
         let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# Document Title\n\nSome preamble text that both sides share.\nThis provides enough common prefix to avoid stale detection.\n\n<!-- agent:exchange -->\n";
         let footer = "<!-- /agent:exchange -->\n";
 
-        let old_exchange = "Line one of old content\nLine two of old content\nLine three of old content\n";
+        let old_exchange =
+            "Line one of old content\nLine two of old content\nLine three of old content\n";
         let baseline = format!("{header}{old_exchange}{footer}");
         let baseline_doc = CrdtDoc::from_text(&baseline);
         let baseline_state = baseline_doc.encode_state();
@@ -966,30 +990,36 @@ commit and push all rappstack packages.
         let ours = format!("{header}{agent_exchange}{footer}");
 
         // User inserts a line in the middle of the original exchange
-        let theirs = format!("{header}Line one of old content\nUser inserted this line\nLine two of old content\nLine three of old content\n{footer}");
+        let theirs = format!(
+            "{header}Line one of old content\nUser inserted this line\nLine two of old content\nLine three of old content\n{footer}"
+        );
 
         let merged = merge(Some(&baseline_state), &ours, &theirs).unwrap();
 
         // Agent text should be contiguous — no mid-word splits
         assert!(
             merged.contains("Completely new line one"),
-            "Agent line 1 missing or garbled. Got:\n{}", merged
+            "Agent line 1 missing or garbled. Got:\n{}",
+            merged
         );
         assert!(
             merged.contains("Completely new line two"),
-            "Agent line 2 missing or garbled. Got:\n{}", merged
+            "Agent line 2 missing or garbled. Got:\n{}",
+            merged
         );
 
         // User text should be preserved
         assert!(
             merged.contains("User inserted this line"),
-            "User insertion missing. Got:\n{}", merged
+            "User insertion missing. Got:\n{}",
+            merged
         );
 
         // No character interleaving (e.g., "Complete" + user text + "ly")
         assert!(
             !merged.contains("CompleteUser") && !merged.contains("Complete\nUser"),
-            "Character interleaving detected. Got:\n{}", merged
+            "Character interleaving detected. Got:\n{}",
+            merged
         );
     }
 
@@ -1010,7 +1040,10 @@ commit and push all rappstack packages.
 
         // Both should be present
         assert!(merged.contains("Agent wrote this."), "missing agent text");
-        assert!(merged.contains("User added this line."), "missing user text");
+        assert!(
+            merged.contains("User added this line."),
+            "missing user text"
+        );
         assert!(merged.contains("Base content."), "missing base text");
 
         // Agent content should appear before human content
@@ -1019,7 +1052,9 @@ commit and push all rappstack packages.
         assert!(
             agent_pos < human_pos,
             "Agent content should appear before human content.\nAgent pos: {}, Human pos: {}\nMerged:\n{}",
-            agent_pos, human_pos, merged
+            agent_pos,
+            human_pos,
+            merged
         );
     }
 
@@ -1029,7 +1064,8 @@ commit and push all rappstack packages.
 
     #[test]
     fn dedup_removes_identical_adjacent_blocks() {
-        let text = "### Re: Question\nAnswer here.\n\n### Re: Question\nAnswer here.\n\nDifferent block.";
+        let text =
+            "### Re: Question\nAnswer here.\n\n### Re: Question\nAnswer here.\n\nDifferent block.";
         let result = dedup_adjacent_blocks(text);
         assert_eq!(result.matches("### Re: Question").count(), 1);
         assert!(result.contains("Different block."));
@@ -1120,10 +1156,14 @@ commit and push all rappstack packages.
         let base = format!("{header}\n<!-- agent:boundary:base-id -->\n{footer}");
 
         // Ours: response applied via boundary-aware append (boundary replaced)
-        let ours = format!("{header}\n### Re: topic — opus-4-6\n\nResponse content here.\n\nMore response text.\n\n<!-- agent:boundary:new-id -->\n{footer}");
+        let ours = format!(
+            "{header}\n### Re: topic — opus-4-6\n\nResponse content here.\n\nMore response text.\n\n<!-- agent:boundary:new-id -->\n{footer}"
+        );
 
         // Theirs: user typed prompt before the boundary
-        let theirs = format!("{header}User prompt line one.\nUser prompt line two.\nLast line of user prompt.\n<!-- agent:boundary:base-id -->\n{footer}");
+        let theirs = format!(
+            "{header}User prompt line one.\nUser prompt line two.\nLast line of user prompt.\n<!-- agent:boundary:base-id -->\n{footer}"
+        );
 
         let base_doc = CrdtDoc::from_text(&base);
         let base_state = base_doc.encode_state();
@@ -1132,17 +1172,37 @@ commit and push all rappstack packages.
 
         // Each user prompt line should appear exactly once
         let count1 = merged.matches("User prompt line one.").count();
-        assert_eq!(count1, 1, "Line one duplicated (count={}). Merged:\n{}", count1, merged);
+        assert_eq!(
+            count1, 1,
+            "Line one duplicated (count={}). Merged:\n{}",
+            count1, merged
+        );
 
         let count2 = merged.matches("User prompt line two.").count();
-        assert_eq!(count2, 1, "Line two duplicated (count={}). Merged:\n{}", count2, merged);
+        assert_eq!(
+            count2, 1,
+            "Line two duplicated (count={}). Merged:\n{}",
+            count2, merged
+        );
 
         let count3 = merged.matches("Last line of user prompt.").count();
-        assert_eq!(count3, 1, "Last line duplicated (count={}). Merged:\n{}", count3, merged);
+        assert_eq!(
+            count3, 1,
+            "Last line duplicated (count={}). Merged:\n{}",
+            count3, merged
+        );
 
         // Response should appear exactly once
-        assert!(merged.contains("### Re: topic — opus-4-6"), "Response heading missing:\n{}", merged);
-        assert!(merged.contains("Response content here."), "Response content missing:\n{}", merged);
+        assert!(
+            merged.contains("### Re: topic — opus-4-6"),
+            "Response heading missing:\n{}",
+            merged
+        );
+        assert!(
+            merged.contains("Response content here."),
+            "Response content missing:\n{}",
+            merged
+        );
 
         // User prompt should come BEFORE response
         let prompt_pos = merged.find("User prompt line one.").unwrap();
@@ -1150,7 +1210,9 @@ commit and push all rappstack packages.
         assert!(
             prompt_pos < response_pos,
             "User prompt should precede response. prompt={} response={}\nMerged:\n{}",
-            prompt_pos, response_pos, merged
+            prompt_pos,
+            response_pos,
+            merged
         );
     }
 
@@ -1163,10 +1225,14 @@ commit and push all rappstack packages.
         let base = format!("{header}\n<!-- agent:boundary:base-id -->\n{footer}");
 
         // Ours: response + normalized ❯ prefix on user lines
-        let ours = format!("{header}❯ Review the code\n❯ What does it do?\n\n### Re: code review — opus-4-6\n\nThe code does X.\n\n<!-- agent:boundary:new-id -->\n{footer}");
+        let ours = format!(
+            "{header}❯ Review the code\n❯ What does it do?\n\n### Re: code review — opus-4-6\n\nThe code does X.\n\n<!-- agent:boundary:new-id -->\n{footer}"
+        );
 
         // Theirs: user's file with same prompt (also ❯ prefixed by IPC normalization)
-        let theirs = format!("{header}❯ Review the code\n❯ What does it do?\n<!-- agent:boundary:base-id -->\n{footer}");
+        let theirs = format!(
+            "{header}❯ Review the code\n❯ What does it do?\n<!-- agent:boundary:base-id -->\n{footer}"
+        );
 
         let base_doc = CrdtDoc::from_text(&base);
         let base_state = base_doc.encode_state();
@@ -1174,8 +1240,16 @@ commit and push all rappstack packages.
         let merged = merge(Some(&base_state), &ours, &theirs).unwrap();
 
         let count = merged.matches("❯ Review the code").count();
-        assert_eq!(count, 1, "Prompt duplicated (count={}). Merged:\n{}", count, merged);
+        assert_eq!(
+            count, 1,
+            "Prompt duplicated (count={}). Merged:\n{}",
+            count, merged
+        );
 
-        assert!(merged.contains("The code does X."), "Response missing:\n{}", merged);
+        assert!(
+            merged.contains("The code does X."),
+            "Response missing:\n{}",
+            merged
+        );
     }
 }

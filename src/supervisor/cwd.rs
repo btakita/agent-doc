@@ -122,9 +122,13 @@ fn canonicalize_dir(candidate: &Path, base: Option<&Path>, context_label: &str) 
     } else {
         candidate.to_path_buf()
     };
-    let canonical = joined
-        .canonicalize()
-        .with_context(|| format!("{}: path does not exist: {}", context_label, joined.display()))?;
+    let canonical = joined.canonicalize().with_context(|| {
+        format!(
+            "{}: path does not exist: {}",
+            context_label,
+            joined.display()
+        )
+    })?;
     if !canonical.is_dir() {
         bail!(
             "{}: path is not a directory: {}",
@@ -268,7 +272,11 @@ mod tests {
         let doc = tmp.path().join("missing.md");
         let err = resolve(None, None, &doc).unwrap_err();
         let msg = format!("{:#}", err);
-        assert!(msg.contains("document does not exist"), "error message: {}", msg);
+        assert!(
+            msg.contains("document does not exist"),
+            "error message: {}",
+            msg
+        );
     }
 
     #[test]

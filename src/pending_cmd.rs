@@ -17,11 +17,10 @@ use crate::pending;
 use crate::snapshot;
 
 fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
-    let content = std::fs::read_to_string(file)
-        .context("failed to read document")?;
-    let components = component::parse(&content)
-        .context("failed to parse components")?;
-    let comp = components.into_iter()
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    let comp = components
+        .into_iter()
         .find(|c| c.name == "pending")
         .context("document has no pending component")?;
     Ok((content, comp))
@@ -157,7 +156,11 @@ pub fn reap(file: &Path) -> Result<()> {
     }
     let new_doc = comp.replace_content(&full_content, &new_content);
     std::fs::write(file, &new_doc)?;
-    eprintln!("[pending] reaped {} item(s): {}", removed.len(), removed.join(", "));
+    eprintln!(
+        "[pending] reaped {} item(s): {}",
+        removed.len(),
+        removed.join(", ")
+    );
     Ok(())
 }
 
@@ -167,12 +170,14 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let lines: Vec<&str> = existing.lines().collect();
     let new_lines: Vec<String> = if contains {
-        lines.iter()
+        lines
+            .iter()
             .filter(|line| !line.contains(target))
             .map(|s| s.to_string())
             .collect()
     } else {
-        lines.iter()
+        lines
+            .iter()
             .filter(|line| {
                 let trimmed = line.trim().trim_start_matches("- ").trim();
                 trimmed != target
@@ -198,7 +203,8 @@ pub fn prune(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let lines: Vec<&str> = existing.lines().collect();
-    let new_lines: Vec<String> = lines.iter()
+    let new_lines: Vec<String> = lines
+        .iter()
         .filter(|line| {
             let trimmed = line.trim();
             !trimmed.starts_with("- [x]")
@@ -229,12 +235,21 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let (new_content, resolved) = pending::op_resolve_gate(existing, gate_type);
     if resolved.is_empty() {
-        eprintln!("[pending] no [/{}] items to resolve in {}", gate_type, file.display());
+        eprintln!(
+            "[pending] no [/{}] items to resolve in {}",
+            gate_type,
+            file.display()
+        );
         return Ok(());
     }
     let new_doc = comp.replace_content(&full_content, &new_content);
     std::fs::write(file, &new_doc)?;
-    eprintln!("[pending] resolved {} [/{}] item(s): {}", resolved.len(), gate_type, resolved.join(", "));
+    eprintln!(
+        "[pending] resolved {} [/{}] item(s): {}",
+        resolved.len(),
+        gate_type,
+        resolved.join(", ")
+    );
     for id in &resolved {
         println!("{}", id);
     }
@@ -272,7 +287,8 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
             let name_str = name.to_string_lossy();
             if path.is_dir() {
                 // Skip hidden dirs and common non-document dirs
-                if !name_str.starts_with('.') && name_str != "node_modules" && name_str != "target" {
+                if !name_str.starts_with('.') && name_str != "node_modules" && name_str != "target"
+                {
                     dirs.push(path);
                 }
                 continue;
@@ -297,7 +313,12 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
             if !resolved.is_empty() {
                 let new_doc = comp.replace_content(&content, &new_content);
                 std::fs::write(&path, &new_doc)?;
-                eprintln!("[resolve-gate] {}: resolved {} item(s): {}", path.display(), resolved.len(), resolved.join(", "));
+                eprintln!(
+                    "[resolve-gate] {}: resolved {} item(s): {}",
+                    path.display(),
+                    resolved.len(),
+                    resolved.join(", ")
+                );
                 total += resolved.len();
             }
         }
@@ -337,7 +358,10 @@ mod tests {
     }
 
     fn doc_with_pending(items: &str) -> (TempDir, PathBuf) {
-        let content = format!("---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n", items);
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n",
+            items
+        );
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
         (tmp, doc)
@@ -355,15 +379,28 @@ mod tests {
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();
         let lines: Vec<&str> = pending.lines().collect();
-        assert!(lines[0].contains("item two"), "expected new item first, got: {}", pending);
-        assert!(lines[1].contains("item one"), "expected existing item second, got: {}", pending);
+        assert!(
+            lines[0].contains("item two"),
+            "expected new item first, got: {}",
+            pending
+        );
+        assert!(
+            lines[1].contains("item one"),
+            "expected existing item second, got: {}",
+            pending
+        );
         assert_eq!(content.matches("[#").count(), 2);
     }
 
     #[test]
     fn add_many_preserves_sequence_order_at_front() {
         let (_tmp, doc) = doc_with_pending("- [ ] [#abcd] existing item");
-        add_many(&doc, &["first new".to_string(), "second new".to_string()], false).unwrap();
+        add_many(
+            &doc,
+            &["first new".to_string(), "second new".to_string()],
+            false,
+        )
+        .unwrap();
 
         let content = fs::read_to_string(&doc).unwrap();
         let pending = content
@@ -372,9 +409,21 @@ mod tests {
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();
         let lines: Vec<&str> = pending.lines().collect();
-        assert!(lines[0].contains("first new"), "expected first batch item first, got: {}", pending);
-        assert!(lines[1].contains("second new"), "expected second batch item second, got: {}", pending);
-        assert!(lines[2].contains("existing item"), "expected existing item after new items, got: {}", pending);
+        assert!(
+            lines[0].contains("first new"),
+            "expected first batch item first, got: {}",
+            pending
+        );
+        assert!(
+            lines[1].contains("second new"),
+            "expected second batch item second, got: {}",
+            pending
+        );
+        assert!(
+            lines[2].contains("existing item"),
+            "expected existing item after new items, got: {}",
+            pending
+        );
     }
 
     #[test]
@@ -437,7 +486,9 @@ mod tests {
 
     #[test]
     fn resolve_gate_flips_typed_items() {
-        let (_tmp, doc) = doc_with_pending("- [/release] [#a1b2] Release v1.0\n- [/deploy] [#c3d4] Deploy\n- [/] [#e5f6] Generic");
+        let (_tmp, doc) = doc_with_pending(
+            "- [/release] [#a1b2] Release v1.0\n- [/deploy] [#c3d4] Deploy\n- [/] [#e5f6] Generic",
+        );
         resolve_gate(&doc, "release").unwrap();
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[x]"), "release item should be done");

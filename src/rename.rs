@@ -56,8 +56,7 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
         let abs = if old_path.is_absolute() {
             old_path.to_string_lossy().to_string()
         } else {
-            let cwd = std::env::current_dir()
-                .context("failed to get current directory")?;
+            let cwd = std::env::current_dir().context("failed to get current directory")?;
             cwd.join(old_path).to_string_lossy().to_string()
         };
         snapshot::doc_hash_from_str(&abs)
@@ -92,9 +91,21 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
                 new_file.display()
             );
         }
-        std::fs::rename(&old_file, &new_file)
-            .with_context(|| format!("failed to rename {} → {}", old_file.display(), new_file.display()))?;
-        eprintln!("[rename] {}/{}.{} → {}.{}", subdir, &old_hash[..8], ext, &new_hash[..8], ext);
+        std::fs::rename(&old_file, &new_file).with_context(|| {
+            format!(
+                "failed to rename {} → {}",
+                old_file.display(),
+                new_file.display()
+            )
+        })?;
+        eprintln!(
+            "[rename] {}/{}.{} → {}.{}",
+            subdir,
+            &old_hash[..8],
+            ext,
+            &new_hash[..8],
+            ext
+        );
         migrated += 1;
     }
 
@@ -143,7 +154,10 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
 
     eprintln!(
         "[rename] migrated {} state file(s), updated {} session(s): {} → {}",
-        migrated, updated_sessions, old_path.display(), new_path.display()
+        migrated,
+        updated_sessions,
+        old_path.display(),
+        new_path.display()
     );
     Ok(())
 }

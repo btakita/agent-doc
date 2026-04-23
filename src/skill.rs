@@ -397,8 +397,20 @@ mod tests {
     #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
         assert!(BUNDLED_SKILL.contains("Manual repair / missed patchback rule"));
-        assert!(BUNDLED_SKILL.contains("do **not** patch the assistant response directly into the file"));
+        assert!(
+            BUNDLED_SKILL
+                .contains("do **not** patch the assistant response directly into the file")
+        );
         assert!(BUNDLED_SKILL.contains("Use `agent-doc write --commit <FILE>`"));
+    }
+
+    #[test]
+    fn bundled_skill_contains_model_short_name_attribution_rule() {
+        assert!(BUNDLED_SKILL.contains("### Re: topic — gpt-5"));
+        assert!(BUNDLED_SKILL.contains("### Re: topic — opus-4-6"));
+        assert!(
+            BUNDLED_SKILL.contains("Never use the harness label (`codex`, `claude`)")
+        );
     }
 
     #[test]
@@ -409,6 +421,8 @@ mod tests {
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(content.contains("### Re: topic — gpt-5"));
+        assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
     }
 
@@ -439,8 +453,13 @@ mod tests {
         assert!(content.contains("Claude Code"));
         assert!(content.contains("Codex"));
         assert!(content.contains("Harness Detection"));
+        assert!(content.contains("Response Header Attribution"));
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("### Re: topic — gpt-5"));
+        assert!(content.contains("### Re: topic — opus-4-6"));
+        assert!(content.contains("### Re: topic — codex"));
+        assert!(content.contains("### Re: topic — claude"));
         assert!(content.contains("Manual repair / missed patchback"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
     }

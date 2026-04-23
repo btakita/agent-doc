@@ -8,11 +8,10 @@ use std::path::Path;
 use crate::component;
 
 fn find_status_component(file: &Path) -> Result<(String, component::Component)> {
-    let content = std::fs::read_to_string(file)
-        .context("failed to read document")?;
-    let components = component::parse(&content)
-        .context("failed to parse components")?;
-    let comp = components.into_iter()
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    let comp = components
+        .into_iter()
         .find(|c| c.name == "status")
         .context("document has no status component")?;
     Ok((content, comp))

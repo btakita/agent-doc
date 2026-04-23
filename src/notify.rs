@@ -39,7 +39,7 @@
 //! - auto_create_inserts_after_exchange: component placed after exchange close tag
 //! - message_required_without_pending: no message, no pending → `Err`
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
@@ -125,7 +125,10 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     new_doc.push_str(&doc[insert_pos..]);
 
     std::fs::write(file, &new_doc)?;
-    eprintln!("[notify] auto-created agent:pending component in {}", file.display());
+    eprintln!(
+        "[notify] auto-created agent:pending component in {}",
+        file.display()
+    );
     Ok(true)
 }
 
@@ -207,9 +210,8 @@ pub fn run(
         return Ok(());
     }
 
-    let message = message.ok_or_else(|| {
-        anyhow::anyhow!("message is required when --pending-add is not used")
-    })?;
+    let message = message
+        .ok_or_else(|| anyhow::anyhow!("message is required when --pending-add is not used"))?;
 
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -220,12 +222,7 @@ pub fn run(
     let exchange = components
         .iter()
         .find(|c| c.name == "exchange")
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "component 'exchange' not found in {}",
-                file.display()
-            )
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("component 'exchange' not found in {}", file.display()))?;
 
     let notification = format_notification(message, source, affects);
 
@@ -287,11 +284,10 @@ pub fn run(
 /// Add a single pending item to a document's pending component.
 /// Returns the assigned hash ID on success.
 fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Result<String> {
-    let content = std::fs::read_to_string(file)
-        .context("failed to read document")?;
-    let components = component::parse(&content)
-        .context("failed to parse components")?;
-    let comp = components.into_iter()
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    let comp = components
+        .into_iter()
         .find(|c| c.name == "pending")
         .context("document has no pending component")?;
     let existing = &content[comp.open_end..comp.close_start];
@@ -353,7 +349,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\nSome content\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Hello world"), None, None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Hello world"),
+            None,
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("> **[NOTIFY]**"));
@@ -371,7 +377,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Update available"), Some("build-monitor"), None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Update available"),
+            Some("build-monitor"),
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("> **[NOTIFY from build-monitor]**"));
@@ -386,7 +402,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Something happened"), None, None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Something happened"),
+            None,
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("> **[NOTIFY]**"));
@@ -402,7 +428,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("API changed"), None, Some("integration tests"), false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("API changed"),
+            None,
+            Some("integration tests"),
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("> **Re-evaluate:** integration tests"));
@@ -432,12 +468,25 @@ mod tests {
             "<!-- agent:exchange patch=append -->\nExisting content\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Before boundary"), None, None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Before boundary"),
+            None,
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let notify_pos = result.find("> Before boundary").unwrap();
         let boundary_pos = result.find("<!-- agent:boundary:abc123 -->").unwrap();
-        assert!(notify_pos < boundary_pos, "notification should be before boundary");
+        assert!(
+            notify_pos < boundary_pos,
+            "notification should be before boundary"
+        );
     }
 
     #[test]
@@ -449,7 +498,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Line one\nLine two\nLine three"), None, None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Line one\nLine two\nLine three"),
+            None,
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("> Line one"));
@@ -466,7 +525,17 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         );
 
-        run(&doc, Some("Snapshot test"), None, None, false, &[], &[], false).unwrap();
+        run(
+            &doc,
+            Some("Snapshot test"),
+            None,
+            None,
+            false,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
 
         let snap_path = dir.path().join(snapshot::path_for(&doc).unwrap());
         let snap = std::fs::read_to_string(snap_path).unwrap();
@@ -516,8 +585,16 @@ mod tests {
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();
         let lines: Vec<&str> = pending.lines().collect();
-        assert!(lines[0].contains("new item"), "expected new item first, got: {}", pending);
-        assert!(lines[1].contains("existing item"), "expected existing item second, got: {}", pending);
+        assert!(
+            lines[0].contains("new item"),
+            "expected new item first, got: {}",
+            pending
+        );
+        assert!(
+            lines[1].contains("existing item"),
+            "expected existing item second, got: {}",
+            pending
+        );
         assert!(result.matches("[#").count() >= 2);
     }
 
@@ -540,9 +617,21 @@ mod tests {
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();
         let lines: Vec<&str> = pending.lines().collect();
-        assert!(lines[0].contains("first new"), "expected first new item first, got: {}", pending);
-        assert!(lines[1].contains("second new"), "expected second new item second, got: {}", pending);
-        assert!(lines[2].contains("existing item"), "expected existing item after new items, got: {}", pending);
+        assert!(
+            lines[0].contains("first new"),
+            "expected first new item first, got: {}",
+            pending
+        );
+        assert!(
+            lines[1].contains("second new"),
+            "expected second new item second, got: {}",
+            pending
+        );
+        assert!(
+            lines[2].contains("existing item"),
+            "expected existing item after new items, got: {}",
+            pending
+        );
     }
 
     #[test]
@@ -591,7 +680,17 @@ mod tests {
         );
 
         let items = vec!["new pending item".to_string()];
-        run(&doc, Some("Notification msg"), None, None, false, &items, &[], false).unwrap();
+        run(
+            &doc,
+            Some("Notification msg"),
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         // Both pending item and exchange blockquote should be present
@@ -632,7 +731,10 @@ mod tests {
         let result = std::fs::read_to_string(&doc).unwrap();
         let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
         let pending_open = result.find("<!-- agent:pending").unwrap();
-        assert!(pending_open > exchange_close, "pending should be after exchange close");
+        assert!(
+            pending_open > exchange_close,
+            "pending should be after exchange close"
+        );
     }
 
     #[test]
@@ -646,6 +748,11 @@ mod tests {
 
         let result = run(&doc, None, None, None, false, &[], &[], false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("message is required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("message is required")
+        );
     }
 }

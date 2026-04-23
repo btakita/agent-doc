@@ -118,7 +118,10 @@ impl<'de> Deserialize<'de> for AgentDocFormat {
         match s.as_str() {
             "append" | "inline" => Ok(Self::Append),
             "template" => Ok(Self::Template),
-            other => Err(serde::de::Error::unknown_variant(other, &["inline", "append", "template"])),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["inline", "append", "template"],
+            )),
         }
     }
 }
@@ -456,7 +459,10 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     let patch: serde_yaml::Value = serde_yaml::from_str(yaml_fields)
         .unwrap_or(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
-    let mapping = patch.as_mapping().unwrap_or(&serde_yaml::Mapping::new()).clone();
+    let mapping = patch
+        .as_mapping()
+        .unwrap_or(&serde_yaml::Mapping::new())
+        .clone();
 
     for (key, value) in &mapping {
         let key_str = key.as_str().unwrap_or("");
@@ -545,7 +551,8 @@ mod tests {
 
     #[test]
     fn parse_all_fields() {
-        let content = "---\nsession: abc-123\nagent: claude\nmodel: opus\nbranch: main\n---\nBody\n";
+        let content =
+            "---\nsession: abc-123\nagent: claude\nmodel: opus\nbranch: main\n---\nBody\n";
         let (fm, body) = parse(content).unwrap();
         assert_eq!(fm.session.as_deref(), Some("abc-123"));
         assert_eq!(fm.agent.as_deref(), Some("claude"));
@@ -935,7 +942,8 @@ mod tests {
     #[test]
     fn set_format_and_write_clears_deprecated_mode() {
         let content = "---\nagent_doc_mode: stream\n---\nBody\n";
-        let result = set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
+        let result =
+            set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert!(fm.mode.is_none());
         assert_eq!(fm.format, Some(AgentDocFormat::Template));
@@ -1008,7 +1016,8 @@ mod tests {
     #[test]
     fn set_format_and_write_clears_deprecated() {
         let content = "---\nagent_doc_mode: append\n---\nBody\n";
-        let result = set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
+        let result =
+            set_format_and_write(content, AgentDocFormat::Template, AgentDocWrite::Crdt).unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert!(fm.mode.is_none());
         assert_eq!(fm.format, Some(AgentDocFormat::Template));
@@ -1019,8 +1028,14 @@ mod tests {
     fn hooks_roundtrip() {
         let content = "---\nhooks:\n  session_start:\n    - \"echo start {{session_id}}\"\n  post_write:\n    - \"notify {{file}}\"\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
-        assert_eq!(fm.hooks.get("session_start"), Some(&vec!["echo start {{session_id}}".to_string()]));
-        assert_eq!(fm.hooks.get("post_write"), Some(&vec!["notify {{file}}".to_string()]));
+        assert_eq!(
+            fm.hooks.get("session_start"),
+            Some(&vec!["echo start {{session_id}}".to_string()])
+        );
+        assert_eq!(
+            fm.hooks.get("post_write"),
+            Some(&vec!["notify {{file}}".to_string()])
+        );
     }
 
     #[test]
@@ -1116,8 +1131,7 @@ mod tests {
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content =
-            "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -1136,10 +1150,7 @@ mod tests {
         };
         let written = write(&fm, "body\n").unwrap();
         let (fm2, _) = parse(&written).unwrap();
-        assert_eq!(
-            fm2.agent_args.as_deref(),
-            Some("--json -s workspace-write")
-        );
+        assert_eq!(fm2.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert_eq!(fm2.codex_args.as_deref(), Some("-s danger-full-access"));
     }
 

@@ -44,8 +44,8 @@
 use anyhow::Result;
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
 use std::io::Read as _;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -99,9 +99,8 @@ fn try_github_release_upgrade(version: &str) -> bool {
     };
 
     let archive_name = format!("{CRATE_NAME}-{target}.tar.gz");
-    let url = format!(
-        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/{archive_name}"
-    );
+    let url =
+        format!("https://github.com/{GITHUB_REPO}/releases/download/v{version}/{archive_name}");
 
     eprintln!("Downloading from GitHub Releases...");
     eprintln!("  {url}");
@@ -199,10 +198,11 @@ pub fn run() -> Result<()> {
         .status();
 
     if let Ok(status) = cargo_status
-        && status.success() {
-            eprintln!("Successfully upgraded to v{latest} via cargo.");
-            return Ok(());
-        }
+        && status.success()
+    {
+        eprintln!("Successfully upgraded to v{latest} via cargo.");
+        return Ok(());
+    }
 
     // Strategy 3: pip install
     eprintln!("cargo install failed, trying: pip install --upgrade {CRATE_NAME}");
@@ -211,10 +211,11 @@ pub fn run() -> Result<()> {
         .status();
 
     if let Ok(status) = pip_status
-        && status.success() {
-            eprintln!("Successfully upgraded to v{latest} via pip.");
-            return Ok(());
-        }
+        && status.success()
+    {
+        eprintln!("Successfully upgraded to v{latest} via pip.");
+        return Ok(());
+    }
 
     // Manual instructions
     eprintln!(
@@ -273,10 +274,7 @@ fn read_cache() -> Option<String> {
 fn write_cache(version: &str) -> Option<()> {
     let path = cache_path()?;
     fs::create_dir_all(path.parent()?).ok()?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_secs();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
     let cache = serde_json::json!({
         "version": version,
         "timestamp": now,
@@ -293,10 +291,7 @@ fn fetch_latest_version(crate_name: &str) -> Option<String> {
         .build();
     let resp = agent.get(&url).call().ok()?;
     let body: Value = resp.into_json().ok()?;
-    let max_version = body
-        .pointer("/crate/max_version")?
-        .as_str()?
-        .to_string();
+    let max_version = body.pointer("/crate/max_version")?.as_str()?.to_string();
     Some(max_version)
 }
 

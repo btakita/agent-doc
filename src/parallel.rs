@@ -79,8 +79,9 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = snapshot::find_project_root(&canonical)
-        .ok_or_else(|| anyhow::anyhow!("no .agent-doc/ project root found for {}", file.display()))?;
+    let project_root = snapshot::find_project_root(&canonical).ok_or_else(|| {
+        anyhow::anyhow!("no .agent-doc/ project root found for {}", file.display())
+    })?;
 
     // Step 2: Read frontmatter for agent_doc_session
     let content = std::fs::read_to_string(file)
@@ -100,11 +101,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             .unwrap_or_else(|| "claude".to_string())
     };
 
-    let agent_doc_session = fm
-        .session
-        .as_deref()
-        .unwrap_or("deep")
-        .to_string();
+    let agent_doc_session = fm.session.as_deref().unwrap_or("deep").to_string();
 
     eprintln!("[parallel] Project root: {}", project_root.display());
     eprintln!("[parallel] Tmux session: {}", session_name);
@@ -131,10 +128,18 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
 
     for (i, task) in config.tasks.iter().enumerate() {
         let task_cwd = if config.no_worktree {
-            eprintln!("[parallel] Task {}/{} (no worktree, using project root)", i + 1, config.tasks.len());
+            eprintln!(
+                "[parallel] Task {}/{} (no worktree, using project root)",
+                i + 1,
+                config.tasks.len()
+            );
             project_root.clone()
         } else {
-            eprintln!("[parallel] Creating worktree for task {}/{}...", i + 1, config.tasks.len());
+            eprintln!(
+                "[parallel] Creating worktree for task {}/{}...",
+                i + 1,
+                config.tasks.len()
+            );
             let worktree_info = crate::worktree::create(&project_root, &agent_doc_session, i)?;
             eprintln!("[parallel]   Worktree: {}", worktree_info.path.display());
             worktree_info.path
@@ -146,7 +151,8 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             .with_context(|| format!("failed to write prompt to {}", prompt_path.display()))?;
 
         // Create tmux pane in the session
-        let pane_id = tmux.auto_start(&session_name, &task_cwd)
+        let pane_id = tmux
+            .auto_start(&session_name, &task_cwd)
             .with_context(|| format!("failed to create tmux pane for task {}", i + 1))?;
         eprintln!("[parallel]   Pane: {}", pane_id);
 
@@ -166,12 +172,16 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
-        tmux.send_keys(&pane_id, &cmd_str)
-            .with_context(|| format!("failed to send keys to pane {} for task {}", pane_id, i + 1))?;
+        tmux.send_keys(&pane_id, &cmd_str).with_context(|| {
+            format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
+        })?;
 
         // Stash the pane so it doesn't clutter the user's view
         if let Err(e) = tmux.stash_pane(&pane_id, &session_name) {
-            eprintln!("[parallel]   Warning: failed to stash pane {}: {}", pane_id, e);
+            eprintln!(
+                "[parallel]   Warning: failed to stash pane {}: {}",
+                pane_id, e
+            );
         }
 
         task_states.push(TaskState {
@@ -196,12 +206,22 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
 
         // Check timeout
         if start.elapsed() > timeout {
-            eprintln!("[parallel] Timeout reached ({} seconds). Killing remaining panes...", config.timeout_secs);
+            eprintln!(
+                "[parallel] Timeout reached ({} seconds). Killing remaining panes...",
+                config.timeout_secs
+            );
             for task in &mut task_states {
                 if !task.completed {
-                    eprintln!("[parallel]   Killing pane {} (task {})", task.pane_id, task.index + 1);
+                    eprintln!(
+                        "[parallel]   Killing pane {} (task {})",
+                        task.pane_id,
+                        task.index + 1
+                    );
                     if let Err(e) = tmux.kill_pane(&task.pane_id) {
-                        eprintln!("[parallel]   Warning: failed to kill pane {}: {}", task.pane_id, e);
+                        eprintln!(
+                            "[parallel]   Warning: failed to kill pane {}: {}",
+                            task.pane_id, e
+                        );
                     }
                     task.completed = true;
                 }
@@ -217,11 +237,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             }
             if !tmux.pane_alive(&task.pane_id) {
                 task.completed = true;
-                eprintln!(
-                    "[parallel] Task {}/{} complete.",
-                    task.index + 1,
-                    total
-                );
+                eprintln!("[parallel] Task {}/{} complete.", task.index + 1, total);
             }
         }
 
@@ -250,13 +266,18 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             }
             Ok(_) => None,
             Err(e) => {
-                eprintln!("[parallel]   Warning: could not read result for task {}: {}", task.index + 1, e);
+                eprintln!(
+                    "[parallel]   Warning: could not read result for task {}: {}",
+                    task.index + 1,
+                    e
+                );
                 // Try reading the log file for error info
                 let log_content = std::fs::read_to_string(&log_path).ok();
                 if let Some(ref log) = log_content
-                    && !log.trim().is_empty() {
-                        eprintln!("[parallel]   Log: {}", log.trim());
-                    }
+                    && !log.trim().is_empty()
+                {
+                    eprintln!("[parallel]   Log: {}", log.trim());
+                }
                 None
             }
         };
@@ -304,9 +325,10 @@ fn extract_result_text(json_str: &str) -> Option<String> {
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(line)
-            && let Some(result) = val.get("result").and_then(|v| v.as_str()) {
-                return Some(result.to_string());
-            }
+            && let Some(result) = val.get("result").and_then(|v| v.as_str())
+        {
+            return Some(result.to_string());
+        }
     }
     None
 }
@@ -317,7 +339,11 @@ fn format_results(results: &[TaskResult]) -> String {
     out.push_str("## Deep Results\n\n");
 
     for result in results {
-        out.push_str(&format!("### Task {} — {}\n\n", result.index + 1, result.description));
+        out.push_str(&format!(
+            "### Task {} — {}\n\n",
+            result.index + 1,
+            result.description
+        ));
 
         // Agent output
         if let Some(ref output) = result.output {

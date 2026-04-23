@@ -102,7 +102,10 @@ pub fn run(
         interval,
         target,
         thinking_enabled,
-        thinking_target.as_ref().map(|t| format!(", thinking_target: {}", t)).unwrap_or_default()
+        thinking_target
+            .as_ref()
+            .map(|t| format!(", thinking_target: {}", t))
+            .unwrap_or_default()
     );
 
     // Compute diff
@@ -112,7 +115,10 @@ pub fn run(
             d
         }
         None => {
-            eprintln!("[stream] Nothing changed since last run for {}", file.display());
+            eprintln!(
+                "[stream] Nothing changed since last run for {}",
+                file.display()
+            );
             return Ok(());
         }
     };
@@ -140,7 +146,10 @@ pub fn run(
         match crate::env::expand_values(&fm.env) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("[stream] env expansion failed: {} — continuing without env", e);
+                eprintln!(
+                    "[stream] env expansion failed: {} — continuing without env",
+                    e
+                );
                 Vec::new()
             }
         }
@@ -153,9 +162,7 @@ pub fn run(
     let prompt = build_prompt(&fm, &the_diff, &content_original);
 
     // Pre-commit user changes
-    if !no_git
-        && let Err(e) = git::commit(file)
-    {
+    if !no_git && let Err(e) = git::commit(file) {
         eprintln!("[stream] git commit skipped: {}", e);
     }
 
@@ -176,7 +183,14 @@ pub fn run(
     };
 
     // Run the write-back loop
-    let result = stream_loop(file, chunks, interval, target, &content_original, thinking_cfg.as_ref())?;
+    let result = stream_loop(
+        file,
+        chunks,
+        interval,
+        target,
+        &content_original,
+        thinking_cfg.as_ref(),
+    )?;
 
     // Update resume ID if we got a session_id
     if let Some(ref sid) = result.session_id {
@@ -187,9 +201,7 @@ pub fn run(
     }
 
     // Final git commit
-    if !no_git
-        && let Err(e) = git::commit(file)
-    {
+    if !no_git && let Err(e) = git::commit(file) {
         eprintln!("[stream] git commit skipped: {}", e);
     }
 
@@ -278,10 +290,7 @@ fn stream_loop(
             }
 
             // Flush thinking text to separate component (or skip if interleaved)
-            if has_thinking
-                && thinking_text != last_thinking
-                && !thinking_text.is_empty()
-            {
+            if has_thinking && thinking_text != last_thinking && !thinking_text.is_empty() {
                 if let Some(ref tt) = thinking_target {
                     match flush_to_document(&file_path, &thinking_text, tt, &baseline_copy) {
                         Ok(()) => {
@@ -322,9 +331,7 @@ fn stream_loop(
             let mut buf = buffer.lock().unwrap();
             // For assistant messages, the text is cumulative (full text so far)
             // For result messages, it's the final full text
-            if thinking_cfg.is_some()
-                && thinking_cfg.unwrap().target.is_none()
-            {
+            if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
                 // Interleave: prepend thinking as collapsible details
                 let thinking_text = thinking_buffer.lock().unwrap().clone();
                 if !thinking_text.is_empty() {
@@ -349,7 +356,9 @@ fn stream_loop(
 
     // Signal timer thread to do final flush
     let _ = done_tx.send(());
-    timer_handle.join().map_err(|_| anyhow::anyhow!("timer thread panicked"))?;
+    timer_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("timer thread panicked"))?;
 
     eprintln!("\n[stream] Received {} chunks", chunk_count);
 
@@ -378,13 +387,21 @@ fn stream_loop(
         // Save this as snapshot so the next diff detects any concurrent user edits.
         // Must use replace mode for the target — stream buffer is cumulative, not incremental.
         let content_ours = {
-            let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
-            let (patches, unmatched) = crate::template::parse_patches(&patch)
-                .unwrap_or_default();
+            let patch = format!(
+                "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
+                target, final_text, target
+            );
+            let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap_or_default();
             let mut mode_overrides = std::collections::HashMap::new();
             mode_overrides.insert(target.to_string(), "replace".to_string());
-            crate::template::apply_patches_with_overrides(baseline, &patches, &unmatched, file, &mode_overrides)
-                .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
+            crate::template::apply_patches_with_overrides(
+                baseline,
+                &patches,
+                &unmatched,
+                file,
+                &mode_overrides,
+            )
+            .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
         };
         snapshot::save(file, &content_ours)?;
         let doc = crdt::CrdtDoc::from_text(&content_ours);
@@ -416,10 +433,13 @@ pub(crate) fn flush_to_document(
     _baseline: &str,
 ) -> Result<()> {
     // Build a patch block targeting the component
-    let patch_response = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n", target, text, target);
+    let patch_response = format!(
+        "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",
+        target, text, target
+    );
 
-    let (patches, unmatched) = template::parse_patches(&patch_response)
-        .context("failed to parse patch blocks")?;
+    let (patches, unmatched) =
+        template::parse_patches(&patch_response).context("failed to parse patch blocks")?;
 
     // Try IPC first — if plugin is active, it applies patches via Document API
     // (no "externally modified" dialog, cursor preserved, undo preserved)
@@ -451,8 +471,13 @@ pub(crate) fn flush_to_document(
 
     // Apply patches with replace override for stream target
     let content_patched = template::apply_patches_with_overrides(
-        &content_current, &patches, &unmatched, file, &mode_overrides,
-    ).context("failed to apply template patches")?;
+        &content_current,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+    )
+    .context("failed to apply template patches")?;
 
     // Write atomically
     crate::write::atomic_write_pub(file, &content_patched)?;
@@ -497,12 +522,19 @@ fn resolve_streaming(
         None => (None, None),
     };
     match name {
-        "claude" => Ok(Box::new(agent::claude::Claude::new(cmd, args).with_env(env))),
+        "claude" => Ok(Box::new(
+            agent::claude::Claude::new(cmd, args).with_env(env),
+        )),
         other => {
             if config.is_some() {
-                Ok(Box::new(agent::claude::Claude::new(cmd, args).with_env(env)))
+                Ok(Box::new(
+                    agent::claude::Claude::new(cmd, args).with_env(env),
+                ))
             } else {
-                anyhow::bail!("Unknown streaming agent backend: {} (only claude supports streaming)", other)
+                anyhow::bail!(
+                    "Unknown streaming agent backend: {} (only claude supports streaming)",
+                    other
+                )
             }
         }
     }
@@ -533,8 +565,16 @@ mod tests {
         flush_to_document(&doc, "New streamed content", "output", content).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("New streamed content"), "patched content missing: {}", result);
-        assert!(!result.contains("Old content"), "old content should be replaced: {}", result);
+        assert!(
+            result.contains("New streamed content"),
+            "patched content missing: {}",
+            result
+        );
+        assert!(
+            !result.contains("Old content"),
+            "old content should be replaced: {}",
+            result
+        );
     }
 
     #[test]
@@ -552,8 +592,15 @@ mod tests {
         flush_to_document(&doc, "New content", "exchange", content).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(!result.contains("Existing"), "stream flush should replace, not append: {}", result);
-        assert!(result.contains("New content"), "new content should be present");
+        assert!(
+            !result.contains("Existing"),
+            "stream flush should replace, not append: {}",
+            result
+        );
+        assert!(
+            result.contains("New content"),
+            "new content should be present"
+        );
     }
 
     #[test]
@@ -574,9 +621,17 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         // Should contain "Hello world" exactly once, not "Hello\nHello world"
-        assert!(result.contains("Hello world"), "cumulative text should be present: {}", result);
+        assert!(
+            result.contains("Hello world"),
+            "cumulative text should be present: {}",
+            result
+        );
         let hello_count = result.matches("Hello").count();
-        assert_eq!(hello_count, 1, "Hello should appear exactly once (replace, not append): {}", result);
+        assert_eq!(
+            hello_count, 1,
+            "Hello should appear exactly once (replace, not append): {}",
+            result
+        );
     }
 
     #[test]
@@ -593,7 +648,10 @@ mod tests {
         flush_to_document(&doc, "New content", "output", content).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("Status line"), "status component should be preserved");
+        assert!(
+            result.contains("Status line"),
+            "status component should be preserved"
+        );
         assert!(result.contains("New content"), "output should be updated");
     }
 
@@ -611,16 +669,35 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         let chunks = mock_chunks(vec![
-            StreamChunk { text: "Hello".to_string(), thinking: None, is_final: false, session_id: None },
-            StreamChunk { text: "Hello world".to_string(), thinking: None, is_final: false, session_id: None },
-            StreamChunk { text: "Hello world!".to_string(), thinking: None, is_final: true, session_id: Some("sess-1".to_string()) },
+            StreamChunk {
+                text: "Hello".to_string(),
+                thinking: None,
+                is_final: false,
+                session_id: None,
+            },
+            StreamChunk {
+                text: "Hello world".to_string(),
+                thinking: None,
+                is_final: false,
+                session_id: None,
+            },
+            StreamChunk {
+                text: "Hello world!".to_string(),
+                thinking: None,
+                is_final: true,
+                session_id: Some("sess-1".to_string()),
+            },
         ]);
 
         let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
         assert_eq!(result.session_id.as_deref(), Some("sess-1"));
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
-        assert!(final_doc.contains("Hello world!"), "final text should be in document: {}", final_doc);
+        assert!(
+            final_doc.contains("Hello world!"),
+            "final text should be in document: {}",
+            final_doc
+        );
     }
 
     #[test]
@@ -637,8 +714,18 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         let chunks = mock_chunks(vec![
-            StreamChunk { text: String::new(), thinking: None, is_final: false, session_id: None },
-            StreamChunk { text: String::new(), thinking: None, is_final: true, session_id: None },
+            StreamChunk {
+                text: String::new(),
+                thinking: None,
+                is_final: false,
+                session_id: None,
+            },
+            StreamChunk {
+                text: String::new(),
+                thinking: None,
+                is_final: true,
+                session_id: None,
+            },
         ]);
 
         let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
@@ -673,7 +760,10 @@ mod tests {
     fn build_prompt_mentions_patch_blocks() {
         let fm = frontmatter::Frontmatter::default();
         let prompt = build_prompt(&fm, "diff", "content");
-        assert!(prompt.contains("patch:exchange"), "prompt should mention patch block format");
+        assert!(
+            prompt.contains("patch:exchange"),
+            "prompt should mention patch block format"
+        );
     }
 
     #[test]
@@ -707,12 +797,21 @@ mod tests {
         let thinking_cfg = ThinkingConfig {
             target: Some("log".to_string()),
         };
-        let result = stream_loop(&doc, chunks, 100, "exchange", content, Some(&thinking_cfg)).unwrap();
+        let result =
+            stream_loop(&doc, chunks, 100, "exchange", content, Some(&thinking_cfg)).unwrap();
         assert_eq!(result.session_id.as_deref(), Some("sess-2"));
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
-        assert!(final_doc.contains("The answer is 42."), "response text should be in exchange: {}", final_doc);
-        assert!(final_doc.contains("Yes, 42."), "thinking should be in log: {}", final_doc);
+        assert!(
+            final_doc.contains("The answer is 42."),
+            "response text should be in exchange: {}",
+            final_doc
+        );
+        assert!(
+            final_doc.contains("Yes, 42."),
+            "thinking should be in log: {}",
+            final_doc
+        );
     }
 
     #[test]
@@ -725,26 +824,38 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
 
         let doc = dir.path().join("test.md");
-        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
+        let content =
+            "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        let chunks = mock_chunks(vec![
-            StreamChunk {
-                text: "The answer.".to_string(),
-                thinking: Some("Reasoning here.".to_string()),
-                is_final: true,
-                session_id: None,
-            },
-        ]);
+        let chunks = mock_chunks(vec![StreamChunk {
+            text: "The answer.".to_string(),
+            thinking: Some("Reasoning here.".to_string()),
+            is_final: true,
+            session_id: None,
+        }]);
 
         let thinking_cfg = ThinkingConfig { target: None }; // interleave
-        let result = stream_loop(&doc, chunks, 100, "output", content, Some(&thinking_cfg)).unwrap();
+        let result =
+            stream_loop(&doc, chunks, 100, "output", content, Some(&thinking_cfg)).unwrap();
         assert!(result.session_id.is_none());
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
-        assert!(final_doc.contains("<details>"), "interleaved thinking should use details tag: {}", final_doc);
-        assert!(final_doc.contains("Reasoning here."), "thinking content should be present: {}", final_doc);
-        assert!(final_doc.contains("The answer."), "response text should be present: {}", final_doc);
+        assert!(
+            final_doc.contains("<details>"),
+            "interleaved thinking should use details tag: {}",
+            final_doc
+        );
+        assert!(
+            final_doc.contains("Reasoning here."),
+            "thinking content should be present: {}",
+            final_doc
+        );
+        assert!(
+            final_doc.contains("The answer."),
+            "response text should be present: {}",
+            final_doc
+        );
     }
 
     #[test]
@@ -757,32 +868,43 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
 
         let doc = dir.path().join("test.md");
-        let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
+        let content =
+            "---\nagent_doc_mode: stream\n---\n\n<!-- agent:output -->\n<!-- /agent:output -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        let chunks = mock_chunks(vec![
-            StreamChunk {
-                text: "Response only.".to_string(),
-                thinking: Some("Secret thoughts.".to_string()),
-                is_final: true,
-                session_id: None,
-            },
-        ]);
+        let chunks = mock_chunks(vec![StreamChunk {
+            text: "Response only.".to_string(),
+            thinking: Some("Secret thoughts.".to_string()),
+            is_final: true,
+            session_id: None,
+        }]);
 
         // No thinking config — thinking should be ignored
         let result = stream_loop(&doc, chunks, 100, "output", content, None).unwrap();
         assert!(result.session_id.is_none());
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
-        assert!(final_doc.contains("Response only."), "response should be present: {}", final_doc);
-        assert!(!final_doc.contains("Secret thoughts"), "thinking should NOT appear: {}", final_doc);
+        assert!(
+            final_doc.contains("Response only."),
+            "response should be present: {}",
+            final_doc
+        );
+        assert!(
+            !final_doc.contains("Secret thoughts"),
+            "thinking should NOT appear: {}",
+            final_doc
+        );
     }
 
     #[test]
     fn mode_validation_rejects_non_crdt() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "---\nagent_doc_format: template\nagent_doc_write: merge\n---\n\nBody\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\nagent_doc_write: merge\n---\n\nBody\n",
+        )
+        .unwrap();
 
         let config = Config::default();
         let err = run(&doc, 2000, None, None, true, &config).unwrap_err();
@@ -816,18 +938,28 @@ publish briantakita.me
 Done — all packages pushed.";
 
         // Build patch and apply WITH replace mode (the fix)
-        let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
+        let patch = format!(
+            "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
+            target, final_text, target
+        );
         let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
         let mut mode_overrides = std::collections::HashMap::new();
         mode_overrides.insert(target.to_string(), "replace".to_string());
         let file = std::path::Path::new("test.md");
         let content_ours = crate::template::apply_patches_with_overrides(
-            baseline, &patches, &unmatched, file, &mode_overrides,
-        ).unwrap();
+            baseline,
+            &patches,
+            &unmatched,
+            file,
+            &mode_overrides,
+        )
+        .unwrap();
 
         // User prompt should appear exactly once
         assert_eq!(
-            content_ours.matches("commit and push all rappstack packages and sites.").count(),
+            content_ours
+                .matches("commit and push all rappstack packages and sites.")
+                .count(),
             1,
             "User prompt duplicated in content_ours:\n{}",
             content_ours
@@ -860,14 +992,16 @@ user prompt here
         let target = "exchange";
         let final_text = "user prompt here\n\nAgent response.";
 
-        let patch = format!("<!-- patch:{} -->\n{}\n<!-- /patch:{} -->", target, final_text, target);
+        let patch = format!(
+            "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
+            target, final_text, target
+        );
         let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
         let file = std::path::Path::new("test.md");
 
         // dedup_exchange_adjacent_lines now removes the echo duplication in append mode
-        let content_no_override = crate::template::apply_patches(
-            baseline, &patches, &unmatched, file,
-        ).unwrap();
+        let content_no_override =
+            crate::template::apply_patches(baseline, &patches, &unmatched, file).unwrap();
 
         // "user prompt here" should appear exactly once — dedup prevents echo duplication
         assert_eq!(

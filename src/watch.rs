@@ -59,7 +59,7 @@
 //! - stream_state_tracks_capture: two captures → incremental new content extracted correctly
 //! - doc_mode_eq: FileWatch == FileWatch; StreamCapture != FileWatch
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -68,7 +68,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::{config::Config, frontmatter, sessions, stream, run};
+use crate::{config::Config, frontmatter, run, sessions, stream};
 
 const PID_FILE: &str = ".agent-doc/watch.pid";
 
@@ -404,7 +404,10 @@ fn run_event_loop(
         } else {
             let idle_start = *idle_since.get_or_insert_with(Instant::now);
             if Instant::now().duration_since(idle_start) >= idle_timeout {
-                eprintln!("No active sessions for {}s — shutting down.", IDLE_TIMEOUT_SECS);
+                eprintln!(
+                    "No active sessions for {}s — shutting down.",
+                    IDLE_TIMEOUT_SECS
+                );
                 break;
             }
         }
@@ -416,8 +419,7 @@ fn run_event_loop(
                 match entry.mode {
                     DocMode::FileWatch => {
                         if !watched_files.contains(&entry.path) {
-                            if let Err(e) =
-                                watcher.watch(&entry.path, RecursiveMode::NonRecursive)
+                            if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive)
                             {
                                 eprintln!(
                                     "Warning: could not watch {}: {}",
@@ -455,10 +457,7 @@ fn run_event_loop(
                                         e
                                     );
                                 } else {
-                                    eprintln!(
-                                        "Now watching {} (reactive)",
-                                        entry.path.display()
-                                    );
+                                    eprintln!("Now watching {} (reactive)", entry.path.display());
                                     watched_files.push(entry.path.clone());
                                 }
                             }
@@ -509,11 +508,7 @@ fn run_event_loop(
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[watch-stream] capture error for {}: {}",
-                        path.display(),
-                        e
-                    );
+                    eprintln!("[watch-stream] capture error for {}: {}", path.display(), e);
                 }
             }
         }
@@ -521,15 +516,13 @@ fn run_event_loop(
         // Receive file-change events with timeout
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(event) => {
-                if matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_)
-                ) {
+                if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                     for path in event.paths {
                         let canonical = path.canonicalize().unwrap_or(path);
-                        if watched_files.iter().any(|w| {
-                            w.canonicalize().unwrap_or_else(|_| w.clone()) == canonical
-                        }) {
+                        if watched_files
+                            .iter()
+                            .any(|w| w.canonicalize().unwrap_or_else(|_| w.clone()) == canonical)
+                        {
                             pending.insert(canonical, Instant::now());
                         }
                     }
@@ -595,7 +588,10 @@ fn run_event_loop(
             // responses from watch daemon competing with skill/stream writes)
             let file_str = path.to_string_lossy().to_string();
             if agent_doc::debounce::is_busy(&file_str) {
-                eprintln!("[watch] skipping {} — busy (active operation in progress)", path.display());
+                eprintln!(
+                    "[watch] skipping {} — busy (active operation in progress)",
+                    path.display()
+                );
                 continue;
             }
 
@@ -745,11 +741,7 @@ pub fn status() -> Result<()> {
 
 /// Find the project root by walking up from `path` looking for `.agent-doc/`.
 fn find_project_root(path: &Path) -> Option<PathBuf> {
-    let mut current = if path.is_file() {
-        path.parent()?
-    } else {
-        path
-    };
+    let mut current = if path.is_file() { path.parent()? } else { path };
     loop {
         if current.join(".agent-doc").is_dir() {
             return Some(current.to_path_buf());
@@ -890,7 +882,8 @@ mod tests {
         ss.last_capture = capture;
 
         // Second capture with more lines
-        let capture2 = "claude output line 1\nclaude output line 2\nclaude output line 3".to_string();
+        let capture2 =
+            "claude output line 1\nclaude output line 2\nclaude output line 3".to_string();
         let new_content2 = extract_new_lines(&ss.last_capture, &capture2);
         assert_eq!(new_content2, "claude output line 3");
         ss.last_capture = capture2;
@@ -919,9 +912,7 @@ mod tests {
         })
         .unwrap();
 
-        watcher
-            .watch(&path, RecursiveMode::NonRecursive)
-            .unwrap();
+        watcher.watch(&path, RecursiveMode::NonRecursive).unwrap();
 
         // Give watcher time to initialize
         std::thread::sleep(Duration::from_millis(100));

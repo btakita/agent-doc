@@ -73,11 +73,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // Re-export Tmux types from tmux-router.
-pub use tmux_router::Tmux;
 #[cfg(test)]
 pub use tmux_router::IsolatedTmux;
-pub use tmux_router::{RegistryEntry as SessionEntry, RegistryLock, Registry as SessionRegistry};
 pub use tmux_router::PaneMoveOp;
+pub use tmux_router::Tmux;
+pub use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 
@@ -116,12 +116,7 @@ pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
 ///
 /// Returns `Err` if either pane is in the wrong session — callers should fall
 /// back to `join-pane` or provision a new pane instead.
-pub fn swap_pane_guarded(
-    tmux: &Tmux,
-    src: &str,
-    dst: &str,
-    expected_session: &str,
-) -> Result<()> {
+pub fn swap_pane_guarded(tmux: &Tmux, src: &str, dst: &str, expected_session: &str) -> Result<()> {
     let src_session = tmux
         .cmd()
         .args(["display-message", "-t", src, "-p", "#{session_name}"])
@@ -132,7 +127,9 @@ pub fn swap_pane_guarded(
     if src_session != expected_session {
         anyhow::bail!(
             "swap_pane_guarded: src pane {} is in session '{}', expected '{}' — refusing cross-session swap",
-            src, src_session, expected_session
+            src,
+            src_session,
+            expected_session
         );
     }
     let dst_session = tmux
@@ -145,7 +142,9 @@ pub fn swap_pane_guarded(
     if dst_session != expected_session {
         anyhow::bail!(
             "swap_pane_guarded: dst pane {} is in session '{}', expected '{}' — refusing cross-session swap",
-            dst, dst_session, expected_session
+            dst,
+            dst_session,
+            expected_session
         );
     }
     tmux.swap_pane(src, dst)
@@ -242,7 +241,13 @@ pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) 
 /// Like `register_with_pid` but accepts an explicit `cwd` override.
 /// Used by `claim` to record the document's nearest git repo root as cwd,
 /// avoiding superproject drift when claiming submodule-hosted documents.
-pub fn register_with_pid_and_cwd(session_id: &str, pane_id: &str, file: &str, pid: u32, cwd: &str) -> Result<()> {
+pub fn register_with_pid_and_cwd(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    cwd: &str,
+) -> Result<()> {
     let window = pane_window(pane_id).unwrap_or_default();
     register_full_with_cwd(session_id, pane_id, file, pid, &window, cwd)
 }
@@ -796,9 +801,15 @@ mod tests {
         .unwrap();
 
         let loaded = load_in(dir.path()).unwrap();
-        assert!(loaded.contains_key("session-cwd-test"), "session should be registered");
+        assert!(
+            loaded.contains_key("session-cwd-test"),
+            "session should be registered"
+        );
         let entry = &loaded["session-cwd-test"];
-        assert_eq!(entry.cwd, explicit_cwd, "stored cwd must match the explicit value passed in");
+        assert_eq!(
+            entry.cwd, explicit_cwd,
+            "stored cwd must match the explicit value passed in"
+        );
         assert_eq!(entry.pane, "%77");
         assert_eq!(entry.file, "plan.md");
         assert_eq!(entry.pid, 9999);
@@ -812,14 +823,29 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let explicit_cwd = "/completely/different/path";
-        register_full_with_cwd_in(dir.path(), "s-explicit", "%88", "doc.md", 1234, "@1", explicit_cwd).unwrap();
+        register_full_with_cwd_in(
+            dir.path(),
+            "s-explicit",
+            "%88",
+            "doc.md",
+            1234,
+            "@1",
+            explicit_cwd,
+        )
+        .unwrap();
 
         let loaded = load_in(dir.path()).unwrap();
         let entry = &loaded["s-explicit"];
         assert_eq!(entry.cwd, explicit_cwd);
         // Verify it differs from the actual process cwd
-        let process_cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
-        assert_ne!(entry.cwd, process_cwd, "stored cwd should differ from process cwd");
+        let process_cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_ne!(
+            entry.cwd, process_cwd,
+            "stored cwd should differ from process cwd"
+        );
     }
 
     #[test]
@@ -860,8 +886,14 @@ mod tests {
         let loaded = load_in(dir.path()).unwrap();
         // Only session-c should remain for pane %42
         assert!(loaded.contains_key("session-c"), "new session should exist");
-        assert!(!loaded.contains_key("session-a"), "old session-a should be removed");
-        assert!(!loaded.contains_key("session-b"), "old session-b should be removed");
+        assert!(
+            !loaded.contains_key("session-a"),
+            "old session-a should be removed"
+        );
+        assert!(
+            !loaded.contains_key("session-b"),
+            "old session-b should be removed"
+        );
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["session-c"].file, "new-file.md");
     }

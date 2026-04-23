@@ -196,8 +196,8 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
 
-use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 use crate::snapshot::find_project_root;
+use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 
 /// Enforcement: reject full-replacement blocks targeting the `pending` component
 /// unless the caller explicitly opts in.
@@ -279,7 +279,10 @@ fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
     while let Some(start) = content[search_from..].find(prefix) {
         let abs_start = comp.open_end + search_from + start;
         // Skip if inside a code block
-        if code_ranges.iter().any(|&(cs, ce)| abs_start >= cs && abs_start < ce) {
+        if code_ranges
+            .iter()
+            .any(|&(cs, ce)| abs_start >= cs && abs_start < ce)
+        {
             search_from += start + prefix.len();
             continue;
         }
@@ -417,7 +420,8 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     // Strip boundary markers from baseline and snapshot for diffing.
     // Preserves trailing newline if present in the original.
     let strip = |s: &str| -> String {
-        let filtered: Vec<&str> = s.lines()
+        let filtered: Vec<&str> = s
+            .lines()
             .filter(|l| !l.trim().starts_with(boundary_prefix))
             .collect();
         let mut out = filtered.join("\n");
@@ -453,7 +457,9 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     /// Returns true if `trimmed` closes a fence opened with `(fence_char, fence_len)`.
     fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
         let fc = trimmed.chars().next().unwrap_or('\0');
-        if fc != fence_char { return false; }
+        if fc != fence_char {
+            return false;
+        }
         let fl = trimmed.chars().take_while(|&c| c == fc).count();
         fl >= fence_len && trimmed[fl..].trim().is_empty()
     }
@@ -485,7 +491,8 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             saw_deleted_heading = !in_baseline_fence && is_heading;
             continue;
         }
-        let heading_replaces_deleted_heading = change.tag() == ChangeTag::Insert && is_heading && saw_deleted_heading;
+        let heading_replaces_deleted_heading =
+            change.tag() == ChangeTag::Insert && is_heading && saw_deleted_heading;
         saw_deleted_heading = false;
         if change.tag() != ChangeTag::Delete {
             if !in_baseline_fence {
@@ -499,8 +506,11 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             }
             if !in_baseline_fence {
                 if heading_level(trimmed).is_some() {
-                    in_agent_block = change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
-                } else if in_agent_block && (trimmed.starts_with('❯') || trimmed.starts_with("<!--")) {
+                    in_agent_block =
+                        change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
+                } else if in_agent_block
+                    && (trimmed.starts_with('❯') || trimmed.starts_with("<!--"))
+                {
                     in_agent_block = false;
                 }
             }
@@ -641,22 +651,32 @@ pub fn normalize_user_prompts_in_exchange_safe(
     let after = count_prefixes(&normalized);
     let applied = after.saturating_sub(before);
 
-    crate::ops_log::log_op(file, &format!(
-        "normalize_user_prompts snap_len={} base_len={} applied={}",
-        snapshot.len(), baseline.len(), applied
-    ));
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "normalize_user_prompts snap_len={} base_len={} applied={}",
+            snapshot.len(),
+            baseline.len(),
+            applied
+        ),
+    );
 
     if applied > MAX_NORMALIZE_USER_LINES {
         eprintln!(
             "[normalize] WARN: {} ❯-prefixes would be applied, exceeds threshold {} for {} — \
              suspected snapshot/baseline divergence. Force-committing current file to absorb drift; \
              skipping ❯ prefix application this cycle.",
-            applied, MAX_NORMALIZE_USER_LINES, file.display()
+            applied,
+            MAX_NORMALIZE_USER_LINES,
+            file.display()
         );
-        crate::ops_log::log_op(file, &format!(
-            "normalize_threshold_exceeded applied={} threshold={} action=force_commit_and_passthrough",
-            applied, MAX_NORMALIZE_USER_LINES
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "normalize_threshold_exceeded applied={} threshold={} action=force_commit_and_passthrough",
+                applied, MAX_NORMALIZE_USER_LINES
+            ),
+        );
         if let Err(e) = crate::git::commit(file) {
             eprintln!("[normalize] WARN: force-commit failed: {}", e);
         }
@@ -705,11 +725,14 @@ pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
 pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {
     match lift_pending_from_exchange(content) {
         Some(repaired) => {
-            eprintln!("[write] repaired: lifted agent:pending out of agent:exchange for {}", file.display());
-            crate::ops_log::log_op(file, &format!(
-                "lift_pending_from_exchange file={}",
+            eprintln!(
+                "[write] repaired: lifted agent:pending out of agent:exchange for {}",
                 file.display()
-            ));
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!("lift_pending_from_exchange file={}", file.display()),
+            );
             repaired
         }
         None => content.to_string(),
@@ -733,33 +756,28 @@ pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
     }
 
     // Try structural comparison via components
-    if let (Ok(snap_components), Ok(base_components)) = (
-        component::parse(snapshot),
-        component::parse(baseline),
-    )
+    if let (Ok(snap_components), Ok(base_components)) =
+        (component::parse(snapshot), component::parse(baseline))
         && !snap_components.is_empty()
     {
         // Only check append-mode components — these grow monotonically and must
         // contain the snapshot's committed content. Replace-mode components
         // (status, pending) are user-editable and should be skipped.
         for snap_comp in &snap_components {
-            let is_append = snap_comp.patch_mode()
+            let is_append = snap_comp
+                .patch_mode()
                 .map(|m| m == "append")
                 .unwrap_or(is_append_mode_component(&snap_comp.name));
             if !is_append {
                 continue;
             }
-            let snap_content = strip_boundary_for_dedup(
-                snap_comp.content(snapshot).trim(),
-            );
+            let snap_content = strip_boundary_for_dedup(snap_comp.content(snapshot).trim());
             if snap_content.is_empty() {
                 continue;
             }
             // Find matching component in baseline by name
             if let Some(base_comp) = base_components.iter().find(|c| c.name == snap_comp.name) {
-                let base_content = strip_boundary_for_dedup(
-                    base_comp.content(baseline).trim(),
-                );
+                let base_content = strip_boundary_for_dedup(base_comp.content(baseline).trim());
                 // Baseline's append component must contain the snapshot's content
                 if !base_content.contains(&snap_content) {
                     return true;
@@ -780,7 +798,8 @@ pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
 /// Boundary markers (`<!-- agent:boundary:XXXXXXXX -->`) get a fresh ID on each write,
 /// so they must be excluded from content equality checks.
 fn strip_boundary_for_dedup(content: &str) -> String {
-    content.lines()
+    content
+        .lines()
         .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
         .collect::<Vec<_>>()
         .join("\n")
@@ -800,7 +819,11 @@ const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 /// proposed content. If the existing exchange is substantial (>100 bytes) and
 /// the new exchange is <10% of the old, refuse the write. Returns `Ok(())` if
 /// the write should proceed, or an error message if it should be refused.
-fn check_exchange_shrink_guard(content_at_start: &str, content_ours: &str, file: &Path) -> Result<()> {
+fn check_exchange_shrink_guard(
+    content_at_start: &str,
+    content_ours: &str,
+    file: &Path,
+) -> Result<()> {
     let old_exchange_len = extract_exchange_content_len(content_at_start);
     let new_exchange_len = extract_exchange_content_len(content_ours);
 
@@ -810,15 +833,23 @@ fn check_exchange_shrink_guard(content_at_start: &str, content_ours: &str, file:
 
     let ratio = new_exchange_len as f64 / old_exchange_len as f64;
     if ratio < SHRINK_GUARD_MAX_RATIO {
-        crate::ops_log::log_op(file, &format!(
-            "shrink_guard_blocked file={} old_len={} new_len={} ratio={:.3}",
-            file.display(), old_exchange_len, new_exchange_len, ratio
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "shrink_guard_blocked file={} old_len={} new_len={} ratio={:.3}",
+                file.display(),
+                old_exchange_len,
+                new_exchange_len,
+                ratio
+            ),
+        );
         anyhow::bail!(
             "exchange content would shrink from {} to {} bytes ({:.0}% of original) — \
              refusing write to prevent accidental truncation. If this is intentional, \
              use `agent-doc compact` or re-run with meaningful content.",
-            old_exchange_len, new_exchange_len, ratio * 100.0
+            old_exchange_len,
+            new_exchange_len,
+            ratio * 100.0
         );
     }
 
@@ -829,7 +860,8 @@ fn check_exchange_shrink_guard(content_at_start: &str, content_ours: &str, file:
 /// Returns 0 if no exchange component is found.
 fn extract_exchange_content_len(doc: &str) -> usize {
     if let Ok(components) = component::parse(doc) {
-        components.iter()
+        components
+            .iter()
             .find(|c| c.name == "exchange")
             .map(|c| c.content(doc).trim().len())
             .unwrap_or(0)
@@ -844,7 +876,8 @@ fn log_dedup(file: &Path, context: &str) {
     eprintln!("{}", msg);
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open("/tmp/agent-doc-write-dedup.log")
     {
         let ts = std::time::SystemTime::now()
@@ -888,7 +921,9 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
         anyhow::bail!(
             "pane ownership mismatch: session {} owned by pane {}, current pane is {}. \
              Use `agent-doc claim` to reclaim.",
-            session_id, entry.pane, current
+            session_id,
+            entry.pane,
+            current
         );
     }
     Ok(())
@@ -981,11 +1016,20 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    crate::ops_log::log_cycle(file, "write_inline", Some(&content_ours), Some(&final_content));
-    crate::ops_log::log_op(file, &format!(
-        "write_inline_done file={} snap_len={}",
-        file.display(), final_content.len()
-    ));
+    crate::ops_log::log_cycle(
+        file,
+        "write_inline",
+        Some(&content_ours),
+        Some(&final_content),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "write_inline_done file={} snap_len={}",
+            file.display(),
+            final_content.len()
+        ),
+    );
     if let Err(e) = crate::cycle_state::mark_write_applied(
         file,
         "write_inline",
@@ -1027,8 +1071,8 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (mut patches, unmatched) = template::parse_patches(&response)
-        .context("failed to parse patch blocks from response")?;
+    let (mut patches, unmatched) =
+        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
@@ -1091,11 +1135,21 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    crate::ops_log::log_cycle(file, "write_template", Some(&content_ours), Some(&final_content));
-    crate::ops_log::log_op(file, &format!(
-        "write_template_done file={} snap_len={} patches={}",
-        file.display(), final_content.len(), patches.len()
-    ));
+    crate::ops_log::log_cycle(
+        file,
+        "write_template",
+        Some(&content_ours),
+        Some(&final_content),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "write_template_done file={} snap_len={} patches={}",
+            file.display(),
+            final_content.len(),
+            patches.len()
+        ),
+    );
     if let Err(e) = crate::cycle_state::mark_write_applied(
         file,
         "write_template",
@@ -1152,8 +1206,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (mut patches, unmatched) = template::parse_patches(&response)
-        .context("failed to parse patch blocks from response")?;
+    let (mut patches, unmatched) =
+        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
@@ -1170,7 +1224,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             "[write] WARNING: 0 template patches found — response may be missing or malformed. \
              Only normalization/boundary changes will be applied."
         );
-        crate::ops_log::log_op(file, "zero_patches_warning: response may be empty or malformed");
+        crate::ops_log::log_op(
+            file,
+            "zero_patches_warning: response may be empty or malformed",
+        );
     }
 
     // Warn when patches target a file with no template components
@@ -1211,8 +1268,13 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let mode_overrides = std::collections::HashMap::new();
             let t_apply = std::time::Instant::now();
             let mut content_ours = template::apply_patches_with_overrides(
-                base, &patches, &unmatched, file, &mode_overrides,
-            ).context("failed to apply patches for snapshot")?;
+                base,
+                &patches,
+                &unmatched,
+                file,
+                &mode_overrides,
+            )
+            .context("failed to apply patches for snapshot")?;
             let elapsed_apply = t_apply.elapsed().as_millis();
             if elapsed_apply > 0 {
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
@@ -1241,14 +1303,25 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 eprintln!(
                     "[write] WARNING: baseline missing snapshot content — stale baseline detected, using current file as baseline"
                 );
-                crate::ops_log::log_op(file, &format!(
-                    "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
-                    file.display(), base.len(), current_snap.len(), content_at_start.len()
-                ));
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
+                        file.display(),
+                        base.len(),
+                        current_snap.len(),
+                        content_at_start.len()
+                    ),
+                );
                 // Re-apply patches to the current file content instead of the stale baseline
                 content_ours = template::apply_patches_with_overrides(
-                    &content_at_start, &patches, &unmatched, file, &mode_overrides,
-                ).context("failed to apply patches with fresh baseline")?;
+                    &content_at_start,
+                    &patches,
+                    &unmatched,
+                    file,
+                    &mode_overrides,
+                )
+                .context("failed to apply patches with fresh baseline")?;
             }
 
             // Normalize user input in exchange: add ❯  prefix to user-added lines.
@@ -1258,7 +1331,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let normalize_prefix_lines: Vec<String> =
                 if let Ok(Some(ref snap)) = snapshot::load(file) {
                     let before = content_ours.clone();
-                    content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
+                    content_ours =
+                        normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
                     extract_normalization_targets(&before, &content_ours)
                 } else {
                     vec![]
@@ -1271,7 +1345,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
 
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)
-            if strip_boundary_for_dedup(&content_ours) == strip_boundary_for_dedup(&content_at_start) {
+            if strip_boundary_for_dedup(&content_ours)
+                == strip_boundary_for_dedup(&content_at_start)
+            {
                 log_dedup(file, "no changes after merge, skipping write");
                 recover::clear_pending(file)?;
                 return Ok(());
@@ -1279,8 +1355,21 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
             // Plugin is installed — try IPC
             let t_ipc = std::time::Instant::now();
-            let norm_lines_opt = if normalize_prefix_lines.is_empty() { None } else { Some(normalize_prefix_lines.as_slice()) };
-            let ipc_result = try_ipc(file, &patches, &unmatched, None, baseline, Some(&content_ours), norm_lines_opt, None)?;
+            let norm_lines_opt = if normalize_prefix_lines.is_empty() {
+                None
+            } else {
+                Some(normalize_prefix_lines.as_slice())
+            };
+            let ipc_result = try_ipc(
+                file,
+                &patches,
+                &unmatched,
+                None,
+                baseline,
+                Some(&content_ours),
+                norm_lines_opt,
+                None,
+            )?;
             if ipc_result.success {
                 let elapsed_ipc = t_ipc.elapsed().as_millis();
                 if elapsed_ipc > 0 {
@@ -1291,10 +1380,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     eprintln!("[perf] run_stream total: {}ms", elapsed_total);
                 }
                 // IPC succeeded — plugin applied patches
-                crate::ops_log::log_op(file, &format!(
-                    "ipc_write_consumed file={} patches={}",
-                    file.display(), patches.len()
-                ));
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "ipc_write_consumed file={} patches={}",
+                        file.display(),
+                        patches.len()
+                    ),
+                );
                 // Fire post_write hook for cross-session coordination
                 let session_id = frontmatter::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
@@ -1310,8 +1403,13 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let patch_file = patches_dir.join(format!("{}.json", hash));
 
             // Use shared helper for synthesis (same boundary-aware logic as try_ipc)
-            let norm_lines_for_timeout = if normalize_prefix_lines.is_empty() { None } else { Some(normalize_prefix_lines.as_slice()) };
-            let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, norm_lines_for_timeout)?;
+            let norm_lines_for_timeout = if normalize_prefix_lines.is_empty() {
+                None
+            } else {
+                Some(normalize_prefix_lines.as_slice())
+            };
+            let ipc_patches =
+                build_ipc_patches_json(file, &patches, &unmatched, norm_lines_for_timeout)?;
 
             // Same dedup guard as try_ipc: don't send unmatched when it was synthesized into a patch.
             let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -1339,7 +1437,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 && !lines.is_empty()
             {
                 ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
-                    lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
+                    lines
+                        .iter()
+                        .map(|l| serde_json::Value::String(l.clone()))
+                        .collect(),
                 );
             }
 
@@ -1352,18 +1453,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
             }
 
-            atomic_write(
-                &patch_file,
-                &serde_json::to_string_pretty(&ipc_payload)?,
-            )?;
+            atomic_write(&patch_file, &serde_json::to_string_pretty(&ipc_payload)?)?;
 
             eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
             // CRDT merge on IPC timeout: content_ours (baseline + patches) may
             // diverge from the on-disk file (user edits, pending mutations from
             // main.rs). Use the same CRDT merge as the normal disk path to
             // preserve all concurrent changes.
-            let content_current = std::fs::read_to_string(file)
-                .unwrap_or_else(|_| content_at_start.clone());
+            let content_current =
+                std::fs::read_to_string(file).unwrap_or_else(|_| content_at_start.clone());
             let (final_content, crdt_state) = if content_current == base {
                 let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
                 (content_ours.clone(), doc.encode_state())
@@ -1371,17 +1469,26 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 // Plugin already applied the response before the sidecar ack
                 // arrived. Using content_current preserves user edits and avoids
                 // duplicating the response via CRDT merge.
-                eprintln!("[write] IPC timeout path: response already in current file (plugin applied), skipping CRDT merge");
-                crate::ops_log::log_op(file, "ipc_timeout_plugin_already_applied: skipping CRDT merge");
+                eprintln!(
+                    "[write] IPC timeout path: response already in current file (plugin applied), skipping CRDT merge"
+                );
+                crate::ops_log::log_op(
+                    file,
+                    "ipc_timeout_plugin_already_applied: skipping CRDT merge",
+                );
                 let doc = crate::crdt::CrdtDoc::from_text(&content_current);
                 (content_current.clone(), doc.encode_state())
             } else {
                 eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
                 let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
-                match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
+                match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)
+                {
                     Ok(merged) => merged,
                     Err(e) => {
-                        eprintln!("[write] WARNING: CRDT merge failed on exit(75), falling back to splice: {}", e);
+                        eprintln!(
+                            "[write] WARNING: CRDT merge failed on exit(75), falling back to splice: {}",
+                            e
+                        );
                         let spliced = splice_pending_component(&content_ours, &content_current);
                         let doc = crate::crdt::CrdtDoc::from_text(&spliced);
                         (spliced, doc.encode_state())
@@ -1390,18 +1497,28 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             };
             // Snapshot saved BEFORE document write (#wcf5).
             if let Err(e) = snapshot::save(file, &final_content) {
-                eprintln!("[write] WARNING: snapshot save before exit(75) failed: {}", e);
+                eprintln!(
+                    "[write] WARNING: snapshot save before exit(75) failed: {}",
+                    e
+                );
             }
             if let Err(e) = snapshot::save_crdt(file, &crdt_state) {
-                eprintln!("[write] WARNING: CRDT state save before exit(75) failed: {}", e);
+                eprintln!(
+                    "[write] WARNING: CRDT state save before exit(75) failed: {}",
+                    e
+                );
             }
             if let Err(e) = atomic_write(file, &final_content) {
-                eprintln!("[write] WARNING: failed to write to working tree before exit(75): {}", e);
+                eprintln!(
+                    "[write] WARNING: failed to write to working tree before exit(75): {}",
+                    e
+                );
             }
             if crate::git::is_in_git_repo(file)
-                && let Err(e) = crate::git::commit(file) {
-                    eprintln!("[commit] warning: commit before exit(75) failed: {}", e);
-                }
+                && let Err(e) = crate::git::commit(file)
+            {
+                eprintln!("[commit] warning: commit before exit(75) failed: {}", e);
+            }
             std::process::exit(75); // EX_TEMPFAIL
         }
     }
@@ -1409,36 +1526,41 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // No plugin installed or --force-disk — direct disk write
     // When --force-disk is set, clean up any pending IPC patch files to prevent
     // the plugin from applying them later (which would cause double-write).
-    if force_disk
-        && let Ok(canonical) = file.canonicalize() {
-            let project_root = resolve_ipc_project_root(&canonical);
-            let patches_dir = project_root.join(".agent-doc/patches");
-            if let Ok(hash) = snapshot::doc_hash(file) {
-                let patch_file = patches_dir.join(format!("{}.json", hash));
-                if patch_file.exists() {
-                    eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
-                    // Read patch_id from stale patch before deleting — write sentinel so plugin skips apply
-                    if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
-                        && let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content)
-                        && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
-                    {
-                        let claimed_dir = project_root.join(".agent-doc/claimed-patches");
-                        match std::fs::create_dir_all(&claimed_dir) {
-                            Err(e) => eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}"),
-                            Ok(_) => {
-                                let sentinel = claimed_dir.join(patch_id);
-                                if let Err(e) = std::fs::write(&sentinel, "") {
-                                    eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
-                                } else {
-                                    eprintln!("[write] patch_id {} claimed (sentinel written)", &patch_id[..8]);
-                                }
+    if force_disk && let Ok(canonical) = file.canonicalize() {
+        let project_root = resolve_ipc_project_root(&canonical);
+        let patches_dir = project_root.join(".agent-doc/patches");
+        if let Ok(hash) = snapshot::doc_hash(file) {
+            let patch_file = patches_dir.join(format!("{}.json", hash));
+            if patch_file.exists() {
+                eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
+                // Read patch_id from stale patch before deleting — write sentinel so plugin skips apply
+                if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
+                    && let Ok(stale_json) =
+                        serde_json::from_str::<serde_json::Value>(&stale_content)
+                    && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
+                {
+                    let claimed_dir = project_root.join(".agent-doc/claimed-patches");
+                    match std::fs::create_dir_all(&claimed_dir) {
+                        Err(e) => {
+                            eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}")
+                        }
+                        Ok(_) => {
+                            let sentinel = claimed_dir.join(patch_id);
+                            if let Err(e) = std::fs::write(&sentinel, "") {
+                                eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
+                            } else {
+                                eprintln!(
+                                    "[write] patch_id {} claimed (sentinel written)",
+                                    &patch_id[..8]
+                                );
                             }
                         }
                     }
-                    let _ = std::fs::remove_file(&patch_file);
                 }
+                let _ = std::fs::remove_file(&patch_file);
             }
         }
+    }
     let t_disk = std::time::Instant::now();
 
     // Acquire advisory lock BEFORE reading document state.
@@ -1457,12 +1579,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // The skill sends delta content for append-mode components.
     let mode_overrides = std::collections::HashMap::new();
     let t_apply2 = std::time::Instant::now();
-    let mut content_ours = template::apply_patches_with_overrides(
-        base, &patches, &unmatched, file, &mode_overrides,
-    ).context("failed to apply template patches")?;
+    let mut content_ours =
+        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
+            .context("failed to apply template patches")?;
     let elapsed_apply2 = t_apply2.elapsed().as_millis();
     if elapsed_apply2 > 0 {
-        eprintln!("[perf] apply_patches_with_overrides (disk): {}ms", elapsed_apply2);
+        eprintln!(
+            "[perf] apply_patches_with_overrides (disk): {}ms",
+            elapsed_apply2
+        );
     }
 
     // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
@@ -1532,11 +1657,20 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     snapshot::save_crdt(file, &crdt_state)?;
 
     atomic_write(file, &final_content)?;
-    crate::ops_log::log_cycle(file, "write_stream", Some(&content_ours), Some(&final_content));
-    crate::ops_log::log_op(file, &format!(
-        "write_stream_done file={} snap_len={}",
-        file.display(), final_content.len()
-    ));
+    crate::ops_log::log_cycle(
+        file,
+        "write_stream",
+        Some(&content_ours),
+        Some(&final_content),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "write_stream_done file={} snap_len={}",
+            file.display(),
+            final_content.len()
+        ),
+    );
     if let Err(e) = crate::cycle_state::mark_write_applied(
         file,
         "write_stream",
@@ -1593,8 +1727,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     recover::save_pending(file, &response)?;
 
     // Parse patch blocks from response
-    let (mut patches, unmatched) = template::parse_patches(&response)
-        .context("failed to parse patch blocks from response")?;
+    let (mut patches, unmatched) =
+        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
@@ -1642,10 +1776,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     }
 
     // Atomic write of patch file
-    atomic_write(
-        &patch_file,
-        &serde_json::to_string_pretty(&ipc_payload)?,
-    )?;
+    atomic_write(&patch_file, &serde_json::to_string_pretty(&ipc_payload)?)?;
 
     eprintln!(
         "[write] IPC patch written to {} ({} components)",
@@ -1664,10 +1795,14 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
             let content = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {} after IPC", file.display()))?;
             snapshot::save(file, &content)?;
-            crate::ops_log::log_op(file, &format!(
-                "snapshot_saved_file_ipc file={} snap_len={}",
-                file.display(), content.len()
-            ));
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "snapshot_saved_file_ipc file={} snap_len={}",
+                    file.display(),
+                    content.len()
+                ),
+            );
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
             snapshot::save_crdt(file, &crdt_doc.encode_state())?;
             recover::clear_pending(file)?;
@@ -1678,7 +1813,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     }
 
     // Timeout — fall back to direct stream write
-    eprintln!("[write] IPC timeout ({}s) — falling back to direct write", timeout.as_secs());
+    eprintln!(
+        "[write] IPC timeout ({}s) — falling back to direct write",
+        timeout.as_secs()
+    );
     // Clean up the unconsumed patch file
     let _ = std::fs::remove_file(&patch_file);
 
@@ -1717,7 +1855,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     );
     Ok(())
 }
-
 
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `recover` to apply orphaned responses.
@@ -1762,8 +1899,8 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let (mut patches, unmatched) = template::parse_patches(response)
-        .context("failed to parse patch blocks from response")?;
+    let (mut patches, unmatched) =
+        template::parse_patches(response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
@@ -1797,7 +1934,9 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
 /// Deletes the sidecar on success. Returns None if no sidecar present (old plugin).
 fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
-    let sidecar = project_root.join(".agent-doc/ack-content").join(format!("{patch_id}.md"));
+    let sidecar = project_root
+        .join(".agent-doc/ack-content")
+        .join(format!("{patch_id}.md"));
     if !sidecar.exists() {
         return Ok(None);
     }
@@ -1886,11 +2025,14 @@ pub fn try_ipc(
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
-        let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
+        let ipc_patches_json =
+            build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
         let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
-            eprintln!("[write] synthesis consumed unmatched content — clearing from socket payload (prevent double-apply)");
+            eprintln!(
+                "[write] synthesis consumed unmatched content — clearing from socket payload (prevent double-apply)"
+            );
             ""
         } else {
             unmatched.trim()
@@ -1911,14 +2053,19 @@ pub fn try_ipc(
             && !lines.is_empty()
         {
             socket_payload["normalize_prefix_lines"] = serde_json::Value::Array(
-                lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
+                lines
+                    .iter()
+                    .map(|l| serde_json::Value::String(l.clone()))
+                    .collect(),
             );
             // Include full normalized content ONLY when there are no component patches.
             // When patches are present, the plugin applies normalize_prefix_lines before
             // component patches — fullContent would conflict by replacing the document
             // before patches run, causing duplicates on the next cycle.
             // fullContent is only safe as a fallback for append-mode (no-component) docs.
-            if ipc_patches_json.is_empty() && let Some(ours) = content_ours {
+            if ipc_patches_json.is_empty()
+                && let Some(ours) = content_ours
+            {
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
             }
         }
@@ -1933,7 +2080,10 @@ pub fn try_ipc(
                 match serde_json::to_string_pretty(&socket_payload) {
                     Ok(json) => {
                         if let Err(e) = std::fs::write(&path, &json) {
-                            eprintln!("[write] WARNING: failed to write fallback patch file: {}", e);
+                            eprintln!(
+                                "[write] WARNING: failed to write fallback patch file: {}",
+                                e
+                            );
                             None
                         } else {
                             eprintln!("[write] fallback patch file pre-written for recovery");
@@ -1954,59 +2104,86 @@ pub fn try_ipc(
                 eprintln!("[write] socket IPC patch delivered");
                 // Poll for ack-content sidecar (written by plugin after apply).
                 let sidecar = poll_ack_content_sidecar(
-                    &project_root, &patch_id,
+                    &project_root,
+                    &patch_id,
                     std::time::Duration::from_millis(200),
                     std::time::Duration::from_millis(25),
                 )?;
                 if let Some(snap_content) = sidecar {
                     // Sidecar confirmed — plugin applied the content
-                    eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", snap_content.len());
+                    eprintln!(
+                        "[write] snapshot from ack-content sidecar ({} bytes)",
+                        snap_content.len()
+                    );
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
                     }
-                    crate::ops_log::log_op(file, &format!(
-                        "ipc_socket_delivered file={} snap_source=ack_content_sidecar snap_len={}",
-                        file.display(), snap_content.len()
-                    ));
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "ipc_socket_delivered file={} snap_source=ack_content_sidecar snap_len={}",
+                            file.display(),
+                            snap_content.len()
+                        ),
+                    );
                     if let Err(e) = snapshot::save(file, &snap_content) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                              Commit will auto-recover via divergence detection.",
                             e
                         );
-                        crate::ops_log::log_op(file, &format!(
-                            "snapshot_save_failed_after_ipc file={} error={}",
-                            file.display(), e
-                        ));
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "snapshot_save_failed_after_ipc file={} error={}",
+                                file.display(),
+                                e
+                            ),
+                        );
                     } else {
-                        crate::ops_log::log_op(file, &format!(
-                            "snapshot_saved_socket_ipc file={} snap_len={}",
-                            file.display(), snap_content.len()
-                        ));
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "snapshot_saved_socket_ipc file={} snap_len={}",
+                                file.display(),
+                                snap_content.len()
+                            ),
+                        );
                         let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
                         if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
                             eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                         }
                     }
-                    return Ok(IpcResult { success: true, patch_id });
+                    return Ok(IpcResult {
+                        success: true,
+                        patch_id,
+                    });
                 }
                 // Sidecar timed out — plugin likely applied the patch but the
                 // ack write was slow. Fall through to disk write for a reliable
                 // snapshot. No degradation — next write will still try socket.
-                eprintln!("[write] sidecar ack timed out — socket delivery unconfirmed, falling back to disk write");
+                eprintln!(
+                    "[write] sidecar ack timed out — socket delivery unconfirmed, falling back to disk write"
+                );
                 if fallback_patch_file.is_some() {
                     eprintln!("[write] fallback patch file left for file watcher recovery");
                 }
-                crate::ops_log::log_op(file, &format!(
-                    "ipc_socket_sidecar_timeout file={} — falling back to disk write",
-                    file.display()
-                ));
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_sidecar_timeout file={} — falling back to disk write",
+                        file.display()
+                    ),
+                );
             }
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
             }
             Err(e) => {
-                eprintln!("[write] socket IPC failed: {} — falling back to file IPC", e);
+                eprintln!(
+                    "[write] socket IPC failed: {} — falling back to file IPC",
+                    e
+                );
             }
         }
     }
@@ -2015,7 +2192,10 @@ pub fn try_ipc(
 
     // Only attempt file-based IPC if the patches directory exists (plugin has started)
     if !patches_dir.exists() {
-        return Ok(IpcResult { success: false, patch_id });
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+        });
     }
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -2046,22 +2226,34 @@ pub fn try_ipc(
         && !lines.is_empty()
     {
         ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
-            lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
+            lines
+                .iter()
+                .map(|l| serde_json::Value::String(l.clone()))
+                .collect(),
         );
         // Include full normalized content ONLY when there are no component patches.
         // When patches are present, normalize_prefix_lines + patches apply correctly
         // without fullContent. Sending fullContent alongside patches causes the plugin
         // to apply fullContent (full replacement) and skip patches → duplicate on next cycle.
-        if ipc_patches.is_empty() && let Some(ours) = content_ours {
+        if ipc_patches.is_empty()
+            && let Some(ours) = content_ours
+        {
             ipc_payload["fullContent"] = serde_json::Value::String(ours.to_string());
         }
     }
 
     // Log IPC write details for debugging cross-contamination
-    crate::ops_log::log_op(file, &format!(
-        "ipc_write_attempt file={} hash={} patches={} ipc_patches={} unmatched_len={}",
-        file.display(), hash, patches.len(), ipc_patches.len(), unmatched.trim().len()
-    ));
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_write_attempt file={} hash={} patches={} ipc_patches={} unmatched_len={}",
+            file.display(),
+            hash,
+            patches.len(),
+            ipc_patches.len(),
+            unmatched.trim().len()
+        ),
+    );
 
     // Warn when unmatched content exists but no IPC patches were synthesized —
     // this means content will be silently dropped by the plugin
@@ -2071,13 +2263,24 @@ pub fn try_ipc(
              Does the target file have template components (<!-- agent:exchange -->)?",
             unmatched.trim().len()
         );
-        crate::ops_log::log_op(file, &format!(
-            "ipc_unmatched_content_dropped file={} unmatched_len={}",
-            file.display(), unmatched.trim().len()
-        ));
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_unmatched_content_dropped file={} unmatched_len={}",
+                file.display(),
+                unmatched.trim().len()
+            ),
+        );
     }
 
-    let success = write_ipc_and_poll(&patch_file, &ipc_payload, file, ipc_patches.len(), content_ours, &project_root)?;
+    let success = write_ipc_and_poll(
+        &patch_file,
+        &ipc_payload,
+        file,
+        ipc_patches.len(),
+        content_ours,
+        &project_root,
+    )?;
     Ok(IpcResult { success, patch_id })
 }
 
@@ -2088,10 +2291,7 @@ pub fn try_ipc(
 /// have `<!-- agent:name -->` component markers.
 ///
 /// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
-pub fn try_ipc_full_content(
-    file: &Path,
-    content: &str,
-) -> Result<bool> {
+pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
 
@@ -2113,10 +2313,15 @@ pub fn try_ipc_full_content(
                 return Ok(true);
             }
             Ok(None) => {
-                eprintln!("[write] socket IPC full content sent but no ack — falling back to file IPC");
+                eprintln!(
+                    "[write] socket IPC full content sent but no ack — falling back to file IPC"
+                );
             }
             Err(e) => {
-                eprintln!("[write] socket IPC full content failed: {} — falling back to file IPC", e);
+                eprintln!(
+                    "[write] socket IPC full content failed: {} — falling back to file IPC",
+                    e
+                );
             }
         }
     }
@@ -2139,7 +2344,14 @@ pub fn try_ipc_full_content(
         "fullContent": content,
     });
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0, Some(content), &project_root)
+    write_ipc_and_poll(
+        &patch_file,
+        &ipc_payload,
+        file,
+        0,
+        Some(content),
+        &project_root,
+    )
 }
 
 /// Send a reposition-only IPC signal to the plugin.
@@ -2190,10 +2402,7 @@ fn write_ipc_and_poll(
     project_root: &Path,
 ) -> Result<bool> {
     // Atomic write of patch file
-    atomic_write(
-        patch_file,
-        &serde_json::to_string_pretty(payload)?,
-    )?;
+    atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
 
     eprintln!(
         "[write] IPC patch written to {} ({} components)",
@@ -2210,19 +2419,28 @@ fn write_ipc_and_poll(
         if !patch_file.exists() {
             // Plugin consumed the patch — poll for ack-content sidecar (authoritative
             // post-apply snapshot). Falls back to file read after timeout.
-            let patch_id = payload.get("patch_id").and_then(|v| v.as_str()).unwrap_or("");
+            let patch_id = payload
+                .get("patch_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let current_on_disk = if !patch_id.is_empty() {
                 match poll_ack_content_sidecar(
-                    project_root, patch_id,
+                    project_root,
+                    patch_id,
                     std::time::Duration::from_millis(500),
                     std::time::Duration::from_millis(25),
                 ) {
                     Ok(Some(content)) => {
-                        eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
+                        eprintln!(
+                            "[write] snapshot from ack-content sidecar ({} bytes)",
+                            content.len()
+                        );
                         content
                     }
                     _ => {
-                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 500ms)");
+                        eprintln!(
+                            "[write] snapshot from file read (ack-content sidecar not available after 500ms)"
+                        );
                         std::fs::read_to_string(doc_file).unwrap_or_default()
                     }
                 }
@@ -2230,7 +2448,8 @@ fn write_ipc_and_poll(
                 eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
                 std::fs::read_to_string(doc_file).unwrap_or_default()
             };
-            let baseline_content = payload.get("baseline")
+            let baseline_content = payload
+                .get("baseline")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
@@ -2245,8 +2464,7 @@ fn write_ipc_and_poll(
 
             // Verify patch content is present in the file (catches partial application).
             // Check that at least one non-empty patch's content appears in the result.
-            let patch_list = payload.get("patches")
-                .and_then(|v| v.as_array());
+            let patch_list = payload.get("patches").and_then(|v| v.as_array());
             if let Some(patches) = patch_list {
                 let has_content_patch = patches.iter().any(|p| {
                     let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
@@ -2255,9 +2473,12 @@ fn write_ipc_and_poll(
                 if has_content_patch {
                     let any_present = patches.iter().any(|p| {
                         let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        if content.trim().is_empty() { return true; }
+                        if content.trim().is_empty() {
+                            return true;
+                        }
                         // Check first meaningful line of content appears in file
-                        content.lines()
+                        content
+                            .lines()
                             .find(|l| !l.trim().is_empty())
                             .is_none_or(|first_line| current_on_disk.contains(first_line.trim()))
                     });
@@ -2274,25 +2495,37 @@ fn write_ipc_and_poll(
             // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
             let snap_content = current_on_disk;
-            crate::ops_log::log_op(doc_file, &format!(
-                "ipc_file_delivered file={} snap_len={}",
-                doc_file.display(), snap_content.len()
-            ));
+            crate::ops_log::log_op(
+                doc_file,
+                &format!(
+                    "ipc_file_delivered file={} snap_len={}",
+                    doc_file.display(),
+                    snap_content.len()
+                ),
+            );
             if let Err(e) = snapshot::save(doc_file, &snap_content) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                      Commit will auto-recover via divergence detection.",
                     e
                 );
-                crate::ops_log::log_op(doc_file, &format!(
-                    "snapshot_save_failed_after_ipc file={} error={}",
-                    doc_file.display(), e
-                ));
+                crate::ops_log::log_op(
+                    doc_file,
+                    &format!(
+                        "snapshot_save_failed_after_ipc file={} error={}",
+                        doc_file.display(),
+                        e
+                    ),
+                );
             } else {
-                crate::ops_log::log_op(doc_file, &format!(
-                    "snapshot_saved_file_ipc file={} snap_len={}",
-                    doc_file.display(), snap_content.len()
-                ));
+                crate::ops_log::log_op(
+                    doc_file,
+                    &format!(
+                        "snapshot_saved_file_ipc file={} snap_len={}",
+                        doc_file.display(),
+                        snap_content.len()
+                    ),
+                );
                 let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
                 if let Err(e) = snapshot::save_crdt(doc_file, &crdt_doc.encode_state()) {
                     eprintln!("[write] WARNING: CRDT state save failed: {}", e);
@@ -2305,7 +2538,10 @@ fn write_ipc_and_poll(
     }
 
     // Timeout — clean up unconsumed patch file
-    eprintln!("[write] IPC timeout ({}s) — falling back to direct write", timeout.as_secs());
+    eprintln!(
+        "[write] IPC timeout ({}s) — falling back to direct write",
+        timeout.as_secs()
+    );
     let _ = std::fs::remove_file(patch_file);
     Ok(false)
 }
@@ -2362,7 +2598,9 @@ fn build_ipc_patches_json(
         .filter(|p| p.name != "frontmatter")
         .map(|p| {
             let content = match normalize_prefix_lines {
-                Some(prefix_lines) if !prefix_lines.is_empty() && is_append_mode_component(&p.name) => {
+                Some(prefix_lines)
+                    if !prefix_lines.is_empty() && is_append_mode_component(&p.name) =>
+                {
                     normalize_patch_content(&p.content, prefix_lines)
                 }
                 _ => p.content.clone(),
@@ -2403,7 +2641,8 @@ fn build_ipc_patches_json(
             if let Some(bid) = find_boundary_id(&current_doc, target) {
                 eprintln!(
                     "[write] synthesizing {} patch for unmatched content (boundary {})",
-                    target, &bid[..8.min(bid.len())]
+                    target,
+                    &bid[..8.min(bid.len())]
                 );
                 ipc_patches.push(serde_json::json!({
                     "component": target,
@@ -2599,7 +2838,8 @@ fn response_already_in_current(base: &str, content_ours: &str, content_current: 
 
     // Find lines added by ours that aren't in base
     let base_lines: std::collections::HashSet<&str> = base_content.lines().collect();
-    let response_lines: Vec<&str> = ours_content.lines()
+    let response_lines: Vec<&str> = ours_content
+        .lines()
         .filter(|line| !line.trim().is_empty())
         .filter(|line| !base_lines.contains(line))
         .collect();
@@ -2610,7 +2850,8 @@ fn response_already_in_current(base: &str, content_ours: &str, content_current: 
 
     // Check if the majority of response lines are already in current
     let current_lines: std::collections::HashSet<&str> = current_content.lines().collect();
-    let present_count = response_lines.iter()
+    let present_count = response_lines
+        .iter()
         .filter(|line| current_lines.contains(*line))
         .count();
 
@@ -2622,7 +2863,8 @@ fn response_already_in_current(base: &str, content_ours: &str, content_current: 
     if detected {
         eprintln!(
             "[write] plugin-applied detection: {}/{} response lines already in current",
-            present_count, response_lines.len()
+            present_count,
+            response_lines.len()
         );
     }
 
@@ -2647,7 +2889,10 @@ fn splice_pending_component(target: &str, source: &str) -> String {
     let source_comps = match component::parse(source) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[write] WARNING: splice_pending: failed to parse source components: {}", e);
+            eprintln!(
+                "[write] WARNING: splice_pending: failed to parse source components: {}",
+                e
+            );
             return target.to_string();
         }
     };
@@ -2661,7 +2906,10 @@ fn splice_pending_component(target: &str, source: &str) -> String {
     let target_comps = match component::parse(target) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[write] WARNING: splice_pending: failed to parse target components: {}", e);
+            eprintln!(
+                "[write] WARNING: splice_pending: failed to parse target components: {}",
+                e
+            );
             return target.to_string();
         }
     };
@@ -2740,7 +2988,11 @@ mod tests {
 
         // Verify snapshot path computation works
         let snap_path = snapshot::path_for(&doc).unwrap();
-        assert!(snap_path.to_string_lossy().contains(".agent-doc/snapshots/"));
+        assert!(
+            snap_path
+                .to_string_lossy()
+                .contains(".agent-doc/snapshots/")
+        );
 
         // Verify atomic_write + read roundtrip (the core of snapshot save)
         let snap_abs = dir.path().join(&snap_path);
@@ -2767,8 +3019,14 @@ mod tests {
         let merged = merge::merge_contents(base, &ours, theirs).unwrap();
 
         // Both the response and the user's follow-up should be in the merge
-        assert!(merged.contains("My response"), "response missing from merge");
-        assert!(merged.contains("And a follow-up!"), "user edit missing from merge");
+        assert!(
+            merged.contains("My response"),
+            "response missing from merge"
+        );
+        assert!(
+            merged.contains("And a follow-up!"),
+            "user edit missing from merge"
+        );
     }
 
     #[test]
@@ -2874,7 +3132,10 @@ mod tests {
         // Write merged content (includes both response and user edit)
         atomic_write(&doc, &merged).unwrap();
         assert!(merged.contains(response), "response missing from merged");
-        assert!(merged.contains("Follow-up question"), "user edit missing from merged");
+        assert!(
+            merged.contains("Follow-up question"),
+            "user edit missing from merged"
+        );
 
         // KEY: Save snapshot as final_content (the actual disk state after merge)
         snapshot::save(&doc, &merged).unwrap();
@@ -2882,9 +3143,18 @@ mod tests {
         // Verify: snapshot matches what's on disk exactly
         let snap = snapshot::load(&doc).unwrap().unwrap();
         let current = fs::read_to_string(&doc).unwrap();
-        assert_eq!(snap, current, "snapshot must match actual disk state after write");
-        assert!(snap.contains(response), "snapshot should contain agent response");
-        assert!(snap.contains("Follow-up question"), "snapshot should contain merged user edit");
+        assert_eq!(
+            snap, current,
+            "snapshot must match actual disk state after write"
+        );
+        assert!(
+            snap.contains(response),
+            "snapshot should contain agent response"
+        );
+        assert!(
+            snap.contains("Follow-up question"),
+            "snapshot should contain merged user edit"
+        );
     }
 
     #[test]
@@ -2896,7 +3166,10 @@ mod tests {
 
         let patches: Vec<crate::template::PatchBlock> = vec![];
         let result = try_ipc(&doc, &patches, "", None, None, None, None, None).unwrap();
-        assert!(!result.success, "should return false when patches dir doesn't exist");
+        assert!(
+            !result.success,
+            "should return false when patches dir doesn't exist"
+        );
     }
 
     #[test]
@@ -2915,7 +3188,10 @@ mod tests {
 
         // This will timeout after 2s — patch file is written but never consumed
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(!result.success, "should return false on timeout (no plugin)");
+        assert!(
+            !result.success,
+            "should return false on timeout (no plugin)"
+        );
 
         // Patch file should be cleaned up after timeout
         let patches_dir = agent_doc_dir.join("patches");
@@ -2923,7 +3199,10 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(entries.is_empty(), "patch file should be cleaned up after timeout");
+        assert!(
+            entries.is_empty(),
+            "patch file should be cleaned up after timeout"
+        );
     }
 
     #[test]
@@ -2951,8 +3230,10 @@ mod tests {
                     for entry in entries.flatten() {
                         if entry.path().extension().is_some_and(|e| e == "json") {
                             // Simulate plugin applying the patch by modifying the doc
-                            let _ = fs::write(&doc_for_watcher,
-                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n");
+                            let _ = fs::write(
+                                &doc_for_watcher,
+                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
+                            );
                             let _ = fs::remove_file(entry.path());
                             return;
                         }
@@ -2962,7 +3243,10 @@ mod tests {
         });
 
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(result.success, "should return true when plugin consumes patch");
+        assert!(
+            result.success,
+            "should return true when plugin consumes patch"
+        );
     }
 
     #[test]
@@ -2972,7 +3256,10 @@ mod tests {
         fs::write(&doc, "content").unwrap();
 
         let result = try_ipc_full_content(&doc, "new content").unwrap();
-        assert!(!result, "should return false when patches dir doesn't exist");
+        assert!(
+            !result,
+            "should return false when patches dir doesn't exist"
+        );
     }
 
     // --- sanitize_component_tags tests ---
@@ -3018,7 +3305,10 @@ mod tests {
     fn sanitize_passes_normal_content_through() {
         let input = "Just some normal markdown content.\n\nWith paragraphs and **bold**.";
         let result = sanitize_component_tags(input);
-        assert_eq!(result, input, "normal content should pass through unchanged");
+        assert_eq!(
+            result, input,
+            "normal content should pass through unchanged"
+        );
     }
 
     #[test]
@@ -3026,7 +3316,10 @@ mod tests {
         // Em dash U+2014 is 3 bytes in UTF-8: 0xE2, 0x80, 0x94
         let input = "This is a test \u{2014} with em dashes \u{2014} in content.";
         let result = sanitize_component_tags(input);
-        assert_eq!(result, input, "em dashes must survive sanitization unchanged");
+        assert_eq!(
+            result, input,
+            "em dashes must survive sanitization unchanged"
+        );
 
         // Verify at the byte level
         assert_eq!(
@@ -3115,7 +3408,10 @@ mod tests {
             None,               // reuse_patch_id
         )
         .unwrap();
-        assert!(result.success, "IPC should succeed when plugin consumes patch");
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
 
         // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
         let snap = snapshot::load(&doc).unwrap().unwrap();
@@ -3230,7 +3526,8 @@ mod tests {
 
     #[test]
     fn stale_baseline_user_appended_text_not_stale() {
-        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
         assert!(!is_stale_baseline(baseline, snapshot));
     }
@@ -3251,7 +3548,8 @@ mod tests {
     #[test]
     fn stale_baseline_missing_committed_content_is_stale() {
         let snapshot = "<!-- agent:exchange patch=append -->\nCommitted response from agent.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nOld content only.\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld content only.\n<!-- /agent:exchange -->\n";
         assert!(
             is_stale_baseline(baseline, snapshot),
             "baseline missing committed content should be stale"
@@ -3261,7 +3559,8 @@ mod tests {
     #[test]
     fn stale_baseline_missing_append_component_is_stale() {
         // Missing an append-mode component = stale
-        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:other patch=append -->\nDifferent.\n<!-- /agent:other -->\n";
         assert!(
             is_stale_baseline(baseline, snapshot),
@@ -3274,7 +3573,8 @@ mod tests {
         // Missing a replace-mode component is fine — user can delete it
         let snapshot = "<!-- agent:status patch=replace -->\nActive\n<!-- /agent:status -->\n\
                          <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
         assert!(
             !is_stale_baseline(baseline, snapshot),
             "missing replace-mode component should NOT trigger stale guard"
@@ -3306,7 +3606,8 @@ mod tests {
     fn stale_baseline_empty_snapshot_component_skipped() {
         // Empty append components in snapshot should not cause false positives
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nUser added content\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nUser added content\n<!-- /agent:exchange -->\n";
         assert!(!is_stale_baseline(baseline, snapshot));
     }
 
@@ -3373,7 +3674,11 @@ mod tests {
         let new_content = "Completely new agent response.";
         let result = build_ipc_patches_json(&doc, &patches, new_content, None).unwrap();
 
-        assert_eq!(result.len(), 1, "synthesis should produce one patch for new content");
+        assert_eq!(
+            result.len(),
+            1,
+            "synthesis should produce one patch for new content"
+        );
         assert_eq!(
             result[0]["component"].as_str().unwrap(),
             "exchange",
@@ -3445,16 +3750,32 @@ mod tests {
 
     #[test]
     fn normalize_user_prompts_new_line_gets_prefix() {
-        let snapshot = "<!-- agent:exchange patch=append -->\nOld content.\n<!-- /agent:exchange -->\n";
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nOld content.\n<!-- /agent:exchange -->\n";
         // baseline = user added "Hello" but agent hasn't responded yet
-        let baseline = "<!-- agent:exchange patch=append -->\nOld content.\nHello\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld content.\nHello\n<!-- /agent:exchange -->\n";
         // content_ours = baseline + agent response appended (boundary at end after pre-patch)
         let content = "<!-- agent:exchange patch=append -->\nOld content.\nHello\n<!-- agent:boundary:abc123 -->\n### Re: response\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ Hello"), "user line should get ❯  prefix: {}", result);
-        assert!(result.contains("Old content."), "old content should be preserved");
-        assert!(result.contains("### Re: response"), "agent response should be preserved");
-        assert!(!result.contains("❯ ###"), "agent heading should not get prefix: {}", result);
+        assert!(
+            result.contains("❯ Hello"),
+            "user line should get ❯  prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("Old content."),
+            "old content should be preserved"
+        );
+        assert!(
+            result.contains("### Re: response"),
+            "agent response should be preserved"
+        );
+        assert!(
+            !result.contains("❯ ###"),
+            "agent heading should not get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3464,13 +3785,26 @@ mod tests {
         // so the agent's response lines ended up in the "user region" and were incorrectly prefixed.
         let snapshot = "<!-- agent:exchange patch=append -->\nOld.\n<!-- /agent:exchange -->\n";
         // baseline: user added "My question"
-        let baseline = "<!-- agent:exchange patch=append -->\nOld.\nMy question\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld.\nMy question\n<!-- /agent:exchange -->\n";
         // content_ours: boundary at end (after pre-patch), agent response before it
         let content = "<!-- agent:exchange patch=append -->\nOld.\nMy question\nAgent answer here.\n<!-- agent:boundary:xyz -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ My question"), "user question should get prefix: {}", result);
-        assert!(!result.contains("❯ Agent answer"), "agent response should NOT get prefix: {}", result);
-        assert!(result.contains("Agent answer here."), "agent response should be preserved: {}", result);
+        assert!(
+            result.contains("❯ My question"),
+            "user question should get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ Agent answer"),
+            "agent response should NOT get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("Agent answer here."),
+            "agent response should be preserved: {}",
+            result
+        );
     }
 
     #[test]
@@ -3480,7 +3814,11 @@ mod tests {
         let content = "<!-- agent:exchange patch=append -->\nOld.\n\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         // blank line should not get prefix
-        assert!(!result.contains("❯ \n"), "blank line should not be prefixed: {}", result);
+        assert!(
+            !result.contains("❯ \n"),
+            "blank line should not be prefixed: {}",
+            result
+        );
     }
 
     #[test]
@@ -3488,11 +3826,20 @@ mod tests {
         // Headings in the exchange are agent response markers. A standalone heading
         // (not ❯-prefixed) is treated as agent content and does NOT get the ❯ prefix.
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\n### My heading\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ ### My heading"), "heading should NOT get prefix (treated as agent content): {}", result);
-        assert!(result.contains("### My heading"), "heading should be preserved: {}", result);
+        assert!(
+            !result.contains("❯ ### My heading"),
+            "heading should NOT get prefix (treated as agent content): {}",
+            result
+        );
+        assert!(
+            result.contains("### My heading"),
+            "heading should be preserved: {}",
+            result
+        );
     }
 
     #[test]
@@ -3500,21 +3847,35 @@ mod tests {
         // Regression for agent-doc-bugs #vnxg: a bare hash reference like `#zj6s` inside
         // the exchange user region was being skipped by the old `starts_with('#')` guard.
         // Under Option 2, the line is user input and must receive the ❯ prefix.
-        let snapshot = "<!-- agent:exchange patch=append -->\nprior turn\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nprior turn\n#zj6s\n<!-- /agent:exchange -->\n";
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\nprior turn\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nprior turn\n#zj6s\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nprior turn\n#zj6s\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ #zj6s"), "hash-ref line must get prefix: {}", result);
+        assert!(
+            result.contains("❯ #zj6s"),
+            "hash-ref line must get prefix: {}",
+            result
+        );
     }
 
     #[test]
     fn normalize_user_prompts_already_prefixed_skipped() {
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\n❯ Already prefixed\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\n❯ Already prefixed\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Already prefixed\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ ❯"), "should not double-prefix: {}", result);
-        assert!(result.contains("❯ Already prefixed"), "prefix should be preserved");
+        assert!(
+            !result.contains("❯ ❯"),
+            "should not double-prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ Already prefixed"),
+            "prefix should be preserved"
+        );
     }
 
     #[test]
@@ -3524,9 +3885,17 @@ mod tests {
         let content = "<!-- agent:exchange patch=append -->\n❯ Previous question\n### Re: answer\nNew question\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         // Previous question already prefixed — should not double-prefix
-        assert!(!result.contains("❯ ❯"), "should not double-prefix existing content: {}", result);
+        assert!(
+            !result.contains("❯ ❯"),
+            "should not double-prefix existing content: {}",
+            result
+        );
         // New question should get prefix
-        assert!(result.contains("❯ New question"), "new line should get prefix: {}", result);
+        assert!(
+            result.contains("❯ New question"),
+            "new line should get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3535,9 +3904,21 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\nSome text.\n```bash\necho hello\n```\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nSome text.\n```bash\necho hello\n```\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ ```"), "code fence marker should not get prefix: {}", result);
-        assert!(!result.contains("❯ echo hello"), "code fence interior should not get prefix: {}", result);
-        assert!(result.contains("❯ Some text."), "regular user line should get prefix: {}", result);
+        assert!(
+            !result.contains("❯ ```"),
+            "code fence marker should not get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ echo hello"),
+            "code fence interior should not get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ Some text."),
+            "regular user line should get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3547,11 +3928,31 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\nQuestion here.\n```rust\nlet x = 1;\nlet y = 2;\n```\nFollow-up.\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nQuestion here.\n```rust\nlet x = 1;\nlet y = 2;\n```\nFollow-up.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ Question here."), "text before fence should get prefix: {}", result);
-        assert!(result.contains("❯ Follow-up."), "text after fence should get prefix: {}", result);
-        assert!(!result.contains("❯ let x"), "fence interior should not get prefix: {}", result);
-        assert!(!result.contains("❯ let y"), "fence interior should not get prefix: {}", result);
-        assert!(!result.contains("❯ ```"), "fence marker should not get prefix: {}", result);
+        assert!(
+            result.contains("❯ Question here."),
+            "text before fence should get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ Follow-up."),
+            "text after fence should get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ let x"),
+            "fence interior should not get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ let y"),
+            "fence interior should not get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ ```"),
+            "fence marker should not get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3561,10 +3962,22 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\nBefore.\n~~~sh\necho hello\n~~~\nAfter.\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nBefore.\n~~~sh\necho hello\n~~~\nAfter.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ Before."), "text before tilde fence should get prefix: {result}");
-        assert!(result.contains("❯ After."), "text after tilde fence should get prefix: {result}");
-        assert!(!result.contains("❯ echo hello"), "tilde fence interior should not get prefix: {result}");
-        assert!(!result.contains("❯ ~~~"), "tilde fence marker should not get prefix: {result}");
+        assert!(
+            result.contains("❯ Before."),
+            "text before tilde fence should get prefix: {result}"
+        );
+        assert!(
+            result.contains("❯ After."),
+            "text after tilde fence should get prefix: {result}"
+        );
+        assert!(
+            !result.contains("❯ echo hello"),
+            "tilde fence interior should not get prefix: {result}"
+        );
+        assert!(
+            !result.contains("❯ ~~~"),
+            "tilde fence marker should not get prefix: {result}"
+        );
     }
 
     #[test]
@@ -3575,16 +3988,28 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ \"Merge conflict"), "quoted user line should get prefix: {}", result);
+        assert!(
+            result.contains("❯ \"Merge conflict"),
+            "quoted user line should get prefix: {}",
+            result
+        );
     }
 
     #[test]
     fn normalize_patch_content_applies_prefix_to_matching_lines() {
-        let patch_content = "transferred line 1\ntransferred line 2\n### Re: Response\nAgent answer\n";
-        let prefix_lines = vec!["transferred line 1".to_string(), "transferred line 2".to_string()];
+        let patch_content =
+            "transferred line 1\ntransferred line 2\n### Re: Response\nAgent answer\n";
+        let prefix_lines = vec![
+            "transferred line 1".to_string(),
+            "transferred line 2".to_string(),
+        ];
         let result = normalize_patch_content(patch_content, &prefix_lines);
-        let expected = "❯ transferred line 1\n❯ transferred line 2\n### Re: Response\nAgent answer\n";
-        assert_eq!(result, expected, "prefix lines should get ❯  in patch content");
+        let expected =
+            "❯ transferred line 1\n❯ transferred line 2\n### Re: Response\nAgent answer\n";
+        assert_eq!(
+            result, expected,
+            "prefix lines should get ❯  in patch content"
+        );
     }
 
     #[test]
@@ -3593,14 +4018,20 @@ mod tests {
         let prefix_lines = vec!["already prefixed".to_string(), "not prefixed".to_string()];
         let result = normalize_patch_content(patch_content, &prefix_lines);
         let expected = "❯ already prefixed\n❯ not prefixed\n";
-        assert_eq!(result, expected, "already-prefixed lines should not get double prefix");
+        assert_eq!(
+            result, expected,
+            "already-prefixed lines should not get double prefix"
+        );
     }
 
     #[test]
     fn normalize_patch_content_empty_prefix_lines_passthrough() {
         let patch_content = "some line\nanother line\n";
         let result = normalize_patch_content(patch_content, &[]);
-        assert_eq!(result, patch_content, "empty prefix_lines should leave content unchanged");
+        assert_eq!(
+            result, patch_content,
+            "empty prefix_lines should leave content unchanged"
+        );
     }
 
     #[test]
@@ -3608,7 +4039,10 @@ mod tests {
         let patch_content = "agent response line\n### heading\n";
         let prefix_lines = vec!["user line".to_string()];
         let result = normalize_patch_content(patch_content, &prefix_lines);
-        assert_eq!(result, patch_content, "non-matching lines should pass through unchanged");
+        assert_eq!(
+            result, patch_content,
+            "non-matching lines should pass through unchanged"
+        );
     }
 
     #[test]
@@ -3616,7 +4050,8 @@ mod tests {
         // Regression: normalize_patch_content was applied to ALL patches including agent:pending.
         // When a line from the exchange user_added set also appeared in a pending patch, it would
         // incorrectly receive the ❯  prefix. The fix gates normalization on is_append_mode_component.
-        let pending_content = "- [ ] Build Gutenberg replacement HTML for home page\n- [ ] Update page content\n";
+        let pending_content =
+            "- [ ] Build Gutenberg replacement HTML for home page\n- [ ] Update page content\n";
         let prefix_lines = vec!["- [ ] Build Gutenberg replacement HTML for home page".to_string()];
         // Simulate the guard: only apply normalize_patch_content for exchange (append-mode) components.
         // For pending (replace-mode), content must pass through unchanged.
@@ -3628,17 +4063,26 @@ mod tests {
         } else {
             pending_content.to_string()
         };
-        assert_eq!(result, pending_content, "agent:pending content must NOT receive ❯  prefix");
-        assert!(!result.contains("❯ "), "no ❯  prefix should appear in pending patches");
+        assert_eq!(
+            result, pending_content,
+            "agent:pending content must NOT receive ❯  prefix"
+        );
+        assert!(
+            !result.contains("❯ "),
+            "no ❯  prefix should appear in pending patches"
+        );
     }
 
-        #[test]
+    #[test]
     fn normalize_user_prompts_no_exchange_passthrough() {
         let content = "No exchange here.\n";
         let baseline = "No exchange here.\n";
         let snapshot = "";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert_eq!(result, content, "document without exchange should pass through unchanged");
+        assert_eq!(
+            result, content,
+            "document without exchange should pass through unchanged"
+        );
     }
 
     #[test]
@@ -3651,8 +4095,16 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- agent:boundary:abc123:doc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ do"), "❯  prefix must be restored when snapshot had it but file lost it: {}", result);
-        assert!(!result.contains("\ndo\n"), "bare do line must not remain without prefix: {}", result);
+        assert!(
+            result.contains("❯ do"),
+            "❯  prefix must be restored when snapshot had it but file lost it: {}",
+            result
+        );
+        assert!(
+            !result.contains("\ndo\n"),
+            "bare do line must not remain without prefix: {}",
+            result
+        );
         // ❯ done must not be double-prefixed
         assert!(!result.contains("❯ ❯"), "no double-prefix: {}", result);
     }
@@ -3666,11 +4118,31 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n❯ Existing prompt\n### Re: topic — gpt-5.4 (HEAD)\nAgent answer.\nfix #vedj. add spec + tests. build + install for local testing\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Existing prompt\n### Re: topic — gpt-5.4 (HEAD)\nAgent answer.\nfix #vedj. add spec + tests. build + install for local testing\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("### Re: topic — gpt-5.4 (HEAD)"), "replacement heading should be preserved: {}", result);
-        assert!(result.contains("Agent answer."), "existing agent body should be preserved: {}", result);
-        assert!(result.contains("❯ fix #vedj. add spec + tests. build + install for local testing"), "new user prompt should get prefix despite heading replacement: {}", result);
-        assert!(!result.contains("❯ Agent answer."), "existing agent body should not be prefixed: {}", result);
-        assert!(!result.contains("❯ ### Re: topic"), "replacement heading should not be prefixed: {}", result);
+        assert!(
+            result.contains("### Re: topic — gpt-5.4 (HEAD)"),
+            "replacement heading should be preserved: {}",
+            result
+        );
+        assert!(
+            result.contains("Agent answer."),
+            "existing agent body should be preserved: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ fix #vedj. add spec + tests. build + install for local testing"),
+            "new user prompt should get prefix despite heading replacement: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ Agent answer."),
+            "existing agent body should not be prefixed: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ ### Re: topic"),
+            "replacement heading should not be prefixed: {}",
+            result
+        );
     }
 
     // ── agent-response-block tracking ────────────────────────────────────────
@@ -3679,13 +4151,26 @@ mod tests {
     fn normalize_user_prompts_agent_table_rows_not_prefixed() {
         // Core bug: stale snapshot causes agent response table rows (inside ### Re: blocks)
         // to appear as Insert lines and incorrectly receive ❯ prefix.
-        let snapshot = "<!-- agent:exchange patch=append -->\n❯ Question\n<!-- /agent:exchange -->\n";
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n❯ Question\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\n❯ Question\n### Re: analysis — opus-4-6\n| model | score |\n|-------|-------|\n| gpt-4 | 85.0 |\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Question\n### Re: analysis — opus-4-6\n| model | score |\n|-------|-------|\n| gpt-4 | 85.0 |\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ |"), "table rows inside agent response should NOT get prefix: {}", result);
-        assert!(!result.contains("❯ ###"), "agent heading should NOT get prefix: {}", result);
-        assert!(result.contains("| model | score |"), "table content should be preserved: {}", result);
+        assert!(
+            !result.contains("❯ |"),
+            "table rows inside agent response should NOT get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ ###"),
+            "agent heading should NOT get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("| model | score |"),
+            "table content should be preserved: {}",
+            result
+        );
     }
 
     #[test]
@@ -3694,7 +4179,11 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n### Re: topic\nSome text.\n#### Details\nMore text.\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n### Re: topic\nSome text.\n#### Details\nMore text.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ "), "no lines should get prefix — all are agent content: {}", result);
+        assert!(
+            !result.contains("❯ "),
+            "no lines should get prefix — all are agent content: {}",
+            result
+        );
     }
 
     #[test]
@@ -3704,7 +4193,11 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n❯ Old question\n### Re: answer\nOld answer.\nNew user input\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Old question\n### Re: answer\nOld answer.\nNew user input\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ New user input"), "user text after Equal heading should get prefix: {}", result);
+        assert!(
+            result.contains("❯ New user input"),
+            "user text after Equal heading should get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3714,10 +4207,26 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\n### Re: answer\nAgent text.\n❯ New question\nFollow-up text.\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n### Re: answer\nAgent text.\n❯ New question\nFollow-up text.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ Agent text"), "agent text should NOT get prefix: {}", result);
-        assert!(!result.contains("❯ ###"), "agent heading should NOT get prefix: {}", result);
-        assert!(result.contains("❯ New question"), "already-prefixed line should be preserved: {}", result);
-        assert!(result.contains("❯ Follow-up text."), "user text after ❯ should get prefix: {}", result);
+        assert!(
+            !result.contains("❯ Agent text"),
+            "agent text should NOT get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ ###"),
+            "agent heading should NOT get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ New question"),
+            "already-prefixed line should be preserved: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ Follow-up text."),
+            "user text after ❯ should get prefix: {}",
+            result
+        );
     }
 
     #[test]
@@ -3727,10 +4236,26 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\nBefore.\n```md\n### Not a real heading\nSome code.\n```\nAfter.\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nBefore.\n```md\n### Not a real heading\nSome code.\n```\nAfter.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(result.contains("❯ Before."), "text before fence should get prefix: {}", result);
-        assert!(result.contains("❯ After."), "text after fence should get prefix: {}", result);
-        assert!(!result.contains("❯ ###"), "heading inside fence should not get prefix: {}", result);
-        assert!(!result.contains("❯ Some code"), "code inside fence should not get prefix: {}", result);
+        assert!(
+            result.contains("❯ Before."),
+            "text before fence should get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("❯ After."),
+            "text after fence should get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ ###"),
+            "heading inside fence should not get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ Some code"),
+            "code inside fence should not get prefix: {}",
+            result
+        );
     }
 
     // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
@@ -3743,11 +4268,15 @@ mod tests {
         std::fs::write(&file, "").unwrap();
 
         let snapshot = "<!-- agent:exchange patch=append -->\nOld.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nOld.\nHello\n<!-- /agent:exchange -->\n";
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld.\nHello\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nOld.\nHello\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
 
         let result = normalize_user_prompts_in_exchange_safe(content, baseline, snapshot, &file);
-        assert!(result.contains("❯ Hello"), "under threshold, ❯ prefix should still be applied: {result}");
+        assert!(
+            result.contains("❯ Hello"),
+            "under threshold, ❯ prefix should still be applied: {result}"
+        );
     }
 
     #[test]
@@ -3765,13 +4294,23 @@ mod tests {
             content_lines.push_str(&format!("user line {i}\n"));
         }
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = format!("<!-- agent:exchange patch=append -->\n{baseline_lines}<!-- /agent:exchange -->\n");
-        let content = format!("<!-- agent:exchange patch=append -->\n{content_lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n");
+        let baseline = format!(
+            "<!-- agent:exchange patch=append -->\n{baseline_lines}<!-- /agent:exchange -->\n"
+        );
+        let content = format!(
+            "<!-- agent:exchange patch=append -->\n{content_lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n"
+        );
 
         let result = normalize_user_prompts_in_exchange_safe(&content, &baseline, snapshot, &file);
         // No ❯ prefix should be applied — content should be returned unchanged.
-        assert_eq!(result, content, "over threshold, content should pass through unchanged");
-        assert!(!result.contains("❯ user line"), "no ❯ prefix should be applied when threshold exceeded");
+        assert_eq!(
+            result, content,
+            "over threshold, content should pass through unchanged"
+        );
+        assert!(
+            !result.contains("❯ user line"),
+            "no ❯ prefix should be applied when threshold exceeded"
+        );
     }
 
     #[test]
@@ -3786,13 +4325,22 @@ mod tests {
             lines.push_str(&format!("line {i}\n"));
         }
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = format!("<!-- agent:exchange patch=append -->\n{lines}<!-- /agent:exchange -->\n");
-        let content = format!("<!-- agent:exchange patch=append -->\n{lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n");
+        let baseline =
+            format!("<!-- agent:exchange patch=append -->\n{lines}<!-- /agent:exchange -->\n");
+        let content = format!(
+            "<!-- agent:exchange patch=append -->\n{lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n"
+        );
 
         let result = normalize_user_prompts_in_exchange_safe(&content, &baseline, snapshot, &file);
         // At exactly 50, prefix should be applied (> is strict).
-        assert!(result.contains("❯ line 0"), "at threshold, first line should get prefix: {result}");
-        assert!(result.contains("❯ line 49"), "at threshold, last line should get prefix: {result}");
+        assert!(
+            result.contains("❯ line 0"),
+            "at threshold, first line should get prefix: {result}"
+        );
+        assert!(
+            result.contains("❯ line 49"),
+            "at threshold, last line should get prefix: {result}"
+        );
     }
 
     // --- exchange shrink guard tests ---
@@ -3810,7 +4358,10 @@ mod tests {
         let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
 
         let result = check_exchange_shrink_guard(&old, new, &doc);
-        assert!(result.is_err(), "shrink guard should block truncation from 500 to ~1 byte");
+        assert!(
+            result.is_err(),
+            "shrink guard should block truncation from 500 to ~1 byte"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("shrink"), "error should mention shrink: {msg}");
     }
@@ -3832,7 +4383,11 @@ mod tests {
         );
 
         let result = check_exchange_shrink_guard(&old, &new, &doc);
-        assert!(result.is_ok(), "shrink guard should allow 50% reduction: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "shrink guard should allow 50% reduction: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -3841,11 +4396,16 @@ mod tests {
         let doc = dir.path().join("test.md");
 
         // Old exchange is only 50 bytes — below SHRINK_GUARD_MIN_BYTES
-        let old = "<!-- agent:exchange -->\nSmall content here, not much.\n<!-- /agent:exchange -->\n";
+        let old =
+            "<!-- agent:exchange -->\nSmall content here, not much.\n<!-- /agent:exchange -->\n";
         let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
 
         let result = check_exchange_shrink_guard(old, new, &doc);
-        assert!(result.is_ok(), "shrink guard should skip small exchanges: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "shrink guard should skip small exchanges: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -3858,7 +4418,10 @@ mod tests {
         let new = "# Just a heading\n.\n";
 
         let result = check_exchange_shrink_guard(old, new, &doc);
-        assert!(result.is_ok(), "shrink guard should pass when no exchange component exists");
+        assert!(
+            result.is_ok(),
+            "shrink guard should pass when no exchange component exists"
+        );
     }
 
     #[test]
@@ -3895,11 +4458,20 @@ original content
 ";
         let result = splice_pending_component(target, source);
         // exchange content from target is preserved
-        assert!(result.contains("response content"), "exchange content should come from target");
+        assert!(
+            result.contains("response content"),
+            "exchange content should come from target"
+        );
         // pending content from source (with [x]) is used
-        assert!(result.contains("- [x] [#aaaa] old item"), "pending done state should come from source");
+        assert!(
+            result.contains("- [x] [#aaaa] old item"),
+            "pending done state should come from source"
+        );
         // old pending from target is gone
-        assert!(!result.contains("- [ ] [#aaaa] old item"), "stale open pending should be replaced");
+        assert!(
+            !result.contains("- [ ] [#aaaa] old item"),
+            "stale open pending should be replaced"
+        );
     }
 
     #[test]
@@ -3918,7 +4490,10 @@ original
 <!-- /agent:exchange -->
 ";
         let result = splice_pending_component(target, source);
-        assert_eq!(result, target, "target should be returned unchanged when source has no pending");
+        assert_eq!(
+            result, target,
+            "target should be returned unchanged when source has no pending"
+        );
     }
 
     #[test]
@@ -3938,7 +4513,10 @@ original
 <!-- /agent:pending -->
 ";
         let result = splice_pending_component(target, source);
-        assert_eq!(result, target, "target should be returned unchanged when target has no pending");
+        assert_eq!(
+            result, target,
+            "target should be returned unchanged when target has no pending"
+        );
     }
 }
 
@@ -3974,10 +4552,12 @@ mod ack_content_snapshot_tests {
         std::fs::write(ack_dir.join(format!("{patch_id}.md")), "immediate content").unwrap();
 
         let result = poll_ack_content_sidecar(
-            &project_root, patch_id,
+            &project_root,
+            patch_id,
             std::time::Duration::from_millis(100),
             std::time::Duration::from_millis(10),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result, Some("immediate content".to_string()));
     }
 
@@ -4001,10 +4581,12 @@ mod ack_content_snapshot_tests {
         });
 
         let result = poll_ack_content_sidecar(
-            &project_root, patch_id,
+            &project_root,
+            patch_id,
             std::time::Duration::from_millis(500),
             std::time::Duration::from_millis(10),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result, Some("delayed content".to_string()));
     }
 
@@ -4019,15 +4601,23 @@ mod ack_content_snapshot_tests {
 
         let start = std::time::Instant::now();
         let result = poll_ack_content_sidecar(
-            &project_root, patch_id,
+            &project_root,
+            patch_id,
             std::time::Duration::from_millis(100),
             std::time::Duration::from_millis(25),
-        ).unwrap();
+        )
+        .unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result, None);
-        assert!(elapsed >= std::time::Duration::from_millis(100), "should wait at least the timeout");
-        assert!(elapsed < std::time::Duration::from_millis(300), "should not wait much longer than timeout");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(100),
+            "should wait at least the timeout"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(300),
+            "should not wait much longer than timeout"
+        );
     }
 }
 
@@ -4044,11 +4634,16 @@ mod submodule_patch_routing_tests {
         let out = Command::new("git")
             .current_dir(dir)
             .args([
-                "-c", "user.email=test@example.com",
-                "-c", "user.name=Test",
-                "-c", "init.defaultBranch=main",
-                "-c", "protocol.file.allow=always",
-                "-c", "commit.gpgsign=false",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "init.defaultBranch=main",
+                "-c",
+                "protocol.file.allow=always",
+                "-c",
+                "commit.gpgsign=false",
             ])
             .args(args)
             .output()
@@ -4083,11 +4678,15 @@ mod submodule_patch_routing_tests {
         std::fs::write(parent.join("README.md"), "parent").unwrap();
         git(&parent, &["add", "README.md"]);
         git(&parent, &["commit", "-m", "init"]);
-        git(&parent, &[
-            "submodule", "add",
-            sub_src.to_string_lossy().as_ref(),
-            "src/submodule",
-        ]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
 
         // Submodule has its own .agent-doc — the IDE plugin registers it as a root.
         let submodule_root = parent.join("src/submodule");
@@ -4095,7 +4694,11 @@ mod submodule_patch_routing_tests {
 
         // Place a document inside the submodule.
         let doc = submodule_root.join("test.md");
-        std::fs::write(&doc, "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
 
         let canonical = doc.canonicalize().unwrap();
         let project_root = resolve_ipc_project_root(&canonical);
@@ -4127,7 +4730,10 @@ mod submodule_patch_routing_tests {
             let root_clone = root.clone();
             let _ = crate::ipc_socket::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v.get("patch_id").and_then(|p| p.as_str()).unwrap_or("unknown");
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
                 // Write ack-content sidecar so poll_ack_content_sidecar succeeds
                 let ack_dir = root_clone.join(".agent-doc/ack-content");
                 let _ = std::fs::create_dir_all(&ack_dir);
@@ -4176,11 +4782,15 @@ mod submodule_patch_routing_tests {
         std::fs::write(parent.join("README.md"), "parent").unwrap();
         git(&parent, &["add", "README.md"]);
         git(&parent, &["commit", "-m", "init"]);
-        git(&parent, &[
-            "submodule", "add",
-            sub_src.to_string_lossy().as_ref(),
-            "src/submodule",
-        ]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
 
         // Submodule has its own .agent-doc/ — mirrors the real boost-client layout.
         let submodule_root = parent.join("src/submodule");
@@ -4193,7 +4803,11 @@ mod submodule_patch_routing_tests {
 
         // Place a document inside the submodule.
         let doc = submodule_root.join("test.md");
-        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
 
         let patch = crate::template::PatchBlock::new("exchange", "test response");
 
@@ -4237,7 +4851,11 @@ mod submodule_patch_routing_tests {
         // Create a document in a subdirectory.
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         let doc = root.join("tasks/test.md");
-        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
 
         let patch = crate::template::PatchBlock::new("exchange", "response");
 
@@ -4350,7 +4968,8 @@ mod future_work_signal_tests {
 
     #[test]
     fn detects_worth_revisiting() {
-        let result = check_future_work_signals("This design is fine. Worth revisiting after v2.", false);
+        let result =
+            check_future_work_signals("This design is fine. Worth revisiting after v2.", false);
         assert_eq!(result, Some("worth revisiting"));
     }
 
@@ -4401,7 +5020,8 @@ some exchange content
         assert!(
             pend_open > ex_close,
             "pending (at {}) should be after exchange close (at {})",
-            pend_open, ex_close
+            pend_open,
+            ex_close
         );
         // exchange content preserved
         assert!(result.contains("some exchange content"));

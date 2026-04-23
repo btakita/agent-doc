@@ -100,3 +100,39 @@ All sources resolve into a single `effective_tier` field in preflight JSON that 
 ## Review
 
 - Pending.
+
+## 2026-04-22 — `#cyc1` cycle completion invariants
+
+- [ ] Add binary-owned cycle-state tracking for per-document preflight/write/commit lifecycle so interrupted cycles are identified by exact phase/hash state rather than loose heuristics.
+- [ ] Update `preflight`, `write`, `recover`, `git`, and `session_check` to advance/validate the cycle state, auto-attempt recovery+commit, and fail closed when the prior cycle still has no terminal committed state.
+- [ ] Add focused tests and spec/docs updates for the new invariant, then verify with targeted tests, `make check`, `cargo build --release`, and `cargo install --path .`.
+
+## 2026-04-22 — route stash-pane eviction (`agent-doc-bugs2`)
+
+- [x] Confirm the repeated auto-start path that creates replacement stash panes for an already-known document session.
+- [x] Evict an existing live stash pane for the same session before re-registering a newly provisioned replacement pane.
+- [x] Add a regression test covering repeated stash provisioning and verify with targeted route tests.
+
+## 2026-04-22 — missing response patchback investigation (`agent-doc-bugs2`)
+
+- [x] Check the root `agent-loop/.agent-doc` logs for `tasks/agent-doc/agent-doc-bugs2.md` rather than the `src/agent-doc` submodule logs.
+- [x] Confirm whether the latest `agent-doc-bugs2.md` session reached `preflight` / `write` / `commit`, or only `session_start` / `codex_start`.
+- [x] Summarize the evidence in the task document, including the stale snapshot vs live-file drift and the absence of pending-response artifacts.
+
+## 2026-04-22 — `agent-doc-bugs` failing tests follow-up
+
+- [x] Reproduce the current `src/agent-doc` test failures and isolate whether they come from the new cycle-state/durable-capture changes or from existing harness/tmux instability.
+- [x] Patch the minimal implementation or test expectation needed to restore the intended behavior without disturbing unrelated dirty worktree changes.
+- [x] Re-run the relevant targeted tests plus the requested broader verification (`make check`, build, install when still applicable) and patch the exact result back into `tasks/agent-doc/agent-doc-bugs.md`.
+
+## 2026-04-22 — `codex_args` follow-up (`agent-doc-bugs`)
+
+- [x] Run the `agent-doc` test/build checks against the current `codex_args` change set and isolate the concrete failures.
+- [x] Fix whichever side is wrong: implementation, docs/spec expectations, or regression tests, while preserving the intended Codex arg-resolution contract.
+- [x] Re-run the relevant verification (`cargo test`, `cargo check`, and any required build/install step) and patch back the result into the task document.
+
+## 2026-04-22 — `#wrtc1` Codex/manual-repair write path
+
+- [x] Tighten the bundled skill/runbooks so Codex/manual-repair patchbacks explicitly require `agent-doc write --commit <file>` when the prompt is already present in the document, and explain why direct file patching is the wrong path.
+- [x] Add regression tests around the bundled skill/install content so the Codex-facing instructions and manual-repair guidance are enforced by tests.
+- [x] Verify with targeted tests plus build/install for local testing, then patch back the outcome and answer whether a hook/helper should try to auto-write the missed patchback.

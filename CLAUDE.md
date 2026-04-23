@@ -18,6 +18,8 @@ Interactive document sessions with AI agents.
 - **Harness arg resolution is explicit** — `agent_args` is the shared override, `claude_args` is Claude-only, and `codex_args` is Codex-only. Keep those precedence chains in `start.rs`, `frontmatter.rs`, `config.rs`, and the docs/specs aligned.
 - **Skill install content is part of the product contract** — changes in `src/skill.rs`, `SKILL.md`, or bundled runbooks must keep the installed `.claude/skills/agent-doc/SKILL.md`, `.codex/AGENTS.md`, and harness runbooks aligned. In particular, Codex/manual-repair guidance must distinguish inserting a missing user prompt from repairing a missed assistant response, and the latter should route through `agent-doc write --commit <FILE>` rather than direct file patching.
 - **Selective commit is conservative** — `git::commit()` stages the snapshot, not arbitrary working-tree drift. The only absorbable out-of-band repair path is narrow agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when the redacted component structure still matches. Plain user prompts must remain uncommitted. Even under extreme snapshot/file drift, tracked docs must not wholesale re-sync the snapshot from the live file — reserve that bootstrap escape hatch for untracked scaffold snapshots only. After a successful commit, boundary cleanup must keep the committed blob clean while preserving a single visible ` (HEAD)` marker on the current response heading in the snapshot / user-facing document state; only skip the direct file rewrite when a live IPC listener is available to perform that visible rewrite in the editor.
+- **Response replay is capture-backed** — final parsed responses must be durably persisted before write/hook emission in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`. Recovery replays the captured response body only when the captured snapshot/file hashes still match the current baseline; otherwise fail closed.
+- **Preflight is a stable binary contract** — keep `src/preflight.rs`, `SKILL.md`, `.claude/skills/agent-doc/SKILL.md`, and the top-level docs aligned on the interrupted-cycle guard (`response_captured` counts as open), tier fields (`effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`), and `agent_model` short-name attribution.
 - **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, socket listeners, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins. **Ontology:** Both the FFI library and each editor plugin are **Systems** with their own **Perspectives**. Each exposes an **Interface** (C ABI, JNA bindings) — the defined boundary through which Systems communicate. The Shared Foundation pattern places shared logic at the broadest **Scope** (FFI library) so all consumer Systems access it through their Interfaces. **Test:** "Does this feature need to work in >1 editor?" → implement in FFI. Example: socket IPC listener lives in `ffi.rs` (`agent_doc_start_ipc_listener`), not in `PatchWatcher.kt`.
 
 ## Binary vs Agent Responsibility
@@ -72,7 +74,8 @@ src/
   ffi.rs            # C ABI exports for editor plugins (JNA/FFI); ffi_git_commit unsets GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE so it works correctly when called from git hook contexts
   ipc_socket.rs     # Socket-based IPC (Unix domain sockets via interprocess crate)
   lib.rs            # Library target re-exports
-  recover.rs        # Orphaned pending response detection + recovery
+  capture.rs        # Durable response-capture ledger + replay hash validation
+  recover.rs        # Orphaned pending/captured response detection + recovery
   compact.rs        # Exchange compaction (archive + truncate)
   convert.rs        # Bidirectional format conversion (inline ↔ template)
   extract.rs        # Extract exchange sections to new documents
@@ -80,7 +83,7 @@ src/
   mode.rs           # Document mode resolution (format + write strategy)
   autoclaim.rs      # SessionStart hook: auto-claim documents
   commands.rs       # List available commands for plugin autocomplete
-  hooks.rs          # Cross-session hook integration (fire_post_write, fire_post_commit, etc.)
+  hooks.rs          # Cross-session hook integration (fire_post_write, fire_post_commit, capture refs)
   hook_cmd.rs       # CLI subcommands: agent-doc hook fire/poll/listen/gc
   ops_log.rs        # Best-effort operational logging to .agent-doc/logs/ops.log
   cycle_state.rs    # Persisted per-document cycle phase/hash state for interrupted-cycle enforcement

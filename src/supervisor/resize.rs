@@ -24,8 +24,8 @@
 
 #[cfg(unix)]
 mod platform {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::{self, JoinHandle};
 
     use anyhow::{Context, Result};
@@ -181,19 +181,18 @@ pub use platform::query_terminal_size;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     #[test]
     fn watcher_construction_and_stop() {
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
-        let mut watcher =
-            ResizeWatcher::spawn(move |_size| {
-                called_clone.store(true, Ordering::Relaxed);
-            })
-            .expect("spawn resize watcher");
+        let mut watcher = ResizeWatcher::spawn(move |_size| {
+            called_clone.store(true, Ordering::Relaxed);
+        })
+        .expect("spawn resize watcher");
 
         // Stop should complete without hanging
         watcher.stop();
@@ -201,8 +200,7 @@ mod tests {
 
     #[test]
     fn stop_is_idempotent() {
-        let mut watcher =
-            ResizeWatcher::spawn(|_| {}).expect("spawn resize watcher");
+        let mut watcher = ResizeWatcher::spawn(|_| {}).expect("spawn resize watcher");
         watcher.stop();
         watcher.stop(); // second stop should be a no-op
     }

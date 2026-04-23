@@ -37,8 +37,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -168,11 +168,7 @@ impl SupervisorIpc {
     /// It runs on the accept thread — callers that need to touch shared
     /// state (PtySession, CrashPolicy) should use interior mutability
     /// (Arc<Mutex<...>>).
-    pub fn start<F>(
-        project_root: &Path,
-        session_uuid: &str,
-        handler: F,
-    ) -> Result<Self>
+    pub fn start<F>(project_root: &Path, session_uuid: &str, handler: F) -> Result<Self>
     where
         F: Fn(IpcMethod) -> IpcResponse + Send + 'static,
     {
@@ -226,13 +222,11 @@ impl SupervisorIpc {
                             if reader.read_line(&mut line).unwrap_or(0) > 0 {
                                 let trimmed = line.trim();
                                 if !trimmed.is_empty() {
-                                    let response =
-                                        match serde_json::from_str::<IpcMethod>(trimmed) {
-                                            Ok(method) => handler(method),
-                                            Err(e) => {
-                                                IpcResponse::err(format!("parse error: {e}"))
-                                            }
-                                        };
+                                    let response = match serde_json::from_str::<IpcMethod>(trimmed)
+                                    {
+                                        Ok(method) => handler(method),
+                                        Err(e) => IpcResponse::err(format!("parse error: {e}")),
+                                    };
 
                                     let mut resp_json = serde_json::to_string(&response)
                                         .unwrap_or_else(|e| {
@@ -341,8 +335,8 @@ pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
     match rx.recv_timeout(Duration::from_secs(2)) {
         Ok((Ok(0), _)) => anyhow::bail!("supervisor closed connection without responding"),
         Ok((Ok(_), line)) => {
-            let resp: IpcResponse = serde_json::from_str(line.trim())
-                .context("failed to parse supervisor response")?;
+            let resp: IpcResponse =
+                serde_json::from_str(line.trim()).context("failed to parse supervisor response")?;
             Ok(resp)
         }
         Ok((Err(e), _)) => anyhow::bail!("supervisor read error: {e}"),
@@ -382,9 +376,7 @@ mod tests {
             IpcMethod::Restart { mode } => {
                 IpcResponse::ok(serde_json::json!({ "pid": 99999, "mode": mode }))
             }
-            IpcMethod::Inject { bytes } => {
-                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-            }
+            IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
         })
         .expect("start test handler")
     }
@@ -631,9 +623,7 @@ mod tests {
     #[test]
     fn socket_path_falls_back_for_long_paths() {
         // Construct a project root long enough to push the socket path over 107 bytes
-        let long_root = PathBuf::from("/tmp")
-            .join("a".repeat(80))
-            .join("nested");
+        let long_root = PathBuf::from("/tmp").join("a".repeat(80)).join("nested");
         let uuid = "12345678-abcd-ef01-2345-6789abcdef01";
 
         let path = socket_path(&long_root, uuid);
@@ -673,9 +663,7 @@ mod tests {
 
     #[test]
     fn long_path_fallback_binds_successfully() {
-        let long_root = PathBuf::from("/tmp")
-            .join("a".repeat(80))
-            .join("nested");
+        let long_root = PathBuf::from("/tmp").join("a".repeat(80)).join("nested");
         let uuid = "test-long-path";
 
         let sock = socket_path(&long_root, uuid);

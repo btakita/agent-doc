@@ -194,10 +194,219 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::snapshot::find_project_root;
 use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
+
+#[derive(Clone, Debug)]
+pub struct CommandOptions {
+    pub file: PathBuf,
+    pub baseline_file: Option<PathBuf>,
+    pub is_template: bool,
+    pub is_stream: bool,
+    pub is_ipc: bool,
+    pub force_disk: bool,
+    pub origin: Option<String>,
+    pub pending_add: Vec<String>,
+    pub pending_add_gated: Vec<String>,
+    pub pending_done: Vec<String>,
+    pub pending_edit: Vec<String>,
+    pub pending_clear: bool,
+    pub pending_reorder: Option<String>,
+    pub pending_gate: Vec<String>,
+    pub pending_ungate: Vec<String>,
+    pub pending_resolve_gate: Vec<String>,
+    pub pending_set_gate_type: Vec<String>,
+    pub allow_replace_pending: bool,
+    pub pending_only: bool,
+    pub status: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommitMode {
+    None,
+    BestEffort,
+    Required,
+}
+
+pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
+    let file = options.file.as_path();
+
+    if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
+        anyhow::bail!(
+            "finalize requires a git repository so the cycle can reach a committed state"
+        );
+    }
+
+    if let Some(ref origin) = options.origin {
+        crate::ops_log::log_op(
+            file,
+            &format!("write_origin file={} origin={}", file.display(), origin),
+        );
+    }
+
+    let has_pending_ops = !options.pending_add.is_empty()
+        || !options.pending_add_gated.is_empty()
+        || !options.pending_done.is_empty()
+        || !options.pending_edit.is_empty()
+        || options.pending_clear
+        || options.pending_reorder.is_some()
+        || !options.pending_gate.is_empty()
+        || !options.pending_ungate.is_empty()
+        || !options.pending_resolve_gate.is_empty()
+        || !options.pending_set_gate_type.is_empty();
+
+    if options.pending_only && !has_pending_ops {
+        anyhow::bail!("--pending-only requires at least one --pending-* flag");
+    }
+    if options.pending_only && (options.is_template || options.is_stream || options.is_ipc) {
+        anyhow::bail!("--pending-only cannot be combined with --template, --stream, or --ipc");
+    }
+    if options.pending_only && commit_mode == CommitMode::Required {
+        anyhow::bail!("finalize does not support --pending-only");
+    }
+
+    if has_pending_ops {
+        if options.pending_clear {
+            crate::pending_cmd::clear(file)?;
+        }
+        crate::pending_cmd::add_many(file, &options.pending_add, false)?;
+        crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?;
+        for pair in &options.pending_edit {
+            let (id, text) = pair
+                .split_once('=')
+                .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+            crate::pending_cmd::edit(file, id, text)?;
+        }
+        for id in &options.pending_gate {
+            crate::pending_cmd::gate(file, id)?;
+        }
+        for pair in &options.pending_set_gate_type {
+            let (id, gt) = pair.split_once('=').with_context(|| {
+                format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
+            })?;
+            crate::pending_cmd::set_gate_type(file, id, gt)?;
+        }
+        for id in &options.pending_ungate {
+            crate::pending_cmd::ungate(file, id)?;
+        }
+        for gt in &options.pending_resolve_gate {
+            crate::pending_cmd::resolve_gate(file, gt)?;
+        }
+        for id in &options.pending_done {
+            crate::pending_cmd::done(file, id)?;
+        }
+        if let Some(ref order) = options.pending_reorder {
+            let ids: Vec<String> = order
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            crate::pending_cmd::reorder(file, &ids)?;
+        }
+    }
+
+    if let Some(ref status_text) = options.status {
+        crate::status_cmd::set(file, status_text)?;
+    }
+
+    if options.pending_only {
+        return finalize_commit(file, commit_mode);
+    }
+
+    if options.allow_replace_pending {
+        // SAFETY: single-threaded at this point in the CLI entrypoint.
+        unsafe {
+            std::env::set_var("AGENT_DOC_ALLOW_REPLACE_PENDING", "1");
+            std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1");
+        }
+    }
+
+    if !options.pending_add.is_empty() || !options.pending_add_gated.is_empty() {
+        // SAFETY: single-threaded at this point in the CLI entrypoint.
+        unsafe {
+            std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1");
+        }
+    }
+
+    let baseline = options
+        .baseline_file
+        .as_ref()
+        .map(std::fs::read_to_string)
+        .transpose()
+        .context("failed to read baseline file")?;
+
+    let write_result = if options.is_ipc {
+        run_ipc(file, baseline.as_deref())
+    } else if options.is_stream {
+        run_stream(file, baseline.as_deref(), options.force_disk)
+    } else if options.is_template {
+        run_template(file, baseline.as_deref())
+    } else {
+        let content =
+            std::fs::read_to_string(file).context("failed to read document for mode detection")?;
+        let (fm, _) = frontmatter::parse(&content)?;
+        if fm.resolve_mode().is_crdt() {
+            run_stream(file, baseline.as_deref(), options.force_disk)
+        } else {
+            run(file, baseline.as_deref())
+        }
+    };
+
+    let commit_result = finalize_commit(file, commit_mode);
+
+    match (write_result, commit_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(write_err), Ok(())) => Err(write_err),
+        (Ok(()), Err(commit_err)) => Err(commit_err),
+        (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
+    }
+}
+
+fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
+    match commit_mode {
+        CommitMode::None => Ok(()),
+        CommitMode::BestEffort => {
+            if crate::git::is_in_git_repo(file) {
+                if let Err(e) = crate::git::commit(file) {
+                    eprintln!("[commit] warning: {}", e);
+                }
+            } else {
+                eprintln!("[commit] skipped (not in git repo)");
+            }
+            Ok(())
+        }
+        CommitMode::Required => {
+            crate::git::commit(file)?;
+            ensure_cycle_committed(file)
+        }
+    }
+}
+
+fn ensure_cycle_committed(file: &Path) -> Result<()> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        anyhow::bail!("finalize did not persist cycle state");
+    };
+    if state.is_open() {
+        anyhow::bail!(
+            "finalize left cycle `{}` open at `{}` ({})",
+            state.cycle_id,
+            cycle_phase_name(state.phase),
+            state.last_event
+        );
+    }
+    Ok(())
+}
+
+fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+    }
+}
 
 /// Enforcement: reject full-replacement blocks targeting the `pending` component
 /// unless the caller explicitly opts in.

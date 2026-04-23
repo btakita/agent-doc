@@ -116,7 +116,7 @@ pub(crate) use agent_doc::merge;
 pub(crate) use agent_doc::template;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
 /// Document mode for agent-doc sessions.
@@ -139,6 +139,79 @@ pub enum AgentDocMode {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Args, Clone)]
+struct WriteArgs {
+    /// Path to the session document
+    file: PathBuf,
+    /// Baseline content for 3-way merge (reads from file if omitted)
+    #[arg(long)]
+    baseline_file: Option<PathBuf>,
+    /// Template mode: parse <!-- patch:name --> blocks and apply to components
+    #[arg(long)]
+    template: bool,
+    /// Stream mode: template patches with CRDT merge (conflict-free)
+    #[arg(long)]
+    stream: bool,
+    /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
+    #[arg(long)]
+    ipc: bool,
+    /// Force direct disk write, skip IPC even when plugin is installed
+    #[arg(long)]
+    force_disk: bool,
+    /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
+    #[arg(long)]
+    origin: Option<String>,
+    /// Add a new pending item at the beginning of the list (repeatable).
+    /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
+    #[arg(long = "pending-add")]
+    pending_add: Vec<String>,
+    /// Add a new gated pending item at the beginning of the list (repeatable).
+    /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
+    #[arg(long = "pending-add-gated")]
+    pending_add_gated: Vec<String>,
+    /// Mark a pending item `[x]` by hash id (repeatable).
+    #[arg(long = "pending-done")]
+    pending_done: Vec<String>,
+    /// Edit a pending item: `id=new text` (repeatable).
+    #[arg(long = "pending-edit")]
+    pending_edit: Vec<String>,
+    /// Clear all pending items.
+    #[arg(long = "pending-clear")]
+    pending_clear: bool,
+    /// Reorder pending items by comma-separated hash ids.
+    #[arg(long = "pending-reorder")]
+    pending_reorder: Option<String>,
+    /// Transition a pending item to `[/]` (gated) by hash id (repeatable).
+    /// Idempotent on already-gated items; errors on `[x]` items.
+    #[arg(long = "pending-gate")]
+    pending_gate: Vec<String>,
+    /// Transition a pending item from `[/]` back to `[ ]` by hash id (repeatable).
+    /// Errors on `[ ]` or `[x]` items — the source must be gated.
+    #[arg(long = "pending-ungate")]
+    pending_ungate: Vec<String>,
+    /// Resolve all items matching a typed gate (e.g., [/release] → [x]).
+    #[arg(long = "pending-resolve-gate")]
+    pending_resolve_gate: Vec<String>,
+    /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
+    #[arg(long = "pending-set-gate-type")]
+    pending_set_gate_type: Vec<String>,
+    /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
+    /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
+    #[arg(
+        long = "allow-replace-pending",
+        alias = "allow-patch-pending",
+        hide = true
+    )]
+    allow_replace_pending: bool,
+    /// Only mutate pending component — skip stdin reading and exchange synthesis.
+    /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
+    #[arg(long = "pending-only")]
+    pending_only: bool,
+    /// Replace the status component content (repeatable for multi-line).
+    #[arg(long = "status")]
+    status: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -414,78 +487,16 @@ enum Commands {
     },
     /// Append an assistant response to a session document (reads from stdin)
     Write {
-        /// Path to the session document
-        file: PathBuf,
-        /// Baseline content for 3-way merge (reads from file if omitted)
-        #[arg(long)]
-        baseline_file: Option<PathBuf>,
-        /// Template mode: parse <!-- patch:name --> blocks and apply to components
-        #[arg(long)]
-        template: bool,
-        /// Stream mode: template patches with CRDT merge (conflict-free)
-        #[arg(long)]
-        stream: bool,
-        /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
-        #[arg(long)]
-        ipc: bool,
-        /// Force direct disk write, skip IPC even when plugin is installed
-        #[arg(long)]
-        force_disk: bool,
-        /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
-        #[arg(long)]
-        origin: Option<String>,
+        #[command(flatten)]
+        args: WriteArgs,
         /// Commit the document to git after a successful write (skipped silently if not in a git repo)
         #[arg(long)]
         commit: bool,
-        /// Add a new pending item at the beginning of the list (repeatable).
-        /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
-        #[arg(long = "pending-add")]
-        pending_add: Vec<String>,
-        /// Add a new gated pending item at the beginning of the list (repeatable).
-        /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
-        #[arg(long = "pending-add-gated")]
-        pending_add_gated: Vec<String>,
-        /// Mark a pending item `[x]` by hash id (repeatable).
-        #[arg(long = "pending-done")]
-        pending_done: Vec<String>,
-        /// Edit a pending item: `id=new text` (repeatable).
-        #[arg(long = "pending-edit")]
-        pending_edit: Vec<String>,
-        /// Clear all pending items.
-        #[arg(long = "pending-clear")]
-        pending_clear: bool,
-        /// Reorder pending items by comma-separated hash ids.
-        #[arg(long = "pending-reorder")]
-        pending_reorder: Option<String>,
-        /// Transition a pending item to `[/]` (gated) by hash id (repeatable).
-        /// Idempotent on already-gated items; errors on `[x]` items.
-        #[arg(long = "pending-gate")]
-        pending_gate: Vec<String>,
-        /// Transition a pending item from `[/]` back to `[ ]` by hash id (repeatable).
-        /// Errors on `[ ]` or `[x]` items — the source must be gated.
-        #[arg(long = "pending-ungate")]
-        pending_ungate: Vec<String>,
-        /// Resolve all items matching a typed gate (e.g., [/release] → [x]).
-        #[arg(long = "pending-resolve-gate")]
-        pending_resolve_gate: Vec<String>,
-        /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
-        #[arg(long = "pending-set-gate-type")]
-        pending_set_gate_type: Vec<String>,
-        /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
-        /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
-        #[arg(
-            long = "allow-replace-pending",
-            alias = "allow-patch-pending",
-            hide = true
-        )]
-        allow_replace_pending: bool,
-        /// Only mutate pending component — skip stdin reading and exchange synthesis.
-        /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
-        #[arg(long = "pending-only")]
-        pending_only: bool,
-        /// Replace the status component content (repeatable for multi-line).
-        #[arg(long = "status")]
-        status: Option<String>,
+    },
+    /// Append an assistant response and require the cycle to reach a committed state
+    Finalize {
+        #[command(flatten)]
+        args: WriteArgs,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -1241,187 +1252,60 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write {
-            file,
-            baseline_file,
-            template: is_template,
-            stream: is_stream,
-            ipc: is_ipc,
-            force_disk,
-            origin,
-            commit: do_commit,
-            pending_add,
-            pending_add_gated,
-            pending_done,
-            pending_edit,
-            pending_clear,
-            pending_reorder,
-            pending_gate,
-            pending_ungate,
-            pending_resolve_gate,
-            pending_set_gate_type,
-            allow_replace_pending,
-            pending_only,
-            status,
-        } => {
-            // Log write origin for tracing
-            if let Some(ref orig) = origin {
-                crate::ops_log::log_op(
-                    &file,
-                    &format!("write_origin file={} origin={}", file.display(), orig),
-                );
-            }
-
-            // Apply pending ops BEFORE the patch payload write so both mutations
-            // land in the same atomic cycle (the pending ops write directly to disk;
-            // the subsequent patch write reads the already-updated document).
-            let has_pending_ops = !pending_add.is_empty()
-                || !pending_add_gated.is_empty()
-                || !pending_done.is_empty()
-                || !pending_edit.is_empty()
-                || pending_clear
-                || pending_reorder.is_some()
-                || !pending_gate.is_empty()
-                || !pending_ungate.is_empty()
-                || !pending_resolve_gate.is_empty()
-                || !pending_set_gate_type.is_empty();
-            // Validate --pending-only constraints
-            if pending_only && !has_pending_ops {
-                anyhow::bail!("--pending-only requires at least one --pending-* flag");
-            }
-            if pending_only && (is_template || is_stream || is_ipc) {
-                anyhow::bail!(
-                    "--pending-only cannot be combined with --template, --stream, or --ipc"
-                );
-            }
-            if has_pending_ops {
-                // Order: clear (destructive) → add → edit → gate → ungate → done → reorder.
-                // Gate/ungate run before done so a `--pending-gate X --pending-done X`
-                // pair is rejected (Done→Gate error) instead of silently swallowed.
-                if pending_clear {
-                    pending_cmd::clear(&file)?;
-                }
-                pending_cmd::add_many(&file, &pending_add, false)?;
-                pending_cmd::add_many(&file, &pending_add_gated, true)?;
-                for pair in &pending_edit {
-                    let (id, text) = pair.split_once('=').with_context(|| {
-                        format!("--pending-edit expects 'id=text', got: {}", pair)
-                    })?;
-                    pending_cmd::edit(&file, id, text)?;
-                }
-                for id in &pending_gate {
-                    pending_cmd::gate(&file, id)?;
-                }
-                for pair in &pending_set_gate_type {
-                    let (id, gt) = pair.split_once('=').with_context(|| {
-                        format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
-                    })?;
-                    pending_cmd::set_gate_type(&file, id, gt)?;
-                }
-                for id in &pending_ungate {
-                    pending_cmd::ungate(&file, id)?;
-                }
-                for gt in &pending_resolve_gate {
-                    pending_cmd::resolve_gate(&file, gt)?;
-                }
-                for id in &pending_done {
-                    pending_cmd::done(&file, id)?;
-                }
-                if let Some(ref order) = pending_reorder {
-                    let ids: Vec<String> = order
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    pending_cmd::reorder(&file, &ids)?;
-                }
-            }
-
-            // Apply --status before the patch payload write (same pattern as pending).
-            if let Some(ref status_text) = status {
-                status_cmd::set(&file, status_text)?;
-            }
-
-            // --pending-only: skip stdin reading and exchange synthesis entirely.
-            // Pending ops already applied above; just commit if requested and return.
-            if pending_only {
-                if do_commit {
-                    if git::is_in_git_repo(&file) {
-                        if let Err(e) = git::commit(&file) {
-                            eprintln!("[commit] warning: {}", e);
-                        }
-                    } else {
-                        eprintln!("[commit] skipped (not in git repo)");
-                    }
-                }
-                return Ok(());
-            }
-
-            // Enforcement: reject `replace:pending` (and the deprecated
-            // `patch:pending`) blocks in stdin unless the caller explicitly
-            // opts in. Default is reject (Phase 3 inversion); the env var
-            // below is the escape hatch shared with library callers. The
-            // skill MUST use the granular flags above.
-            //
-            // `AGENT_DOC_ALLOW_REPLACE_PENDING` is the canonical env var.
-            // `AGENT_DOC_ALLOW_PATCH_PENDING` is accepted for one release as
-            // a deprecated alias (#25ag migration).
-            if allow_replace_pending {
-                // SAFETY: single-threaded at this point in the CLI entrypoint.
-                unsafe {
-                    std::env::set_var("AGENT_DOC_ALLOW_REPLACE_PENDING", "1");
-                    // Also set the legacy var so any library-layer code that
-                    // still checks only the old name keeps working during the
-                    // dual-accept window.
-                    std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1");
-                }
-            }
-
-            // Signal to write module whether --pending-add was provided (for future-work lint)
-            if !pending_add.is_empty() || !pending_add_gated.is_empty() {
-                // SAFETY: single-threaded at this point in the CLI entrypoint.
-                unsafe {
-                    std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1");
-                }
-            }
-
-            let baseline = baseline_file
-                .as_ref()
-                .map(std::fs::read_to_string)
-                .transpose()
-                .context("failed to read baseline file")?;
-            let result = if is_ipc {
-                write::run_ipc(&file, baseline.as_deref())
-            } else if is_stream {
-                write::run_stream(&file, baseline.as_deref(), force_disk)
-            } else if is_template {
-                write::run_template(&file, baseline.as_deref())
+        Commands::Write { args, commit } => write::run_command(
+            write::CommandOptions {
+                file: args.file,
+                baseline_file: args.baseline_file,
+                is_template: args.template,
+                is_stream: args.stream,
+                is_ipc: args.ipc,
+                force_disk: args.force_disk,
+                origin: args.origin,
+                pending_add: args.pending_add,
+                pending_add_gated: args.pending_add_gated,
+                pending_done: args.pending_done,
+                pending_edit: args.pending_edit,
+                pending_clear: args.pending_clear,
+                pending_reorder: args.pending_reorder,
+                pending_gate: args.pending_gate,
+                pending_ungate: args.pending_ungate,
+                pending_resolve_gate: args.pending_resolve_gate,
+                pending_set_gate_type: args.pending_set_gate_type,
+                allow_replace_pending: args.allow_replace_pending,
+                pending_only: args.pending_only,
+                status: args.status,
+            },
+            if commit {
+                write::CommitMode::BestEffort
             } else {
-                // Auto-detect write strategy from frontmatter
-                let content = std::fs::read_to_string(&file)
-                    .context("failed to read document for mode detection")?;
-                let (fm, _) = frontmatter::parse(&content)?;
-                if fm.resolve_mode().is_crdt() {
-                    write::run_stream(&file, baseline.as_deref(), force_disk)
-                } else {
-                    write::run(&file, baseline.as_deref())
-                }
-            };
-            // Fix 2: attempt commit even when run_stream returns Err — a partial write
-            // may have already saved the snapshot, and we want it tracked before
-            // propagating the error.
-            if do_commit {
-                if git::is_in_git_repo(&file) {
-                    if let Err(e) = git::commit(&file) {
-                        eprintln!("[commit] warning: {}", e);
-                    }
-                } else {
-                    eprintln!("[commit] skipped (not in git repo)");
-                }
-            }
-            result?;
-            Ok(())
-        }
+                write::CommitMode::None
+            },
+        ),
+        Commands::Finalize { args } => write::run_command(
+            write::CommandOptions {
+                file: args.file,
+                baseline_file: args.baseline_file,
+                is_template: args.template,
+                is_stream: args.stream,
+                is_ipc: args.ipc,
+                force_disk: args.force_disk,
+                origin: args.origin,
+                pending_add: args.pending_add,
+                pending_add_gated: args.pending_add_gated,
+                pending_done: args.pending_done,
+                pending_edit: args.pending_edit,
+                pending_clear: args.pending_clear,
+                pending_reorder: args.pending_reorder,
+                pending_gate: args.pending_gate,
+                pending_ungate: args.pending_ungate,
+                pending_resolve_gate: args.pending_resolve_gate,
+                pending_set_gate_type: args.pending_set_gate_type,
+                allow_replace_pending: args.allow_replace_pending,
+                pending_only: args.pending_only,
+                status: args.status,
+            },
+            write::CommitMode::Required,
+        ),
         Commands::Stream {
             file,
             interval,

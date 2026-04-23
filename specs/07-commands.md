@@ -317,6 +317,10 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Manual-repair contract:** For documented manual repair across Claude Code and Codex, once the user prompt already exists in the document the assistant response path is `agent-doc write --commit <FILE>`. Do not document or rely on a repair flow that stops after bare `agent-doc write`; that leaves the cycle open on the wrong side of the response-commit boundary.
 
+**`--commit` behavior:** `agent-doc write --commit <FILE>` remains a best-effort convenience: it runs the normal write path, then tries `git::commit()`. Outside git it warns and skips commit; inside git it warns on commit failure but still reports the underlying write result. This is the documented manual-repair path because it preserves the older CLI surface while crossing the write/commit boundary in one invocation.
+
+**Response-commit invariant:** Every appended response must cross a commit boundary unless the user explicitly asks to leave it uncommitted. The default happy-path command for normal response cycles is `agent-doc finalize <FILE>`; bare `agent-doc write` is for explicit no-commit exceptions or intermediate checkpoints, not for the final response.
+
 **Write dedup (v0.28.2):** All four write paths skip the actual write when the merged/patched content is identical to the current file on disk. On dedup, pending state is cleared and the function returns early. Events are logged to stderr and appended (with backtrace) to `/tmp/agent-doc-write-dedup.log`.
 
 **Pane ownership verification (v0.28.2):** `verify_pane_ownership()` is called at the top of `run`, `run_template`, and `run_stream`. It reads the document's `session` frontmatter field, looks up the owning pane in the session registry, and compares it to the current tmux pane. If a different pane definitively owns the session, the write is rejected. The check is lenient: it passes silently when not in tmux, when there is no session ID, or when the pane is indeterminate.
@@ -347,6 +351,23 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 **IPC boundary:** Before building the IPC patch JSON, all IPC write paths call `reposition_boundary_to_end()` on the current document in memory. This removes stale boundaries and inserts a fresh one at the end of the exchange — the same pre-patch step that `apply_patches_with_overrides()` performs. The repositioned document is used only for `boundary_id` extraction (never written to disk by this step). Without this, the IPC path would read the old boundary position (above the user's new prompt), causing responses to be inserted before the prompt. When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically.
 
 **FFI export:** `agent_doc_reposition_boundary_to_end(doc)` — exposed via C ABI for editor plugins. Takes a document string, returns the visible post-reposition document state with all stale boundaries removed, a single fresh 8-char boundary at end-of-exchange, and the normal single-`(HEAD)` affordance preserved. Plugins should call this via JNA/FFI rather than reimplementing boundary cleanup logic.
+
+## finalize
+
+`agent-doc finalize <FILE> [write flags...]` — strict happy-path response write for session documents.
+
+1. Validate that `<FILE>` lives in a git repository before mutating the document.
+2. Reuse the same mutation surface as `write`: pending/status mutations are applied first, then the response write path is selected from `--ipc` / `--stream` / `--template` / auto-detect.
+3. Run the normal write pipeline (`write`, `run_template`, `run_stream`, or `run_ipc`) with the same snapshot/capture/merge semantics as `agent-doc write`.
+4. Invoke `git::commit(<FILE>)` even if the write path returned an error, because the write may have partially succeeded after persisting snapshot/cycle state.
+5. Fail unless the final persisted cycle state for the document is `committed`.
+
+**Contract:** `finalize` is the binary-owned happy path for normal session responses. Unlike `write --commit`, it is not best-effort:
+
+- non-git documents are rejected before any write
+- `--pending-only` is rejected because `finalize` is for response cycles, not standalone pending maintenance
+- success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed`
+- a write error plus a commit error is still a command failure even if some recovery work ran
 
 ## watch
 

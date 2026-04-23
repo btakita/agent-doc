@@ -348,7 +348,7 @@ I added both requested items to pending:
 
 - prevent delivered-but-uncommitted patchbacks by persisting recoverable post-write / pre-commit state and forcing same-owner commit completion;
 - remove the full-suite pre-commit hook, and move that responsibility into harness policy documented in `AGENTS.md`.
-<!-- agent:boundary:9a8e50b1 -->
+<!-- agent:boundary:63403b85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

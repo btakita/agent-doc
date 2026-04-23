@@ -360,7 +360,7 @@ Tracked scope:
 - normalize `src/agent-doc` by removing tracked `.agent-doc` runtime files from the index;
 - remove the accidental `.gitgnore` typo file if it was not intentional; and
 - keep the real ignore rule, then rebase `20260422/codex-agent-backend` onto `origin/main`.
-<!-- agent:boundary:1c718308 -->
+<!-- agent:boundary:e748b8a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -69,9 +69,9 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 
-**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. When a live editor IPC listener exists, the visible working-tree rewrite is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so boundary cleanup still lands and no boundary-only dirtiness is left behind.
+**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. The committed blob stays clean, but the visible post-commit document keeps a single ` (HEAD)` marker on the current response heading. When a live editor IPC listener exists, that visible rewrite is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so the affordance still lands and stale boundary churn is removed.
 
-**Snapshot boundary cleanup:** After committing, `commit()` calls the clean boundary reposition helper on the snapshot content. This strips ALL stale boundaries from the snapshot (not just the last one), inserts a single fresh 8-char boundary at end-of-exchange, and removes any transient `(HEAD)` heading suffixes. The cleaned snapshot is saved back.
+**Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same visible post-commit shape as the user-facing document: ALL stale boundaries are stripped, a single fresh 8-char boundary is inserted at end-of-exchange, and a single ` (HEAD)` marker is preserved on the current response heading.
 
 **Boundary reposition lifecycle:**
 1. **Before IPC patch JSON (clean boundary reposition):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and normalize boundaries in memory before extracting `boundary_id` values. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.

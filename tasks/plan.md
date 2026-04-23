@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc `#cyc1` patchback
+
+- [x] Isolate the intended `src/agent-doc` cycle-invariant change set from the dirty submodule worktree and land a clean submodule commit.
+- [x] Verify `#cyc1` with spec/tests/build/install, using an isolated clean clone when the live worktree hook is noisy.
+- [x] Patch back `tasks/agent-doc/agent-doc-bugs.md` with the exact result and commit the parent submodule-pointer update separately.
+
 ### 2026-04-22 — agent-doc last-two patchback delay explanation
 
 - [x] Check the recent parent-repo commit timestamps so the answer uses exact timing for the last two patchback cycles.

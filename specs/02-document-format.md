@@ -14,6 +14,7 @@ Frontmatter fields:
 - `branch`: Reserved for branch tracking
 - `agent_args`: Additional CLI arguments for the active agent process (space-separated string)
 - `claude_args`: Additional CLI arguments for the `claude` process (space-separated string, see §6.1)
+- `codex_args`: Additional CLI arguments for the `codex` process (space-separated string, see §6.1)
 
 All fields are optional and default to null. Resolution: explicit `agent_doc_format`/`agent_doc_write` > deprecated `agent_doc_mode` > defaults (template + crdt). The body alternates `## User` and `## Assistant` blocks (append format) or uses named components (template format).
 

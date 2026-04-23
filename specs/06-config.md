@@ -4,31 +4,36 @@
 
 Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-doc/config.toml`).
 
-Fields: `default_agent`, `agent_args`, `claude_args`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
 
 ## agent_args
 
 Additional CLI arguments passed to the active agent process when spawned by `agent-doc start`.
 Space-separated string.
 
-For Codex-backed sessions, this is the only frontmatter/config arg field that applies.
+For both Claude and Codex, `agent_args` is the harness-neutral override and takes precedence over harness-specific aliases.
 
 ## claude_args
 
 Additional CLI arguments passed to the `claude` process when spawned by `agent-doc start`.
 Space-separated string. Claude-only compatibility alias for older documents/configs.
 
+## codex_args
+
+Additional CLI arguments passed to the `codex` process when spawned by `agent-doc start`.
+Space-separated string. Codex-only alias for explicit Codex session configuration.
+
 Claude sources, in precedence order (highest first):
 
-1. **Frontmatter**: `agent_args: "--model sonnet"` or `claude_args: "--dangerously-skip-permissions"` in the document's YAML frontmatter
-2. **Global config**: `agent_args = "--model sonnet"` or `claude_args = "--dangerously-skip-permissions"` in `~/.config/agent-doc/config.toml`
+1. **Frontmatter**: `agent_args: "--model sonnet"`, `claude_args: "--dangerously-skip-permissions"`, or `codex_args: "-s danger-full-access"` in the document's YAML frontmatter
+2. **Global config**: `agent_args = "--model sonnet"`, `claude_args = "--dangerously-skip-permissions"`, or `codex_args = "-s danger-full-access"` in `~/.config/agent-doc/config.toml`
 3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"`
 
 Claude resolution chain: `frontmatter agent_args > frontmatter claude_args > config agent_args > config claude_args > AGENT_DOC_CLAUDE_ARGS`.
 
-Codex resolution chain: `frontmatter agent_args > config agent_args`.
+Codex resolution chain: `frontmatter agent_args > frontmatter codex_args > config agent_args > config codex_args`.
 
-`claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude.
+`claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex.
 
 ## Project Config
 

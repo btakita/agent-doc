@@ -91,6 +91,8 @@ If the document has an `<!-- agent:pending -->` component, mutations go through 
 
 ### 2. Persist the response (MANDATORY — never skip)
 
+Complete the requested implementation, verification, build/install, and local inspection work for this turn **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
+
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 ```bash
@@ -100,6 +102,10 @@ RESPONSE
 ```
 
 `finalize` reuses the normal write pipeline, then requires the cycle to reach `committed`. Use [runbooks/commit.md](runbooks/commit.md) for the default/exception contract.
+
+**End-of-turn guard:** after any final response persistence command (`agent-doc finalize <FILE> ...` for the normal path, or `agent-doc write --commit <FILE> ...` for manual repair), run `agent-doc session-check <FILE>`. If it exits nonzero, the cycle is still open or the document shows a likely direct assistant patchback that bypassed `agent-doc`: do **not** report success, and continue recovery instead of ending the turn.
+
+After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is the immediate `session-check`, minimal recovery if it fails, and concise result reporting.
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 

@@ -530,7 +530,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Check end-of-cycle write invariant — nonzero exit if last ops.log event is `preflight_diff_start`
+    /// Check end-of-cycle write invariant — nonzero exit if the cycle is open or a likely direct response patchback bypassed agent-doc
     SessionCheck {
         /// Path to the session document
         file: PathBuf,

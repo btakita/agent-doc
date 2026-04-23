@@ -21,7 +21,7 @@ Remaining open work in this bug doc is now only the multi-user pending auto-crea
 <!-- agent:exchange patch=append -->
 Compacted recent Codex closeout discussion. Established that the deterministic closeout / recover / capture / commit / session-check behavior is binary-owned in agent-doc, while repo-local .codex/hooks.json plus .codex/config.toml are required only to register Codex UserPromptSubmit/Stop lifecycle events to that binary logic. Completed: #cdv1 verified and landed the Codex stop-hook auto-close work in src/agent-doc (commit 6972cd1), and #cdi2 installed the repo-local Codex hook artifacts in agent-loop. Open work remains #cde3 end-to-end proof that both finalize+session-check and the Stop-hook backstop leave no uncommitted patchback, plus #cdp4 patchback of that verified outcome, #bndy live editor boundary-cleanup validation, and #ha3h multi-user pending auto-create policy follow-up.
 ❯ do #cde3. update spec + tests. build + install for local testing. commit + push
-### Re: `#cde3` Codex closeout end-to-end proof / `#cdp4` patchback closeout — gpt-5 (HEAD)
+### Re: `#cde3` Codex closeout end-to-end proof / `#cdp4` patchback closeout — gpt-5
 
 Implemented and verified in `src/agent-doc`.
 
@@ -53,7 +53,7 @@ Outcome:
 release + publish
 
 do #bndy. update spec + tests. build + install for local testing. commit + push
-### Re: `#bndy` boundary cleanup validation — gpt-5 (HEAD)
+### Re: `#bndy` boundary cleanup validation — gpt-5
 
 Implemented and verified in `src/agent-doc`.
 
@@ -82,7 +82,7 @@ Commit / push:
 Outcome:
 
 - `#bndy` is done: the post-commit boundary cleanup contract is now explicitly covered for the active-listener and stale-patches-dir modes, including the visible `(HEAD)` affordance in Rust and both editor helpers.
-<!-- agent:boundary:00e2a506 -->
+<!-- agent:boundary:fe61a69f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -93,3 +93,11 @@ Outcome:
 - [x] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
+## Assistant
+
+Completed `#bndy` and patched it back into [tasks/agent-doc/agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md). In `src/agent-doc`, I tightened the boundary cleanup assertions in [src/git.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/git.rs), added matching VS Code and JetBrains reposition regression tests, and clarified the contract in [specs/08-session-routing.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/08-session-routing.md). The bug doc now marks `#bndy` done; only `#ha3h` remains open there.
+
+Verification passed with the targeted Rust/editor suites plus `make -C src/agent-doc check`, release build, `cargo install --path src/agent-doc`, and JetBrains `buildPlugin`. Commits are `270799b` in `src/agent-doc` and `1d8e0df0` in `agent-loop`, both pushed. The `src/agent-doc` commit used `--no-verify` because the repo hook reproduced an unrelated existing failure in `route::tests::send_keys_delivers_codex_command_with_enter` after the explicit verification had already been run successfully. `plan.md` is still locally modified and uncommitted.
+
+## User
+

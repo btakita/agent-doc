@@ -11,24 +11,29 @@
 //! - Resolves the agent backend from: `agent_name` arg > frontmatter `agent`
 //!   field > `config.default_agent` > fallback `"claude"`.
 //! - Resolves the model from: `model` arg > frontmatter `model` field.
-//! - Builds one of two prompt shapes: "resume" (diff + full document, for
-//!   continuing sessions) or "fork" (full document only, for new sessions),
-//!   determined by whether `resume` is set in frontmatter.
+//! - Resolves the response write mode from frontmatter via
+//!   `Frontmatter::resolve_mode()`, defaulting to template mode when no
+//!   explicit format is present.
+//! - Builds one of four prompt shapes: append/template × resume/fork. Template
+//!   prompts require `patch:exchange` blocks; append prompts require plain
+//!   markdown without `## Assistant`.
 //! - In `--dry-run` mode: prints the diff and prompt size to stderr and returns
 //!   without calling the agent, writing files, or touching git.
 //! - Optionally creates a git branch via `git::create_branch` before committing
 //!   (only when `branch=true` and `no_git=false`).
 //! - Pre-commits user's changes via `git::commit` before sending to the agent
 //!   so the editor shows agent additions as diff-gutter entries.
-//! - Appends the agent response as `## Assistant\n\n<response>\n\n## User\n\n`
-//!   and updates the `resume` ID in frontmatter from the agent's returned
-//!   session ID.
+//! - Writes the agent response back through the mode-appropriate append or
+//!   template path, preserving concurrent user edits against the original
+//!   baseline captured before the agent call.
+//! - Updates the `resume` ID in frontmatter from the agent's returned session
+//!   ID after the response write succeeds.
 //! - Captures the final parsed response in the durable response ledger before
 //!   any file mutation so interrupted cycles can be replayed deterministically.
 //! - Acquires an advisory `flock` on a per-document lock file before writing so
 //!   concurrent `agent-doc run` / watch-daemon invocations are serialized.
 //! - Re-reads the file under lock; if the user edited concurrently, performs a
-//!   3-way merge via `merge::merge_contents`.
+//!   3-way merge for append/merge docs or a CRDT merge for template+CRDT docs.
 //! - Tries IPC write to the IDE plugin first; on IPC miss, falls back to
 //!   `atomic_write` (temp file + POSIX rename) and saves a snapshot.
 //! - `acquire_doc_lock(path)`: opens/creates `.agent-doc/locks/<hash>.lock` and
@@ -39,19 +44,17 @@
 //! ## Agentic Contracts
 //! - Callers must not assume the file is modified when `run` returns `Ok(())`
 //!   early (no-op case): the document and snapshot are untouched.
-//! - The snapshot saved after a successful run always reflects
-//!   `content_ours` (baseline + response), never `final_content`, so concurrent
-//!   user edits are detectable on the next diff.
+//! - The snapshot saved after a successful run reflects the final post-merge
+//!   document state, including any `resume` update that landed with the
+//!   response write.
 //! - Git operations (branch creation, pre-commit) are skipped entirely when
 //!   `no_git=true`; the agent call and write still proceed normally.
 //! - The advisory flock serializes only agent-doc processes; editors bypass it.
 //!   Readers of the document file must not rely on the lock for read safety.
-//! - IPC success: snapshot is saved by the IDE plugin; the binary does not
-//!   write a snapshot in this path. IPC failure: binary writes snapshot.
 //! - `atomic_write` is safe for concurrent callers on the same path; one write
 //!   wins and the file is never in a partially-written state.
-//! - The assistant heading (`## Assistant`) is stripped from the agent response
-//!   before appending to avoid duplication; the binary inserts it.
+//! - Append-mode responses strip any echoed `## Assistant` heading before
+//!   insertion; template-mode responses keep their patch-block content intact.
 //!
 //! ## Evals
 //! - `run_file_not_found`: call `run` with a missing path → `Err` containing
@@ -83,7 +86,23 @@ use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::path::Path;
 
-use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot};
+use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot, template, write};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunMode {
+    Append,
+    Template,
+}
+
+impl RunMode {
+    fn from_frontmatter(fm: &frontmatter::Frontmatter) -> Self {
+        if fm.resolve_mode().is_template() {
+            Self::Template
+        } else {
+            Self::Append
+        }
+    }
+}
 
 pub fn run(
     file: &Path,
@@ -122,6 +141,7 @@ pub fn run(
         std::fs::write(file, &content_original)?;
     }
     let (fm, _body) = frontmatter::parse(&content_original)?;
+    let run_mode = RunMode::from_frontmatter(&fm);
 
     // Resolve agent
     let agent_name = agent_name
@@ -145,28 +165,7 @@ pub fn run(
 
     let backend = agent::resolve(agent_name, agent_config, expanded_env)?;
 
-    // Build prompt
-    let prompt = if fm.resume.is_some() {
-        format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
-             <diff>\n{}\n</diff>\n\n\
-             The full document is now:\n\n\
-             <document>\n{}\n</document>\n\n\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user asked questions inline (e.g., in blockquotes), address those too.",
-            the_diff, content_original
-        )
-    } else {
-        format!(
-            "The user is starting a session document. Here is the full document:\n\n\
-             <document>\n{}\n</document>\n\n\
-             Respond to the user's content. Write your response in markdown.\n\
-             Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user asked questions inline (e.g., in blockquotes), address those too.",
-            content_original
-        )
-    };
+    let prompt = build_prompt(run_mode, &fm, &the_diff, &content_original);
 
     if dry_run {
         eprintln!("--- Diff ---");
@@ -193,51 +192,170 @@ pub fn run(
     let model = model.or(fm.model.as_deref());
     let response = backend.send(&prompt, fm.resume.as_deref(), fork, model)?;
 
-    // Build our version: original + resume_id update + response appended
-    let mut content_ours = content_original.clone();
-    if let Some(ref sid) = response.session_id {
-        content_ours = frontmatter::set_resume_id(&content_ours, sid)?;
-    }
-    let response_text = crate::write::strip_assistant_heading(&response.text);
-    crate::recover::save_pending(file, &response_text)?;
-    content_ours.push_str("\n## Assistant\n\n");
-    content_ours.push_str(&response_text);
-    content_ours.push_str("\n\n## User\n\n");
-
-    // Acquire advisory lock on the document for agent-doc-vs-agent-doc
-    // coordination (e.g., watch daemon vs. manual `agent-doc run`).
-    // Editors ignore advisory locks, so this only serializes agent-doc writes.
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Re-read file to check for user edits during run
-    let content_current = std::fs::read_to_string(file)?;
-
-    let final_content = if content_current == content_original {
-        // No edits during run — use our version directly
-        content_ours.clone()
-    } else {
-        eprintln!("File was modified during run. Merging changes...");
-        merge::merge_contents(&content_original, &content_ours, &content_current)?
+    let response_text = match run_mode {
+        RunMode::Append => write::strip_assistant_heading(&response.text),
+        RunMode::Template => response.text.clone(),
     };
+    crate::recover::save_pending(file, &response_text)?;
 
-    // Try IPC first — if an IDE plugin is active, it applies the change via
-    // Document API (no "externally modified" dialog, cursor preserved).
-    let ipc_ok = crate::write::try_ipc_full_content(file, &final_content)?;
-
-    if !ipc_ok {
-        // IPC not available or timed out — fall back to direct disk write
-        atomic_write(file, &final_content)?;
-
-        // Save snapshot as content_ours (baseline + response), not final_content.
-        // If the user edited concurrently, final_content includes their edits.
-        // Saving content_ours ensures the next diff detects those concurrent edits.
-        snapshot::save(file, &content_ours)?;
+    match run_mode {
+        RunMode::Append => apply_append_response(file, &content_original, &response_text)?,
+        RunMode::Template => apply_template_response(
+            file,
+            &content_original,
+            &response_text,
+            fm.resolve_mode().is_crdt(),
+        )?,
     }
 
-    drop(doc_lock); // explicit release after both doc and snapshot are written
+    if let Some(ref sid) = response.session_id {
+        update_resume_id(file, sid)?;
+    }
+
     crate::recover::clear_pending(file)?;
 
-    eprintln!("Response appended to {}", file.display());
+    if !no_git {
+        git::commit(file)?;
+    }
+
+    eprintln!("Response written to {}", file.display());
+    Ok(())
+}
+
+fn build_prompt(
+    run_mode: RunMode,
+    fm: &frontmatter::Frontmatter,
+    the_diff: &str,
+    content: &str,
+) -> String {
+    match (run_mode, fm.resume.is_some()) {
+        (RunMode::Template, true) => format!(
+            "The user edited the session document. Here is the diff since the last run:\n\n\
+             <diff>\n{}\n</diff>\n\n\
+             The full document is now:\n\n\
+             <document>\n{}\n</document>\n\n\
+             Respond to the user's new content. Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            the_diff, content
+        ),
+        (RunMode::Template, false) => format!(
+            "The user is starting a session document. Here is the full document:\n\n\
+             <document>\n{}\n</document>\n\n\
+             Respond to the user's content. Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            content
+        ),
+        (RunMode::Append, true) => format!(
+            "The user edited the session document. Here is the diff since the last run:\n\n\
+             <diff>\n{}\n</diff>\n\n\
+             The full document is now:\n\n\
+             <document>\n{}\n</document>\n\n\
+             Respond to the user's new content. Write your response in markdown.\n\
+             Do not include a ## Assistant heading — it will be added automatically.\n\
+             If the user asked questions inline (e.g., in blockquotes), address those too.",
+            the_diff, content
+        ),
+        (RunMode::Append, false) => format!(
+            "The user is starting a session document. Here is the full document:\n\n\
+             <document>\n{}\n</document>\n\n\
+             Respond to the user's content. Write your response in markdown.\n\
+             Do not include a ## Assistant heading — it will be added automatically.\n\
+             If the user asked questions inline (e.g., in blockquotes), address those too.",
+            content
+        ),
+    }
+}
+
+fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<()> {
+    let doc_lock = acquire_doc_lock(file)?;
+    snapshot::save_pre_response(file, baseline)?;
+
+    let mut content_ours = baseline.to_string();
+    if !content_ours.ends_with('\n') {
+        content_ours.push('\n');
+    }
+    content_ours.push_str("## Assistant\n\n");
+    content_ours.push_str(response);
+    if !response.ends_with('\n') {
+        content_ours.push('\n');
+    }
+    content_ours.push_str("\n## User\n\n");
+
+    let content_current = std::fs::read_to_string(file)?;
+    let final_content = if content_current == baseline {
+        content_ours
+    } else {
+        eprintln!("File was modified during run. Merging changes...");
+        merge::merge_contents(baseline, &content_ours, &content_current)?
+    };
+
+    snapshot::save(file, &final_content)?;
+    atomic_write(file, &final_content)?;
+    drop(doc_lock);
+    Ok(())
+}
+
+fn apply_template_response(
+    file: &Path,
+    baseline: &str,
+    response: &str,
+    use_crdt: bool,
+) -> Result<()> {
+    let (mut patches, unmatched) =
+        template::parse_patches(response).context("failed to parse patch blocks from response")?;
+    write::sanitize_patches(&mut patches);
+    write::enforce_no_replace_pending(&patches)?;
+
+    if patches.is_empty() && unmatched.trim().is_empty() {
+        anyhow::bail!("no patch blocks or content found in response");
+    }
+
+    let doc_lock = acquire_doc_lock(file)?;
+    snapshot::save_pre_response(file, baseline)?;
+
+    let content_ours = template::apply_patches(baseline, &patches, &unmatched, file)
+        .context("failed to apply template patches")?;
+    let content_ours = write::normalize_template_structure_or_fail(&content_ours, file)?;
+
+    let content_current = std::fs::read_to_string(file)?;
+    let (final_content, crdt_state) = if content_current == baseline {
+        let state = if use_crdt {
+            Some(crate::crdt::CrdtDoc::from_text(&content_ours).encode_state())
+        } else {
+            None
+        };
+        (content_ours, state)
+    } else if use_crdt {
+        eprintln!("File was modified during run. CRDT merging changes...");
+        let base_state = crate::crdt::CrdtDoc::from_text(baseline).encode_state();
+        let (merged, state) =
+            merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
+        (merged, Some(state))
+    } else {
+        eprintln!("File was modified during run. Merging changes...");
+        (
+            merge::merge_contents(baseline, &content_ours, &content_current)?,
+            None,
+        )
+    };
+    let final_content = write::normalize_template_structure_or_fail(&final_content, file)?;
+
+    snapshot::save(file, &final_content)?;
+    if let Some(state) = crdt_state {
+        snapshot::save_crdt(file, &state)?;
+    }
+    atomic_write(file, &final_content)?;
+    drop(doc_lock);
+    Ok(())
+}
+
+fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
+    let current = std::fs::read_to_string(file)?;
+    let updated = frontmatter::set_resume_id(&current, session_id)?;
+    atomic_write(file, &updated)?;
+    snapshot::save(file, &updated)?;
     Ok(())
 }
 
@@ -282,6 +400,25 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
+
+    #[test]
+    fn build_prompt_defaults_to_template_mode() {
+        let fm = frontmatter::Frontmatter::default();
+        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc");
+        assert!(prompt.contains("patch:exchange"));
+        assert!(!prompt.contains("## Assistant heading"));
+    }
+
+    #[test]
+    fn build_prompt_append_mode_uses_inline_contract() {
+        let fm = frontmatter::Frontmatter {
+            format: Some(frontmatter::AgentDocFormat::Append),
+            ..Default::default()
+        };
+        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc");
+        assert!(prompt.contains("Do not include a ## Assistant heading"));
+        assert!(!prompt.contains("patch:exchange"));
+    }
 
     #[test]
     fn acquire_doc_lock_succeeds() {

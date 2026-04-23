@@ -426,7 +426,7 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
 ///
 /// Phase 3 inversion (2026-04-14): the default is now reject. Library callers
 /// (FFI, tests, future SDK consumers) must opt in explicitly.
-fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Result<()> {
+pub(crate) fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Result<()> {
     let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -948,7 +948,7 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
     }
 }
 
-fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
+pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
     match crate::template::repair_conversation_tail_outside_exchange(&lifted)? {
         Some(repaired) => {
@@ -2528,6 +2528,7 @@ pub fn try_ipc(
 /// have `<!-- agent:name -->` component markers.
 ///
 /// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
+#[allow(dead_code)]
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
@@ -2990,7 +2991,7 @@ fn find_comment_close(bytes: &[u8], start: usize) -> Option<usize> {
 }
 
 /// Sanitize the content of each patch block in-place.
-fn sanitize_patches(patches: &mut [template::PatchBlock]) {
+pub(crate) fn sanitize_patches(patches: &mut [template::PatchBlock]) {
     for patch in patches.iter_mut() {
         patch.content = sanitize_component_tags(&patch.content);
     }

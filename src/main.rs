@@ -240,7 +240,7 @@ struct WriteArgs {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run a session: diff, send to agent, append response
+    /// Run a session: diff, send to agent, write response by document mode
     Run {
         /// Path to the session document
         file: PathBuf,

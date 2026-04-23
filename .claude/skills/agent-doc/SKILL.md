@@ -1,320 +1,131 @@
 ---
-description: Submit a session document to an AI agent and append the response
+description: "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.32.0"
+agent-doc-version: "0.33.12"
 ---
 
 # agent-doc
 
 Interactive document session — respond to user edits in a markdown document.
 
+## Harness Compatibility
+
+This skill works across multiple agent harnesses (Claude Code, Codex, Cursor, etc.). The core workflow is identical; only invocation and tool dispatch differ. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific patterns.
+
 ## Invocation
 
 ```
 /agent-doc <FILE>
 /agent-doc claim <FILE>
+/agent-doc compact <FILE>
+/agent-doc compact exchange <FILE>
 ```
 
-- `/agent-doc <FILE>` — run the document session workflow (diff, respond, write back)
-- `/agent-doc claim <FILE>` — claim a file for the current tmux pane (run `agent-doc claim <FILE>` via Bash, then stop)
+Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`)
+**Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
 
 ## Core Principles
 
-- **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console
-- **Preserve user edits** — never overwrite; read the file fresh before writing
-- **Show progress** — stream your response in the console so the user sees real-time feedback
-- **Maintain session** — the document is a living conversation, not a one-shot
+- **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
+- **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
+- **Show progress** — stream your response in the console so the user sees real-time feedback.
 
 ## Workflow
 
 ### 0. Pre-flight (single command)
 
-**Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
+**Detect subcommands** before running the normal workflow:
 
-**Detect compact:** If the first argument is `compact`, handle compaction and stop:
-- `compact exchange <FILE>` → read and follow the compact exchange runbook: [runbooks/compact-exchange.md](runbooks/compact-exchange.md)
-- `compact <FILE>` → run `agent-doc compact <FILE>` then `agent-doc commit <FILE>`
+- `claim <FILE>` → run `agent-doc claim <FILE>` via Bash and stop.
+- `compact <FILE>` → run `agent-doc compact <FILE>` then `agent-doc commit <FILE>` and stop.
+- `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-Do not proceed with the normal document session workflow after handling compact.
+**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
-**Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install --reload compact` to update this SKILL.md. If the output contains `SKILL_RELOAD=compact`, use `AskUserQuestion` to prompt the user: "SKILL.md was updated. Run /compact to reload the skill, then re-run /agent-doc." Stop and do not proceed with the document session. If `agent-doc` is not installed or the version matches, skip this step.
+**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, reads claims, and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
-**Run preflight:** Execute `agent-doc preflight <FILE>` via Bash. This single command handles:
-- Recovering orphaned responses (from interrupted cycles)
-- Committing previous cycle changes (git gutter management)
-- Reading and truncating the claims log
-- Computing the diff (with comment stripping)
-
-The command outputs JSON to stdout:
-```json
-{
-  "recovered": false,
-  "committed": true,
-  "claims": [],
-  "diff": "unified diff text or null",
-  "no_changes": false,
-  "baseline_file": "/path/to/.agent-doc/baselines/<hash>.md",
-  "slash_commands": [],
-  "builtin_commands": [],
-  "effective_tier": "med",
-  "required_tier": null,
-  "suggested_tier": "med",
-  "model_switch": null,
-  "model_switch_tier": null,
-  "env": {}
-}
-```
-
-- If `no_changes` is `true`, tell the user nothing changed and stop
-- Print any `claims` entries to the console as a record
-- The `diff` field contains the user's changes since the last snapshot
-- **`baseline_file`** — use this path as `--baseline-file` when calling `agent-doc write`. It is taken AFTER preflight commits any gap, so it always reflects the stable pre-response file state. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if a concurrent write occurred between the copy and preflight.
-- **First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding
-- **Do NOT read the snapshot file directly** — use `agent-doc read <FILE>` if HEAD content is needed
+- If `no_changes: true` → tell the user nothing changed and stop.
+- Print any `claims` to the console as a record.
+- Use `baseline_file` as `--baseline-file` for every subsequent `agent-doc write`. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
+- First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
 
 ### 0b. Execute slash commands (if any)
 
-If preflight returns a non-empty `slash_commands` or `builtin_commands` array, handle each **before** generating your response.
+If `slash_commands` or `builtin_commands` is non-empty, handle each **before** responding. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific dispatch.
 
-**Skill commands** (`slash_commands` — non-built-ins): Invoke each via the `Skill` tool:
-- Strip the leading `/` to get the skill name and args
-- Log each: `Running: /command args`
-- Example: `/agent-doc ./plan.md` → `Skill { skill: "agent-doc", args: "./plan.md" }`
-- Example: `/caveman` → `Skill { skill: "caveman" }`
+- **Skill commands** (`slash_commands`): Claude Code invokes via the `Skill` tool (strip leading `/`, pass remaining args). Other harnesses skip these.
+- **Built-in commands** (`builtin_commands`): Write a document note instructing the user to run it at the terminal (e.g., `/compact`, `/clear`). Skip all others.
 
-**Built-in commands** (`builtin_commands` — Claude Code built-ins): Cannot invoke via Skill. Write a note to the document for each:
-- `/compact` → document note: "Run `/compact` at the terminal to compact the conversation context."
-- `/clear` → document note: "Run `/clear` at the terminal to clear the conversation history."
-- All other built-ins → log to console and skip (cannot execute Claude Code built-ins from within the session)
+Trust the preflight output — do not re-validate code fences or blockquotes.
 
-**Guards:** `parse_slash_commands` already filtered out code-fenced lines, blockquotes, and non-added lines — trust the output. Do not re-validate.
+### 0c. Model tier gate
 
-### 0c. Model tier gate (harness-agnostic)
+Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. `required_tier` is the hard gate, `suggested_tier` is advisory, and `model_switch_tier` is the resolved tier for the user's inline `/model` request. Full gate behavior: [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
 
-Preflight composes an `effective_tier` (`low | med | high`) from these sources, highest precedence first:
+### 1. Respond
 
-1. Inline `/model <x>` command in the diff (stripped from downstream diff)
-2. `<!-- agent:model -->` component content
-3. `agent_doc_model_tier` frontmatter field
-4. Diff heuristic (`suggested_tier`)
+- Address the user's changes naturally in the console — the console response IS the document response.
+- Respond to new `## User` blocks, inline annotations (blockquotes, comments, edits to previous responses), and structural changes.
 
-Use the tier to gate execution:
+**Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 
-- If `model_switch` is set (user typed `/model <x>`), acknowledge the switch in your response and proceed. The user explicitly chose this tier.
-- If `required_tier` is set (from component or frontmatter) and the current session's tier is **lower** than `required_tier`, tell the user:
-  > "This document requires `<required_tier>` tier. Run `/model <x>` in your terminal, then re-run `/agent-doc`."
-  and stop. Do not generate a response.
-- Otherwise, compare `effective_tier` against the current session model. If you (the running agent) are a lower tier than `effective_tier` and the task looks substantial (`diff_type` ∈ {`approval`, `implementation`, `architecture`}, or long diff), suggest escalating in the response but still proceed best-effort.
-- `effective_tier = auto` means "no preference" — always proceed.
+**Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
 
-The tier comparison is advisory within a session — the skill cannot switch the running model, but it can surface the mismatch so the user can `/model` and re-invoke.
+**Streaming checkpoints:** for long multi-topic responses, flush partial content at natural breakpoints so the user sees progress. Full procedure + baseline re-save pattern: [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md).
 
-### 0c2. Export frontmatter env vars
-
-If preflight returns a non-empty `env` object, export each key-value pair into the current shell **before** generating your response. Values may contain shell expressions (`$(command)`, `$VAR`) — the shell expands them during export.
-
-Run a single Bash tool call with sequential exports:
-```bash
-export KEY1=value1
-export KEY2="$(passage btak/SOME_KEY)"
-export KEY3="$KEY1"
-```
-
-This ensures later values can reference earlier keys. The expanded values apply to all subsequent Bash tool calls in this session.
-
-**Security:** Values are returned **unexpanded** from preflight (e.g., `$(passage ...)`). The shell evaluates them at export time — expanded secrets never appear in JSON output or tool call results.
-
-### 0d. Handle pending callbacks
-
-If preflight returns a non-empty `pending_callbacks` array, another process (e.g., `agent-doc cleanup`) is waiting for this session to respond. Handle each callback **before** generating your normal response.
-
-For each pending callback:
-
-1. **Read the full request:**
-   ```bash
-   agent-doc callback read <doc_path>
-   ```
-   This returns JSON with `request_id`, `operations`, `context`, and `ttl_secs`.
-
-2. **Process the requested operations** (common types):
-   - `compact` — summarize the exchange content into a concise paragraph
-   - `prune-pending` — review pending items, remove completed ones
-   - `summary` — generate a status summary from current document state
-
-3. **Write the response:**
-   ```bash
-   agent-doc callback respond <doc_path> --request-id <id> --summary "Your response text here"
-   ```
-
-4. Log to console: `[callback] processed <operations> for <doc_path>`
-
-**The PostToolUse hook also fires `agent-doc hook check-callbacks`** after every Bash tool use. If the hook output contains `pending_callbacks` with entries, handle them the same way — read, process, respond. This gives faster detection than waiting for the next preflight cycle.
-
-**Timing:** Callbacks have a TTL (default 120-300s). If you see one, process it promptly. The requesting process is polling for your response.
-
-### 1. Respond (with streaming checkpoints for template mode)
-
-- Address the user's changes naturally in the console (this gives real-time streaming feedback)
-- Respond to:
-  - New `## User` blocks
-  - Inline annotations (blockquotes, comments, edits to previous responses)
-  - Structural changes (deletions, reorganization)
-- Your console response IS the document response — they should be the same content
-
-**Response header format (template mode):**
-Use `### Re:` markdown headers for response sections — NOT bold text (`**Re: ...**`). The `(HEAD)` boundary marker requires actual markdown headings to function. Bold text pseudo-headers break the gutter boundary.
-
-Markdown supports h1-h6. In template mode exchange components (typically under `## Exchange`), use `### Re:` (h3) for response headers. This leaves h4-h6 for sub-sections within each response.
-
-**Streaming checkpoints (template/stream mode):**
-When responding to a document with multiple user questions/topics, flush partial responses at natural breakpoints so the user sees progress in their editor:
-
-1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
-   ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
-   <partial response as patch blocks>
-   RESPONSE
-   ```
-2. **Re-save the baseline** after each checkpoint flush (the document has changed):
-   ```bash
-   cp <FILE> /tmp/agent-doc-baseline-$$.md
-   ```
-3. Continue responding to the next section, then flush again
-4. The final write-back (step 2) writes the complete response
-
-**When to checkpoint:** After each `### Re:` section, after completing a code implementation summary, or after any response block that takes >15s to generate. Skip checkpoints for short single-topic responses.
-
-**All writes use `--stream` (CRDT merge)** — this eliminates merge conflicts when the user edits the document during response generation.
-
-**Preferred: wrap exchange responses in `<!-- patch:exchange -->`:** For template-mode documents, wrapping responses in `<!-- patch:exchange -->` targets the component directly and is the cleanest path. Raw (unwrapped) content goes through boundary-synthesis, which is also correct — the binary deduplicates and clears `unmatched` when synthesis occurs. Both paths are valid; explicit wrapping is preferred for clarity.
+**Prefer wrapping exchange responses in `<!-- patch:exchange -->`** for clarity. Raw (unwrapped) content also works via boundary synthesis.
 
 ### 1b. Update pending (template mode)
 
-If the document has an `<!-- agent:pending -->` component, **every response MUST include a `<!-- patch:pending -->` block** reflecting the current state. This is not optional — pending drift makes task lists unreliable.
+If the document has an `<!-- agent:pending -->` component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
-**What to update each cycle:**
-- Items completed during this response → remove or mark `([done])`
-- New items discovered → add with context
-- Active work items → move to top
-- Reprioritize based on current work direction
+**Pending capture rule:** if your response identifies concrete follow-up work that should be tracked, add it to `agent:pending` in the same cycle. Do not leave pending-worthy next steps as exchange-only prose.
 
-### 2. Write back to the document
+**Recommendations vs accepted work:** if the item is only a recommendation and the user has not accepted it yet, include `recommended` in the pending text (for example, `[recommended] Add regression coverage for X`). Do not silently promote hypotheticals or mutually exclusive options the user has not chosen.
 
-Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `response_mode`).
+**Default ordering:** new pending items belong at the beginning of `agent:pending`. When adding multiple new items in one cycle, preserve the order you presented them in. If the user explicitly reorders pending and preflight reports `pending_reordered: true`, do not reorder existing items that cycle beyond the front insertion behavior for genuinely new work.
 
-#### 2a. Append mode (default — no `agent_doc_mode` or `agent_doc_mode: append`)
+**Promotion heuristic (when to add pending in the same cycle):** if your response ends with a numbered list of distinct, actionable recommendations (e.g., "What I'd recommend: 1. ..., 2. ..., 3. ..."), and either pending is currently empty OR the user asked for a backlog / "tasks" / "todo", add each recommendation as a pending item in the same cycle. The pending component is where backlog lives. Skip promotion when items are hypotheticals, options you're asking the user to choose between, or already captured elsewhere.
 
-Use `agent-doc write --stream` to atomically append the response:
+### 2. Write back (MANDATORY — never skip)
 
-1. **Save a baseline copy** of the document content (before step 1) to a temp file
-2. **Pipe your response** through `agent-doc write`:
-   ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
-   <your response>
-   RESPONSE
-   ```
-3. `agent-doc write --stream` handles:
-   - Appending `## Assistant\n\n<response>\n\n## User\n\n`
-   - CRDT merge if the user edited during your response (conflict-free)
-   - Atomic file write (flock + tempfile + rename)
-   - Snapshot update
+Pipe the response through `agent-doc write --stream` — it handles patch parsing, CRDT merge, atomic write, and snapshot update. **This step is MANDATORY every cycle, regardless of response length or complexity. Skipping write breaks the document sync.**
 
-#### 2b. Template mode (`agent_doc_mode: template`)
-
-Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
-The agent responds with **patch blocks** that target specific components.
-
-1. **Save a baseline copy** of the document content (before step 1) to a temp file
-2. **Format your response as patch blocks:**
-   ```markdown
-   <!-- patch:output -->
-   Your response content here.
-   <!-- /patch:output -->
-
-   <!-- patch:status -->
-   Updated status line.
-   <!-- /patch:status -->
-   ```
-   - Each `<!-- patch:name -->` targets the corresponding `<!-- agent:name -->` component
-   - Content outside patch blocks goes to `<!-- agent:output -->` (auto-created if missing)
-   - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
-3. **Pipe through `agent-doc write` with `--stream` flag:**
-   ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
-   <your patch response>
-   RESPONSE
-   ```
-4. `agent-doc write --stream` handles:
-   - Parsing patch blocks from the response
-   - Applying each patch to the matching component
-   - CRDT merge if the user edited during your response (conflict-free)
-   - Atomic file write + snapshot update
-
-**Template document conventions:**
-- `<!-- agent:input -->` — user writes prompts here
-- `<!-- agent:output -->` — agent responds here (or use patch blocks for multiple components)
-- `<!-- agent:exchange -->` — shared conversation surface (user and agent both write inline)
-- Other components (status, architecture, etc.) are agent-managed via patch blocks
-
-**IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
-The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
-
-**Baseline file:** Use the `baseline_file` path from the preflight JSON output as `--baseline-file`. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if the file was modified concurrently between the copy and preflight. The preflight-saved baseline is always taken at a stable post-commit point.
-
-For streaming checkpoints, re-save the baseline after each flush:
 ```bash
-cp <FILE> /tmp/agent-doc-baseline-$$.md
-```
-Pass this updated copy as `--baseline-file` for subsequent checkpoint writes.
-
-### 3. Git integration
-
-**Commit immediately after writing the response.** After `agent-doc write` completes, run `agent-doc commit <FILE>`. The selective commit stages only the snapshot content (agent response), leaving user edits in the working tree as uncommitted. This gives the user:
-- Agent response → committed (no gutter)
-- Heading with `(HEAD)` marker → modified (blue gutter, visual boundary)
-- User's new input → uncommitted (green gutter)
-
-- **NEVER use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`
-- Step 0b also calls `agent-doc commit` as a safety net (no-op if already committed)
-
-## Document Format
-
-Session documents use YAML frontmatter:
-
-```yaml
----
-agent_doc_session: <uuid or null>
-agent: <name or null>
-model: <model or null>
-branch: <branch or null>
-agent_doc_mode: <append | template>  # optional, default: append
----
+cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+<your response — patch blocks for template mode, or plain text for inline mode>
+RESPONSE
 ```
 
-**Append mode** (default): The body alternates `## User` and `## Assistant` blocks. Inline annotations (blockquotes, comments) within any block are valid prompts.
+**IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 
-**Template mode** (`agent_doc_mode: template`): The body contains named components (`<!-- agent:name -->...<!-- /agent:name -->`). The agent responds with patch blocks targeting specific components. See step 2b.
+**IMPORTANT: The response content MUST include `<!-- patch:exchange -->` blocks for template-mode documents.** If the heredoc is empty or contains only raw text without patch markers, the binary will warn (`0 template patches found`) and only apply normalization — the response will be silently lost. Context compaction can drop the response between generation and the write command; if this happens, re-generate the response before piping.
 
-## Snapshot Storage
+**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document and you are repairing a missed patchback, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` for the response write-back so the repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists in the document.
 
-- Location: `.agent-doc/snapshots/` relative to the project root (where the document lives)
-- Filename: `sha256(canonical_path) + ".md"`
-- Contains the full document content after the last submit
-- **IMPORTANT:** Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session.
+Document format, frontmatter fields, append vs template mode conventions, and component naming: [runbooks/document-format.md](runbooks/document-format.md).
+
+### 3. Commit (MANDATORY — never skip)
+
+Immediately after `agent-doc write` succeeds, run `agent-doc commit <FILE>`. **This step is MANDATORY every cycle.** The selective commit stages only the snapshot content so the user's working-tree edits stay visible as gutter changes. It also has a narrow self-heal path for missed agent-owned drift (`status`, appended `### Re:` response, pending-ID superset) when component structure still matches. Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff.
+
+**Never use `git commit -m "$(date ...)"` or any `$()` substitution** — always use `agent-doc commit`.
 
 ## Runbooks
 
-When the user requests one of these operations, read and follow the linked runbook:
-
-- `compact exchange` — [runbooks/compact-exchange.md](runbooks/compact-exchange.md)
-- `transfer` / `extract` — [runbooks/transfer-extract.md](runbooks/transfer-extract.md)
+- [runbooks/harness-invocation.md](runbooks/harness-invocation.md) — harness-specific invocation patterns
+- [runbooks/compact-exchange.md](runbooks/compact-exchange.md) — `compact exchange` operation
+- [runbooks/transfer-extract.md](runbooks/transfer-extract.md) — `transfer` / `extract` operations
+- [runbooks/pending-ops.md](runbooks/pending-ops.md) — pending mutation contract
+- [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
+- [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
+- [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
+- [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) — which invariants live in the binary
 
 ## Success Criteria
 
-- User sees streaming response in the Claude console
-- Document is updated with the response (user can see it in their editor)
-- User edits made during response are preserved (not overwritten)
-- Snapshot is updated for the next submit's diff computation
+- User sees streaming response in the agent console.
+- Document is updated and user's concurrent edits are preserved.
+- Snapshot is updated for the next cycle's diff.

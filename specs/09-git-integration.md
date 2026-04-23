@@ -10,7 +10,7 @@
 
 Cross-session event coordination via `agent-kit` hooks (v0.3).
 
-**CLI:** `agent-doc hook fire|poll|listen|gc`
+**CLI:** `agent-doc hook fire|poll|listen|gc|codex-user-prompt-submit|codex-stop`
 
 - `fire <EVENT> <FILE>` — write event JSON to `.agent-doc/hooks/<event>/`, auto-reads session ID from frontmatter
 - `poll <EVENT> [--since SECS]` — read events newer than timestamp, clean expired
@@ -28,3 +28,10 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 ```json
 {"hooks":{"PostToolUse":[{"matcher":"Write|Edit","command":"agent-doc hook fire post_write \"$TOOL_INPUT_FILE\""}]}}
 ```
+
+**Codex bridge:** `agent-doc skill install` now also writes repo-local `.codex/hooks.json` plus `.codex/config.toml` (`[features] codex_hooks = true`). That bridge routes:
+
+- `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
+- `Stop` → `agent-doc hook codex-stop`
+
+The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop: when Codex reaches `Stop` with an open `agent-doc` cycle, the binary captures `last_assistant_message` into the existing pending/capture ledger and blocks or fails closed so the response cannot silently leave the harness without a recoverable record.

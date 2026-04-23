@@ -54,6 +54,7 @@ mod commands;
 mod compact;
 mod config;
 mod convert;
+mod codex_hook;
 mod cycle_state;
 mod dedupe;
 mod diff;
@@ -821,6 +822,10 @@ enum HookAction {
         #[arg(long)]
         root: Option<String>,
     },
+    /// Track the active `agent-doc` document for a Codex session (stdin JSON hook payload)
+    CodexUserPromptSubmit,
+    /// Enforce the Codex end-of-turn `session-check` guard (stdin JSON hook payload)
+    CodexStop,
 }
 
 #[derive(Subcommand)]
@@ -1495,6 +1500,8 @@ fn main() -> anyhow::Result<()> {
                 println!("{}", json);
                 Ok(())
             }
+            HookAction::CodexUserPromptSubmit => codex_hook::handle_user_prompt_submit(),
+            HookAction::CodexStop => codex_hook::handle_stop(),
         },
         Commands::Cleanup {
             file,

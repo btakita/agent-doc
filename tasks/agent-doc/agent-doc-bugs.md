@@ -1874,7 +1874,7 @@ Immediate remediation in this repo:
 I am not adding a new product pending item for this specific follow-up because `#cshk` already covers the shipped binary/backstop work; the gap exposed here is that this workspace has not picked up the installed Codex hook artifacts yet.
 
 Why is the response patchback not committed? We have gone through >10 rounds and this is still an issue. What more needs to be done? Is this a skill issue? Can we make the commit deterministic? Should agent-doc have defensive logic in case the harness does not behave correctly? The first priority is to make the harness behave correctly.
-### Re: why I went off-task / what the priority should be — gpt-5
+### Re: why I went off-task / what the priority should be — gpt-5 (HEAD)
 
 You are right. I moved in the wrong direction.
 
@@ -1896,12 +1896,32 @@ What more needs to be done, in priority order:
 5. Keep `session-check` as a hard post-write verifier, but not the only line of defense.
 
 So the first priority you gave is the right one: make the harness behave correctly first. The repeated misses mean I should have stayed on that diagnosis instead of treating this as another open-ended implementation turn.
-<!-- agent:boundary:045dec21 -->
+
+Plan the next steps to address the priorities.
+### Re: plan to address the harness-first priorities — codex
+
+Priority order should be:
+
+1. Make the normal Codex closeout path deterministic before relying on the hook backstop. The turn should end with `agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>`, then immediate `agent-doc session-check <FILE>`, with no more substantial work after response persistence.
+2. Finish and verify the defensive binary backstop that is already in the current `src/agent-doc` worktree. The open WIP in `src/codex_hook.rs` changes `Stop` from capture-only behavior to an attempted deterministic auto-close from `last_assistant_message`, then block/fail-closed if the cycle still remains open.
+3. Activate that behavior in this actual `agent-loop` workspace. The product-side fix is not enough by itself; we also need to reinstall `agent-doc` here so repo-local `.codex/hooks.json` and `.codex/config.toml` are present and active.
+4. Run one real end-to-end Codex check in this repo after install. We need to prove both paths: the intended `finalize` + `session-check` happy path, and a forced open-cycle / missed-patchback case where the `Stop` hook auto-closes or fails closed instead of letting the turn exit dirty.
+5. Only after that should we patch the verified outcome back here and commit/push. If the live repro still leaves the file dirty after those steps, the next fix should move closer to the Codex execution path itself (`agent::codex` / harness invocation), not another docs-only pass.
+
+So the next execution sequence is:
+
+- verify the current `src/agent-doc` closeout WIP with focused tests plus `make check`
+- commit that submodule change if clean
+- reinstall the updated skill/hook artifacts in `agent-loop`
+- run the live Codex closeout proof in this workspace
+- then patch the result back into this bug doc and commit the parent repo state
+<!-- agent:boundary:9254946b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#cdet] Codex deterministic closeout hardening: verify/land the current `Stop` auto-close path, reinstall `agent-doc` in `agent-loop` so repo-local `.codex/hooks.json` / `.codex/config.toml` are active, and prove in a live Codex session that both `finalize` + `session-check` and the `Stop` backstop leave no uncommitted patchback.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

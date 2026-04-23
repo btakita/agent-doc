@@ -332,7 +332,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Exchange prompt normalization:** For append-mode `agent:exchange`, the write path prefixes newly added user lines with `❯ ` based on the `snapshot -> baseline` diff. This normalization must ignore synthetic heading-only churn from binary-owned commit markers (for example a response heading gaining ` (HEAD)` in the committed snapshot). A heading replacement may preserve existing agent content, but it must not suppress `❯ ` prefixing for the next genuine user prompt.
 
-**Template structure guard:** After patch application and again after any merge, template writes must keep live conversation content inside `<!-- agent:exchange -->`. If a safe trailing `## User` / `## Assistant` / `### Re:` tail escaped below `<!-- /agent:exchange -->`, the binary moves it back inside exchange before snapshot/write. If the trailing suffix mixes conversation with other document structure, the write fails closed instead of committing a malformed template document.
+**Template structure guard:** After patch application and again after any merge, template writes must keep live conversation content inside `<!-- agent:exchange -->`. If a safe trailing `## User` / `## Assistant` / `### Re:` tail escaped below `<!-- /agent:exchange -->`, the binary moves it back inside exchange before snapshot/write. Comment-only notes or other non-conversation scratch content without escaped conversation headings must stay outside `agent:exchange`. If the trailing suffix mixes conversation with other document structure, the write fails closed instead of committing a malformed template document.
 
 **Boundary marker lifecycle (binary-owned):** Boundary management is fully deterministic and handled by the binary — never by the SKILL workflow. The `apply_patches()` function manages the complete lifecycle:
 
@@ -476,6 +476,7 @@ Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff,
    - Otherwise, an open `preflight_started` cycle only auto-closes when `recover` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
+   - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`

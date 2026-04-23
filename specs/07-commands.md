@@ -187,6 +187,7 @@ Exits with error if the pane is dead or no session is registered.
    b. Write the modified snapshot to git's object database via `git hash-object -w --stdin`
    c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>` — working tree is NOT modified
    d. Result: snapshot content (agent response) is committed; user edits in the working tree stay uncommitted
+   e. Narrow repair path: if the live document is ahead of the snapshot due to a missed agent-doc mutation, `commit` first refreshes the snapshot from the live file, then stages it. The repair only triggers when the redacted component structure is unchanged and the drift looks like an agent-owned `status` change and/or an appended `### Re:` block and/or a `pending` stable-ID superset. Plain user-prompt drift is not absorbed.
 3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
 4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
 5. On successful commit: write `vcs-refresh.signal` to `.agent-doc/patches/` — the IDE plugin watches this and triggers `VcsDirtyScopeManager.markEverythingDirty()` + VFS refresh so git gutter updates immediately

@@ -1704,6 +1704,8 @@ The newer line:
 
 is different: `git blame` shows it is still an uncommitted working-tree edit. It appears after the previous response simply because it is the next user prompt appended to `agent:exchange` after that response.
 
+I added the prompt after the file was committed. Why was the prompt committed with its response? And why after its response? It seems there is an issue with the patchback mechanism.
+
 On the `❯ ` prefix: preflight does **not** edit the document to add that prefix. The prefixing happens later in the write path, in `write.rs` via exchange prompt normalization against `snapshot -> baseline` when a response is persisted. Until that write-back happens, a raw newly-typed prompt can appear without `❯ ` in the live file.
 
 So the concrete root causes are:
@@ -1718,6 +1720,63 @@ The relevant regression coverage is already present and currently passing:
 - `write::tests::normalize_user_prompts_restores_prefix_lost_in_file`
 
 No new `src/agent-doc` code change was required from this follow-up because the current implementation/tests are green; the mismatch here is the historical task-doc state and the fact that prompt-prefix normalization only occurs on write-back, not on preflight.
+
+I thought we had an earlier feature to add the `❯ ` prefix on preflight. Would adding `❯ ` on preflight fix the issue reliably?
+
+This response was uncommitted. We still have the issue. This is a major problem with agent-doc on Codex. Please analyze why this is still happening.
+### Re: why this is still happening / preflight `❯ ` vs Codex guard — gpt-5
+
+Root cause: the remaining failure mode is still outside the binary guarantees we had already added.
+
+What the current product already enforced before this turn:
+
+- `#drc1` protects cycles only after `agent-doc` has the final response body
+- `#finz` / `#cmiv` protect the normal binary write+commit path
+- `#schk` required Codex to run `agent-doc session-check <FILE>` after `finalize` / `write --commit`
+
+What was still missing:
+
+- `session-check` only looked at cycle-state and `ops.log`
+- if Codex patched the document directly instead of going through `agent-doc write` / `finalize`, there was no `response_captured` / `write_applied` cycle state to catch
+- in that bypassed path, the document could sit as a plain working-tree diff long enough for a later user prompt to land in the same eventual parent commit
+
+That is why this was still happening even after the earlier fixes: those fixes only guarded binary-owned response cycles, but the observed bug was a direct-patchback / bypassed-write path.
+
+On the `❯ ` question: adding `❯ ` during preflight would not fix this reliably.
+
+- it would only affect prompt presentation, not the commit boundary
+- the bad commit happened before the next preflight, while the response was already sitting as a direct working-tree diff
+- the real bug was "assistant response bypassed `agent-doc write`", not "prompt lacked `❯ `"
+
+I tightened the product guard in the current `src/agent-doc` worktree:
+
+- `src/session_check.rs` now also compares snapshot → current file and fails closed when it sees a likely direct assistant patchback marker (`### Re:` or `## Assistant`) without a corresponding `agent-doc` cycle
+- `src/main.rs`, `SPEC.md`, `README.md`, and `specs/07-commands.md` now document that stronger `session-check` contract
+- focused regression coverage now proves:
+  - template-mode direct `### Re:` patchbacks are flagged
+  - inline-mode direct `## Assistant` patchbacks are flagged
+  - plain user prompts are not falsely flagged
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_check -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml detect_bypassed_response_write -- --nocapture`
+
+So the immediate answer is:
+
+- no, preflight-side `❯ ` would not have fixed this
+- yes, there was still a real Codex-specific gap
+- the gap was that `session-check` trusted only cycle metadata, so direct patchbacks could still look clean
+- the current worktree now closes that gap by making `session-check` fail on likely bypassed assistant patchbacks too
+
+Remaining limitation:
+
+- this still depends on Codex actually invoking `agent-doc session-check <FILE>` as instructed
+- if we want to protect even against "Codex skipped the guard entirely", the next step is a Codex-side hook that enforces the check and, for full missed-patchback recovery, captures the final assistant text before the message exits the harness
+
+Plan note:
+
+- used the root `plan.md`
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1728,6 +1787,7 @@ No new `src/agent-doc` code change was required from this follow-up because the 
 - [x] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
 - [x] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [x] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
+- [ ] [#cshk] [recommended] Add a Codex-side end-of-turn hook that enforces `agent-doc session-check <FILE>` execution and captures the final assistant text before it leaves the harness, so bypassed direct patchbacks can be blocked or replayed even when Codex skips the binary write path.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

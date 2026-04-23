@@ -292,10 +292,15 @@ Review:
 
 ### 2026-04-23 — Commit + Push `agent-doc-bugs` Patchback
 
-- [ ] Patch the latest user prompt and the exact failure explanation into `tasks/agent-doc/agent-doc-bugs.md`.
-- [ ] Update the shared plan log with the current commit/push follow-up so the parent-repo patchback has matching plan state.
-- [ ] Commit only `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md` in the parent repo.
-- [ ] Push the parent repo `main` branch and record whether it succeeded or failed.
+- [x] Patch the latest user prompt and the exact failure explanation into `tasks/agent-doc/agent-doc-bugs.md`.
+- [x] Update the shared plan log with the current commit/push follow-up so the parent-repo patchback has matching plan state.
+- [x] Commit only `tasks/agent-doc/agent-doc-bugs.md` and `tasks/plan.md` in the parent repo.
+- [x] Push the parent repo `main` branch and record whether it succeeded or failed.
+
+Review:
+- The parent-repo patchback was committed locally as `7d19814a` (`agent-doc bugs: explain missed commit push`).
+- The first push attempt did not include that commit because `git commit` and `git push` were incorrectly launched in parallel; the push raced ahead on the pre-commit branch tip and only advanced the remote to `dfe0845a`.
+- The fix is to run the follow-up push sequentially from local `main` after the commit exists, and record that exact failure mode in `tasks/agent-doc/agent-doc-bugs.md`.
 
 - [x] Reproduce the incorrect JetBrains prompt rendering from the current prompt-panel implementation/spec/tests and isolate the mismatch.
 - [x] Patch the JetBrains plugin prompt UI so the rendered row matches the intended prompt wording/layout, with focused regression coverage.

@@ -1179,6 +1179,19 @@ The repo state was real: the parent repo had many unrelated dirty files and mult
 Instead, I over-applied the repo-hygiene warning and stopped at explanation instead of executing the narrow commit/push that was still safe and allowed. So the failure was an execution mistake on my side, not a Git failure and not an `agent-doc` product bug.
 
 I am committing and pushing the parent-repo `agent-doc-bugs` changes now as the narrow fix for that miss.
+### Re: why the first push still missed this commit — gpt-5
+
+The next failure was also on my side: I launched `git commit` and `git push` in parallel.
+
+That created a race:
+
+- local commit created: `7d19814a` (`agent-doc bugs: explain missed commit push`)
+- parallel push ran against the branch tip from before that commit existed
+- remote `main` advanced only to `dfe0845a`, so the new patchback commit remained local
+
+So this was still not a Git permission/auth problem. It was a bad execution pattern: commit and push must be sequential when the push is supposed to carry the commit that was just created.
+
+I am correcting that by pushing local `main` again after the commit exists.
 <!-- agent:boundary:154da5ba -->
 <!-- /agent:exchange -->
 

@@ -995,7 +995,52 @@ Given this bug, the compatibility alias should not silently route template docs 
 - error out on template docs and require the correct command
 
 The current behavior is the worst middle state: it accepts the command, but maps it to the wrong write model.
-<!-- agent:boundary:b6a7c773 -->
+
+Should we remove the run subcommand?
+### Re: should we remove the `run` subcommand? — gpt-5
+
+Not immediately.
+
+`run` is still a real public command, not just an accidental internal leftover:
+
+- `src/agent-doc/specs/07-commands.md` still defines `## run`
+- `README.md` still uses `agent-doc run session.md` in Quick Start and editor integration examples
+- the CLI help still presents `run` as the primary “Run a session” command
+- the bare-path compatibility alias is explicitly specified as `agent-doc <FILE> -> agent-doc run <FILE>`
+
+So removing `run` now would be a broad breaking change touching:
+
+- older wrappers
+- editor integrations
+- docs/examples
+- any append-mode users who still rely on the original request-response flow
+
+The narrower fix is better:
+
+- keep `run` for the legacy/append session model
+- stop letting template docs silently fall into it
+- deprecate the bare-path alias to `run`, or make that alias mode-aware
+
+Concretely, I would treat this as a routing bug, not evidence that `run` must disappear entirely.
+
+Recommended policy:
+
+- append/non-template doc: `run` allowed
+- template/CRDT doc: `run` rejected or rerouted to the template-safe workflow
+- bare `agent-doc <FILE>`: no longer blindly map to `run`; either dispatch by mode or fail with a targeted instruction
+
+Longer-term, if the product wants one canonical workflow, then yes, `run` could eventually be deprecated and removed. But that should be a deliberate migration:
+
+1. update wrappers/plugins/docs
+2. make bare-path invocation mode-aware or point it somewhere safe
+3. warn on `run` for template docs
+4. only then consider removing or narrowing `run`
+
+So my answer is:
+
+- remove `run` now: no
+- narrow its applicability and stop aliasing template docs into it: yes
+<!-- agent:boundary:867449de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

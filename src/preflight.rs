@@ -7,6 +7,10 @@
 //! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
 //!   problems (window index, session drift); issues are
 //!   included in output but do not abort the run.
+//! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state,
+//!   auto-attempts `recover::run(file)` + `git::commit(file)` for an open prior
+//!   cycle, and fails closed if that cycle still cannot reach a terminal
+//!   committed state.
 //! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
@@ -448,6 +452,65 @@ fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
 /// 5. Read document HEAD from disk
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
+fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok((false, false));
+    };
+    if !state.is_open() {
+        return Ok((false, false));
+    }
+
+    eprintln!(
+        "[preflight] WARNING: previous cycle `{}` is still `{}` ({}) — attempting recovery before diff",
+        state.cycle_id,
+        match state.phase {
+            crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+            crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+            crate::cycle_state::CyclePhase::Committed => "committed",
+        },
+        state.last_event
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "interrupted_cycle_detected file={} cycle_id={} phase={:?} event={}",
+            file.display(),
+            state.cycle_id,
+            state.phase,
+            state.last_event
+        ),
+    );
+
+    let recovered = recover::run(file).unwrap_or_else(|e| {
+        eprintln!("[preflight] interrupted-cycle recover warning: {}", e);
+        false
+    });
+    let committed = match git::commit(file) {
+        Ok(did_commit) => did_commit,
+        Err(e) => {
+            eprintln!("[preflight] interrupted-cycle commit warning: {}", e);
+            false
+        }
+    };
+
+    if let Some(after) = crate::cycle_state::load(file)?
+        && after.is_open()
+    {
+        anyhow::bail!(
+            "previous cycle `{}` is still `{}` after recovery/commit ({})",
+            after.cycle_id,
+            match after.phase {
+                crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+                crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+                crate::cycle_state::CyclePhase::Committed => "committed",
+            },
+            after.last_event
+        );
+    }
+
+    Ok((recovered, committed))
+}
+
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -481,18 +544,7 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
-    // Step 0-pre: Invariant check (#a011) — if the last ops.log event was a
-    // `preflight_diff_start` without any subsequent write/commit event, the
-    // previous cycle was interrupted (crash, killed agent, IPC timeout that
-    // never recovered). Warn loudly so the operator can investigate.
-    if let Ok(Some(last)) = crate::session_check::last_ops_event(file)
-        && last.starts_with(crate::session_check::PREFLIGHT_START_EVENT)
-    {
-        eprintln!(
-            "[preflight] WARNING: previous cycle ended at `preflight_diff_start` without a write — interrupted cycle detected"
-        );
-        crate::ops_log::log_op(file, "interrupted_cycle_detected file=");
-    }
+    let (recovered_prior, committed_prior) = enforce_cycle_completion(file)?;
 
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
@@ -509,7 +561,7 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: recover");
-    let recovered = recover::run(file).unwrap_or_else(|e| {
+    let recovered = recovered_prior || recover::run(file).unwrap_or_else(|e| {
         eprintln!("[preflight] recover warning: {}", e);
         false
     });
@@ -538,8 +590,8 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
-    let committed = match git::commit(file) {
-        Ok(()) => true,
+    let committed = committed_prior || match git::commit(file) {
+        Ok(did_commit) => did_commit,
         Err(e) => {
             eprintln!("[preflight] commit warning: {}", e);
             false
@@ -659,7 +711,8 @@ pub fn run(file: &Path) -> Result<()> {
                             continue;
                         }
                         match git::commit(&doc_path) {
-                            Ok(()) => eprintln!("[preflight] sweep: committed {}", doc_path.display()),
+                            Ok(true) => eprintln!("[preflight] sweep: committed {}", doc_path.display()),
+                            Ok(false) => eprintln!("[preflight] sweep: clean {}", doc_path.display()),
                             Err(e) => eprintln!("[preflight] sweep: warning for {}: {}", doc_path.display(), e),
                         }
                     }
@@ -736,16 +789,19 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
-    {
-        let snap_len = crate::snapshot::load(file).unwrap_or(None).map(|s| s.len()).unwrap_or(0);
-        let file_len = std::fs::metadata(file).map(|m| m.len() as usize).unwrap_or(0);
+    let raw_diff = diff::compute(file)?;
+    let no_changes = raw_diff.is_none();
+    if !no_changes {
+        let snap = crate::snapshot::load(file).unwrap_or(None);
+        let file_content = std::fs::read_to_string(file).unwrap_or_default();
+        let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
+        let file_len = file_content.len();
+        crate::cycle_state::start_preflight(file, snap.as_deref(), Some(&file_content))?;
         crate::ops_log::log_op(file, &format!(
             "preflight_diff_start file={} snap_len={} file_len={}",
             file.display(), snap_len, file_len
         ));
     }
-    let raw_diff = diff::compute(file)?;
-    let no_changes = raw_diff.is_none();
 
     // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
     // line(s) before downstream classification. The strip prevents `/model` from
@@ -1403,6 +1459,39 @@ mod tests {
         // diff::compute should detect changes → no_changes = false.
         let diff_result = diff::compute(&doc).unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
+    }
+
+    #[test]
+    fn preflight_auto_commits_open_write_applied_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nAnswer\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "write_template", Some(content), Some(content)).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_success");
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_open_preflight_started_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::git::commit(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(err.to_string().contains("previous cycle"), "unexpected error: {err}");
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted);
     }
 
     #[test]

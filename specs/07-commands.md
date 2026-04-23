@@ -436,9 +436,12 @@ command = "wezterm start -- {tmux_command}"
 
 `agent-doc preflight <FILE>` — run all pre-agent steps and output JSON.
 
-Combines recover, commit, claims-log check, diff, and document HEAD read into a single call. The SKILL workflow consumes the structured JSON output instead of making separate CLI calls.
+Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff, and document HEAD read into a single call. The SKILL workflow consumes the structured JSON output instead of making separate CLI calls.
 
 **Steps (in order):**
+0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
+   - If the prior cycle is still `preflight_started` or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Recover orphaned pending responses (`agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
@@ -475,6 +478,15 @@ Combines recover, commit, claims-log check, diff, and document HEAD read into a 
 - `slash_commands` — slash commands extracted from user-added lines in the diff via `parse_slash_commands()`; omitted when empty. Guards: code fences (``` / ~~~), blockquotes (`>`), non-added lines, and removed lines are excluded. Pattern: `/` followed immediately by an ASCII letter.
 - `linked_changes` lists changes in linked docs/URLs since last cycle (omitted when empty)
 - Progress/diagnostic messages go to stderr
+
+## session-check
+
+`agent-doc session-check <FILE>` — verify that the previous cycle reached a terminal committed state.
+
+- Primary source of truth: `.agent-doc/state/cycles/<doc-hash>.json`
+- Fallback for older repos: last non-empty `.agent-doc/logs/ops.log` line
+- Exit `1` when the current cycle state is still open (`preflight_started` or `write_applied`)
+- Exit `0` when the cycle state is committed or no state/log file exists
 
 **URL link processing:**
 - URLs (`http://`/`https://`) in `links` frontmatter are fetched with a 10s timeout

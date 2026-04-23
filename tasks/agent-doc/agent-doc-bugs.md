@@ -474,7 +474,7 @@ Spec/tests I would add with that work:
 
 Sequence I’d recommend: land the validator + fail-closed backstop first, then the safe auto-repair, then the component-aware merge refactor.
 Add to pending.
-<!-- agent:boundary:567f5ff3 -->
+<!-- agent:boundary:2dcc9c12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

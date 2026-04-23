@@ -11,7 +11,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-✅ Confirmed, fixed, and committed the real self-heal regression in `agent-doc`: `git::commit()` only absorbed out-of-band `exchange` / `pending` drift, so a normal patchback that changed both `agent:status` and `agent:exchange` was rejected and stayed uncommitted. `src/git.rs` now treats agent-owned `status` mutations as absorbable alongside `exchange` / `pending`, while still rejecting plain appended user prompts. The fix is committed in `src/agent-doc` as `01d56cb` (`fix: absorb status drift in commit self-heal`). Verified with focused classifier/commit tests, `cargo check`, and the full pre-commit hook path (`cargo clippy`, full `cargo test`, `audit-docs`).
+✅ Confirmed, fixed, and committed the remaining boundary-marker dirtiness bug in `agent-doc`. Commit-time boundary cleanup was reusing the helper that adds transient `(HEAD)` markers, and it treated a bare `.agent-doc/patches/` directory as “IPC available” even when no live listener existed. `src/template.rs`, `src/git.rs`, `src/ffi.rs`, and `src/write.rs` now use a clean boundary-reposition path for commit/plugin cleanup, and `git::commit()` only skips the disk rewrite when `ipc_socket::is_listener_active()` is actually true. The fix is committed in `src/agent-doc` as `4e1505b` (`fix: clean boundary cleanup after commit`). Verified with focused `git::tests`, `cargo check`, and full `make check`. The earlier self-heal fix for `status+exchange` patchbacks remains committed as `01d56cb` (`fix: absorb status drift in commit self-heal`).
 <!-- /agent:status -->
 
 ## Exchange
@@ -78,12 +78,67 @@ I also checked the remaining dirty `tasks/agent-doc/*.md` files. Those are not m
 - `tasks/agent-doc/agent-doc-model.md`
 
 So the real patchback bug is fixed and the actual missed patchbacks are committed. The only remaining dirtiness in that area is the current boundary-marker behavior.
+
+Why was this not added into agent:pending? Many pending items were added to tasks/plan.md but not into this file's agent:pending. Please add. Fix the following.
+> The only remaining dirtiness in that area is the current boundary-marker behavior.
+
+### Re: boundary-only dirtiness / pending tracking — codex
+
+Root cause confirmed:
+
+- `git::commit()` was using commit-time boundary reposition logic that shared the same helper as the old visual `(HEAD)` annotation path, so the cleanup step itself could leave boundary-only working-tree churn behind.
+- The working-tree rewrite was also skipped whenever `.agent-doc/patches/` existed, even if no live IPC socket listener was running. In that state there was nobody to apply the reposition signal, so stale boundary-only dirtiness remained.
+
+Fixed in the current `src/agent-doc` working tree:
+
+- Added clean `reposition_boundary_to_end_clean()` helpers in `src/template.rs`.
+- Switched `src/git.rs` and the FFI/plugin reposition path in `src/ffi.rs` to use the clean helper instead of the `(HEAD)`-annotating path.
+- Switched IPC boundary-id extraction in `src/write.rs` to the same clean helper so commit/plugin cleanup and IPC targeting agree.
+- Tightened the commit path to skip the disk rewrite only when `ipc_socket::is_listener_active()` is actually true.
+
+Regression coverage now includes:
+
+- `git::tests::reposition_skips_working_tree_when_ipc_listener_active`
+- `git::tests::reposition_updates_working_tree_when_only_patches_dir_exists`
+- updated `git::tests::commit_staged_blob_has_no_head_markers`
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml git::tests -- --nocapture`
+- `cargo check --manifest-path src/agent-doc/Cargo.toml`
+
+On the pending-item question: you were right. The bug doc should have carried a concrete follow-up instead of leaving the work only in `tasks/plan.md`. I added the remaining live-session validation item below.
+
+### Re: why the last response patchback was still uncommitted / why “fixed” was said too early — codex
+
+It was still uncommitted because the newer boundary-cleanup fix existed only as a `src/agent-doc` working-tree diff. I had verified the targeted behavior and then described it as fixed before the code had actually cleared the submodule's real commit gate.
+
+The concrete failure path was:
+
+1. The `status+exchange` self-heal fix was already committed as `01d56cb`.
+2. The later boundary-cleanup fix was only patched in the `src/agent-doc` worktree, so the repo still showed `M src/agent-doc`.
+3. My first attempt to commit that fix failed in the submodule hook because `audit-docs` flagged stale `README.md`, `SPEC.md`, `CLAUDE.md`, and `.claude/skills/agent-doc/SKILL.md`.
+4. Because that commit failed, the parent repo still had the task-doc patchback and submodule pointer uncommitted too.
+
+That is why you still saw the bug as "fixed but uncommitted": the statement got ahead of the actual commit boundary.
+
+Current committed state:
+
+- `src/agent-doc`: `4e1505b` — `fix: clean boundary cleanup after commit`
+- `src/agent-doc`: `01d56cb` — `fix: absorb status drift in commit self-heal`
+
+Verification that cleared before the commit:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml git::tests -- --nocapture`
+- `cargo check --manifest-path src/agent-doc/Cargo.toml`
+- `make check`
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 <!-- /agent:pending -->
 
 [//]: # (After a `compact exchange` to this document, the patchback was not committed. Why?)

@@ -233,6 +233,28 @@ Review:
 - [x] Commit the parent repo changes that correspond to the repaired patchbacks (`src/agent-doc` submodule pointer plus `tasks/agent-doc/agent-doc-bugs.md`).
 - [x] Verify the remaining `tasks/agent-doc/*.md` dirtiness is boundary-only `(HEAD)` state, not another missed response-patchback bug.
 
+### 2026-04-22 — Fix Boundary-Only Dirtiness (`agent-doc-bugs`)
+
+- [x] Reproduce the current boundary-only working-tree churn (`(HEAD)` suffix / boundary UUID drift) and confirm which `commit()` + plugin path leaves documents dirty after the response is committed.
+- [x] Patch `src/agent-doc` so committed patchbacks do not leave boundary-only repo dirtiness behind, with focused regression coverage for the affected commit/reposition path.
+- [x] Update the relevant task/spec state (`tasks/agent-doc/agent-doc-bugs.md`, pending item tracking, and command/session-routing docs if behavior changes), then verify with targeted tests.
+
+Review:
+- Split commit-time boundary cleanup from the older `(HEAD)` annotation path by adding clean reposition helpers in `src/agent-doc/src/template.rs` and routing `git.rs`, `ffi.rs`, and IPC boundary-id extraction through them.
+- Tightened `git::reposition_boundary_in_snapshot()` so it skips the working-tree rewrite only when a live IPC socket listener exists; a stale `.agent-doc/patches/` directory no longer leaves boundary-only dirtiness behind.
+- Verified with `cargo test --manifest-path src/agent-doc/Cargo.toml git::tests -- --nocapture` and `cargo check --manifest-path src/agent-doc/Cargo.toml`.
+
+### 2026-04-22 — Commit Boundary Cleanup Fix (`agent-doc-bugs`)
+
+- [x] Verify whether the uncommitted `src/agent-doc` boundary-cleanup patch actually fixes the reported missed-patchback path or whether another regression remains.
+- [x] If the fix is sound, commit the `src/agent-doc` submodule changes with only the boundary-cleanup/spec updates needed for this bug.
+- [x] Commit the parent `agent-loop` changes that carry the updated `src/agent-doc` pointer plus the repaired `tasks/agent-doc/agent-doc-bugs.md` / `tasks/plan.md` patchback state.
+
+Review:
+- Re-ran focused verification first (`cargo test git::tests -- --nocapture`, `cargo check`) and then the full submodule gate (`make check`) to confirm the boundary-cleanup patch was real before committing it.
+- The first `src/agent-doc` commit attempt failed because the hook's `audit-docs` step flagged stale `README.md`, `SPEC.md`, `CLAUDE.md`, and `.claude/skills/agent-doc/SKILL.md`; updated those docs to match the clean post-commit boundary behavior and retried.
+- Committed the submodule fix as `4e1505b` (`fix: clean boundary cleanup after commit`) after the hook passed cleanly.
+
 Review:
 - Updated `src/agent-doc/src/pending.rs` so `pending::op_add` accepts a leading `id=<custom> ` prefix, validates 1-8 ASCII alphanumeric ids, strips an optional leading `#`, rejects duplicates, and preserves the provided id instead of generating one.
 - Updated `src/agent-doc/src/main.rs`, `src/agent-doc/src/pending_cmd.rs`, `src/agent-doc/runbooks/pending-ops.md`, and `src/agent-doc/specs/pending-system.md` so the custom-ID syntax is documented in the CLI/help/runbook/spec surfaces.

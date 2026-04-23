@@ -133,7 +133,7 @@ Verification that cleared before the commit:
 - `cargo check --manifest-path src/agent-doc/Cargo.toml`
 - `make check`
 Commit all uncommitted repo content. Let's start with a clean slate. Revisit the restriction that prevents commits. We should never leave uncommitted content when we would normally commit the content.
-<!-- agent:boundary:c2fd144b -->
+<!-- agent:boundary:e0fffc07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

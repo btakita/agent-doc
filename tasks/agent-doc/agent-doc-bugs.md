@@ -1915,13 +1915,42 @@ So the next execution sequence is:
 - reinstall the updated skill/hook artifacts in `agent-loop`
 - run the live Codex closeout proof in this workspace
 - then patch the result back into this bug doc and commit the parent repo state
+
+do #cdv1. update spec + tests. build + install for local testing. commit + push
+### Re: `#cdv1` verify and land Codex closeout WIP — codex
+
+Implemented in `src/agent-doc`.
+
+What happened:
+
+- The existing Codex closeout WIP was mostly correct, but `make check` exposed one real instruction-surface bug: `SKILL.md` still said "On `Stop`, agent-doc first tries ...", which the CLI test correctly parsed as an invalid `agent-doc first` subcommand.
+- I fixed that wording in `SKILL.md`, refreshed the generated `.claude/skills/agent-doc/SKILL.md`, and kept the Codex stop-hook docs/spec/runbooks/tests aligned with the deterministic auto-close contract already in the worktree.
+
+Verification:
+
+- `cargo test codex_hook::tests -- --nocapture`
+- `cargo test --test test_cli test_skill_md_references_valid_commands -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `cargo run --quiet -- audit-docs`
+
+All passed.
+
+Commit / push:
+
+- `src/agent-doc`: `6972cd1` — `fix: auto-close codex stop hook`
+- pushed to `origin 20260422/codex-agent-backend`
 <!-- agent:boundary:9254946b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#cdet] Codex deterministic closeout hardening: verify/land the current `Stop` auto-close path, reinstall `agent-doc` in `agent-loop` so repo-local `.codex/hooks.json` / `.codex/config.toml` are active, and prove in a live Codex session that both `finalize` + `session-check` and the `Stop` backstop leave no uncommitted patchback.
+- [x] [#cdv1] Verify the current Codex closeout WIP in `src/agent-doc` with focused hook/session tests and `make -C src/agent-doc check`, so the next action is based on the live tree rather than prior turn assumptions.
+- [ ] [#cdi2] Install the updated `agent-doc` skill/artifacts into `agent-loop` and confirm the repo-local `.codex/hooks.json` and `.codex/config.toml` backstop are actually present here.
+- [ ] [#cde3] Run an end-to-end Codex closeout check in `agent-loop` that proves both the normal `finalize` + `session-check` path and the `Stop` hook backstop leave no uncommitted patchback.
+- [ ] [#cdp4] Patch the verified Codex closeout outcome back into this bug doc, update pending state, and then commit/push in the correct repo boundaries.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -1621,7 +1621,63 @@ Installed local content refreshed:
 Plan note:
 
 - used a discrete plan file at `tasks/agent-doc/plan-instr1-generated-skill-surface.md`
+do #schk. add spec + tests. build + install for local testing
+### Re: `#schk` end-of-turn session-check guard — gpt-5.4
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- `SKILL.md` now requires an end-of-turn `agent-doc session-check <FILE>` after final response persistence, covering both the normal `finalize` path and manual `write --commit` repair
+- `runbooks/harness-invocation.md` now makes that guard explicit in the Codex/direct-exec path: after `finalize` or `write --commit`, run `session-check`; if it exits nonzero, do not report success and continue recovery
+- `runbooks/commit.md`, `SPEC.md`, `README.md`, `CLAUDE.md`, and `specs/07-commands.md` now align on that Codex post-write guard contract
+- `src/skill.rs` and `tests/test_cli.rs` now lock the new behavior with regression coverage for bundled/generated/installed skill content and the installed `SKILL.md` workflow surface
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `cargo test test_skill_md_contains_required_steps -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness claude`
+- `agent-doc skill install --harness codex`
+
+Installed local content refreshed:
+
+- `.claude/skills/agent-doc/SKILL.md`
+- `.codex/AGENTS.md`
+
+Plan note:
+
+- used a discrete plan file at `tasks/agent-doc/plan-schk-session-check-guard.md`
 <!-- agent:boundary:6260882e -->
+### Re: why the response was visible before the commit boundary — gpt-5.4
+
+Root cause confirmed: this was primarily an instruction-ordering gap, not a missing `finalize` implementation.
+
+What was happening:
+
+- the commit boundary itself had already been tightened (`finalize`, `write --commit`, `session-check`)
+- but the instruction surface still left room for Codex to treat the document patchback as an intermediate milestone instead of the close-out boundary of the turn
+- that meant the response could become visible in the document while Codex still kept running build / install / other long-running work afterward, which made it look like the response was "not committed yet"
+
+Implemented in `src/agent-doc`:
+
+- `SKILL.md` now says requested implementation / verification / build-install work must finish **before** final response persistence
+- `SKILL.md` now says that after `finalize` / `write --commit`, no more long-running task work should happen for that turn; only `session-check`, failure recovery, and final reporting remain
+- `runbooks/commit.md`, `runbooks/harness-invocation.md`, `SPEC.md`, `README.md`, and `CLAUDE.md` now align on the same ordering rule
+- `src/skill.rs` and `tests/test_cli.rs` now lock that wording so the installed Claude/Codex instruction surfaces keep the close-out-boundary rule
+
+Verification:
+
+- `cargo test skill::tests -- --nocapture`
+- `cargo test test_skill_md_contains_required_steps -- --nocapture`
+
+Plan note:
+
+- used a discrete plan file at `tasks/agent-doc/plan-response-not-committed-delay.md`
+Why is the response not being committed? Codex runs for about 15 seconds after the response is patched back into this document.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1630,7 +1686,7 @@ Plan note:
 - [x] [#wcmp] Make `agent-doc write --commit <FILE>` the default documented/manual-repair path for Codex and Claude patchbacks; remove hot-path examples that stop after bare write-back.
 - [x] [#cmiv] Update `commit.md` to define a hard invariant: every appended `agent-doc` response must be committed unless explicitly told otherwise.
 - [x] [#finz] Add `agent-doc finalize <FILE>` (or equivalent) that performs response write, response commit, and snapshot commit as one binary-enforced happy path.
-- [ ] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
+- [x] [#schk] Require end-of-turn `agent-doc session-check <FILE>` in the Codex skill / runbook path and fail closed when a cycle is still open after write-back.
 - [x] [#instr1] [recommended] Collapse the hot-path Codex/skill contract to a single generated instruction surface and add install-parity plus completion-boundary tests so harness drift is caught automatically.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

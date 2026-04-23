@@ -1040,7 +1040,44 @@ So my answer is:
 
 - remove `run` now: no
 - narrow its applicability and stop aliasing template docs into it: yes
-<!-- agent:boundary:867449de -->
+
+Can we have `agent-doc run <file>` be a pure alias to `agent-doc <file>`? No legacy presets.
+### Re: should `agent-doc run <file>` become a pure alias to `agent-doc <file>`? — gpt-5
+
+Yes, but only if `agent-doc <file>` stops meaning “rewrite to legacy `run`” and instead means “dispatch by document mode.”
+
+So the clean design is:
+
+- `agent-doc <file>` = canonical mode-aware entrypoint
+- `agent-doc run <file>` = explicit alias to that same entrypoint
+- neither path carries legacy append-mode assumptions by default
+
+That means:
+
+- resolve the file
+- read frontmatter / document mode
+- if append doc, use the append workflow
+- if template/CRDT doc, use the template-safe workflow
+- keep any truly low-level legacy behavior behind a different explicit command if it still needs to exist
+
+So conceptually: yes.
+
+But implementation-wise, I would not describe it as “`run` aliases to bare path,” because bare path is not a real subcommand. I would implement one shared dispatcher and have both syntaxes land there.
+
+Why this is better:
+
+- no hidden semantic split between `agent-doc <file>` and `agent-doc run <file>`
+- no legacy preset accidentally riding along with `run`
+- explicit subcommand form still works for scripts and docs
+- bare-path form still works for harnesses and older wrappers
+
+So the target behavior should be:
+
+- `agent-doc <file>` and `agent-doc run <file>` are equivalent
+- equivalence is mode-aware, not legacy-append-biased
+
+That is the direction I would take.
+<!-- agent:boundary:56bb92a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

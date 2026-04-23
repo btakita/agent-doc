@@ -379,6 +379,27 @@ fn is_safe_out_of_band_status_mutation(snapshot_content: &str, file_content: &st
     snapshot_content.trim() != file_content.trim()
 }
 
+fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
+    let body = crate::frontmatter::parse(snapshot_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(snapshot_doc);
+    let Ok(components) = crate::component::parse(body) else {
+        return false;
+    };
+
+    let has_status = components.iter().any(|c| c.name == "status");
+    let has_exchange = components.iter().any(|c| c.name == "exchange");
+    let has_pending = components.iter().any(|c| c.name == "pending");
+    if !(has_status && has_exchange && has_pending) {
+        return false;
+    }
+
+    components.iter().all(|component| {
+        matches!(component.name.as_str(), "status" | "exchange" | "pending")
+            && normalize_component_content_for_absorb(component.content(body)).is_empty()
+    })
+}
+
 fn classify_safe_out_of_band_agent_doc_mutation(snapshot_doc: &str, file_doc: &str) -> Option<&'static str> {
     if snapshot_doc == file_doc {
         return None;
@@ -542,21 +563,38 @@ pub fn commit(file: &Path) -> Result<()> {
                 file.display(), drift, snap_len, file_len
             ));
 
-            // Extreme drift (file >5x snapshot): likely a file move/rename where
-            // the snapshot is from auto-init but the file has full content from
-            // the old path. Re-sync snapshot from file content so the commit
-            // stages everything and the drift loop stops.
-            if file_len > snap_len * 5 {
-                eprintln!(
-                    "[commit] Extreme drift detected ({}x) — re-syncing snapshot from file content (likely file move)",
-                    file_len / snap_len.max(1)
-                );
-                crate::ops_log::log_op(file, &format!(
-                    "snapshot_resync file={} old_snap_len={} new_snap_len={}",
-                    file.display(), snap_len, file_len
-                ));
-                crate::snapshot::save(file, &file_content)?;
-                snapshot_content = Some(file_content.clone());
+            // Extreme drift can happen when a newly-bootstrapped document still
+            // has the empty scaffold snapshot but the working tree now contains
+            // the real file content. Only auto-resync that bootstrap case for
+            // files with no HEAD entry yet. Tracked documents stay
+            // snapshot-selective here so unanswered user prompts cannot be
+            // swallowed into the committed snapshot during preflight.
+            if file_len > snap_len * 5
+                && let Some(ref snapshot) = snapshot_content
+            {
+                let head_exists = show_head(file)?.is_some();
+                let scaffold_snapshot = is_empty_template_scaffold_snapshot(snapshot);
+                if !head_exists && scaffold_snapshot {
+                    eprintln!(
+                        "[commit] Extreme drift detected ({}x) — re-syncing bootstrap scaffold snapshot from file content",
+                        file_len / snap_len.max(1)
+                    );
+                    crate::ops_log::log_op(file, &format!(
+                        "snapshot_resync file={} old_snap_len={} new_snap_len={}",
+                        file.display(), snap_len, file_len
+                    ));
+                    crate::snapshot::save(file, &file_content)?;
+                    snapshot_content = Some(file_content.clone());
+                } else {
+                    eprintln!(
+                        "[commit] Extreme drift detected ({}x) — NOT re-syncing tracked/non-scaffold snapshot",
+                        file_len / snap_len.max(1)
+                    );
+                    crate::ops_log::log_op(file, &format!(
+                        "snapshot_resync_blocked file={} head_exists={} scaffold_snapshot={} old_snap_len={} file_len={}",
+                        file.display(), head_exists, scaffold_snapshot, snap_len, file_len
+                    ));
+                }
             }
         }
     }
@@ -1669,6 +1707,143 @@ mod tests {
         assert!(
             working.contains("❯ follow-up question"),
             "working tree should retain the user prompt:\n{working}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_extreme_drift_resync_for_tracked_user_prompt() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let scaffold = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            ## Status\n\n\
+            <!-- agent:status patch=replace -->\n\
+            <!-- /agent:status -->\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Pending / Not Built\n\n\
+            <!-- agent:pending patch=replace -->\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, scaffold).unwrap();
+        crate::snapshot::save(&doc, scaffold).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add scaffold", "--no-verify"]).output().unwrap();
+
+        let live = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            ## Status\n\n\
+            <!-- agent:status patch=replace -->\n\
+            <!-- /agent:status -->\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ❯ user question that still needs an answer\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Pending / Not Built\n\n\
+            <!-- agent:pending patch=replace -->\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, live).unwrap();
+
+        commit(&doc).expect("commit should succeed without absorbing the prompt");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            !committed.contains("user question that still needs an answer"),
+            "tracked extreme drift must not absorb unanswered prompt:\n{committed}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snap.contains("user question that still needs an answer"),
+            "snapshot should remain selective for tracked docs:\n{snap}"
+        );
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("❯ user question that still needs an answer"),
+            "working tree should retain the unanswered prompt:\n{working}"
+        );
+    }
+
+    #[test]
+    fn commit_resyncs_extreme_drift_for_untracked_scaffold_doc() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        let doc = root.join("session.md");
+        let scaffold = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            ## Status\n\n\
+            <!-- agent:status patch=replace -->\n\
+            <!-- /agent:status -->\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Pending / Not Built\n\n\
+            <!-- agent:pending patch=replace -->\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, scaffold).unwrap();
+        crate::snapshot::save(&doc, scaffold).unwrap();
+
+        let live = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            ## Status\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Ready\n\
+            <!-- /agent:status -->\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: imported\n\
+           body from moved file\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Pending / Not Built\n\n\
+            <!-- agent:pending patch=replace -->\n\
+            - [ ] [#a1b2] imported\n\
+            <!-- /agent:pending -->\n";
+        fs::write(&doc, live).unwrap();
+
+        commit(&doc).expect("commit should resync bootstrap scaffold snapshot");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed.contains("### Re: imported\n"),
+            "bootstrap resync should stage the real file content:\n{committed}"
+        );
+        assert!(
+            committed.contains("[#a1b2] imported"),
+            "bootstrap resync should carry pending content too:\n{committed}"
         );
     }
 

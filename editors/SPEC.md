@@ -64,7 +64,8 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 **Reposition behavior:** When the plugin receives a `reposition_boundary: true` IPC signal:
 1. Remove ALL `<!-- agent:boundary:... -->` lines from the exchange component (not just the last one)
 2. Insert a single fresh boundary with a new 8-char hex ID at the end of the exchange content
-3. Skip boundary markers inside fenced code blocks
+3. Do not introduce any transient ` (HEAD)` heading annotations during this cleanup
+4. Skip boundary markers inside fenced code blocks
 
 **Recommended implementation:** Call `agent_doc_reposition_boundary_to_end()` via FFI/JNA on the shared library (`libagent_doc.so` / `libagent_doc.dylib`). This ensures identical cleanup logic across all platforms and prevents divergence between plugin and binary behavior.
 

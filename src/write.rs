@@ -2310,7 +2310,7 @@ fn build_ipc_patches_json(
     normalize_prefix_lines: Option<&[String]>,
 ) -> Result<Vec<serde_json::Value>> {
     let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc = template::reposition_boundary_to_end_with_summary(
+    let current_doc = template::reposition_boundary_to_end_clean_with_summary(
         &raw_doc,
         file.file_stem().and_then(|s| s.to_str()),
     );

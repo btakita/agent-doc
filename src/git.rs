@@ -6,9 +6,8 @@
 //!   resolved against the git superproject root first, then the toplevel.  When a snapshot exists,
 //!   a CLEAN copy of the snapshot (with all ` (HEAD)` heading suffixes stripped via
 //!   `strip_head_markers`) is staged via `git hash-object + update-index` so the working tree is
-//!   never touched; user keystrokes typed after the snapshot was taken remain uncommitted (green
-//!   gutter), and the working tree's current-boundary `### Re: ... (HEAD)` heading shows as a
-//!   single modified line (blue gutter) automatically since the blob has no `(HEAD)` suffix.
+//!   not staged directly. Narrow agent-owned snapshot drift can be absorbed first; plain user
+//!   keystrokes typed after the snapshot was taken remain uncommitted (green gutter).
 //!   Narrow exception: when the working tree is ahead of the snapshot due to a missed
 //!   agent-doc-style status mutation and/or exchange append and/or pending mutation, `commit`
 //!   first absorbs that live document state into the snapshot, then stages it. Plain user prompts
@@ -16,7 +15,8 @@
 //!   Falls back to `git add -f` when hash-object fails.  After a successful commit, repositions
 //!   the boundary marker in the snapshot and fires an IPC reposition signal
 //!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
-//!   via the plugin's Document API.
+//!   via the plugin's Document API when a live listener exists; otherwise the file is rewritten
+//!   locally to the same clean shape as the committed blob.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
@@ -26,10 +26,8 @@
 //! - `squash_session(file)`: soft-resets to before the first `agent-doc` commit touching the file
 //!   and recommits as a single squashed commit.
 //! - `strip_head_markers` (private): strips ` (HEAD)` suffix from markdown headings and bold-text
-//!   pseudo-headers in the commit-staging path.  `(HEAD)` is a working-tree-only marker and
-//!   must never appear in the committed blob — with a clean blob, the working tree's current
-//!   boundary heading shows as a single modified line automatically (blue gutter) and moving
-//!   the boundary across cycles cannot produce phantom `(HEAD)` diffs on prior-cycle headings.
+//!   pseudo-headers in the commit-staging path.  `(HEAD)` is treated as a transient artifact and
+//!   must never appear in the committed blob.
 //!
 //! ## Agentic Contracts
 //! - `commit` never modifies the working tree file directly; all staging is done through the git
@@ -710,10 +708,8 @@ pub fn commit(file: &Path) -> Result<()> {
     }
 
     // Post-commit housekeeping. The staged blob is already clean (commit
-    // staging strips `(HEAD)` from the snapshot before `git hash-object`),
-    // so the working tree keeps its current-boundary `(HEAD)` as the
-    // blue-gutter navigation affordance. The on-disk snapshot is kept in
-    // sync with the committed blob (clean, no `(HEAD)`) so the next cycle's
+    // staging strips `(HEAD)` from the snapshot before `git hash-object`).
+    // Keep the on-disk snapshot in the same clean shape so the next cycle's
     // diff doesn't see phantom `(HEAD)` additions/removals.
     if let Ok(ref s) = commit_status
         && s.success()
@@ -774,13 +770,9 @@ pub fn commit(file: &Path) -> Result<()> {
 /// foreign docs that never touch `agent-doc write` — this function is
 /// the canonical place the on-disk state becomes consistent.
 ///
-/// The working-tree rewrite applies `template::reposition_boundary_to_end`
-/// only — drops stale `<!-- agent:boundary:... -->` markers and inserts a
-/// single fresh one at the end of the exchange component. `(HEAD)` suffixes
-/// on `### Re:` headings are intentionally NOT touched here: the commit
-/// staging path strips `(HEAD)` from the blob, so leaving the working tree
-/// alone is both simpler and avoids phantom diffs on prior-cycle sections
-/// the user is editing.
+/// The working-tree rewrite uses the clean boundary-only reposition helper so
+/// the on-disk file matches the committed blob shape instead of introducing
+/// `(HEAD)`-only churn.
 ///
 /// Returns true if the snapshot OR working tree content changed.
 fn reposition_boundary_in_snapshot(file: &Path) -> bool {
@@ -796,28 +788,9 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
 
     let mut changed = false;
 
-    // Build a baseline of `### Re:` headings from git HEAD so the reposition
-    // step can mark EVERY new-this-cycle heading with ` (HEAD)`, not just the
-    // last one. When a patchback contains multiple `### Re:` sections (the
-    // common case for responses with more than one topic), each new heading
-    // becomes a modified line in the git gutter. If HEAD is unavailable
-    // (file untracked, no commits yet), the baseline is empty — meaning all
-    // current Re: headings are treated as "new" and all get marked.
-    let head_doc = crate::git::show_head(file).ok().flatten();
-    let baseline_headings: std::collections::HashSet<String> = head_doc
-        .as_deref()
-        .map(crate::template::exchange_baseline_headings)
-        .unwrap_or_default();
-    let baseline_opt = Some(&baseline_headings);
-
-    // Reposition in snapshot — use the baseline-aware path so all new Re:
-    // headings get annotated (not just the last one).
+    // Reposition in snapshot with a clean boundary-only rewrite.
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        let new_snap = crate::template::reposition_boundary_to_end_with_baseline(
-            &snap_content,
-            None,
-            baseline_opt,
-        );
+        let new_snap = crate::template::reposition_boundary_to_end_clean(&snap_content);
         if new_snap != snap_content {
             match crate::snapshot::save(file, &new_snap) {
                 Ok(()) => {
@@ -831,33 +804,25 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         }
     }
 
-    // Reposition in the working tree — only when no IDE plugin is installed.
-    // When the plugin is present (.agent-doc/patches/ exists), the IPC
-    // reposition signal (sent post-commit) lets the plugin handle the
-    // working-tree boundary via Document API, coordinated with user edits.
+    // Reposition in the working tree unless a live IDE listener is available.
+    // A stale `.agent-doc/patches/` directory by itself is not enough — the
+    // reposition signal is socket-based, so skipping the disk rewrite without
+    // a listener would leave boundary-only dirtiness behind.
+    //
+    // When the listener is present, the IPC reposition signal (sent
+    // post-commit) lets the plugin handle the working-tree boundary via
+    // Document API, coordinated with user edits.
     // Doing a disk-level read-modify-write here races with the user typing
     // in the IDE, producing duplicate structural tails (bug #xbs3).
-    //
-    // Only the `<!-- agent:boundary:... -->` marker is repositioned here;
-    // `(HEAD)` suffixes on `### Re:` headings are left alone. The commit
-    // staging path strips `(HEAD)` from the blob, so the working tree's
-    // current-boundary `(HEAD)` heading shows correctly as a modified line
-    // without any rewrite. Rewriting old headings here would strip `(HEAD)`
-    // from sections the user is actively editing and cause phantom diffs
-    // on prior-cycle sections (bug #dsng).
-    let ipc_available = file
+    let ipc_listener_active = file
         .canonicalize()
         .map(|c| crate::write::resolve_ipc_project_root_pub(&c))
-        .map(|root| root.join(".agent-doc/patches").exists())
+        .map(|root| crate::ipc_socket::is_listener_active(&root))
         .unwrap_or(false);
-    if ipc_available {
-        eprintln!("[commit] skipping working-tree boundary reposition — IPC available");
+    if ipc_listener_active {
+        eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let repositioned = crate::template::reposition_boundary_to_end_with_baseline(
-            &working,
-            None,
-            baseline_opt,
-        );
+        let repositioned = crate::template::reposition_boundary_to_end_clean(&working);
         if repositioned != working {
             match crate::write::atomic_write_pub(file, &repositioned) {
                 Ok(()) => {
@@ -1522,9 +1487,8 @@ mod tests {
         Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
         Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
 
-        // Simulate a write cycle: snapshot has a new response whose boundary
-        // heading carries `(HEAD)`. Working tree matches — this is what the
-        // IPC write path leaves on disk.
+        // Simulate a write cycle: snapshot has a new response whose heading
+        // still carries a transient `(HEAD)` marker.
         let cycle1 = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\n### Re: newer (HEAD)\nnew body\n<!-- /agent:exchange -->\n";
         fs::write(&doc, cycle1).unwrap();
         fs::write(&snap_abs, cycle1).unwrap();
@@ -1552,18 +1516,17 @@ mod tests {
             "committed blob should still contain the older heading; got:\n{blob}"
         );
 
-        // And the working tree keeps its `(HEAD)` on the current boundary —
-        // the blue-gutter navigation affordance. Commit staging must not
-        // touch the working tree.
+        // The working tree should also be rewritten back to the same clean
+        // shape as the committed blob when no live editor listener owns
+        // boundary refresh.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("### Re: newer (HEAD)"),
-            "working tree should retain (HEAD) on current boundary; got:\n{working}"
+            working.contains("### Re: newer\n"),
+            "working tree should keep the clean new heading; got:\n{working}"
         );
-        assert_eq!(
-            working.matches("(HEAD)").count(),
-            1,
-            "working tree should have exactly one (HEAD) — the current boundary"
+        assert!(
+            !working.contains("(HEAD)"),
+            "working tree should not retain transient HEAD markers; got:\n{working}"
         );
     }
 
@@ -2076,8 +2039,10 @@ mod tests {
     }
 
     #[test]
-    fn reposition_skips_working_tree_when_ipc_available() {
+    fn reposition_skips_working_tree_when_ipc_listener_active() {
         use std::fs;
+        use std::thread;
+        use std::time::Duration;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         Command::new("git").current_dir(root).args(["init"]).output().unwrap();
@@ -2105,27 +2070,36 @@ mod tests {
         Command::new("git").current_dir(root)
             .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
 
-        // Create .agent-doc/patches/ to simulate IDE plugin installed
-        let patches_dir = root.join(".agent-doc/patches");
-        fs::create_dir_all(&patches_dir).unwrap();
+        // Start a live IPC listener to simulate an active editor plugin.
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let root_clone = root.to_path_buf();
+        let server = thread::spawn(move || {
+            crate::ipc_socket::start_listener(&root_clone, |_msg| {
+                Some(serde_json::json!({"type": "ack"}).to_string())
+            }).ok();
+        });
+        thread::sleep(Duration::from_millis(100));
 
-        // Run reposition — should skip working tree because IPC is available
+        // Run reposition — should skip working tree because the listener is active.
         let changed = reposition_boundary_in_snapshot(&doc);
 
         // Snapshot should be repositioned
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(!snap.contains("oldid123"), "snapshot boundary should be repositioned");
 
-        // Working tree should NOT be modified (IPC available)
+        // Working tree should NOT be modified (listener owns the update)
         let working = fs::read_to_string(&doc).unwrap();
         assert!(working.contains("oldid123"),
-            "working tree should keep old boundary when IPC is available");
+            "working tree should keep old boundary when listener is active");
 
         assert!(changed, "snapshot change should report changed=true");
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(root));
+        drop(server);
     }
 
     #[test]
-    fn reposition_updates_working_tree_when_no_ipc() {
+    fn reposition_updates_working_tree_when_only_patches_dir_exists() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -2154,7 +2128,9 @@ mod tests {
         Command::new("git").current_dir(root)
             .args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
 
-        // NO .agent-doc/patches/ — no IDE plugin
+        // Stale plugin install marker without a live listener should not block
+        // the clean disk rewrite.
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
         reposition_boundary_in_snapshot(&doc);
@@ -2165,7 +2141,11 @@ mod tests {
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(!working.contains("oldid456"),
-            "working tree should be repositioned when no IPC available");
+            "working tree should be repositioned when only patches dir exists");
+        assert!(
+            !working.contains("(HEAD)"),
+            "working tree should stay clean after boundary rewrite"
+        );
     }
 
     #[test]

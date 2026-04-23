@@ -69,15 +69,15 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 
-**Commit write contract:** `commit()` only modifies the snapshot (appending HEAD markers and repositioning the boundary to end-of-exchange). The working tree file is NEVER written by `commit()`. All visible document changes are delivered via IPC through the plugin Document API. This prevents IDE file-cache conflicts and keystroke loss that would occur if `commit()` wrote to disk while the user is typing.
+**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. When a live editor IPC listener exists, the visible working-tree rewrite is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so boundary cleanup still lands and no boundary-only dirtiness is left behind.
 
-**Snapshot boundary cleanup:** After committing, `commit()` calls `reposition_boundary_to_end()` on the snapshot content. This uses `remove_all_boundaries()` to strip ALL stale boundaries from the snapshot (not just the last one), then inserts a single fresh 8-char boundary at end-of-exchange. The cleaned snapshot is saved back. This guarantees the snapshot never accumulates stale boundaries regardless of plugin behavior.
+**Snapshot boundary cleanup:** After committing, `commit()` calls the clean boundary reposition helper on the snapshot content. This strips ALL stale boundaries from the snapshot (not just the last one), inserts a single fresh 8-char boundary at end-of-exchange, and removes any transient `(HEAD)` heading suffixes. The cleaned snapshot is saved back.
 
 **Boundary reposition lifecycle:**
-1. **Before IPC patch JSON (`reposition_boundary_to_end()`):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and call `reposition_boundary_to_end()` in memory. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
+1. **Before IPC patch JSON (clean boundary reposition):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and normalize boundaries in memory before extracting `boundary_id` values. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
 2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch. The plugin should call `agent_doc_reposition_boundary_to_end()` via FFI to ensure identical cleanup logic.
-3. During `agent-doc commit`: (a) the snapshot is cleaned via `reposition_boundary_to_end()`, and (b) a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly.
-4. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
+3. During `agent-doc commit`: (a) the snapshot is cleaned via the same clean reposition helper, and (b) a standalone IPC signal (`try_ipc_reposition_boundary`) is sent only when a live listener exists. This keeps the plugin buffer aligned with the committed file without introducing extra boundary-only diffs.
+4. If no plugin is active, the file is rewritten locally with the same clean boundary result, so the working tree still ends in the correct state.
 
 ## Pane Lifecycle — Binding Invariant
 

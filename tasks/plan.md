@@ -8,6 +8,24 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-23 — `agent-doc-bugs` `#cde3`
+
+- [x] Inspect the current `src/agent-doc` Codex hook/session-check coverage plus the live `agent-loop` workspace hook install state to define the minimal proof for both the normal `finalize` path and the `Stop` hook backstop.
+- [x] Run the necessary end-to-end verification for `#cde3`; if the proof exposes a product gap, patch the minimal `src/agent-doc` fix with aligned spec/tests and then rerun build/install verification.
+- [ ] Patch the verified `#cde3` outcome back into `tasks/agent-doc/agent-doc-bugs.md`, update pending state, and verify the patchback with `agent-doc session-check`.
+
+### 2026-04-23 — `agent-doc-bugs` Codex hook config explanation
+
+- [x] Inspect the current Codex hook/config contract in the installed skill plus `src/agent-doc` docs/code so the answer explains exactly why `.codex/config.toml` / `.codex/hooks.json` exist and what the binary can or cannot do on its own.
+- [x] Patch back a direct answer into `tasks/agent-doc/agent-doc-bugs.md`, keeping the response scoped to the user’s config-vs-binary question and updating pending only if the answer exposes a new concrete task.
+- [ ] Verify the patchback crossed the normal `agent-doc` closeout boundary with `agent-doc session-check tasks/agent-doc/agent-doc-bugs.md`.
+
+### 2026-04-23 — `agent-doc-bugs` `#cdi2`
+
+- [x] Confirm the currently installed `agent-doc` binary supports the Codex hook/install surface expected by `6972cd1`, and inspect whether this workspace already has repo-local `.codex/hooks.json` / `.codex/config.toml`.
+- [x] Install or refresh the `agent-doc` skill/artifacts in `agent-loop`, then verify the repo-local Codex hook/config files and any installed runbook surfaces that changed.
+- [x] Patch the verified `#cdi2` outcome back into `tasks/agent-doc/agent-doc-bugs.md` and update the pending checklist based on the live workspace state.
+
 ### 2026-04-23 — agent-doc systemic Codex/runbook compliance diagnosis
 
 - [x] Audit the active Codex-facing instruction surfaces (`.codex/AGENTS.md`, bundled runbooks, task history) to separate context loss from contract duplication / enforcement gaps.
@@ -506,3 +524,15 @@ Review:
 - Updated `README.md`, `SPEC.md`, `CLAUDE.md`, `specs/06-config.md`, `specs/07-commands.md`, `specs/08-session-routing.md`, and `.claude/skills/agent-doc/SKILL.md` so the contract is explicit.
 - Verified with focused `cargo test` filters for the changed commit/reposition cases, `cargo check`, and the full submodule commit hook path (`cargo clippy -- -D warnings`, full `cargo test`, `cargo run --quiet -- audit-docs`).
 - Committed in `src/agent-doc` as `9fe4c26` (`fix: restore post-commit head marker affordance`).
+
+### 2026-04-23 — `agent-doc-bugs` `#finz`
+
+- [x] Inspect the current `src/agent-doc` response write / response-commit / snapshot-commit flow and identify the minimal binary-owned `finalize` shape.
+- [x] Implement `agent-doc finalize <FILE>` with aligned docs/spec wording and targeted regression coverage.
+- [x] Run verification (`make check`, build, install), then patch the result back into `tasks/agent-doc/agent-doc-bugs.md`.
+
+Review:
+- Added `agent-doc finalize <FILE>` in `src/agent-doc/src/main.rs` and moved the shared CLI write/finalize flow into `src/agent-doc/src/write.rs` with explicit `CommitMode::{None, BestEffort, Required}` so the new command is strict without changing the older manual-repair `write --commit` surface.
+- `finalize` now fails before mutating non-git documents, reuses the normal write path plus pending/status mutations, rejects `--pending-only`, and requires the persisted cycle state to end in `committed`.
+- Added `src/agent-doc/tests/finalize_integration.rs` and updated `src/agent-doc/README.md`, `SPEC.md`, `CLAUDE.md`, and `specs/07-commands.md` to document the new happy-path contract.
+- Verified with `cargo test finalize -- --nocapture`, `make check`, `cargo build --release`, and `cargo install --path .`.

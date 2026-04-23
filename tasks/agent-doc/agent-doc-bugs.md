@@ -422,12 +422,63 @@ Note:
 
 - The submodule commit also carried forward two changes that were already staged in `src/agent-doc` before the retry: deleting tracked `.agent-doc/logs/ops.log` and adding `.gitgnore`. I did not mark `#ndyy` done, because the broader merge-normalization work is still not complete.
 - `make -C src/agent-doc precommit` initially failed before hook removal because the installed hook was still active and `audit-docs` flagged stale mirrored instruction files; I updated those surfaces. A later standalone `audit-docs` invocation in this environment hung after printing `Auditing docs...`, so I do **not** have a clean final zero-exit result for that standalone step.
-<!-- agent:boundary:49dc171e -->
+
+❯ agent-doc claudescore.md was writing the patchback to the end of the document. Plan on how to make this less brittle.
+```
+• I shouldn’t be. That is a structure bug.
+
+  tasks/claudescore.md is supposed to keep the conversation inside the <!-- agent:exchange ... --> block, with <!-- /
+  agent:exchange --> after the latest ## User / ## Assistant turn. In the current file, the closing marker is at tasks/
+  claudescore.md:866, but later ## Assistant blocks are below it. That means the patchback landed outside the exchange
+  region.
+
+  Why it happened:
+
+  - agent-doc reported File was modified during run. Merging changes...
+  - after that merge, the appended response was preserved, but the exchange closing marker did not move down with it
+  - I then treated the result as acceptable because the text was present, instead of repairing the block structure
+
+  So the short answer is: not intentional, and not correct. The likely trigger was the during-run merge; the real
+  mistake was that I didn’t fix the malformed agent:exchange boundary afterward.
+
+  If you want, I can fix tasks/claudescore.md now by moving the recent ## User / ## Assistant turns back inside the
+  agent:exchange block and leaving Pending / Todo outside it.
+```
+### Re: exchange-boundary brittleness plan — gpt-5
+
+The failure mode is narrower than “merge is flaky”. In template mode, `run_template` currently does the right thing up to `content_ours`: patches are applied inside `agent:exchange`, the boundary is consumed/reinserted there, and the close marker is still in the right place. The brittle step is the later whole-document `merge::merge_contents(base, ours, current)` fallback. That merge is line-oriented, not component-aware, so after a concurrent edit it can preserve the appended response text while leaving `&lt;!-- /agent:exchange --&gt;` at the older position.
+
+Plan I would use:
+
+1. Add a hard post-merge invariant in the template write path.
+After `final_content` is computed in `run_template` (and the equivalent stream/disk fallback path), re-parse the document and verify that exchange-shaped conversation content is still inside `agent:exchange`. At minimum: no new `### Re:` / `## Assistant` / `## User` / `❯` block that belongs to the live turn should appear after `&lt;!-- /agent:exchange --&gt;`.
+
+2. Auto-repair the safe case before commit.
+If the only out-of-band content after `&lt;!-- /agent:exchange --&gt;` is a trailing conversation block that obviously belongs to exchange, move it back inside the component and reinsert a single boundary at the end. That gives us a deterministic repair for the exact `claudescore.md` shape instead of accepting malformed structure because “the text is present”.
+
+3. Fail closed on ambiguous structure.
+If the trailing content mixes conversation text with unrelated sections or the repair would have to guess, stop the cycle with a specific error instead of reporting success. That is better than silently committing a structurally-invalid template document.
+
+4. Add a backstop outside the write path.
+Teach `session-check` and `preflight` to detect “conversation content escaped the exchange component” and either self-heal the safe case or block green status. That way a wrapper or merge edge case cannot leave the doc looking successful when the component boundary is wrong.
+
+5. Then reduce reliance on whole-document diff3 for template docs.
+Longer term, template mode should merge by component, not by raw file text: merge exchange content against exchange content, preserve replace-mode components independently, then rebuild the document. That is the less brittle architecture. The validator/repair backstop should land first so we stop leaking malformed docs immediately.
+
+Spec/tests I would add with that work:
+
+- regression: concurrent edit during `agent-doc finalize --stream` causes merge, and the final document still keeps the new `### Re:` block inside `agent:exchange`
+- repair: malformed trailing `### Re:` block after `&lt;!-- /agent:exchange --&gt;` is moved back inside exchange and boundary is rewritten once
+- fail-closed: ambiguous trailing out-of-band content is rejected, not normalized blindly
+- session-check/preflight: malformed exchange boundary cannot return green / no-changes success
+
+Sequence I’d recommend: land the validator + fail-closed backstop first, then the safe auto-repair, then the component-aware merge refactor.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#vpm8] [recommended] Prevent template merge/write from leaving conversation content outside <!-- agent:exchange -->: add a post-merge structural validator/repair path in write/finalize and a fail-closed session-check/preflight backstop for malformed exchange boundaries.
 - [ ] [#6nj9] [recommended] Eliminate post-success working-tree dirtiness when the cycle is already committed: avoid leaving only HEAD-marker / agent-boundary churn in session docs such as src/session-share/tasks/claudescore.md.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [ ] [#n5hs] Prevent delivered-but-uncommitted patchbacks: if response content reaches the live file/snapshot before commit, persist recoverable cycle state and require same-repo/submodule commit completion or fail closed until preflight can deterministically finish it.
@@ -436,3 +487,4 @@ Note:
 
 [//]: # (do #6nj9. update spec + tests. build + install for local testing. commit + push)
 [//]: # Fix test suite warnings ignored tests
+[//]: # (Please diagnose why audit-docs is hanging.)

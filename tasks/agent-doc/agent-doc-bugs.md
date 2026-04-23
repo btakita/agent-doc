@@ -865,7 +865,44 @@ Outcome:
 
 - The no-op commit cleanup now removes stale boundary / `(HEAD)` churn without dropping scratch comments that live outside `agent:exchange`.
 - The local `agent-doc` binary is rebuilt and reinstalled.
-<!-- agent:boundary:38dac299 -->
+
+agent-doc should always respect user edits. I deleted the corrupted text at the bottom of the document. Now agent-doc repair fails. agent-doc run still readds the corrupted text at the bottom of the document:
+```
+• You ran agent-doc repair tasks/claudescore.md
+  └ Error: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/
+    session-share/tasks/claudescore.md
+```
+### Re: respect manual exchange-tail cleanup — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- `repair` / interrupted-cycle recovery now recognize the narrow safe case where a template doc's current file equals the captured snapshot with only an escaped `## User` / `## Assistant` / `### Re:` tail removed. In that case, `agent-doc` respects the user's manual cleanup: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail.
+- Tightened template exchange-tail detection so auto-repair is driven by escaped conversation headings. Plain comments / scratch notes outside `agent:exchange` stay outside instead of being swept into exchange. If an escaped heading exists after such notes, only the headed conversation tail is eligible for repair/removal.
+- Updated `README.md`, `SPEC.md`, and `specs/07-commands.md` so the external contract matches both behaviors.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_respects_manual_removal_of_escaped_exchange_tail -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml strip_conversation_tail_outside_exchange_removes_escaped_heading_tail_only -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `8c9d64c` — `fix: respect manual exchange-tail cleanup`
+- pushed to `origin 20260422/codex-agent-backend`
+- parent repo: `0436dac0` — `chore: update agent-doc submodule`
+- pushed to `origin main`
+
+Outcome:
+
+- Deleting corrupted trailing assistant/user content no longer causes `agent-doc repair` to fail on a stale capture baseline or `agent-doc run` to re-add that deleted tail.
+- Comments outside `agent:exchange` that do not start an escaped conversation turn now remain outside as intended.
+<!-- agent:boundary:21c0303c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

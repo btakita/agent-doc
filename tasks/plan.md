@@ -8,6 +8,12 @@ tmux_session: '1'
 
 ## Current Plan
 
+### 2026-04-22 — agent-doc pending capture + model attribution drift patchback
+
+- [x] Confirm the current model-attribution contract in `src/agent-doc/SKILL.md` / specs and distinguish harness label vs model label in the answer.
+- [x] Append the answer to `tasks/agent-doc/agent-doc-bugs.md` and capture any missing pending follow-up in that document's `agent:pending`.
+- [ ] Commit only the parent-repo task-doc updates for this patchback.
+
 ### 2026-04-22 — agent-doc patchback delay + drift mitigation follow-up
 
 - [x] Inspect the recent parent-repo commit sequence and current drift/recovery code so the explanation separates workflow delay from snapshot/session drift.

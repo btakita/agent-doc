@@ -350,11 +350,34 @@ What I would do:
 - **Shrink the working-tree-only window.** For task-doc patchbacks like this one, the parent `git add`/`git commit` should happen immediately after the write-back succeeds, before any secondary plan cleanup or narrative reporting.
 
 The concrete follow-up I would track is: add a cycle-scoped completion record and make preflight refuse to continue quietly when the previous cycle has no terminal write/commit event. That addresses both classes of drift: stale snapshot state and "response exists but completion boundary was never crossed."
+
+Please add you suggestions to this document's agent:pending element. If you are going to use tasks/plan.md, YOU STILL NEED TO ALWAYS ADD TO THE PENDING LIST ON THIS DOCUMENT!!! You also have subtle spec drift. `### Re: short uncommitted patchback window / addressing extreme session drift — codex` does not show the model...It shows "codex". I'm very concerned that you are simply ignoring the specs/*.md
+### Re: pending capture + model attribution spec drift — gpt-5
+
+You are right on both points.
+
+On pending capture: the drift-mitigation suggestion is now in this document's own `agent:pending` list as `#cyc1`. That part should have happened in the same cycle as the recommendation, and for future cycles I should treat "capture in this document's pending list" as mandatory rather than relying on `tasks/plan.md` bookkeeping as if it were sufficient.
+
+On the header suffix: that was real spec drift on my side.
+
+- `src/agent-doc/SKILL.md` says the suffix must be the **model short name**, for example `### Re: topic — opus-4-6`.
+- `preflight.agent_model` exists specifically for that attribution when frontmatter provides one.
+- `codex` is the harness label, not the model short name.
+
+So `### Re: short uncommitted patchback window / addressing extreme session drift — codex` did not satisfy the documented contract. That was not me intentionally overruling the spec; it was me being sloppy about the harness/model distinction and letting the wrong label through in the response header.
+
+The correct boundary is:
+
+- harness: `codex`
+- model attribution in the response header: actual model short name, e.g. `gpt-5` or whatever `preflight.agent_model` resolved to for that session
+
+So your concern is valid: this is exactly the kind of subtle drift that happens when behavior is carried procedurally instead of being enforced tightly enough. The immediate document-level correction is: yes, `#cyc1` is in `agent:pending`, and I am also adding a separate pending follow-up for enforcing model-attribution compliance so this does not keep depending on agent discipline.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#mdl1] [recommended] Enforce response-header model attribution: use the resolved model short name (for example `gpt-5` / `opus-4-6`), never the harness label (`codex` / `claude`), and add skill/tests/docs coverage so spec drift is caught automatically.
 - [ ] [#cyc1] [recommended] Harden cycle completion invariants: persist cycle-scoped completion state/hashes, make preflight auto-recover or fail closed when the previous cycle ended without a terminal write/commit event, and prefer exact reconciliation over size-based drift heuristics.
 - [ ] [#bndy] Live editor-session validation for boundary cleanup: verify committed patchbacks in JetBrains / VS Code no longer leave `(HEAD)` / boundary-UUID-only working-tree dirtiness after commit, both with an active IPC listener and with only a stale `.agent-doc/patches/` directory present.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

@@ -495,7 +495,7 @@ Concrete fix direction:
 - only treat it as a real patchback failure when the response never reached `ipc_file_delivered` / `write_stream_done` or never got a first `commit_success`.
 
 I added that follow-up to pending as `#tgdf`.
-<!-- agent:boundary:d45f3fc4 -->
+<!-- agent:boundary:9de16282 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

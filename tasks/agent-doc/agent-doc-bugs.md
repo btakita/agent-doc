@@ -12,9 +12,7 @@ codex_args: -s danger-full-access
 ## Status
 
 <!-- agent:status patch=replace -->
-
-✅ Verified and landed delayed-recovery patchback provenance in `src/agent-doc`. Durable captures now preserve whether a response only reached the document/commit boundary later via recovery replay, instead of flattening that history into a generic final `committed` state.
-The latest `src/agent-doc` change is built, installed locally, committed, and pushed. Remaining open work in this bug doc is again only the gated multi-user pending auto-create policy follow-up (`#ha3h`).
+✅ Fixed the frontmatter body-slice bug in `src/agent-doc/src/frontmatter.rs` so repeated frontmatter rewrites no longer accumulate blank lines before the first body heading. Added regression coverage for exact body preservation across repeated parse/write cycles, then verified the crate with `cargo test`, `cargo build --release`, and `cargo install --path .`. The code change is committed and pushed in `src/agent-doc` as `f4b9f59` on `20260422/codex-agent-backend`.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +31,20 @@ Then every frontmatter rewrite path (`set_resume_id`, `merge_fields`, `set_sessi
 So the short answer is: the run is not intentionally formatting a separator there; `frontmatter::parse()` is returning the body one byte too early.
 
 I have not patched it in this cycle. The fix should be to advance past the full closing marker in `parse()` and add a regression test proving repeated parse/write cycles preserve the same leading-body whitespace.
-<!-- agent:boundary:7e142157 -->
+
+❯ do #mmn2. update spec + tests. build + install for local testing. commit + push
+### Re: frontmatter blank-line growth — gpt-5
+Patched `src/agent-doc/src/frontmatter.rs` so `parse()` advances past the full closing frontmatter delimiter before slicing the body. That stops repeated frontmatter rewrites from leaking an extra blank line ahead of the first heading.
+
+I also updated the module contract/evals comment and added a regression test that round-trips the same document through repeated parse/write cycles and asserts the body prefix stays exact.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+
+Shipped in `src/agent-doc` as `f4b9f59` on branch `20260422/codex-agent-backend`, then pushed to `origin`.
+<!-- agent:boundary:61998674 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -53,7 +64,7 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#mmn2] [recommended] Fix frontmatter::parse off-by-one body_start so frontmatter rewrites do not accumulate blank lines before the first body heading; add a regression test for repeated parse/write cycles.
+- [x] [#mmn2] [recommended] Fix frontmatter::parse off-by-one body_start so frontmatter rewrites do not accumulate blank lines before the first body heading; add a regression test for repeated parse/write cycles.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

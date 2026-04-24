@@ -15,15 +15,25 @@ codex_args: -s danger-full-access
 
 ✅ Verified and landed delayed-recovery patchback provenance in `src/agent-doc`. Durable captures now preserve whether a response only reached the document/commit boundary later via recovery replay, instead of flattening that history into a generic final `committed` state.
 The latest `src/agent-doc` change is built, installed locally, committed, and pushed. Remaining open work in this bug doc is again only the gated multi-user pending auto-create policy follow-up (`#ha3h`).
-
-In src/session-share, `agent-doc tasks/claudescore-3.md` runs seem to add a \n between the frontmatter and the beginning of the document content `## Status`. Why?
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
 Compacted exchange summary: Investigated and fixed multiple `agent-doc` closeout and patchback bugs in `src/agent-doc`, including audit-docs root selection (#3sd5), Codex Stop-hook closeout across nested `.agent-doc` roots (#hj0x), repo-scoped git closeout serialization (#73tv), `repair` crossing the git commit boundary (#f3nj), stale-snapshot committed-head protection (#y9d6), delayed recovery patchback provenance (#vezj), and natural-language imperative pending detection (#3gwn). Also tightened post-commit local-drift explanation and documented the relevant closeout invariants. Each shipped change was verified with targeted tests plus local build/install steps and pushed on `20260422/codex-agent-backend`. Remaining open work in this doc is still the gated multi-user pending auto-create follow-up (#ha3h).
-<!-- agent:boundary:abf70992 -->
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` runs seem to add a \n between the frontmatter and the beginning of the document content `## Status`. Why?
+### Re: frontmatter blank-line growth — gpt-5
+Yes. This is an off-by-one in `src/agent-doc/src/frontmatter.rs`.
+
+`parse()` finds the closing frontmatter delimiter as `\n---\n`, but it sets `body_start = 4 + end + 4`. The full closing marker is 5 bytes, so the returned `body` incorrectly starts with the delimiter's trailing newline.
+
+Then every frontmatter rewrite path (`set_resume_id`, `merge_fields`, `set_session_id`, etc.) calls `write()`, which emits `---\n{yaml}---\n{body}`. Because `body` already includes one leaked newline, each parse/write cycle adds one more blank line before `## Status`. That matches the blame on `src/session-share/tasks/claudescore-3.md`: the original scaffold left one separator line, and later commits kept inserting additional blank lines at the top of the body.
+
+So the short answer is: the run is not intentionally formatting a separator there; `frontmatter::parse()` is returning the body one byte too early.
+
+I have not patched it in this cycle. The fix should be to advance past the full closing marker in `parse()` and add a regression test proving repeated parse/write cycles preserve the same leading-body whitespace.
+<!-- agent:boundary:7e142157 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -43,6 +53,7 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#mmn2] [recommended] Fix frontmatter::parse off-by-one body_start so frontmatter rewrites do not accumulate blank lines before the first body heading; add a regression test for repeated parse/write cycles.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

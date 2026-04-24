@@ -131,7 +131,25 @@ Verification:
 - `cargo install --path .`
 
 I did **not** commit or push this `src/agent-doc` change in this cycle.
-<!-- agent:boundary:db1344fb -->
+
+❯ Please rename the `recover` method to `repair`. Make sure all docs and specs are in sync. update spec + tests. build + install for local testing. commit + push
+### Re: `recover` -> `repair` rename — gpt-5
+Renamed the primary repair surface in `src/agent-doc` so `repair` is now the canonical command/module/logging path and `recover` remains only as the legacy CLI alias.
+
+Shipped changes:
+- renamed `src/recover.rs` to `src/repair.rs`, updated the Rust call sites, and switched the primary command branch / outcome type to `repair`
+- updated the command/spec/doc surfaces (`README.md`, `CLAUDE.md`, `specs/07-commands.md`, `docs/reference/reactive-stream.md`, `examples/agent-doc/task.md`, `VERSIONS.md`) so `repair` is the primary term and `recover` is explicitly documented as compatibility-only
+- tightened CLI coverage so `--help` asserts the canonical `repair` surface while the alias test still covers `recover`
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc --version`
+- `agent-doc repair --help`
+
+Committed and pushed in `src/agent-doc` as `4f4a21d` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:e0701c0c -->
 <!-- /agent:exchange -->
 
 <!--

@@ -201,13 +201,12 @@ Outcome:
 
 - `#hj0x` is done.
 - A later Codex `Stop` can no longer skip auto-closeout just because the workspace CWD moved between nested `.agent-doc` roots or because the stop event's `turn_id` is newer than the original submit event.
-<!-- agent:boundary:a6f32666 -->
+<!-- agent:boundary:7064ba23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#hj0x] Investigate/fix Codex closeout for src/session-share/tasks/docs.md: console response existed, but no finalize/hook capture wrote it into the document; current cycle is left stuck at preflight_started.
 - [ ] [#w199] Fix doc-lint check ordering so missing Document Header does not short-circuit strict link validation; README.md should still report broken/cross-repo links.
 - [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

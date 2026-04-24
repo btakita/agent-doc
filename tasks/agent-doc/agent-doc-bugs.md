@@ -546,7 +546,27 @@ Verification:
 Commit / push:
 - committed locally in `src/agent-doc` as `9aa0b4e`
 - `origin/20260422/codex-agent-backend` had advanced to `b623b2f`, so I pushed the equivalent change on top of that tip as `9e99645`
-<!-- agent:boundary:bd63b4a9 -->
+
+❯ do #r4kp. update spec + tests. build + install for local testing. commit + push
+### Re: `--pending-add` custom-id compatibility — gpt-5
+Shipped `#r4kp` in `src/agent-doc`.
+
+What changed:
+- `src/pending.rs` now treats a leading `[#id]` pending-add prefix as the same custom-id request as canonical `id=<custom>`, so agent-written `--pending-add "[#foo] text"` no longer renders as `[#auto] [#foo] text`.
+- Added regression coverage in both the unit layer and `tests/pending_integration.rs` for `agent-doc pending ... add` and `agent-doc write --pending-add ...` using the bracketed form, including invalid-id and missing-text rejection at the parser layer.
+- Updated the shipped contract surfaces (`SKILL.md`, `runbooks/pending-ops.md`, `specs/pending-system.md`, CLI help/doc comments) so `id=<custom>` remains the preferred syntax while bracketed `[#id]` is documented as compatibility input.
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commit / push:
+- committed in `src/agent-doc` as `757bbd5`
+- pushed to `origin/20260422/codex-agent-backend`
+
+I preserved the separate uncommitted local changes already present in `src/agent-doc` (`src/skill.rs`, `specs/07-commands.md`, `VERSIONS.md`) and kept them out of this `#r4kp` commit.
+<!-- agent:boundary:4f71ede9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -576,7 +596,7 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
+- [x] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

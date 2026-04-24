@@ -201,7 +201,40 @@ Outcome:
 
 - `#hj0x` is done.
 - A later Codex `Stop` can no longer skip auto-closeout just because the workspace CWD moved between nested `.agent-doc` roots or because the stop event's `turn_id` is newer than the original submit event.
-<!-- agent:boundary:7064ba23 -->
+
+❯ docs.md has an error. Why?:
+```
+• git commit is blocked by a stale lock file: /home/brian/work/btakita/agent-loop/.git/modules/src/session-share/
+  index.lock.
+
+  No active git process showed up for this repo, so it looks safe to remove, but I haven’t done that without your
+  approval. If you want, I’ll delete the lock and retry the commit for tasks/docs.md only.
+```
+### Re: `docs.md` stale `index.lock` error — gpt-5
+
+That error was not coming from `docs.md` content. It was coming from the `src/session-share` git repo that owns `tasks/docs.md`.
+
+What I verified:
+
+- `git -C src/session-share rev-parse --git-dir` points to `/home/brian/work/btakita/agent-loop/.git/modules/src/session-share`, so Git writes that submodule's index lock at `.git/modules/src/session-share/index.lock`.
+- The lock file is **not** present now, and `git -C src/session-share status` works, so the failure was transient rather than a current hard block.
+- `agent-doc session-check src/session-share/tasks/docs.md` still reports an interrupted cycle: `cycle-1777005555107` is stuck at `preflight_started`.
+- There is also a live `agent-doc start tasks/docs.md` process, plus other active `agent-doc` sessions targeting the same `src/session-share` repo. Those sessions all contend for the same git index.
+
+So the most likely sequence is:
+
+1. `agent-doc` tried to commit a `tasks/docs.md` response inside the `src/session-share` submodule.
+2. Another git write in that same submodule was already holding, or had just left behind, `.git/modules/src/session-share/index.lock`.
+3. The closeout did not reach the normal `finalize` / commit boundary, which is why `tasks/docs.md` still shows an interrupted `preflight_started` cycle instead of a clean committed turn.
+
+So "why?":
+
+- not a markdown/doc bug in `docs.md`
+- a repo-level git lock problem in the `src/session-share` submodule
+- likely caused by concurrent `agent-doc` activity in that repo, with the residual symptom now being the interrupted cycle rather than an active lock file
+
+If you want, I can take the next step on the actual broken state: either recover `src/session-share/tasks/docs.md` cleanly, or investigate whether `git::commit` needs a stronger lock-contention path than the current retry behavior.
+<!-- agent:boundary:daf164fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -25,7 +25,7 @@ Combine any number of flags in one `agent-doc write` call:
 
 | Flag | Purpose |
 |------|---------|
-| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with `id=<custom> `. Repeat for multiple adds. |
+| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Repeat for multiple adds. |
 | `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
@@ -36,7 +36,7 @@ Combine any number of flags in one `agent-doc write` call:
 ## Custom IDs
 
 When you need a stable human-chosen identifier, start the add text with
-`id=<custom> `:
+canonical `id=<custom> ` syntax:
 
 ```bash
 agent-doc pending plan.md add "id=spec1 write rollout spec"
@@ -46,6 +46,8 @@ agent-doc write plan.md --pending-add "id=fix42 add regression test"
 Rules:
 - `custom` is 1-8 ASCII alphanumeric characters.
 - `id=#spec1 ...` is also accepted; the leading `#` is stripped.
+- Leading `[#spec1] ...` is accepted as compatibility input and normalized to the
+  same custom id, but `id=<custom> ` remains the preferred form for agents.
 - The custom id must be unique within the pending component.
 - The remainder after the prefix becomes the item text.
 

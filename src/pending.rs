@@ -282,11 +282,14 @@ fn is_valid_hash_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 8 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
-    let trimmed = text.trim();
-    let Some(rest) = trimmed.strip_prefix("id=") else {
-        return Ok((None, trimmed.to_string()));
-    };
+fn custom_id_error(raw_id: &str) -> anyhow::Error {
+    anyhow!(
+        "pending add: invalid custom id `{}` — ids must be 1-8 ASCII alphanumeric characters",
+        raw_id.trim()
+    )
+}
+
+fn parse_explicit_custom_id_prefix(rest: &str) -> Result<(Option<String>, String)> {
     let Some((raw_id, remainder)) = rest.split_once(char::is_whitespace) else {
         bail!(
             "pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)"
@@ -294,10 +297,7 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
     };
     let custom_id = raw_id.trim().trim_start_matches('#');
     if !is_valid_hash_id(custom_id) {
-        bail!(
-            "pending add: invalid custom id `{}` — ids must be 1-8 ASCII alphanumeric characters",
-            raw_id.trim()
-        );
+        return Err(custom_id_error(raw_id));
     }
     let remainder = remainder.trim();
     if remainder.is_empty() {
@@ -306,6 +306,34 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
         );
     }
     Ok((Some(custom_id.to_lowercase()), remainder.to_string()))
+}
+
+fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, String)> {
+    let Some(after_hash) = trimmed.strip_prefix("[#") else {
+        return Ok((None, trimmed.to_string()));
+    };
+    let Some(close) = after_hash.find(']') else {
+        return Ok((None, trimmed.to_string()));
+    };
+    let raw_id = &after_hash[..close];
+    let remainder = after_hash[close + 1..].trim_start();
+    if !is_valid_hash_id(raw_id) {
+        return Err(custom_id_error(raw_id));
+    }
+    if remainder.is_empty() {
+        bail!(
+            "pending add: bracketed custom id prefix must be followed by item text (expected `[#id] <text>`)"
+        );
+    }
+    Ok((Some(raw_id.to_lowercase()), remainder.to_string()))
+}
+
+fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("id=") {
+        return parse_explicit_custom_id_prefix(rest);
+    }
+    parse_bracketed_custom_id_prefix(trimmed)
 }
 
 /// Serialize items back to a body string.
@@ -957,8 +985,21 @@ mod tests {
     }
 
     #[test]
+    fn op_add_accepts_bracketed_custom_id_prefix() {
+        let (new_body, id) = op_add("", "[#ship1] release checklist", DOC_ID, false).unwrap();
+        assert_eq!(id, "ship1");
+        assert!(new_body.contains("- [ ] [#ship1] release checklist"));
+    }
+
+    #[test]
     fn op_add_rejects_invalid_custom_id_prefix() {
         let err = op_add("", "id=bad-id release checklist", DOC_ID, false).unwrap_err();
+        assert!(format!("{}", err).contains("invalid custom id"));
+    }
+
+    #[test]
+    fn op_add_rejects_invalid_bracketed_custom_id_prefix() {
+        let err = op_add("", "[#bad-id] release checklist", DOC_ID, false).unwrap_err();
         assert!(format!("{}", err).contains("invalid custom id"));
     }
 
@@ -973,6 +1014,14 @@ mod tests {
     fn op_add_rejects_missing_text_after_custom_id_prefix() {
         let err = op_add("", "id=ship1", DOC_ID, false).unwrap_err();
         assert!(format!("{}", err).contains("custom id prefix must be followed by item text"));
+    }
+
+    #[test]
+    fn op_add_rejects_missing_text_after_bracketed_custom_id_prefix() {
+        let err = op_add("", "[#ship1]", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("bracketed custom id prefix must be followed by item text")
+        );
     }
 
     #[test]

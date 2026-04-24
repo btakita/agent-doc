@@ -3,7 +3,8 @@
 //! CLI subcommands for managing the `agent:pending` component.
 //!
 //! - `agent-doc pending <FILE> add <item>` — add a pending item at the beginning
-//!   (supports leading `id=<custom> ` prefix to preserve a custom id)
+//!   (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input
+//!   to preserve a custom id)
 //! - `agent-doc pending <FILE> remove <target>` — remove by content match
 //! - `agent-doc pending <FILE> prune` — remove completed items
 //! - `agent-doc pending <FILE> list` — print pending items
@@ -34,8 +35,9 @@ pub fn doc_id_for(file: &Path) -> String {
 }
 
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
-/// or `[/]`) at the beginning of the list. Supports a leading
-/// `id=<custom> ` prefix to preserve a custom id. Prints the assigned hash id to stdout.
+/// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
+/// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
+/// the assigned hash id to stdout.
 pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];

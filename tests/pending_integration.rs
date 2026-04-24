@@ -72,6 +72,22 @@ fn pending_add_accepts_custom_id_prefix() {
 }
 
 #[test]
+fn pending_add_accepts_bracketed_custom_id_prefix() {
+    let (_tmp, doc) = setup_doc("");
+    agent_doc()
+        .args([
+            "pending",
+            doc.to_str().unwrap(),
+            "add",
+            "[#spec1] first task",
+        ])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#spec1] first task"));
+}
+
+#[test]
 fn pending_add_rejects_invalid_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
@@ -183,6 +199,24 @@ fn write_pending_add_accepts_custom_id_prefix() {
             "--force-disk",
             "--pending-add",
             "id=fix42 new task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#fix42] new task"));
+}
+
+#[test]
+fn write_pending_add_accepts_bracketed_custom_id_prefix() {
+    let (_tmp, doc) = setup_doc("");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add",
+            "[#fix42] new task",
         ])
         .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
         .assert()

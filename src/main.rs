@@ -189,11 +189,13 @@ struct WriteArgs {
     #[arg(long)]
     origin: Option<String>,
     /// Add a new pending item at the beginning of the list (repeatable).
-    /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
+    /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
+    /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add")]
     pending_add: Vec<String>,
     /// Add a new gated pending item at the beginning of the list (repeatable).
-    /// Prefix with `id=<custom> ` to preserve a custom id instead of generating one.
+    /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
+    /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add-gated")]
     pending_add_gated: Vec<String>,
     /// Mark a pending item `[x]` by hash id (repeatable).
@@ -857,12 +859,14 @@ enum HookAction {
 enum PendingAction {
     /// Add an item to the pending component (front of list; assigns stable hash id + `[ ]`)
     Add {
-        /// The pending item description. Prefix with `id=<custom> ` to preserve a custom id.
+        /// The pending item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
+        /// Leading `[#custom] ` is also accepted as compatibility input.
         item: String,
     },
     /// Add a gated item to the pending component (front of list; assigns stable hash id + `[/]`)
     AddGated {
-        /// The pending item description. Prefix with `id=<custom> ` to preserve a custom id.
+        /// The pending item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
+        /// Leading `[#custom] ` is also accepted as compatibility input.
         item: String,
     },
     /// Remove an item from the pending component

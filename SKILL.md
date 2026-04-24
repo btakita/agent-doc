@@ -82,7 +82,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 ### 1b. Update pending (template mode)
 
-If the document has an `<!-- agent:pending -->` component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
+If the document has an `<!-- agent:pending -->` component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Custom pending IDs should use `--pending-add "id=spec1 text"`; leading `--pending-add "[#spec1] text"` is accepted for compatibility but is not the canonical form. Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
 **Pending capture rule:** if your response identifies concrete follow-up work that should be tracked, add it to `agent:pending` in the same cycle. Do not leave pending-worthy next steps as exchange-only prose.
 

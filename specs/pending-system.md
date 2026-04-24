@@ -34,7 +34,9 @@ Every bullet in `agent:pending` carries a 4-char base32 hash as a visible prefix
 ```
 
 - Generated on first insert (via `--pending-add`) unless the caller explicitly
-  provides a custom id with `id=<custom> `; lazy backfill still generates IDs.
+  provides a custom id with canonical `id=<custom> ` syntax; leading
+  `[#custom] ` is accepted as compatibility input and normalized to the same
+  custom id. Lazy backfill still generates IDs.
 - Stable across reorders, text edits, and cycles.
 - Visible in rendered markdown (like a GitHub issue number) — no hidden state.
 - Opaque: the hash is not meaningful, just unique within the component.
@@ -126,7 +128,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 
 | Flag | Behavior |
 |------|----------|
-| `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with `id=<custom> `. |
+| `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. |
 | `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle, or immediate if `--reap` is added. Valid from any state (`[ ]` or `[/]`). |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
@@ -182,7 +184,7 @@ After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls f
 ## Implementation plan
 
 1. **Rust — commands** (`src/write.rs`, `src/pending.rs`):
-   - `--pending-add <text>` (supports leading `id=<custom> ` prefix)
+   - `--pending-add <text>` (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input)
    - `--pending-done <id>`
    - `--pending-gate <id>` (new — Gated lifecycle)
    - `--pending-ungate <id>` (new — Gated lifecycle)

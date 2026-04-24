@@ -277,7 +277,28 @@ A correct `agent-doc` response pass should do both of these before answering:
 I did not do that here. So your diagnosis is right: this was a response-completeness bug, not a missing-context problem.
 
 If you want, the next step is to treat this as a real `agent-doc` product bug and specify the invariant more concretely: pre-response validation should fail if the changed exchange tail still contains an unanswered user prompt ahead of the candidate response target.
-<!-- agent:boundary:259e8d47 -->
+❯ Yes. Specify the invariant more concretely. update spec + tests. build + install for local testing. commit + push
+### Re: response-completeness invariant — gpt-5
+I tightened the invariant at the prompt-contract layer in `src/agent-doc`, because that is the layer where this bug is actually enforceable without pretending the binary can semantically prove a freeform answer covered every question.
+
+Concrete invariant now:
+- resumed turns restate ordered `required response targets` extracted from user request blocks in the diff
+- that list is oldest-first, so the agent sees the full changed exchange tail instead of anchoring only on the newest question
+- the prompt explicitly says the turn is incomplete until each listed target is answered or explicitly grouped into one response
+
+What changed:
+- added diff-side extraction/formatting helpers in `src/diff.rs` for ordered required-response blocks
+- updated `run` and `stream` prompt builders to inject that section on resumed turns
+- updated `SKILL.md`, `SPEC.md`, and `specs/05-agent-backend.md` so the instruction/spec surface matches the binary behavior
+- added regression coverage for multi-prompt tails, code-fence preservation, prompt rendering, and bundled skill text
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Committed and pushed in `src/agent-doc` as `38942ad` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:cd8baacb -->
 <!-- /agent:exchange -->
 
 

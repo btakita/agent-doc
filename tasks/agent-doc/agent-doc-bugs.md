@@ -878,7 +878,7 @@ Outcome:
 
 - `#vezj` is done.
 - A later recovered patchback is now durably distinguishable from an original same-turn patchback, both in capture JSON and in `ops.log`.
-<!-- agent:boundary:2f7156f1 -->
+<!-- agent:boundary:d28d02e1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -898,7 +898,6 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#vezj] [recommended] Distinguish delayed recovered patchbacks after out-of-band closeout from operator-missed-step failures in logs and forensic explanations.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

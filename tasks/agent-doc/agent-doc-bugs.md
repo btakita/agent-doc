@@ -85,17 +85,32 @@ Verification:
 - `git -C src/agent-doc rev-list --count --author='Test <test@test.com>' origin/main..HEAD` returned `0`
 - force-pushed the rewritten branch with `git -C src/agent-doc push --force-with-lease origin HEAD:20260422/codex-agent-backend`
 - new branch tip: `49e75f9`
-<!-- agent:boundary:cf65b794 -->
-<!-- /agent:exchange -->
 
-<!--
-In src/session-share, `agent-doc tasks/claudescore-3.md` had the following in the Claude Code session. Please explain what `[recover] Response already present in document — skipping apply, cleaning up pending file` means? Is there an issue with 
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` had the following in the Claude Code session. Please explain what `[recover] Response already present in document — skipping apply, cleaning up pending file` means? Is there an issue with the run state?
 ```
 ● Bash(agent-doc preflight tasks/claudescore-3.md)
   ⎿  [preflight] step 0: layout check
      [preflight] step 1: recover
      [recover] Response already present in document — skipping apply, cleaning up pending file
 ```
+
+### Re: recover dedup message — gpt-5
+That log line means `preflight` found a saved pending/captured response from an earlier cycle, checked the current document before replaying it, and saw that the response text was already present. So it deliberately did **not** apply the response a second time, and instead cleaned up the stale pending/capture state.
+
+In `src/agent-doc/src/recover.rs`, that is the `is_already_applied(...)` dedup guard returning true. The usual shape is: the prior run got far enough that the editor/file write succeeded, but the process was interrupted before cleanup fully finished, so the pending file or durable capture was left behind.
+
+So: this does indicate the **previous cycle did not finish its bookkeeping cleanly**, but it does **not** mean the document is corrupted or that the current run state is bad. In the normal healthy recovery path, `preflight` sees that leftover state, skips double-applying the response, clears the stale pending file, updates cycle state, and then continues.
+
+I would treat the snippet you pasted as a safe self-heal, not as an active bug by itself. It becomes a real problem only if you see it repeatedly for the same document without the cycle closing afterward, or if it is followed by `session-check` / commit failures.
+
+Concretely:
+- Safe/expected after interruption: response is already visible in the doc, and `preflight` or `session-check` finishes cleanly.
+- Worth investigating: the message appears over and over for the same cycle, pending files keep reappearing, or the next steps fail to reach `committed`.
+<!-- agent:boundary:48cbca91 -->
+<!-- /agent:exchange -->
+
+<!--
+Please reconcile `20260422/codex-agent-backend` so it can be merged into the `main` branch. I prefer to cherry-pick or rebase onto main. A force push is on the table.
 -->
 
 ## Pending / Not Built

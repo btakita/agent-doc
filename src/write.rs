@@ -66,7 +66,7 @@
 //!   cursor/undo in the IDE). Non-fatal on timeout.
 //!
 //! - `apply_append_from_string`: recovery variant of `run` — takes response
-//!   text directly instead of reading stdin. Used by `recover` to replay
+//!   text directly instead of reading stdin. Used by `repair` to replay
 //!   orphaned inline responses.
 //!
 //! - `apply_template_from_string`: recovery variant of `run_template`.
@@ -208,7 +208,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::snapshot::find_project_root;
-use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
+use crate::{component, frontmatter, merge, repair, sessions, snapshot, template};
 
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
@@ -1398,7 +1398,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     let response = strip_assistant_heading(&response);
 
     // Save response to pending store (survives context compaction)
-    recover::save_pending(file, &response)?;
+    repair::save_pending(file, &response)?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -1449,7 +1449,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
             Some(&content_current),
         );
         drop(doc_lock);
-        recover::clear_pending(file)?;
+        repair::clear_pending(file)?;
         return Ok(());
     }
 
@@ -1487,7 +1487,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     drop(doc_lock);
 
     // Clear pending response after successful write
-    recover::clear_pending(file)?;
+    repair::clear_pending(file)?;
 
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
@@ -1517,7 +1517,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
-    recover::save_pending(file, &response)?;
+    repair::save_pending(file, &response)?;
 
     // Parse patch blocks from response
     let (mut patches, unmatched) =
@@ -1574,7 +1574,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
             Some(&content_current),
         );
         drop(doc_lock);
-        recover::clear_pending(file)?;
+        repair::clear_pending(file)?;
         return Ok(());
     }
 
@@ -1613,7 +1613,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     drop(doc_lock);
 
     // Clear pending response after successful write
-    recover::clear_pending(file)?;
+    repair::clear_pending(file)?;
 
     eprintln!(
         "[write] Template patches applied to {} ({} components patched)",
@@ -1658,7 +1658,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     warn_future_work_signals(&response);
 
     // Save response to pending store (survives context compaction)
-    recover::save_pending(file, &response)?;
+    repair::save_pending(file, &response)?;
 
     // Parse patch blocks from response
     let (mut patches, unmatched) =
@@ -1805,7 +1805,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 == strip_boundary_for_dedup(&content_at_start)
             {
                 log_dedup(file, "no changes after merge, skipping write");
-                recover::clear_pending(file)?;
+                repair::clear_pending(file)?;
                 return Ok(());
             }
 
@@ -1848,7 +1848,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 let session_id = frontmatter::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
                 crate::hooks::fire_doc_event(file, "post_write");
-                recover::clear_pending(file)?;
+                repair::clear_pending(file)?;
                 return Ok(());
             }
             // IPC timeout — patch file was already cleaned up by try_ipc,
@@ -2097,7 +2097,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             Some(&content_current),
         );
         drop(doc_lock);
-        recover::clear_pending(file)?;
+        repair::clear_pending(file)?;
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
             eprintln!("[perf] run_stream total: {}ms", elapsed_total);
@@ -2142,7 +2142,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     drop(doc_lock);
 
     // Clear pending response after successful write
-    recover::clear_pending(file)?;
+    repair::clear_pending(file)?;
 
     let elapsed_disk = t_disk.elapsed().as_millis();
     if elapsed_disk > 0 {
@@ -2187,7 +2187,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
-    recover::save_pending(file, &response)?;
+    repair::save_pending(file, &response)?;
 
     // Parse patch blocks from response
     let (mut patches, unmatched) =
@@ -2268,7 +2268,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
             );
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
             snapshot::save_crdt(file, &crdt_doc.encode_state())?;
-            recover::clear_pending(file)?;
+            repair::clear_pending(file)?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
             return Ok(());
         }
@@ -2312,7 +2312,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
     drop(doc_lock);
-    recover::clear_pending(file)?;
+    repair::clear_pending(file)?;
     eprintln!(
         "[write] Stream patches applied to {} ({} components patched, CRDT fallback)",
         file.display(),
@@ -2322,7 +2322,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
 }
 
 /// Apply an append-mode response from a string (not stdin).
-/// Used by `recover` to apply orphaned responses.
+/// Used by `repair` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let response = strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
@@ -2359,7 +2359,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 }
 
 /// Apply template-mode patches from a string (not stdin).
-/// Used by `recover` to apply orphaned template responses.
+/// Used by `repair` to apply orphaned template responses.
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

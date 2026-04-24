@@ -1,21 +1,22 @@
-//! # Module: recover
+//! # Module: repair
 //!
 //! ## Spec
 //! - Guards against response loss caused by context compaction interrupting the write-back phase (between agent respond and `agent-doc write`).
 //! - Pending responses are stored in `.agent-doc/pending/<hash>.md` before the write attempt, and
 //!   the same response is also captured in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`.
-//! - `run(file)` — canonicalizes the path, checks for a pending file or active durable capture, and
-//!   applies it if found. Before applying, reads the current document and checks if the response is
-//!   already present (dedup guard). If already present, removes the pending file without writing
-//!   and returns `RecoverOutcome::AlreadyApplied`. When replaying from a durable capture, requires
-//!   the current document and snapshot hashes to still match the captured baseline; otherwise fails
-//!   closed.
+//! - `run(file)` — canonicalizes the path, checks for a pending file or a recoverable durable
+//!   capture, and applies it if found. Terminal captures (`committed`, `discarded`) are ignored for
+//!   replay so later preflights do not repeatedly enter the dedup path after a successful closeout.
+//!   Before applying, reads the current document and checks if the response is already present
+//!   (dedup guard). If already present, removes the pending file without writing and returns
+//!   `RepairOutcome::AlreadyApplied`. When replaying from a durable capture, requires the current
+//!   document and snapshot hashes to still match the captured baseline; otherwise fails closed.
 //!   Template/CRDT documents always replay through the template write path
 //!   (`write::apply_template_from_string`) even when the captured response is raw text
 //!   without `<!-- patch:... -->` fences (for example `compact exchange` closeouts).
 //!   Non-template documents use plain append (`write::apply_append_from_string`).
 //!   Removes the pending file on successful write.
-//! - Empty pending files are cleaned up without triggering a write; `run` returns `RecoverOutcome::Noop`.
+//! - Empty pending files are cleaned up without triggering a write; `run` returns `RepairOutcome::Noop`.
 //! - `repair(file)` — runs the same recovery logic as `run(file)` and, when recovery work happened
 //!   inside a git repo, immediately attempts `git::commit(file)` so the repaired response crosses
 //!   the normal commit boundary instead of waiting for a later `preflight`.
@@ -24,7 +25,7 @@
 //! - `fingerprint_lines(response)` — extracts the first 3 non-empty, non-marker lines from a response for dedup checking.
 //!
 //! ## Agentic Contracts
-//! - `run(file)` — returns a `RecoverOutcome` describing whether nothing happened, the response was replayed, the response was already present, manual tail cleanup was respected, or a stale `preflight_started` lock was repaired. Returns `Err` on I/O failure or if the write-back itself fails.
+//! - `run(file)` — returns a `RepairOutcome` describing whether nothing happened, the response was replayed, the response was already present, manual tail cleanup was respected, or a stale `preflight_started` lock was repaired. Returns `Err` on I/O failure or if the write-back itself fails.
 //! - `repair(file)` — preserves `run(file)` behavior and additionally attempts `git::commit(file)` when the document lives in git and the outcome was not `Noop`.
 //! - Pending file is removed only after a fully successful write (or dedup detection); a failed write leaves the pending file intact for retry.
 //! - `save_pending` and `clear_pending` are idempotent with respect to directory creation and missing files respectively.
@@ -45,7 +46,7 @@ use std::path::Path;
 use crate::{frontmatter, snapshot, write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecoverOutcome {
+pub enum RepairOutcome {
     Noop,
     ReplayedResponse,
     AlreadyApplied,
@@ -53,7 +54,7 @@ pub enum RecoverOutcome {
     StalePreflightLockRepaired,
 }
 
-impl RecoverOutcome {
+impl RepairOutcome {
     pub fn repaired(self) -> bool {
         !matches!(self, Self::Noop)
     }
@@ -63,12 +64,21 @@ impl RecoverOutcome {
     }
 }
 
-fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RecoverOutcome> {
+fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
+    matches!(
+        capture.state,
+        crate::capture::CaptureState::Captured
+            | crate::capture::CaptureState::WriteApplied
+            | crate::capture::CaptureState::Replayed
+    )
+}
+
+fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     let Some(state) = crate::cycle_state::load(file)? else {
-        return Ok(RecoverOutcome::Noop);
+        return Ok(RepairOutcome::Noop);
     };
     if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
-        return Ok(RecoverOutcome::Noop);
+        return Ok(RepairOutcome::Noop);
     }
 
     let file_content = std::fs::read_to_string(file).with_context(|| {
@@ -86,29 +96,29 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RecoverOutcome> {
     if state.file_hash.as_deref() != Some(current_file_hash.as_str())
         || state.snapshot_hash != current_snapshot_hash
     {
-        return Ok(RecoverOutcome::Noop);
+        return Ok(RepairOutcome::Noop);
     }
 
     crate::cycle_state::mark_committed(
         file,
-        "recover_preflight_stale_lock",
+        "repair_preflight_stale_lock",
         snapshot_content.as_deref(),
         Some(&file_content),
     )?;
     crate::ops_log::log_op(
         file,
         &format!(
-            "recover_preflight_stale_lock file={} cycle_id={}",
+            "repair_preflight_stale_lock file={} cycle_id={}",
             file.display(),
             state.cycle_id
         ),
     );
     eprintln!(
-        "[recover] repaired stale preflight_started cycle {} for {}",
+        "[repair] repaired stale preflight_started cycle {} for {}",
         state.cycle_id,
         file.display()
     );
-    Ok(RecoverOutcome::StalePreflightLockRepaired)
+    Ok(RepairOutcome::StalePreflightLockRepaired)
 }
 
 fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<String> {
@@ -118,10 +128,10 @@ fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<Stri
             snapshot::save(file, &repaired)?;
             crate::ops_log::log_op(
                 file,
-                &format!("recover_repair_exchange_tail file={}", file.display()),
+                &format!("repair_exchange_tail file={}", file.display()),
             );
             eprintln!(
-                "[recover] repaired escaped conversation tail in {}",
+                "[repair] repaired escaped conversation tail in {}",
                 file.display()
             );
             Ok(repaired)
@@ -145,25 +155,25 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
         })?;
     }
     if let Err(e) = snapshot::delete_pre_response(file) {
-        eprintln!("[recover] warning: failed to delete pre-response: {}", e);
+        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
     }
     crate::capture::mark_discarded(file)?;
     snapshot::save(file, current_doc)?;
     crate::cycle_state::mark_committed(
         file,
-        "recover_respect_manual_exchange_tail_removal",
+        "repair_respect_manual_exchange_tail_removal",
         Some(current_doc),
         Some(current_doc),
     )?;
     crate::ops_log::log_op(
         file,
         &format!(
-            "recover_discard_stale_capture_after_manual_tail_removal file={}",
+            "repair_discard_stale_capture_after_manual_tail_removal file={}",
             file.display()
         ),
     );
     eprintln!(
-        "[recover] respected manual removal of escaped conversation tail in {}",
+        "[repair] respected manual removal of escaped conversation tail in {}",
         file.display()
     );
     Ok(())
@@ -201,14 +211,14 @@ fn respect_manual_exchange_tail_removal_if_safe(
 }
 
 /// Check for a pending response and apply it if found.
-pub fn run(file: &Path) -> Result<RecoverOutcome> {
+pub fn run(file: &Path) -> Result<RepairOutcome> {
     // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule)
     let canonical = file
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     let pending_path = snapshot::pending_path_for(&canonical)?;
-    let capture = crate::capture::load_active(&canonical)?;
+    let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
     if !pending_path.exists() && capture.is_none() {
         return repair_stale_preflight_started_cycle(file);
     }
@@ -230,7 +240,7 @@ pub fn run(file: &Path) -> Result<RecoverOutcome> {
         // Empty pending file — just clean up
         let _ = std::fs::remove_file(&pending_path);
         let _ = crate::capture::mark_discarded(&canonical);
-        return Ok(RecoverOutcome::Noop);
+        return Ok(RepairOutcome::Noop);
     }
 
     // Dedup guard: check if the response content is already present in the document.
@@ -241,7 +251,7 @@ pub fn run(file: &Path) -> Result<RecoverOutcome> {
         .with_context(|| format!("failed to read document for dedup check {}", file.display()))?;
     if is_already_applied(&doc_content, &response) {
         eprintln!(
-            "[recover] Response already present in document — skipping apply, cleaning up pending file"
+            "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
         let repaired_doc = repair_template_tail_if_needed(file, &doc_content)?;
         let state_is_open = crate::cycle_state::load(file)?
@@ -250,26 +260,26 @@ pub fn run(file: &Path) -> Result<RecoverOutcome> {
         if state_is_open
             && let Err(e) = crate::cycle_state::mark_write_applied(
                 file,
-                "recover_already_applied",
+                "repair_already_applied",
                 Some(&repaired_doc),
                 Some(&repaired_doc),
             )
         {
-            eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
+            eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
         }
         clear_pending(&canonical)?;
-        return Ok(RecoverOutcome::AlreadyApplied);
+        return Ok(RepairOutcome::AlreadyApplied);
     }
 
     if let Some(ref capture) = capture {
         if respect_manual_exchange_tail_removal_if_safe(&canonical, &doc_content, capture)? {
-            return Ok(RecoverOutcome::ManualTailRemovalRespected);
+            return Ok(RepairOutcome::ManualTailRemovalRespected);
         }
         crate::capture::validate_replay(&canonical, capture)?;
     }
 
     eprintln!(
-        "[recover] Found orphaned response for {} ({} bytes). Applying...",
+        "[repair] Found orphaned response for {} ({} bytes). Applying...",
         file.display(),
         response.len()
     );
@@ -287,26 +297,26 @@ pub fn run(file: &Path) -> Result<RecoverOutcome> {
     clear_pending(&canonical)?;
 
     eprintln!(
-        "[recover] Response recovered and written to {}",
+        "[repair] Response repaired and written to {}",
         file.display()
     );
     let final_doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read recovered document {}", file.display()))?;
     if let Err(e) = crate::cycle_state::mark_write_applied(
         file,
-        "recover_applied",
+        "repair_applied",
         Some(&final_doc),
         Some(&final_doc),
     ) {
-        eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
+        eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
     }
     if let Err(e) = crate::capture::mark_replayed(&canonical) {
-        eprintln!("[recover] capture-state update failed: {} (non-fatal)", e);
+        eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
     }
-    Ok(RecoverOutcome::ReplayedResponse)
+    Ok(RepairOutcome::ReplayedResponse)
 }
 
-pub fn repair(file: &Path) -> Result<RecoverOutcome> {
+pub fn repair(file: &Path) -> Result<RepairOutcome> {
     let outcome = run(file)?;
     if outcome.repaired() && crate::git::is_in_git_repo(file) {
         crate::git::commit(file)?;
@@ -369,10 +379,10 @@ pub fn clear_pending(file: &Path) -> Result<()> {
     // Also clean up the pre-response snapshot (saved before write for undo support).
     // Without this, pre-response files accumulate indefinitely after successful writes.
     if let Err(e) = snapshot::delete_pre_response(file) {
-        eprintln!("[recover] warning: failed to delete pre-response: {}", e);
+        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
     }
     if let Err(e) = crate::capture::mark_write_applied(file) {
-        eprintln!("[recover] warning: failed to update capture state: {}", e);
+        eprintln!("[repair] warning: failed to update capture state: {}", e);
     }
     Ok(())
 }
@@ -425,7 +435,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\n## User\n\nHello\n").unwrap();
-        assert_eq!(run(&doc).unwrap(), RecoverOutcome::Noop);
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
     }
 
     #[test]
@@ -454,7 +464,7 @@ mod tests {
 
         // Recover it
         let recovered = run(&doc).unwrap();
-        assert_eq!(recovered, RecoverOutcome::ReplayedResponse);
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
 
         // Verify the response was written
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -490,7 +500,7 @@ mod tests {
         .unwrap();
 
         let recovered = run(&doc).unwrap();
-        assert_eq!(recovered, RecoverOutcome::ReplayedResponse);
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
@@ -515,7 +525,7 @@ mod tests {
 
         save_pending(&doc, "").unwrap();
         let recovered = run(&doc).unwrap();
-        assert_eq!(recovered, RecoverOutcome::Noop);
+        assert_eq!(recovered, RepairOutcome::Noop);
 
         let pending = snapshot::pending_path_for(&doc).unwrap();
         assert!(!pending.exists());
@@ -538,7 +548,7 @@ mod tests {
 
         // run should detect the content is already present and skip
         let recovered = run(&doc).unwrap();
-        assert_eq!(recovered, RecoverOutcome::AlreadyApplied);
+        assert_eq!(recovered, RepairOutcome::AlreadyApplied);
 
         // Document should be unchanged
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -565,7 +575,7 @@ mod tests {
         crate::capture::capture_response(&doc, "Recovered from capture.").unwrap();
 
         let recovered = run(&doc).unwrap();
-        assert_eq!(recovered, RecoverOutcome::ReplayedResponse);
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Recovered from capture."));
     }
@@ -628,7 +638,7 @@ mod tests {
         let recovered = run(&doc).unwrap();
         assert_eq!(
             recovered,
-            RecoverOutcome::ManualTailRemovalRespected,
+            RepairOutcome::ManualTailRemovalRespected,
             "manual deletion of the escaped tail should be treated as a repair"
         );
 
@@ -646,7 +656,7 @@ mod tests {
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(
             state.last_event,
-            "recover_respect_manual_exchange_tail_removal"
+            "repair_respect_manual_exchange_tail_removal"
         );
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
@@ -671,7 +681,7 @@ mod tests {
         let recovered = run(&doc).unwrap();
         assert_eq!(
             recovered,
-            RecoverOutcome::AlreadyApplied,
+            RepairOutcome::AlreadyApplied,
             "should detect content as already applied despite (HEAD) suffix and blank lines"
         );
 
@@ -691,12 +701,31 @@ mod tests {
         let repaired = run(&doc).unwrap();
         assert_eq!(
             repaired,
-            RecoverOutcome::StalePreflightLockRepaired,
+            RepairOutcome::StalePreflightLockRepaired,
             "stale preflight lock should be repaired"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
-        assert_eq!(state.last_event, "recover_preflight_stale_lock");
+        assert_eq!(state.last_event, "repair_preflight_stale_lock");
+    }
+
+    #[test]
+    fn recover_ignores_committed_capture_without_pending() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        crate::capture::capture_response(&doc, "Recovered answer.").unwrap();
+        crate::capture::mark_committed(&doc).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(
+            recovered,
+            RepairOutcome::Noop,
+            "committed captures should not trigger replay/dedup on later preflights"
+        );
     }
 
     #[test]
@@ -722,7 +751,7 @@ mod tests {
         let recovered = run(&doc).unwrap();
         assert_eq!(
             recovered,
-            RecoverOutcome::AlreadyApplied,
+            RepairOutcome::AlreadyApplied,
             "dedup path should skip replay"
         );
 
@@ -747,7 +776,7 @@ mod tests {
         save_pending(&doc, "This is the recovered response.").unwrap();
 
         let outcome = repair(&doc).unwrap();
-        assert_eq!(outcome, RecoverOutcome::ReplayedResponse);
+        assert_eq!(outcome, RepairOutcome::ReplayedResponse);
 
         let head = crate::git::show_head(&doc).unwrap().unwrap();
         assert!(
@@ -793,7 +822,7 @@ mod tests {
         save_pending(&doc, "Recovered answer.").unwrap();
 
         let outcome = repair(&doc).unwrap();
-        assert_eq!(outcome, RecoverOutcome::AlreadyApplied);
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
 
         let head = crate::git::show_head(&doc).unwrap().unwrap();
         assert!(

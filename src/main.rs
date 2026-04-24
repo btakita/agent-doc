@@ -84,8 +84,8 @@ mod preflight;
 mod project_config;
 mod prompt;
 mod read;
-mod recover;
 mod rename;
+mod repair;
 mod reset;
 mod resync;
 mod route;
@@ -544,13 +544,13 @@ enum Commands {
         /// Path to the document
         file: PathBuf,
     },
-    /// Repair an orphaned response or stale document cycle
+    /// Repair an orphaned response or stale document cycle (`recover` alias kept)
     #[command(name = "repair", visible_alias = "recover")]
-    Recover {
+    Repair {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Run all pre-agent steps (recover, commit, claims, diff, document HEAD) and output JSON
+    /// Run all pre-agent steps (repair, commit, claims, diff, document HEAD) and output JSON
     Preflight {
         /// Path to the session document
         file: PathBuf,
@@ -1354,10 +1354,10 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&info)?);
             Ok(())
         }
-        Commands::Recover { file } => {
-            let outcome = recover::repair(&file)?;
+        Commands::Repair { file } => {
+            let outcome = repair::repair(&file)?;
             if !outcome.repaired() {
-                eprintln!("[recover] No pending response found for {}", file.display());
+                eprintln!("[repair] No pending response found for {}", file.display());
             }
             Ok(())
         }

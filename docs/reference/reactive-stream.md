@@ -131,11 +131,11 @@ All write-back paths converge through `merge_contents_crdt()` before reaching th
                     │                  │                   │
                     ▼                  ▼                   ▼
               agent-doc          agent-doc            agent-doc
-              write --stream     recover              stream
+              write --stream     repair               stream
 ```
 
 - **`agent-doc write --stream`**: The SKILL-level write-back path. Used when Claude Code's `/agent-doc` skill writes a response to the document.
-- **`agent-doc repair`** (legacy alias: `recover`): Replays orphaned stream responses from `.agent-doc/pending/` and repairs stale document-cycle state after an interrupted run.
+- **`agent-doc repair`** (legacy alias: `recover`): Repairs orphaned stream responses from `.agent-doc/pending/` and repairs stale document-cycle state after an interrupted run.
 - **`agent-doc stream`**: The real-time streaming path. Timer-based flush loop writes cumulative agent output to the document every 200ms.
 
 All three converge through `merge_contents_crdt()` which handles CRDT state loading, merging, and persistence.

@@ -210,7 +210,7 @@ pub fn run(
         RunMode::Template => response.text.clone(),
     };
     write::enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
-    crate::recover::save_pending(file, &response_text)?;
+    crate::repair::save_pending(file, &response_text)?;
 
     match run_mode {
         RunMode::Append => apply_append_response(file, &content_original, &response_text)?,
@@ -228,7 +228,7 @@ pub fn run(
         mark_run_write_applied(file, "run_write_applied_resume")?;
     }
 
-    crate::recover::clear_pending(file)?;
+    crate::repair::clear_pending(file)?;
     maybe_abort_after_write_applied_for_test()?;
 
     if !no_git {

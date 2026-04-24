@@ -9,12 +9,12 @@
 //!   included in output but do not abort the run.
 //! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
 //!   For an open prior `response_captured` / `write_applied` cycle, preflight
-//!   auto-attempts `recover::run(file)` + `git::commit(file)`. For an open
-//!   `preflight_started` cycle, preflight only auto-closes when `recover`
+//!   auto-attempts `repair::run(file)` + `git::commit(file)`. For an open
+//!   `preflight_started` cycle, preflight only auto-closes when `repair`
 //!   replays a pending/captured response first; otherwise it fails closed
 //!   instead of letting a stale snapshot commit silently revert newer live
 //!   document content.
-//! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
+//! - Step 1 — repair: calls `repair::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
 //!   exchange cycle; failure is downgraded to a warning, not a hard error.
@@ -102,7 +102,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{config, diff, frontmatter, git, recover, resync, sessions, snapshot};
+use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Serialize)]
@@ -448,7 +448,7 @@ fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
 ///
 /// Steps (in order):
 /// 0. Check tmux layout health (`check_layout`)
-/// 1. Recover orphaned pending response (`recover::run`)
+/// 1. Repair orphaned pending response (`repair::run`)
 /// 2. Commit previous cycle (`git::commit`)
 /// 3. Check claims log (read + truncate `.agent-doc/claims.log`)
 /// 4. Compute diff (`diff::compute`)
@@ -485,10 +485,10 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         ),
     );
 
-    let recovered = recover::run(file)
+    let recovered = repair::run(file)
         .unwrap_or_else(|e| {
-            eprintln!("[preflight] interrupted-cycle recover warning: {}", e);
-            recover::RecoverOutcome::Noop
+            eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
+            repair::RepairOutcome::Noop
         })
         .repaired();
 
@@ -588,12 +588,12 @@ pub fn run(file: &Path) -> Result<()> {
     maybe_auto_resync_on_drift(file, &layout_issues);
 
     // Step 1: Recover orphaned pending responses.
-    eprintln!("[preflight] step 1: recover");
+    eprintln!("[preflight] step 1: repair");
     let recovered = recovered_prior
-        || recover::run(file)
+        || repair::run(file)
             .unwrap_or_else(|e| {
-                eprintln!("[preflight] recover warning: {}", e);
-                recover::RecoverOutcome::Noop
+                eprintln!("[preflight] repair warning: {}", e);
+                repair::RepairOutcome::Noop
             })
             .repaired();
 
@@ -1711,7 +1711,7 @@ mod tests {
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
-        crate::recover::save_pending(&doc, "Recovered answer.").unwrap();
+        crate::repair::save_pending(&doc, "Recovered answer.").unwrap();
         let pending = snapshot::pending_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
 

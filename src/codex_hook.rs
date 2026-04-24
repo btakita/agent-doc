@@ -10,7 +10,7 @@
 //!   the cycle is still open.
 //! - On the first intercepted stop, the hook first tries to finish the response
 //!   cycle deterministically: save/capture `last_assistant_message`, replay it
-//!   through `recover`, and run the normal `git::commit()` boundary.
+//!   through `repair`, and run the normal `git::commit()` boundary.
 //! - If the cycle still cannot be closed automatically, the hook falls back to
 //!   blocking the turn with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
@@ -229,17 +229,17 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
 
     let mut note = String::new();
     if has_response {
-        crate::recover::save_pending(file, &input.last_assistant_message)?;
+        crate::repair::save_pending(file, &input.last_assistant_message)?;
         crate::ops_log::log_op(file, "codex_stop_capture_saved");
         note.push_str(
             " The latest assistant text was captured into the pending/capture ledger before auto-close.",
         );
     }
 
-    let recover_outcome = crate::recover::run(file)?;
-    if recover_outcome.replayed_response() {
+    let repair_outcome = crate::repair::run(file)?;
+    if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
-    } else if recover_outcome.repaired() {
+    } else if repair_outcome.repaired() {
         note.push_str(" The hook repaired the pending closeout state before auto-close.");
     }
 
@@ -273,7 +273,7 @@ fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
     if input.last_assistant_message.trim().is_empty() {
         return " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string();
     }
-    match crate::recover::save_pending(file, &input.last_assistant_message) {
+    match crate::repair::save_pending(file, &input.last_assistant_message) {
         Ok(()) => {
             crate::ops_log::log_op(file, "codex_stop_capture_saved");
             " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()

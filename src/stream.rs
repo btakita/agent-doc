@@ -62,7 +62,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::streaming::{StreamChunk, StreamingAgent};
-use crate::{agent, config::Config, crdt, diff, frontmatter, git, recover, snapshot, template};
+use crate::{agent, config::Config, crdt, diff, frontmatter, git, repair, snapshot, template};
 
 /// Run the stream command: stream agent output to document in real-time.
 pub fn run(
@@ -366,7 +366,7 @@ fn stream_loop(
     let final_text = buffer.lock().unwrap().clone();
     if !final_text.is_empty() {
         // Save as pending for crash recovery
-        recover::save_pending(file, &final_text)?;
+        repair::save_pending(file, &final_text)?;
 
         // Gate: skip if timer thread already flushed the final text (avoids IPC double-append)
         if !timer_flushed_final.load(Ordering::Acquire) {
@@ -407,7 +407,7 @@ fn stream_loop(
         let doc = crdt::CrdtDoc::from_text(&content_ours);
         snapshot::save_crdt(file, &doc.encode_state())?;
 
-        recover::clear_pending(file)?;
+        repair::clear_pending(file)?;
     }
 
     Ok(StreamResult { session_id })

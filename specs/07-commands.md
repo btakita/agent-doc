@@ -14,7 +14,7 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 **Imperative-directive guard:** if the pending user diff contains executable directives like `do #id`, `run tests`, `build + install`, `commit + push`, a one-word approval such as `go`, or natural-language pending-item task text that begins with an imperative verb (for example `[#n8q4] Fix the cross-repo ...`), `run` rejects status-only/meta-only agent replies. The response must include either concrete execution evidence (for example commands, verification/commit sections, or file-path evidence) or a concrete blocker.
 
-**Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `recover` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
+**Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `repair` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
 
 ## init
 
@@ -387,7 +387,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 ## repair
 
-`agent-doc repair <FILE>` (legacy alias: `agent-doc recover`) — recover orphaned pending/captured response state and close git-backed repairs through the normal commit boundary.
+`agent-doc repair <FILE>` (legacy alias: `agent-doc recover`) — repair orphaned pending/captured response state and close git-backed repairs through the normal commit boundary.
 
 1. Run the same recovery engine as `preflight` step 1:
    - replay a pending/captured response when the response still needs to be written
@@ -491,14 +491,14 @@ command = "wezterm start -- {tmux_command}"
 
 `agent-doc preflight <FILE>` — run all pre-agent steps and output JSON.
 
-Combines interrupted-cycle enforcement, recover, commit, claims-log check, diff, and document HEAD read into a single call. The SKILL workflow consumes the structured JSON output instead of making separate CLI calls.
+Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, and document HEAD read into a single call. The SKILL workflow consumes the structured JSON output instead of making separate CLI calls.
 
 **Steps (in order):**
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
-   - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `recover` + `commit`
+   - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `repair` + `commit`
    - If that `commit` path finds the staged snapshot already matches `HEAD`, it closes the cycle as already committed instead of logging `commit_failed`
-   - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `recover` repairs that stale preflight lock as a no-op closeout
-   - Otherwise, an open `preflight_started` cycle only auto-closes when `recover` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
+   - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `repair` repairs that stale preflight lock as a no-op closeout
+   - Otherwise, an open `preflight_started` cycle only auto-closes when `repair` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
    - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail

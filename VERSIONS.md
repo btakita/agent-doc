@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.13
 
+- **Committed captures no longer trigger repeat recovery dedup on later preflights.** `repair` now ignores terminal durable-capture states (`committed`, `discarded`) unless there is still a pending response file to reconcile, so routine `preflight` runs stop emitting the "`Response already present in document`" self-heal message after a cycle has already closed cleanly. Added regression coverage for the committed-capture/no-pending shape.
+
 - **Post-commit editor refresh now reuses the committed boundary ID.** Standalone IPC `reposition` messages can carry the exact exchange `boundary_id`, and both editor helpers now preserve that marker instead of minting a new one after `commit()`. This closes the boundary-only dirty-worktree shape where the response was already committed but the editor saved a fresh marker afterward. Added Rust, JetBrains, and VS Code regression coverage for explicit-ID repositioning.
 
 - **Imperative detection now recognizes natural-language pending tasks.** The executable-directive guard no longer stops at hard-coded `do #id` / `run tests` phrases: pending-item prose that starts with an imperative verb (for example `[#n8q4] Fix the cross-repo ...`) is now classified as executable intent too. That means status-only replies like "I'm starting now" are rejected for those diffs instead of letting actionable pending text be misread as non-directive continuation prose. Added unit coverage for diff extraction and finalize integration coverage for the pending-item shape.
@@ -32,7 +34,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Repo-scoped commit closeout serialization.** `git::commit()` now keys its advisory closeout lock by the resolved git dir / submodule git dir, blocks for the short critical section instead of proceeding unlocked, and retries the full stage+commit transaction when `index.lock` contention hits `update-index`, `git add`, or `git commit`. Added regression coverage for a staged `index.lock` retry and two different docs contending on closeout in the same repo.
 
-- **`repair` now closes git-backed recovery in one command.** `agent-doc repair` / `recover` no longer stops after replaying or deduping a pending response; when recovery work happened inside git it now immediately runs the normal commit boundary so repaired assistant content does not remain uncommitted until a later `preflight`. Added regression coverage for both replayed and already-applied repair paths.
+- **`repair` now closes git-backed recovery in one command.** `agent-doc repair` (legacy alias: `recover`) no longer stops after replaying or deduping a pending response; when recovery work happened inside git it now immediately runs the normal commit boundary so repaired assistant content does not remain uncommitted until a later `preflight`. Added regression coverage for both replayed and already-applied repair paths.
 
 ## 0.33.12
 
@@ -259,7 +261,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.31.26
 
-- **Fix: orphan recovery dedup guard (recover.rs):** `recover::run` now reads the document before applying a pending response and checks if the content is already present using a 3-line fingerprint. If already applied (e.g., IPC path wrote the content but `clear_pending` was never called due to exit 75), the pending file is removed without re-applying. Prevents ghost-reappearance of previous responses. New test: `recover_skips_duplicate_apply`.
+- **Fix: orphan repair dedup guard (repair.rs):** `repair::run` now reads the document before applying a pending response and checks if the content is already present using a 3-line fingerprint. If already applied (e.g., IPC path wrote the content but `clear_pending` was never called due to exit 75), the pending file is removed without re-applying. Prevents ghost-reappearance of previous responses. New test: `recover_skips_duplicate_apply`.
 
 ## 0.31.25
 

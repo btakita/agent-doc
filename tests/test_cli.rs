@@ -19,7 +19,8 @@ fn test_cli_help() {
     cmd.arg("--help");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("Interactive document sessions"));
+        .stdout(predicate::str::contains("Interactive document sessions"))
+        .stdout(predicate::str::contains("repair"));
 }
 
 #[test]

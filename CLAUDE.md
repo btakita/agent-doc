@@ -22,7 +22,7 @@ Interactive document sessions with AI agents.
 - **Response replay is capture-backed** — final parsed responses must be durably persisted before write/hook emission in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`. Recovery replays the captured response body only when the captured snapshot/file hashes still match the current baseline; otherwise fail closed.
 - **`finalize` is the strict response happy path** — `agent-doc finalize <FILE>` must fail before mutating a non-git document and must not report success unless the cycle reaches `committed`. Keep that contract aligned in `main.rs`, `write.rs`, and the command docs.
 - **Codex post-write guard stays explicit** — keep `SKILL.md`, `runbooks/commit.md`, `runbooks/harness-invocation.md`, and `specs/07-commands.md` aligned on the Codex/direct-exec requirement to run `agent-doc session-check <FILE>` after `finalize` or manual `write --commit`, and fail closed if it reports an open cycle or a likely direct assistant patchback that bypassed the binary write path. The only self-heal exception is already-committed historical snapshot drift proven by `HEAD`.
-- **Codex hook backstop is binary-owned** — keep `src/codex_hook.rs`, `src/skill.rs`, `SKILL.md`, `runbooks/harness-invocation.md`, `README.md`, and `SPEC.md` aligned on the installed `.codex/hooks.json` / `.codex/config.toml` contract: `UserPromptSubmit` tracks the active document, and `Stop` first tries to finish the response cycle deterministically from `last_assistant_message` via the normal recover/write/commit path before falling back to capture-and-block / fail-closed behavior.
+- **Codex hook backstop is binary-owned** — keep `src/codex_hook.rs`, `src/skill.rs`, `SKILL.md`, `runbooks/harness-invocation.md`, `README.md`, and `SPEC.md` aligned on the installed `.codex/hooks.json` / `.codex/config.toml` contract: `UserPromptSubmit` tracks the active document, and `Stop` first tries to finish the response cycle deterministically from `last_assistant_message` via the normal repair/write/commit path before falling back to capture-and-block / fail-closed behavior.
 - **Response ordering is part of the contract** — keep the same files aligned on the rule that requested implementation / verification / build-install work finishes before final response persistence, and that only `session-check`, recovery, and final reporting remain after `finalize` / `write --commit`.
 - **Harnesses own full-suite verification** — keep `Makefile`, `SKILL.md`, `SPEC.md`, and installed harness instruction surfaces aligned on the rule that agents explicitly run the full project verification suite after changes instead of relying on a git pre-commit hook to do it implicitly.
 - **Preflight is a stable binary contract** — keep `src/preflight.rs`, `SKILL.md`, `.claude/skills/agent-doc/SKILL.md`, and the top-level docs aligned on the interrupted-cycle guard (`preflight_started`, `response_captured`, and `write_applied` count as open; only recoverable `preflight_started` cycles auto-close), tier fields (`effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`), and `agent_model` short-name attribution.
@@ -82,7 +82,7 @@ src/
   ipc_socket.rs     # Socket-based IPC (Unix domain sockets via interprocess crate)
   lib.rs            # Library target re-exports
   capture.rs        # Durable response-capture ledger + replay hash validation
-  recover.rs        # Orphaned pending/captured response detection + recovery
+  repair.rs         # Orphaned pending/captured response detection + recovery
   compact.rs        # Exchange compaction (archive + truncate)
   convert.rs        # Bidirectional format conversion (inline ↔ template)
   extract.rs        # Extract exchange sections to new documents
@@ -95,7 +95,7 @@ src/
   ops_log.rs        # Best-effort operational logging to .agent-doc/logs/ops.log
   cycle_state.rs    # Persisted per-document cycle phase/hash state for interrupted-cycle enforcement
   sync.rs           # Sync pane state between editor and tmux (reconciler always runs, no early exits, column memory)
-  preflight.rs      # Pre-agent checks: layout check, recover, commit, claims, diff, document read → JSON
+  preflight.rs      # Pre-agent checks: layout check, repair, commit, claims, diff, document read → JSON
   model_tier.rs     # Harness-agnostic model tier selection (Tier enum, config, heuristic, scanner, composition)
   agent/
     mod.rs          # Agent trait

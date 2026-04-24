@@ -59,6 +59,7 @@
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
 //! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
 //! - commit_repairs_committed_historical_snapshot_drift: historical direct response already committed in `HEAD` repairs the stale snapshot without creating a duplicate commit
+//! - commit_repairs_committed_head_before_user_follow_up_noop: snapshot lags behind a committed response in `HEAD`, working tree adds only a new user follow-up, and commit repairs the snapshot up to `HEAD` instead of staging the stale snapshot and rewinding the doc
 //! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
 //! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
 
@@ -472,6 +473,18 @@ fn is_safe_historical_exchange_growth(snapshot_content: &str, file_content: &str
     saw_insert && flush_exchange_insert_block(&mut insert_block)
 }
 
+fn is_safe_user_follow_up_exchange_growth(head_content: &str, current_content: &str) -> bool {
+    if head_content == current_content || !current_content.starts_with(head_content) {
+        return false;
+    }
+
+    let suffix = current_content[head_content.len()..].trim();
+    !suffix.is_empty()
+        && suffix != "## Assistant"
+        && !suffix.starts_with("### Re:")
+        && !suffix.starts_with("#### Re:")
+}
+
 fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &str) -> bool {
     let (snap_prelude, snap_items, snap_postlude) = crate::pending::parse_items(snapshot_content);
     let (file_prelude, file_items, file_postlude) = crate::pending::parse_items(file_content);
@@ -619,6 +632,58 @@ fn classify_safe_committed_historical_agent_doc_mutation(
     classify_safe_agent_doc_mutation(snapshot_doc, file_doc, true)
 }
 
+fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc: &str) -> bool {
+    if head_doc == current_doc {
+        return false;
+    }
+
+    let head_body = crate::frontmatter::parse(head_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(head_doc);
+    let current_body = crate::frontmatter::parse(current_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(current_doc);
+
+    let Ok(head_components) = crate::component::parse(head_body) else {
+        return false;
+    };
+    let Ok(current_components) = crate::component::parse(current_body) else {
+        return false;
+    };
+    if head_components.len() != current_components.len() {
+        return false;
+    }
+
+    let mut saw_exchange = false;
+
+    for (head_comp, current_comp) in head_components.iter().zip(current_components.iter()) {
+        if head_comp.name != current_comp.name
+            || head_comp.patch_mode() != current_comp.patch_mode()
+        {
+            return false;
+        }
+
+        let head_content = normalize_component_content_for_absorb(head_comp.content(head_body));
+        let current_content =
+            normalize_component_content_for_absorb(current_comp.content(current_body));
+        if head_content == current_content {
+            continue;
+        }
+
+        match head_comp.name.as_str() {
+            "exchange" => {
+                if !is_safe_user_follow_up_exchange_growth(&head_content, &current_content) {
+                    return false;
+                }
+                saw_exchange = true;
+            }
+            _ => return false,
+        }
+    }
+
+    saw_exchange
+}
+
 pub(crate) fn repair_committed_historical_snapshot_drift(
     file: &Path,
 ) -> Result<Option<&'static str>> {
@@ -636,28 +701,41 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     let Some(head_doc) = show_head(file)? else {
         return Ok(None);
     };
-    if normalize_transient_agent_doc_markers(&current_doc)
-        != normalize_transient_agent_doc_markers(&head_doc)
-    {
-        return Ok(None);
-    }
-
     let Some(reason) =
-        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &current_doc)
+        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc)
     else {
         return Ok(None);
     };
 
-    crate::snapshot::save(file, &current_doc)?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "snapshot_repair file={} reason={} basis=head",
-            file.display(),
-            reason
-        ),
-    );
-    Ok(Some(reason))
+    if normalize_transient_agent_doc_markers(&current_doc)
+        == normalize_transient_agent_doc_markers(&head_doc)
+    {
+        crate::snapshot::save(file, &current_doc)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "snapshot_repair file={} reason={} basis=head",
+                file.display(),
+                reason
+            ),
+        );
+        return Ok(Some(reason));
+    }
+
+    if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
+        crate::snapshot::save(file, &head_doc)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "snapshot_repair file={} reason={} basis=head_follow_up",
+                file.display(),
+                reason
+            ),
+        );
+        return Ok(Some(reason));
+    }
+
+    Ok(None)
 }
 
 /// Commit a file with an auto-generated message. Skips hooks.
@@ -725,7 +803,7 @@ pub fn commit(file: &Path) -> Result<bool> {
             reason,
             file.display()
         );
-        snapshot_content = Some(file_content.clone());
+        snapshot_content = crate::snapshot::load(file)?;
     }
 
     if let Some(ref snapshot) = snapshot_content
@@ -1863,6 +1941,31 @@ mod tests {
     }
 
     #[test]
+    fn is_safe_user_only_follow_up_after_committed_head_exchange_only() {
+        let head = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n";
+        let current = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            ❯ follow-up question\n\
+            <!-- agent:boundary:live -->\n\
+            <!-- /agent:exchange -->\n";
+
+        assert!(is_safe_user_only_follow_up_after_committed_head(
+            head, current
+        ));
+    }
+
+    #[test]
     fn classify_safe_committed_historical_agent_doc_mutation_exchange() {
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -2917,6 +3020,158 @@ mod tests {
             !log.contains("commit_failed"),
             "already-committed no-op must not be logged as commit_failed:\n{log}"
         );
+    }
+
+    #[test]
+    fn commit_repairs_committed_head_before_user_follow_up_noop() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let stale_snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:old -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, stale_snapshot).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed_head = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed_head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+
+        let working = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            ❯ follow-up question\n\
+            <!-- agent:boundary:live -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, working).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(working)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(stale_snapshot),
+            Some(working),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let head_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let did_commit = commit(&doc).expect("commit should not rewind a stale snapshot");
+        let head_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !did_commit,
+            "repairing the snapshot up to committed HEAD should close as a no-op"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&head_before.stdout),
+            String::from_utf8_lossy(&head_after.stdout),
+            "HEAD should stay on the already-committed response instead of creating a rewind commit"
+        );
+
+        let committed = show_head(&doc).unwrap().unwrap();
+        assert!(
+            committed.contains("### Re: newer\n"),
+            "HEAD should keep the newer committed response:\n{committed}"
+        );
+        assert!(
+            !committed.contains("❯ follow-up question"),
+            "HEAD should not absorb the user's follow-up prompt:\n{committed}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: newer\n"),
+            "snapshot should repair up to the already-committed response:\n{snap}"
+        );
+        assert!(
+            !snap.contains("❯ follow-up question"),
+            "snapshot repair must stop at HEAD, not absorb the follow-up prompt:\n{snap}"
+        );
+
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working_after.contains("❯ follow-up question"),
+            "working tree should keep the user's follow-up prompt uncommitted:\n{working_after}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
     }
 
     #[test]

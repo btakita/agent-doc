@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.13
 
+- **Stale snapshots can no longer rewind already-committed responses on no-op closeout.** If the snapshot lags behind a response that is already in `HEAD`, and the working tree only adds a new user follow-up on top of that committed state, `agent-doc commit` now repairs the snapshot up to `HEAD` before the `HEAD`-current no-op path runs. This prevents a later closeout from staging the old snapshot blob and momentarily rewinding the document before recovery re-adds the response. Added regression coverage for the exact stale-snapshot + follow-up shape.
+
 - **Relative submodule doc resolution no longer falls through to outer-repo shadows.** When `agent-doc` is invoked from inside a submodule with a relative document path like `tasks/monsterrodholders.md`, path resolution now prefers the caller's existing cwd-local file before consulting the superproject root. This fixes the case where `commit` / `show_head` / related git paths could silently target an outer-repo document with the same relative path, leaving the intended submodule doc uncommitted even though the closeout logged success. Added regression coverage for the shadowed-path shape.
 
 - **Executable-directive backstop in `run` + `finalize`.** The binary now inspects the pending user diff for imperative document directives (`do #id`, `run tests`, `build + install`, `commit + push`, and approval words like `go`) and rejects status-only/meta-only replies unless they include either concrete execution evidence or a concrete blocker. Added unit coverage for directive extraction + response classification and finalize integration coverage for the reject path.

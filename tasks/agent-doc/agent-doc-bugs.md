@@ -777,7 +777,43 @@ So the right conclusion is narrower than "the patchback has uncommitted content"
 - this is not evidence that the original `agent-doc` writeback itself stopped half-committed
 
 If we want to harden the product here, the bug to track is detection/explanation of **post-commit local drift**, not the normal finalize path for this specific case.
-<!-- agent:boundary:4675120f -->
+
+❯ Yes harden the product. Fix detection/explanation of **post-commit local drift**. update spec + tests. build + install for local testing. commit + push
+### Re: post-commit local drift hardening — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- `src/git.rs` now classifies the `snapshot == HEAD` / `working tree != HEAD` case as **post-commit local drift** before the no-op closeout path, instead of only emitting the generic "possible out-of-band write" warning.
+- The new closeout logging distinguishes safe in-exchange user follow-up drift from broader later local working-tree edits, and it explicitly says those edits are staying uncommitted because `HEAD` already contains the committed response.
+- Tightened `is_safe_user_only_follow_up_after_committed_head()` so only exchange-local follow-up growth qualifies; drift outside the component structure no longer gets mislabeled as a user follow-up.
+- Updated `README.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the post-commit local drift contract.
+
+Regression coverage:
+
+- existing no-op closeout coverage now asserts the new drift classification
+- added a dedicated regression for later local working-tree edits on top of `HEAD`
+- tightened the follow-up classifier so outside-of-component drift falls into the broader working-tree-edit bucket
+
+Verification:
+
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_identifies_post_commit_local_working_tree_edits -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_repairs_committed_head_before_user_follow_up_noop -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `8ceebbc` — `fix: explain post-commit local drift`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `agent-doc preflight` / `commit` now explains the monsterrodholders-style case correctly: if `HEAD` already has the committed response and the live file has later local edits, that is reported as post-commit local drift rather than a half-committed patchback.
+<!-- agent:boundary:2aba42ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

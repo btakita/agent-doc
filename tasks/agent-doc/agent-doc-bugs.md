@@ -301,14 +301,13 @@ Outcome:
 
 - `#73tv` is done.
 - Two different docs in the same repo/submodule now serialize on one repo-scoped lock, and repo `index.lock` contention retries the whole transaction instead of failing after only retrying `git commit`.
-<!-- agent:boundary:649ac5a8 -->
+<!-- agent:boundary:644ce412 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#73tv] [recommended] Serialize git-backed commit closeout per git root/submodule and retry the full staging+commit transaction on repo index.lock contention instead of only retrying git commit for ~700ms.
-- [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
+- [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

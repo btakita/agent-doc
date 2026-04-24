@@ -195,10 +195,11 @@ Exits with error if the pane is dead or no session is registered.
    d. Result: snapshot content (agent response) is committed; plain user edits in the working tree stay uncommitted
    e. Narrow repair path: if the live document is ahead of the snapshot due to a missed agent-doc mutation, `commit` first refreshes the snapshot from the live file, then stages it. The repair only triggers when the redacted component structure is unchanged and the drift looks like an agent-owned `status` change and/or an appended `### Re:` block and/or a `pending` stable-ID superset. Plain user-prompt drift is not absorbed.
    f. Extreme drift guard: when the file is vastly larger than the snapshot, `commit` may auto-resync only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents still do NOT wholesale re-sync from the live file, because that would risk absorbing unanswered user prompts.
-3. If no snapshot: fall back to `git add -f <file>` (stages entire file)
-4. If the fully staged index already matches `HEAD`, close the cycle as `commit_already_current` and return success without creating a duplicate git commit
-5. Otherwise run `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
-6. On successful commit: keep the on-disk snapshot / visible document in the same clean post-commit shape as the committed blob, then either
+3. Acquire a blocking advisory commit lock keyed by the resolved git dir (`git rev-parse --absolute-git-dir`), so different docs in the same repo or submodule serialize the short staging+commit critical section instead of racing on one shared index.
+4. If no snapshot: fall back to `git add -f <file>` (stages entire file)
+5. If the fully staged index already matches `HEAD`, close the cycle as `commit_already_current` and return success without creating a duplicate git commit
+6. Otherwise run the full staging+commit transaction. If git reports `index.lock` contention during `update-index`, `git add`, or `git commit`, retry the whole transaction with backoff instead of retrying only the final `git commit` call.
+7. On successful commit: keep the on-disk snapshot / visible document in the same clean post-commit shape as the committed blob, then either
    - rewrite the working tree locally to that clean single-boundary shape when no live editor IPC listener exists, or
    - send reposition + VCS-refresh IPC signals so the plugin applies that same clean rewrite via the Document API
 

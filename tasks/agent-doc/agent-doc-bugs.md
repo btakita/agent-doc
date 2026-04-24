@@ -50,7 +50,27 @@ Outcome:
 
 - `#3sd5` is done.
 - `agent-doc audit-docs` no longer audits the outer monorepo root when it is launched from that root via `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs`; it scopes discovery to the `src/agent-doc` crate workspace instead.
-<!-- agent:boundary:6d4fa018 -->
+
+❯ Why id `agent-doc repair` not commit the changes?
+❯ • You ran agent-doc repair tasks/claudescore-3.md
+❯ └ [recover] Response already present in document — skipping apply, cleaning up pending file
+❯ [recover] repaired escaped conversation tail in tasks/claudescore-3.md
+❯ [recover] No pending response found for tasks/claudescore-3.md
+### Re: `agent-doc repair` commit behavior — gpt-5
+
+Short answer: because `agent-doc repair` is a recovery command, not the commit-boundary command.
+
+Your output hit the dedupe path: the response was already present in `tasks/claudescore-3.md`, so `repair` cleaned up stale pending state and repaired the escaped exchange tail, but it did not run `git::commit()`. The CLI wiring for `repair` just calls `recover::run()` and returns.
+
+The documented commands that are supposed to cross the commit boundary are:
+
+- normal response path: `agent-doc finalize <FILE>`
+- missed-patchback repair when the prompt is already in the doc: `agent-doc write --commit <FILE>`
+
+So if you run `agent-doc repair` by itself, a commit is not guaranteed. In your case the later `agent-doc preflight tasks/agent-doc/agent-doc-bugs.md` did the commit during its recover/commit sweep, which is why this session started with a fresh preflight commit (`8ba82014`).
+
+If you want, I can turn that mismatch into a follow-up bug/doc task so `repair` vs `write --commit` is harder to confuse.
+<!-- agent:boundary:fe5559e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -59,11 +79,3 @@ Outcome:
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
-
-<!--
-Why id `agent-doc repair` not commit the changes?
-• You ran agent-doc repair tasks/claudescore-3.md
-  └ [recover] Response already present in document — skipping apply, cleaning up pending file
-    [recover] repaired escaped conversation tail in tasks/claudescore-3.md
-    [recover] No pending response found for tasks/claudescore-3.md
--->

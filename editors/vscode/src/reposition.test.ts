@@ -105,4 +105,24 @@ describe('repositionBoundaryToEnd', () => {
         assert.ok(!result.includes('aaa11111'));
         assert.ok(!result.includes('bbb22222'));
     });
+
+    it('reuses the requested boundary id when provided', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            'Response.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'User prompt.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = repositionBoundaryToEnd(doc, 'exchange', 'keep-this-id');
+        assert.ok(result, 'should return repositioned content');
+        assert.ok(result.includes('<!-- agent:boundary:keep-this-id -->'));
+        assert.ok(!result.includes('aaa11111'));
+        assert.strictEqual(
+            (result.match(/<!-- agent:boundary:[a-z0-9-]+ -->/g) || []).length,
+            1,
+            'exactly one boundary marker',
+        );
+    });
 });

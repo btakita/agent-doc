@@ -33,7 +33,7 @@ function stripTransientHeadMarkers(content: string): string {
     }).join('\n');
 }
 
-export function repositionBoundaryToEnd(doc: string, component: string): string | null {
+export function repositionBoundaryToEnd(doc: string, component: string, boundaryId?: string): string | null {
     const openPattern = new RegExp(`<!-- agent:${escapeRegex(component)}(\\s[^>]*)? -->`);
     const closeTag = `<!-- /agent:${component} -->`;
 
@@ -51,7 +51,7 @@ export function repositionBoundaryToEnd(doc: string, component: string): string 
 
     content = content.replace(/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g, '');
 
-    const id = Array.from({ length: 8 }, () =>
+    const id = boundaryId ?? Array.from({ length: 8 }, () =>
         Math.floor(Math.random() * 16).toString(16)
     ).join('');
 

@@ -156,4 +156,21 @@ User prompt.
         assertFalse(result.contains("aaa11111"))
         assertFalse(result.contains("bbb22222"))
     }
+
+    @Test
+    fun `reuses explicit boundary id when provided`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+Response.
+<!-- agent:boundary:aaa11111 -->
+User prompt.
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange", "keep-this-id")
+        assertNotNull(result)
+        assertTrue(result!!.contains("<!-- agent:boundary:keep-this-id -->"))
+        assertFalse(result.contains("aaa11111"))
+        assertEquals(1, Regex("""<!-- agent:boundary:[a-z0-9-]+ -->""").findAll(result).count())
+    }
 }

@@ -60,10 +60,10 @@
 //!   replacement (`fullContent` field) instead of component patches. Used by
 //!   inline-mode documents without component markers.
 //!
-//! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with empty
-//!   patches and `reposition_boundary: true`. Moves the boundary marker to
-//!   end-of-exchange without touching the working tree (preserves cursor/undo
-//!   in the IDE). Non-fatal on timeout.
+//! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with the exact
+//!   committed exchange `boundary_id`. Normalizes the editor buffer back to the
+//!   committed boundary marker without touching the working tree (preserves
+//!   cursor/undo in the IDE). Non-fatal on timeout.
 //!
 //! - `apply_append_from_string`: recovery variant of `run` — takes response
 //!   text directly instead of reading stdin. Used by `recover` to replay
@@ -2837,12 +2837,27 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Err(_) => return false,
     };
     let project_root = resolve_ipc_project_root(&canonical);
+    let boundary_id = crate::snapshot::load(file)
+        .ok()
+        .flatten()
+        .as_deref()
+        .and_then(|doc| find_boundary_id(doc, "exchange"))
+        .or_else(|| {
+            std::fs::read_to_string(file)
+                .ok()
+                .as_deref()
+                .and_then(|doc| find_boundary_id(doc, "exchange"))
+        });
 
     if !crate::ipc_socket::is_listener_active(&project_root) {
         return false;
     }
 
-    match crate::ipc_socket::send_reposition(&project_root, &canonical.to_string_lossy()) {
+    match crate::ipc_socket::send_reposition(
+        &project_root,
+        &canonical.to_string_lossy(),
+        boundary_id.as_deref(),
+    ) {
         Ok(true) => {
             eprintln!("[commit] IPC reposition boundary signal sent");
             true

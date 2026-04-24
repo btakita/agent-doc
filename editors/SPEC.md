@@ -63,7 +63,9 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **Reposition behavior:** When the plugin receives a `reposition_boundary: true` IPC signal:
 1. Remove ALL `<!-- agent:boundary:... -->` lines from the exchange component (not just the last one)
-2. Insert a single fresh boundary with a new 8-char hex ID at the end of the exchange content
+2. Insert a single boundary at the end of the exchange content.
+   If the IPC payload includes `reposition_boundary_id` / `boundary_id`, reuse that exact ID.
+   Otherwise generate a fresh 8-char hex ID.
 3. Do not introduce any transient ` (HEAD)` heading annotations during this cleanup
 4. Skip boundary markers inside fenced code blocks
 
@@ -71,7 +73,7 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **When to reposition:**
 - After applying an IPC patch (when `reposition_boundary` flag is set)
-- After receiving a standalone reposition IPC signal (post-commit)
+- After receiving a standalone reposition IPC signal (post-commit). Post-commit signals should carry the committed `boundary_id` so the editor normalizes back to `HEAD` instead of inventing a new local diff.
 
 ## 10. CLI Dependency
 

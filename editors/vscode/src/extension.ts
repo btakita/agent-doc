@@ -628,6 +628,7 @@ interface IpcPatch {
     frontmatter?: string;
     fullContent?: string;
     reposition_boundary?: boolean;
+    reposition_boundary_id?: string;
     normalize_prefix_lines?: string[];
 }
 
@@ -750,7 +751,11 @@ class PatchWatcher implements vscode.Disposable {
 
             // Handle reposition-only signals with typing debounce
             if (patch.reposition_boundary && patch.patches.length === 0) {
-                this.repositionBoundaryWithDebounce(patch.file, uri.fsPath);
+                this.repositionBoundaryWithDebounce(
+                    patch.file,
+                    uri.fsPath,
+                    patch.reposition_boundary_id,
+                );
                 return;
             }
 
@@ -779,7 +784,12 @@ class PatchWatcher implements vscode.Disposable {
      * Uses FFI `agent_doc_reposition_boundary_to_end` when available,
      * falls back to TS implementation.
      */
-    private repositionBoundaryWithDebounce(filePath: string, patchFilePath: string, elapsed = 0): void {
+    private repositionBoundaryWithDebounce(
+        filePath: string,
+        patchFilePath: string,
+        boundaryId?: string,
+        elapsed = 0,
+    ): void {
         const debounceMs = 500;
         const timeoutMs = 5000;
         const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
@@ -793,7 +803,7 @@ class PatchWatcher implements vscode.Disposable {
 
         if (!idle && elapsed < timeoutMs) {
             setTimeout(() => {
-                this.repositionBoundaryWithDebounce(filePath, patchFilePath, elapsed + 500);
+                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, elapsed + 500);
             }, 500);
             return;
         }
@@ -803,8 +813,8 @@ class PatchWatcher implements vscode.Disposable {
         vscode.workspace.openTextDocument(fileUri).then(async (document) => {
             const content = document.getText();
             // Prefer FFI reposition, fall back to TS
-            const repositioned = native.repositionBoundaryToEnd(content, projectRoot)
-                ?? this.repositionBoundaryToEndTs(content, 'exchange');
+            const repositioned = native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
+                ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId);
             if (repositioned && repositioned !== content && document.getText() === content) {
                 const fullRange = new vscode.Range(
                     document.positionAt(0),
@@ -823,8 +833,8 @@ class PatchWatcher implements vscode.Disposable {
         });
     }
 
-    private repositionBoundaryToEndTs(doc: string, component: string): string | null {
-        return repositionBoundaryToEnd(doc, component);
+    private repositionBoundaryToEndTs(doc: string, component: string, boundaryId?: string): string | null {
+        return repositionBoundaryToEnd(doc, component, boundaryId);
     }
 
     private async applyPatch(patch: IpcPatch): Promise<boolean> {

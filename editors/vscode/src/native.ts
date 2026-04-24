@@ -159,6 +159,7 @@ function ensureLoaded(projectRoot?: string): boolean {
 
 // Lazy function bindings (resolved on first call)
 let _reposition_boundary_to_end: any = null;
+let _reposition_boundary_to_end_with_id: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
 let _document_changed: any = null;
@@ -182,6 +183,11 @@ function bindFunctions(): void {
     });
 
     _reposition_boundary_to_end = lib.func('agent_doc_reposition_boundary_to_end', FfiPatchResultType, ['str']);
+    _reposition_boundary_to_end_with_id = lib.func(
+        'agent_doc_reposition_boundary_to_end_with_id',
+        FfiPatchResultType,
+        ['str', 'str'],
+    );
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
@@ -211,11 +217,13 @@ function verifyVersion(libPath: string): void {
  * Reposition boundary marker to end of exchange component.
  * Returns the updated document, or null if FFI is unavailable/errors.
  */
-export function repositionBoundaryToEnd(doc: string, projectRoot?: string): string | null {
+export function repositionBoundaryToEnd(doc: string, projectRoot?: string, boundaryId?: string): string | null {
     if (!ensureLoaded(projectRoot)) return null;
     bindFunctions();
 
-    const result = _reposition_boundary_to_end(doc);
+    const result = boundaryId
+        ? _reposition_boundary_to_end_with_id(doc, boundaryId)
+        : _reposition_boundary_to_end(doc);
     try {
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);

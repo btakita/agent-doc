@@ -786,7 +786,15 @@ pub fn reposition_boundary_to_end(doc: &str) -> String {
 /// working tree can be brought back to the same clean shape as the committed
 /// blob instead of introducing boundary-only dirtiness.
 pub fn reposition_boundary_to_end_clean(doc: &str) -> String {
-    reposition_boundary_to_end_clean_with_summary(doc, None)
+    reposition_boundary_to_end_clean_with_id(doc, None)
+}
+
+/// Reposition boundary using an explicit boundary ID when provided.
+///
+/// Callers use this to refresh an editor buffer to the already-committed
+/// boundary marker instead of minting a new boundary-only diff locally.
+pub fn reposition_boundary_to_end_clean_with_id(doc: &str, boundary_id: Option<&str>) -> String {
+    reposition_boundary_to_end_clean_internal(doc, boundary_id, None)
 }
 
 /// Reposition boundary with an optional human-readable summary suffix.
@@ -800,11 +808,21 @@ pub fn reposition_boundary_to_end_with_summary(doc: &str, summary: Option<&str>)
 /// Reposition boundary with an optional human-readable summary suffix, but do
 /// not add any ` (HEAD)` heading annotations.
 pub fn reposition_boundary_to_end_clean_with_summary(doc: &str, summary: Option<&str>) -> String {
+    reposition_boundary_to_end_clean_internal(doc, None, summary)
+}
+
+fn reposition_boundary_to_end_clean_internal(
+    doc: &str,
+    boundary_id: Option<&str>,
+    summary: Option<&str>,
+) -> String {
     let mut result = strip_transient_head_markers(&remove_all_boundaries(doc));
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = crate::new_boundary_id_with_summary(summary);
+        let id = boundary_id
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| crate::new_boundary_id_with_summary(summary));
         let marker = crate::format_boundary_marker(&id);
         let content = exchange.content(&result).to_string();
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
@@ -2055,6 +2073,27 @@ Some content.
         assert!(
             !result.contains("<!-- agent:boundary:"),
             "no boundary should be added to non-exchange"
+        );
+    }
+
+    #[test]
+    fn reposition_boundary_clean_reuses_explicit_id() {
+        let doc = "\
+<!-- agent:exchange -->
+Previous response.
+<!-- agent:boundary:old-id -->
+User prompt here.
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end_clean_with_id(doc, Some("keep-this-id"));
+        assert!(!result.contains("old-id"), "old boundary should be removed");
+        assert!(
+            result.contains("<!-- agent:boundary:keep-this-id -->"),
+            "explicit boundary id should be reused"
+        );
+        assert_eq!(
+            result.matches("<!-- agent:boundary:").count(),
+            1,
+            "exactly one boundary should remain"
         );
     }
 

@@ -18,7 +18,9 @@
 //!
 //! Message types:
 //! - `{"type": "patch", "file": "...", "patches": [...], "frontmatter": "..."}` — apply patches
-//! - `{"type": "reposition", "file": "..."}` — reposition boundary marker
+//! - `{"type": "reposition", "file": "...", "boundary_id": "..."}` — reposition
+//!   boundary marker; `boundary_id` is optional and lets the plugin reuse the
+//!   already-committed marker instead of generating a fresh boundary-only diff
 //! - `{"type": "vcs_refresh"}` — trigger VCS refresh
 //! - `{"type": "ack", "id": "..."}` — acknowledgment from plugin
 
@@ -133,11 +135,14 @@ pub fn send_patch(
 }
 
 /// Send a reposition boundary message.
-pub fn send_reposition(project_root: &Path, file: &str) -> Result<bool> {
-    let message = serde_json::json!({
+pub fn send_reposition(project_root: &Path, file: &str, boundary_id: Option<&str>) -> Result<bool> {
+    let mut message = serde_json::json!({
         "type": "reposition",
         "file": file,
     });
+    if let Some(boundary_id) = boundary_id {
+        message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+    }
 
     send_message(project_root, &message).map(|_| true)
 }

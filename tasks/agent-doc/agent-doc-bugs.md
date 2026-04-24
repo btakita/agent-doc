@@ -704,13 +704,44 @@ What I could verify:
 So the real problem was not "there was no new response content to write." The real problem was that the session hit an out-of-band closeout path that reshuffled existing document state instead of doing a clean same-turn `finalize` patchback.
 
 The quoted terminal answer rationalized the miss as a content-specification issue, but the file and log history point to a **closeout-boundary bug** instead.
-<!-- agent:boundary:d7c9265c -->
+
+do #y9d6. update spec + tests. build + install for local testing. commit + pus
+### Re: `#y9d6` committed-head closeout floor — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- `git::commit()` now treats already-committed historical response growth in `HEAD` as the lower bound when the snapshot is stale and the working tree only adds a new user follow-up in `exchange`, so a later no-op closeout cannot stage the older snapshot and rewind the document.
+- After that repair path runs, `commit()` now reloads the repaired snapshot from disk before the `HEAD` comparison, so it stages the repaired committed state rather than stale in-memory working-tree text.
+- Added regression coverage for the exact stale-snapshot + follow-up shape and documented the invariant in `README.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml is_safe_user_only_follow_up_after_committed_head_exchange_only -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_repairs_committed_head_before_user_follow_up_noop -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_repairs_committed_historical_snapshot_drift -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `c0e365b` — `fix: keep committed responses ahead of stale snapshots`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#y9d6` is done.
+- A stale snapshot can no longer win over an already-committed `### Re:` block just because the next turn added a follow-up prompt.
+<!-- agent:boundary:fa399b07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#y9d6] [recommended] Investigate claudescore-3 closeout path that rewound and re-added an existing assistant response via out-of-band commit instead of same-turn finalize patchback.
+- [x] [#y9d6] [recommended] Investigate claudescore-3 closeout path that rewound and re-added an existing assistant response via out-of-band commit instead of same-turn finalize patchback.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

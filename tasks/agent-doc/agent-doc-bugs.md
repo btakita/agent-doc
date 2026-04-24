@@ -467,10 +467,53 @@ Verification:
 Commit / push:
 - committed in `src/agent-doc` as `5b8fd9c`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:b7e9e551 -->
+
+❯ I keep on getting the following error forcing me to restart codex after 1 agent-doc run. Please fix:
+```
+• agent-doc updated the local skill instructions from
+  0.33.12 to 0.33.13 and returned SKILL_RELOAD=compact.
+
+  Run /compact to reload the updated instructions, then re-
+  invoke agent-doc tasks/agent-doc/agent-doc-bugs.md.
+```
+
+❯ If I were to give you a sequential list of tasks to run, could you create a new subagent for each task and patchback the response for each task as they are completed into this document? Will the experience be the same as if I had manually run each task one at a time?
+### Re: Codex skill reload loop — gpt-5
+
+Fixed this in `src/agent-doc`.
+
+Root cause was two-fold:
+- Installed harness instructions were carrying a stale literal `agent-doc-version` from the source template, so `0.33.13` installs could still advertise `0.33.12`.
+- The Codex auto-update path was still described as the generic compact flow, and plain `skill install` in this shell could fall back to the wrong target instead of the Codex harness file.
+
+What changed:
+- `src/skill.rs` now rewrites `agent-doc-version` from `CARGO_PKG_VERSION` when rendering installed instructions.
+- Codex-rendered instructions now say `agent-doc skill install --harness codex --reload restart`; Claude-rendered instructions now say `--harness claude --reload compact`.
+- The skill installer now treats `CODEX_THREAD_ID` / `CODEX_CI` as a Codex fallback only when normal harness detection is otherwise generic, so a plain `agent-doc skill install` in this shell lands in `.codex/AGENTS.md`.
+- Added regression coverage for rendered version stamping, Codex/Claude auto-update text, and the Codex-shell fallback. Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc lib-install`
+- Smoke test: `agent-doc skill install --reload restart` now wrote `.codex/AGENTS.md` with `agent-doc-version: "0.33.13"` and the Codex-specific restart instruction.
+
+I did not commit or push `src/agent-doc` in this cycle.
+
+### Re: subagent-per-task patchback — gpt-5
+
+Yes, if you give me a task list and want explicit delegation, I can spawn a worker per task and patch back each completed result into this document in sequence.
+
+It will not be exactly identical to manually running one task at a time in a single session. I can make the document experience close, but each worker runs in its own isolated context/worktree, so I still need to integrate the result, verify it, and write the final patchback for that task from the parent session. For independent tasks that works well; for tightly coupled tasks, sequential single-agent work is usually cleaner.
+<!-- agent:boundary:3fb8e439 -->
 <!-- /agent:exchange -->
 
 <!--
+Please run the following prompt chain sequentially in a gpt-5.4 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
+- #8cmb
+- #r4kp
+
 In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
 ```
 • Because I treated the patchback as an assistant-only response block, not as a transcript entry.

@@ -735,7 +735,49 @@ Outcome:
 
 - `#y9d6` is done.
 - A stale snapshot can no longer win over an already-committed `### Re:` block just because the next turn added a follow-up prompt.
-<!-- agent:boundary:48c764f8 -->
+
+❯ In src/boost-client running `agent-doc tasks/monsterrodholders.md`, the patchback has some uncommitted content:
+```
+`#h7cq` is not ready for enablement yet: `monit` package/config deployment is the easy part, but the healthcheck path is still 
+.invalid because the Cloudflare Worker returns `503` after homepage and checkout probes get `403` from Cloudflare. That means `monit` should stay disabled until the external check path is fixed.
+```
+
+❯ See
+```
+• Because that exact text was introduced after the last commit and never staged.
+
+  Current state:
+
+  - HEAD commit a9605a5 already contains the clean sentence: still invalid because...
+  - Your working tree now has an uncommitted follow-on edit in tasks/monsterrodholders.md:38 that split it into:
+      - still
+      - .invalid because...
+
+  That broken .invalid form was not part of the committed agent-doc writeback. It was left behind by a later partial/d
+  irty edit, along with the extra line I see https://boost-health.monsterrodholder74.workers.dev/ having a 401 respons
+  e. You see a 503 from where? and a moved boundary marker.
+
+  So the reason it was not committed is simple: it is a later uncommitted working-tree change, not the content in the
+  last commit.
+```
+### Re: `src/boost-client/tasks/monsterrodholders.md` uncommitted patchback text — gpt-5
+
+That specific `.invalid` text is not the committed `agent-doc` patchback.
+
+What I checked in `src/boost-client`:
+
+- `git status --short -- tasks/monsterrodholders.md` shows the file is currently dirty.
+- `HEAD` commit `a9605a5` from **April 24, 2026 03:05:42 EDT** already contains the clean sentence on `tasks/monsterrodholders.md:41`: `still invalid because ...`
+- The live diff against `HEAD` is a later local edit that split that line into `still` plus `.invalid`, changed the exchange boundary marker, and added the HTML comment asking where the `503` came from.
+
+So the right conclusion is narrower than "the patchback has uncommitted content":
+
+- the committed writeback is already in `HEAD`
+- the current uncommitted content is a later out-of-band / manual working-tree edit on top of that commit
+- this is not evidence that the original `agent-doc` writeback itself stopped half-committed
+
+If we want to harden the product here, the bug to track is detection/explanation of **post-commit local drift**, not the normal finalize path for this specific case.
+<!-- agent:boundary:4675120f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

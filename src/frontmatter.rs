@@ -37,7 +37,8 @@
 //! - `parse` never panics; it returns `Err` only for an unterminated frontmatter block or a YAML
 //!   deserialisation failure. All missing optional fields default to `None`.
 //! - `write(parse(doc).0, parse(doc).1)` round-trips the document: re-parsing the result yields
-//!   semantically equivalent `Frontmatter` and an identical body string.
+//!   semantically equivalent `Frontmatter` and an identical body string, without accumulating
+//!   blank lines at the start of the body.
 //! - `ensure_session` is idempotent: calling it twice on the same document returns the same
 //!   session ID and does not modify the document on the second call.
 //! - `merge_fields` is additive: it never removes existing fields unless an explicit `null`
@@ -55,7 +56,9 @@
 //! - parse_null_fields: YAML `null` values → all fields `None`
 //! - parse_unterminated_frontmatter: `---` open with no close → `Err` "Unterminated frontmatter"
 //! - parse_closing_at_eof: closing `---` without trailing newline → body = ""
-//! - write_roundtrip: write then parse → identical Frontmatter, body contains original text
+//! - write_roundtrip: write then parse → identical Frontmatter and identical body
+//! - repeated_parse_write_roundtrip_preserves_body_prefix: repeated parse/write cycles preserve
+//!   the exact body prefix and do not accumulate blank lines before the first heading
 //! - write_default_frontmatter: default Frontmatter → output starts with `---\n`, ends with `---\n`
 //! - set_session_id_creates_frontmatter: plain doc → frontmatter added with correct session
 //! - set_session_id_preserves_other_fields: existing fields not clobbered by session update
@@ -402,13 +405,14 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
         return Ok((Frontmatter::default(), content));
     }
     let rest = &content[4..]; // skip opening ---\n
-    let end = rest
+    let (end, closing_len) = rest
         .find("\n---\n")
-        .or_else(|| rest.find("\n---"))
+        .map(|end| (end, 5))
+        .or_else(|| rest.find("\n---").map(|end| (end, 4)))
         .ok_or_else(|| anyhow::anyhow!("Unterminated frontmatter block"))?;
     let yaml = &rest[..end];
     let fm: Frontmatter = serde_yaml::from_str(yaml)?;
-    let body_start = 4 + end + 4; // opening --- + yaml + closing ---\n
+    let body_start = 4 + end + closing_len; // opening ---\n + yaml + closing marker
     let body = if body_start <= content.len() {
         &content[body_start..]
     } else {
@@ -692,9 +696,30 @@ mod tests {
         assert_eq!(fm2.agent, fm.agent);
         assert_eq!(fm2.model, fm.model);
         assert_eq!(fm2.branch, fm.branch);
-        // Roundtrip preserves body (may have leading newline from parse)
-        assert!(body2.contains("# Hello"));
-        assert!(body2.contains("Body text."));
+        assert_eq!(body2, body);
+    }
+
+    #[test]
+    fn repeated_parse_write_roundtrip_preserves_body_prefix() {
+        let fm = Frontmatter {
+            session: Some("abc".to_string()),
+            agent: Some("codex".to_string()),
+            ..Default::default()
+        };
+        let original = write(&fm, "## Status\n\nBody\n").unwrap();
+        let mut current = original.clone();
+
+        for _ in 0..3 {
+            let (fm, body) = parse(&current).unwrap();
+            assert_eq!(body, "## Status\n\nBody\n");
+            current = write(&fm, body).unwrap();
+        }
+
+        let (fm, body) = parse(&current).unwrap();
+        assert_eq!(fm.session.as_deref(), Some("abc"));
+        assert_eq!(fm.agent.as_deref(), Some("codex"));
+        assert_eq!(body, "## Status\n\nBody\n");
+        assert_eq!(current, original);
     }
 
     #[test]

@@ -83,6 +83,13 @@
 //!   and emits a `[write] WARN:` message to stderr when the signal fires.
 //!   Integrated into `run_stream` after patch application.
 //!
+//! - `enforce_imperative_response_contract(file, baseline, current, response)`:
+//!   when the current document diff contains imperative user directives
+//!   (`do #id`, `run tests`, `build + install`, `commit + push`, or approval
+//!   words like `go`), rejects status-only/meta responses unless they include
+//!   either concrete execution evidence or a concrete blocker. This is the
+//!   binary-side backstop for the executable-directive contract.
+//!
 //! - `sanitize_component_tags`: escapes `<!-- agent:NAME -->` and
 //!   `<!-- /agent:NAME -->` markers appearing in patch content to prevent the
 //!   component parser from treating them as real delimiters.
@@ -168,6 +175,10 @@
 //! - `no_false_positive_on_normal_text`: response without any signal phrases →
 //!   returns `None`.
 //! - `case_insensitive_detection`: "WORTH REVISITING" (uppercase) → detected.
+//! - `imperative_contract_rejects_status_only_response`: directive diff +
+//!   "In progress" response → error
+//! - `imperative_contract_allows_concrete_blocker`: directive diff +
+//!   blocked/error response → accepted
 //! - `normalize_user_prompts_new_line_gets_prefix`: user adds "Hello" to exchange
 //!   → normalized content has "❯ Hello".
 //! - `normalize_user_prompts_agent_response_not_prefixed`: agent response lines in content_ours
@@ -815,6 +826,209 @@ pub fn check_future_work_signals(response: &str, has_pending_add: bool) -> Optio
     None
 }
 
+const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
+    "in progress",
+    "continuing",
+    "starting",
+    "working on it",
+    "still working",
+    "next i'll",
+    "next i will",
+    "i'll update",
+    "i will update",
+    "i'm going to",
+    "i am going to",
+    "let me do that",
+];
+
+const IMPERATIVE_META_REFUSAL_SIGNALS: &[&str] = &[
+    "because you asked me to run agent-doc",
+    "treated that text as document content",
+    "not to execute",
+    "say do #",
+    "repeat the instruction in chat",
+    "i stayed on the first layer",
+    "operate on the session document",
+];
+
+const IMPERATIVE_BLOCKER_SIGNALS: &[&str] = &[
+    "blocked",
+    "blocker",
+    "failed",
+    "error",
+    "cannot",
+    "can't",
+    "unable",
+    "missing",
+    "permission denied",
+    "requires approval",
+    "needs approval",
+    "lock file",
+    "timed out",
+];
+
+const IMPERATIVE_EVIDENCE_LABELS: &[&str] = &[
+    "what changed:",
+    "verification:",
+    "commit / push:",
+    "outcome:",
+    "root cause:",
+    "blocked:",
+    "blocker:",
+];
+
+pub(crate) fn enforce_imperative_response_contract(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response: &str,
+) -> Result<()> {
+    let baseline_owned = baseline
+        .map(ToOwned::to_owned)
+        .or_else(|| snapshot::load(file).ok().flatten());
+    let Some(base) = baseline_owned.as_deref() else {
+        return Ok(());
+    };
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(base, current_content) else {
+        return Ok(());
+    };
+    enforce_imperative_response_contract_for_diff(file, &diff_text, response)
+}
+
+pub(crate) fn enforce_imperative_response_contract_for_diff(
+    file: &Path,
+    diff_text: &str,
+    response: &str,
+) -> Result<()> {
+    if !crate::diff::diff_contains_imperative_directive(diff_text) {
+        return Ok(());
+    }
+    if response_satisfies_imperative_contract(response) {
+        return Ok(());
+    }
+    let trigger = crate::diff::extract_imperative_directives(diff_text)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "approval".to_string());
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "imperative_response_rejected file={} trigger={}",
+            file.display(),
+            truncate_signal(&trigger, 80)
+        ),
+    );
+    anyhow::bail!(
+        "imperative document directive requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for `{}`",
+        truncate_signal(&trigger, 80)
+    );
+}
+
+fn response_satisfies_imperative_contract(response: &str) -> bool {
+    let lower = response.to_ascii_lowercase();
+    if contains_any_signal(&lower, IMPERATIVE_BLOCKER_SIGNALS) {
+        return true;
+    }
+    if contains_any_signal(&lower, IMPERATIVE_META_REFUSAL_SIGNALS) {
+        return false;
+    }
+    if contains_execution_evidence(response, &lower) {
+        return true;
+    }
+    if contains_any_signal(&lower, IMPERATIVE_STATUS_ONLY_SIGNALS) {
+        return false;
+    }
+    false
+}
+
+fn contains_any_signal(haystack: &str, signals: &[&str]) -> bool {
+    signals.iter().any(|signal| haystack.contains(signal))
+}
+
+fn contains_execution_evidence(response: &str, lower: &str) -> bool {
+    if response.contains("```") || response.contains("~~~") {
+        return true;
+    }
+    if IMPERATIVE_EVIDENCE_LABELS
+        .iter()
+        .any(|label| lower.contains(label))
+    {
+        return true;
+    }
+    if lower.contains("implemented and verified")
+        || lower.contains("built and installed")
+        || lower.contains("added regression coverage")
+        || lower.contains("pushed to ")
+    {
+        return true;
+    }
+    response.lines().any(|line| {
+        has_commandish_backticks(line)
+            || has_code_path(line)
+            || contains_commit_hash(line)
+            || line.trim_start().starts_with("- `")
+    })
+}
+
+fn has_commandish_backticks(line: &str) -> bool {
+    if !line.contains('`') {
+        return false;
+    }
+    let lower = line.to_ascii_lowercase();
+    lower.contains("cargo ")
+        || lower.contains("git ")
+        || lower.contains("make ")
+        || lower.contains("npm ")
+        || lower.contains("pnpm ")
+        || lower.contains("yarn ")
+        || lower.contains("pytest")
+        || lower.contains("uv run")
+        || lower.contains("agent-doc ")
+        || line.contains('/')
+}
+
+fn has_code_path(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    line.contains("src/")
+        || line.contains("tests/")
+        || line.contains("specs/")
+        || line.contains("runbooks/")
+        || lower.contains(".rs")
+        || lower.contains(".md")
+        || lower.contains(".toml")
+        || lower.contains(".json")
+        || lower.contains(".sh")
+        || lower.contains(".kt")
+        || lower.contains(".ts")
+}
+
+fn contains_commit_hash(line: &str) -> bool {
+    let mut run = 0usize;
+    for ch in line.chars() {
+        if ch.is_ascii_hexdigit() {
+            run += 1;
+            if run >= 7 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
+fn truncate_signal(value: &str, max: usize) -> String {
+    if value.len() <= max {
+        value.to_string()
+    } else {
+        let mut cut = max;
+        while cut > 0 && !value.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}...", &value[..cut])
+    }
+}
+
 /// Maximum number of `❯ `-prefix lines a single normalization cycle may add.
 ///
 /// A legitimate user input rarely produces more than a few dozen prefixed lines
@@ -1176,6 +1390,10 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         anyhow::bail!("empty response — nothing to write");
     }
 
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let response = strip_assistant_heading(&response);
 
@@ -1293,6 +1511,10 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     if response.trim().is_empty() {
         anyhow::bail!("empty response — nothing to write");
     }
+
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
     recover::save_pending(file, &response)?;
@@ -1427,6 +1649,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     if response.trim().is_empty() {
         anyhow::bail!("empty response — nothing to write");
     }
+
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Lint: warn if response contains future-work signals without --pending-add
     warn_future_work_signals(&response);
@@ -1955,6 +2181,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     if response.trim().is_empty() {
         anyhow::bail!("empty response — nothing to write");
     }
+
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
     recover::save_pending(file, &response)?;
@@ -5239,6 +5469,46 @@ mod future_work_signal_tests {
     fn case_insensitive_detection() {
         let result = check_future_work_signals("WORTH REVISITING this approach.", false);
         assert_eq!(result, Some("worth revisiting"));
+    }
+
+    #[test]
+    fn imperative_contract_rejects_status_only_response() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #6zyp. run tests. build + install. commit + push\n";
+        let err = enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: task — gpt-5\nIn progress. Continuing now.",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("imperative document directive requires concrete execution evidence or a concrete blocker"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn imperative_contract_allows_concrete_blocker() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #6zyp. run tests. build + install. commit + push\n";
+        enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: blocked — gpt-5\nBlocked by missing `OPENROUTER_API_KEY`; build cannot proceed.",
+        )
+        .expect("blocker response should be accepted");
+    }
+
+    #[test]
+    fn imperative_contract_allows_execution_evidence() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+go\n";
+        enforce_imperative_response_contract_for_diff(
+            file,
+            diff,
+            "### Re: done — gpt-5\nVerification:\n- `cargo test --manifest-path src/agent-doc/Cargo.toml`\nCommit / push:\n- `abc1234`\n",
+        )
+        .expect("evidence response should be accepted");
     }
 
     #[test]

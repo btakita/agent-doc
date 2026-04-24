@@ -49,6 +49,12 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .unwrap();
 }
 
+fn write_baseline(root: &Path, content: &str) -> PathBuf {
+    let baseline = root.join("baseline.md");
+    fs::write(&baseline, content).unwrap();
+    baseline
+}
+
 #[test]
 fn finalize_requires_git_repo_before_mutating_document() {
     let (_tmp, doc) = setup_template_doc();
@@ -132,4 +138,41 @@ fn finalize_writes_and_commits_template_response() {
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success();
+}
+
+#[test]
+fn finalize_rejects_status_only_response_for_imperative_directive() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &original);
+    let edited = original.replace(
+        "❯ Please reply\n",
+        "❯ Please reply\n\ndo #6zyp. run tests. build + install. commit + push\n",
+    );
+    fs::write(&doc, edited).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nIn progress. Continuing now.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "imperative document directive requires concrete execution evidence or a concrete blocker",
+        ));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !after.contains("### Re: test — gpt-5"),
+        "finalize should fail before patching a status-only response into the document"
+    );
 }

@@ -26,6 +26,10 @@
 //! - Writes the agent response back through the mode-appropriate append or
 //!   template path, preserving concurrent user edits against the original
 //!   baseline captured before the agent call.
+//! - When the user diff contains an imperative document directive (`do #id`,
+//!   `run tests`, `build + install`, `commit + push`, or approval words like
+//!   `go`), rejects status-only/meta agent replies unless they include either
+//!   concrete execution evidence or a concrete blocker.
 //! - Updates the `resume` ID in frontmatter from the agent's returned session
 //!   ID after the response write succeeds.
 //! - Captures the final parsed response in the durable response ledger before
@@ -205,6 +209,7 @@ pub fn run(
         RunMode::Append => write::strip_assistant_heading(&response.text),
         RunMode::Template => response.text.clone(),
     };
+    write::enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
     crate::recover::save_pending(file, &response_text)?;
 
     match run_mode {

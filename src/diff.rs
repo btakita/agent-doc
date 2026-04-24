@@ -99,6 +99,10 @@
 //! - `parse_slash_commands_ignores_removed_lines`: `/cmd` on removed line (`-`) → empty
 //! - `parse_slash_commands_with_args`: `/agent-doc foo.md` → `["/agent-doc foo.md"]`
 //! - `parse_slash_commands_requires_letter_after_slash`: `/ `, `//comment` → empty
+//! - `extract_imperative_directives(diff)`: finds added user directive lines like `do #id`,
+//!   `run tests`, `build + install`, or `commit + push`, skipping code fences and blockquotes
+//! - `diff_contains_imperative_directive(diff)`: true when the diff contains either an explicit
+//!   imperative directive line or a one-word approval like `go`
 
 use anyhow::Result;
 use serde::Serialize;
@@ -443,6 +447,129 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
     commands
 }
 
+/// Build a unified diff directly from two content strings after comment stripping.
+///
+/// Returns `None` when there are no meaningful changes.
+pub fn unified_diff_from_contents(previous: &str, current: &str) -> Option<String> {
+    let previous_stripped = strip_comments(previous);
+    let current_stripped = strip_comments(current);
+    let diff = TextDiff::from_lines(&previous_stripped, &current_stripped);
+    let has_changes = diff.iter_all_changes().any(|c| c.tag() != ChangeTag::Equal);
+    if !has_changes {
+        return None;
+    }
+    Some(
+        diff.unified_diff()
+            .context_radius(5)
+            .header("snapshot", "document")
+            .to_string(),
+    )
+}
+
+/// Extract imperative user directives from added lines in a unified diff.
+///
+/// This is a conservative parser for the binary-enforced directive contract.
+/// It only recognizes clear imperative shapes and approval words, while
+/// skipping code fences and blockquotes to avoid false positives.
+pub fn extract_imperative_directives(diff: &str) -> Vec<String> {
+    let mut directives = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+        let trimmed = content.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                    continue;
+                }
+            }
+        }
+
+        if !line.starts_with('+') || line.starts_with("+++") || in_fence {
+            continue;
+        }
+
+        if content.starts_with('>') {
+            continue;
+        }
+
+        let normalized = content
+            .trim()
+            .trim_start_matches('❯')
+            .trim_start()
+            .trim_end_matches(|c: char| c.is_ascii_punctuation())
+            .trim();
+        if normalized.is_empty() {
+            continue;
+        }
+
+        if looks_like_imperative_directive(normalized) {
+            directives.push(normalized.to_string());
+        }
+    }
+
+    directives
+}
+
+/// Returns true when the diff contains an imperative work directive or a
+/// one-word approval that authorizes the next step.
+pub fn diff_contains_imperative_directive(diff: &str) -> bool {
+    if !extract_imperative_directives(diff).is_empty() {
+        return true;
+    }
+    matches!(classify_diff(diff).diff_type, DiffType::Approval)
+}
+
+fn looks_like_imperative_directive(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let compact = lower.trim();
+    let exact = compact.trim_end_matches(|c: char| c.is_ascii_punctuation());
+    if APPROVAL_WORDS.contains(&exact) {
+        return true;
+    }
+    compact.starts_with("do #")
+        || compact.starts_with("fix #")
+        || compact.starts_with("fix this")
+        || compact.contains(" run tests")
+        || compact.starts_with("run tests")
+        || compact.contains(" run benchmarks")
+        || compact.starts_with("run benchmarks")
+        || compact.contains(" build + install")
+        || compact.starts_with("build + install")
+        || compact.contains(" build and install")
+        || compact.starts_with("build and install")
+        || compact.contains(" commit + push")
+        || compact.starts_with("commit + push")
+        || compact.contains(" commit and push")
+        || compact.starts_with("commit and push")
+}
+
 /// Compute a unified diff between the snapshot and the current document.
 /// Returns None if there are no changes.
 ///
@@ -483,10 +610,7 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         previous_stripped.len(),
     );
 
-    let diff = TextDiff::from_lines(&previous_stripped, &current_stripped);
-    let has_changes = diff.iter_all_changes().any(|c| c.tag() != ChangeTag::Equal);
-
-    if !has_changes {
+    let Some(output) = unified_diff_from_contents(&previous, &current) else {
         eprintln!(
             "[diff] no changes detected between snapshot and document (after comment stripping)"
         );
@@ -495,7 +619,7 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
             eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
         }
         return Ok(None);
-    }
+    };
 
     // Stale snapshot recovery: if the diff is only completed assistant/user
     // exchanges with no new user content, the previous cycle wrote the response
@@ -524,14 +648,6 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     }
 
     eprintln!("[diff] changes detected, computing unified diff");
-
-    // Use unified diff with 5 lines of context around each change.
-    // This provides surrounding context while keeping the diff focused.
-    let output = diff
-        .unified_diff()
-        .context_radius(5)
-        .header("snapshot", "document")
-        .to_string();
 
     let elapsed_total = t_total.elapsed().as_millis();
     if elapsed_total > 0 {
@@ -1929,5 +2045,43 @@ Please fix the bug.\n\
             cmds,
             vec!["/mcp:reload", "/agent-doc file.md", "/some_thing", "/v2"]
         );
+    }
+
+    #[test]
+    fn extract_imperative_directives_detects_do_and_build_push() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n\
+            +do #6zyp. update spec + tests. build + install for local testing. commit + push\n\
+            +run benchmarks\n";
+        let directives = extract_imperative_directives(diff);
+        assert_eq!(
+            directives,
+            vec![
+                "do #6zyp. update spec + tests. build + install for local testing. commit + push",
+                "run benchmarks",
+            ]
+        );
+        assert!(diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn extract_imperative_directives_ignores_blockquotes_and_fences() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,6 @@\n ctx\n\
+            +> do #skip\n\
+            +```\n\
+            +run tests\n\
+            +```\n\
+            +plain note\n";
+        let directives = extract_imperative_directives(diff);
+        assert!(
+            directives.is_empty(),
+            "unexpected directives: {directives:?}"
+        );
+        assert!(!diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn diff_contains_imperative_directive_for_approval_word() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+go\n";
+        assert!(diff_contains_imperative_directive(diff));
     }
 }

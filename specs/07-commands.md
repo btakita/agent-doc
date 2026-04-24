@@ -12,6 +12,8 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 `agent-doc <FILE>` and `agent-doc run <FILE>` are equivalent. Both dispatch by document mode from frontmatter, with template as the default when no explicit format is present.
 
+**Imperative-directive guard:** if the pending user diff contains executable directives like `do #id`, `run tests`, `build + install`, `commit + push`, or a one-word approval such as `go`, `run` rejects status-only/meta-only agent replies. The response must include either concrete execution evidence (for example commands, verification/commit sections, or file-path evidence) or a concrete blocker.
+
 **Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `recover` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
 
 ## init
@@ -378,6 +380,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - `--pending-only` is rejected because `finalize` is for response cycles, not standalone pending maintenance
 - success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed`
 - a write error plus a commit error is still a command failure even if some recovery work ran
+- imperative directive diffs (`do #id`, `run tests`, `build + install`, `commit + push`, or `go`) reject status-only/meta-only responses unless they contain concrete execution evidence or a concrete blocker
 
 ## repair
 

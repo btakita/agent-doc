@@ -644,6 +644,12 @@ fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc:
         .map(|(_, body)| body)
         .unwrap_or(current_doc);
 
+    if redact_component_contents_for_absorb(head_body)
+        != redact_component_contents_for_absorb(current_body)
+    {
+        return false;
+    }
+
     let Ok(head_components) = crate::component::parse(head_body) else {
         return false;
     };
@@ -785,6 +791,7 @@ pub fn commit(file: &Path) -> Result<bool> {
     // - User's subsequent edits → uncommitted (green git gutter)
     let mut snapshot_content = crate::snapshot::load(file)?;
     let file_content = std::fs::read_to_string(file).unwrap_or_default();
+    let head_doc = show_head(file)?;
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     crate::ops_log::log_op(
@@ -829,6 +836,18 @@ pub fn commit(file: &Path) -> Result<bool> {
         snapshot_content = Some(file_content.clone());
     }
 
+    let snapshot_matches_head = snapshot_content
+        .as_deref()
+        .zip(head_doc.as_deref())
+        .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
+    let post_commit_local_drift = if snapshot_matches_head {
+        head_doc
+            .as_deref()
+            .and_then(|head| classify_post_commit_local_drift(head, &file_content))
+    } else {
+        None
+    };
+
     // Warn on significant file/snapshot drift — may indicate an out-of-band write
     // that bypassed the agent-doc write pipeline (snapshot not updated).
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
@@ -846,7 +865,7 @@ pub fn commit(file: &Path) -> Result<bool> {
                 file_len
             ),
         );
-        if drift > 100 {
+        if drift > 100 && post_commit_local_drift.is_none() {
             eprintln!(
                 "[commit] WARNING: file is {} bytes larger than snapshot for {} — possible out-of-band write (snap={}, file={})",
                 drift,
@@ -874,7 +893,7 @@ pub fn commit(file: &Path) -> Result<bool> {
             if file_len > snap_len * 5
                 && let Some(ref snapshot) = snapshot_content
             {
-                let head_exists = show_head(file)?.is_some();
+                let head_exists = head_doc.is_some();
                 let scaffold_snapshot = is_empty_template_scaffold_snapshot(snapshot);
                 if !head_exists && scaffold_snapshot {
                     eprintln!(
@@ -930,7 +949,22 @@ pub fn commit(file: &Path) -> Result<bool> {
         snapshot_content = Some(file_content.clone());
     }
 
-    if snapshot_blob_already_matches_head(file, snapshot_content.as_deref())? {
+    if snapshot_matches_head {
+        if let Some(kind) = post_commit_local_drift {
+            eprintln!(
+                "[commit] detected post-commit local drift for {} — HEAD already contains the committed response; leaving {} uncommitted",
+                file.display(),
+                kind.describe()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "post_commit_local_drift file={} kind={} basis=head",
+                    file.display(),
+                    kind.as_str()
+                ),
+            );
+        }
         eprintln!(
             "[commit] staged snapshot already matches HEAD for {} — closing cycle as already committed",
             file.display()
@@ -1439,14 +1473,44 @@ fn relative_to(path: &Path, root: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-fn snapshot_blob_already_matches_head(file: &Path, snapshot_content: Option<&str>) -> Result<bool> {
-    let Some(snapshot) = snapshot_content else {
-        return Ok(false);
-    };
-    let Some(head_doc) = show_head(file)? else {
-        return Ok(false);
-    };
-    Ok(strip_head_markers(snapshot) == head_doc)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PostCommitLocalDriftKind {
+    UserFollowUp,
+    WorkingTreeEdits,
+}
+
+impl PostCommitLocalDriftKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::UserFollowUp => "user_follow_up",
+            Self::WorkingTreeEdits => "working_tree_edits",
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Self::UserFollowUp => "later local user follow-up edits",
+            Self::WorkingTreeEdits => "later local working-tree edits",
+        }
+    }
+}
+
+fn classify_post_commit_local_drift(
+    head_doc: &str,
+    current_doc: &str,
+) -> Option<PostCommitLocalDriftKind> {
+    if head_doc == current_doc {
+        return None;
+    }
+    if normalize_transient_agent_doc_markers(current_doc)
+        == normalize_transient_agent_doc_markers(head_doc)
+    {
+        return None;
+    }
+    if is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc) {
+        return Some(PostCommitLocalDriftKind::UserFollowUp);
+    }
+    Some(PostCommitLocalDriftKind::WorkingTreeEdits)
 }
 
 fn repair_clean_head_if_only_transient_worktree_drift(
@@ -3020,6 +3084,11 @@ mod tests {
             !log.contains("commit_failed"),
             "already-committed no-op must not be logged as commit_failed:\n{log}"
         );
+        assert!(
+            log.contains("post_commit_local_drift file=")
+                && log.contains("kind=working_tree_edits"),
+            "out-of-component local edits should be classified as working-tree drift:\n{log}"
+        );
     }
 
     #[test]
@@ -3172,6 +3241,12 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_local_drift file=") && log.contains("kind=user_follow_up"),
+            "follow-up noop closeout should classify post-commit local drift:\n{log}"
+        );
     }
 
     #[test]
@@ -3254,6 +3329,100 @@ mod tests {
         assert_eq!(
             snap, committed,
             "snapshot should also be restored to clean HEAD after transient cleanup"
+        );
+    }
+
+    #[test]
+    fn commit_identifies_post_commit_local_working_tree_edits() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: state\n\
+            clean committed response\n\
+            <!-- agent:boundary:head-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let working = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: state\n\
+            clean committed response plus later local edit\n\
+            <!-- agent:boundary:live-boundary -->\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- later local note -->\n";
+        fs::write(&doc, working).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("HEAD-current local edits should close as no-op");
+        assert!(
+            !did_commit,
+            "later local edits on top of HEAD must stay uncommitted"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
+
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working_after, working,
+            "commit should not overwrite later local edits when HEAD is already current"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_local_drift file=")
+                && log.contains("kind=working_tree_edits"),
+            "working-tree edits should be classified as post-commit local drift:\n{log}"
+        );
+        assert!(
+            !log.contains("drift_warning file="),
+            "post-commit local drift should not be mislabeled as a generic out-of-band write:\n{log}"
         );
     }
 

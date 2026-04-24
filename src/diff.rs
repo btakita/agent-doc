@@ -393,24 +393,24 @@ fn classify_prompt_bearing_block(
 }
 
 pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
-    let mut changes: Vec<PromptBearingChange> = extract_prompt_target_blocks(diff)
-        .into_iter()
-        .map(|text| PromptBearingChange {
+    let mut changes = annotate_diff(diff)
+        .map(|annotated| classify_prompt_bearing_changes_from_annotated(&annotated))
+        .unwrap_or_default();
+
+    // Annotated classification is the ordered source of truth because it preserves
+    // mixed prompt/edit/artifact encounter order across the changed tail. Keep the
+    // older prompt-block extractor as a safety net for prompt-target-only consumers
+    // and append only truly-missing prompt blocks.
+    for text in extract_prompt_target_blocks(diff) {
+        if changes.iter().any(|existing| {
+            existing.kind == PromptBearingChangeKind::PromptTarget && existing.text == text
+        }) {
+            continue;
+        }
+        changes.push(PromptBearingChange {
             kind: PromptBearingChangeKind::PromptTarget,
             text,
-        })
-        .collect();
-
-    if let Some(annotated) = annotate_diff(diff) {
-        for change in classify_prompt_bearing_changes_from_annotated(&annotated) {
-            if changes
-                .iter()
-                .any(|existing| existing.kind == change.kind && existing.text == change.text)
-            {
-                continue;
-            }
-            changes.push(change);
-        }
+        });
     }
 
     changes
@@ -2556,6 +2556,37 @@ Please fix the bug.\n\
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].kind, PromptBearingChangeKind::BoundaryArtifact);
         assert_eq!(changes[0].text, "### Re: Something (HEAD)");
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_preserves_mixed_triage_order() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,7 +1,12 @@\n\
+            The service returned 401 from this endpoint\n\
+            +The service returned 503 from this endpoint\n\
+            The rest of the response stays the same\n\
+            +### Re: delayed patchback — gpt-5\n\
+            +Patched after the fact.\n\
+            Context after repair\n\
+            +<!-- agent:boundary:test-boundary -->\n\
+            More context\n\
+            +Why was the `❯` prefix omitted here?\n\
+            The response continues below\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 4);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::ContentEdit);
+        assert_eq!(
+            changes[0].text,
+            "The service returned 503 from this endpoint"
+        );
+        assert_eq!(changes[1].kind, PromptBearingChangeKind::RecoveryArtifact);
+        assert_eq!(
+            changes[1].text,
+            "### Re: delayed patchback — gpt-5\nPatched after the fact."
+        );
+        assert_eq!(changes[2].kind, PromptBearingChangeKind::BoundaryArtifact);
+        assert_eq!(changes[2].text, "<!-- agent:boundary:test-boundary -->");
+        assert_eq!(changes[3].kind, PromptBearingChangeKind::PromptTarget);
+        assert_eq!(changes[3].text, "Why was the `❯` prefix omitted here?");
     }
 
     // parse_slash_commands tests

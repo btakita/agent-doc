@@ -33,6 +33,8 @@ That section is oldest-first and uses explicit subtypes:
 
 A turn is not complete until each `prompt_target` item is answered or explicitly grouped into one response. The prompt must also tell the agent to incorporate `content_edit` items and normalize artifact items instead of treating them as ordinary conversation.
 
+That section must preserve the diff encounter order across mixed kinds. If a `content_edit` or artifact appears before a later prompt in the changed tail, the prompt payload must keep that ordering instead of moving all `prompt_target` items to the front.
+
 ## Custom Backends
 
 Config overrides `command` and `args` for any agent name.

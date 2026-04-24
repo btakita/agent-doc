@@ -393,12 +393,13 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 1. Run the same recovery engine as `preflight` step 1:
    - replay a pending/captured response when the response still needs to be written
    - dedup and clean stale pending/capture state when the response is already present in the document
+   - for template docs, that `AlreadyApplied` dedup path still runs transcript/tail canonicalization before cleanup, including restoring required `❯ ` prompt prefixes from the prompt-bearing classifier
    - respect safe manual removal of an escaped template conversation tail
    - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly
 2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>` and then the same internal `session-check` closeout guard
 3. If no pending/captured repair path exists, print the usual "No pending response found" note and stop without committing
 
-**Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit/session-check boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content.
+**Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit/session-check boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content. For template docs that means `AlreadyApplied` is still a document-mutation-capable repair outcome when transcript canonicalization is needed.
 
 ## watch
 

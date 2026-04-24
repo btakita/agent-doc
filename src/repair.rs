@@ -8,9 +8,10 @@
 //!   capture, and applies it if found. Terminal captures (`committed`, `discarded`) are ignored for
 //!   replay so later preflights do not repeatedly enter the dedup path after a successful closeout.
 //!   Before applying, reads the current document and checks if the response is already present
-//!   (dedup guard). If already present, removes the pending file without writing and returns
-//!   `RepairOutcome::AlreadyApplied`. When replaying from a durable capture, requires the current
-//!   document and snapshot hashes to still match the captured baseline; otherwise fails closed.
+//!   (dedup guard). If already present, template docs still run binary-owned transcript/tail
+//!   normalization before pending cleanup, then `run(file)` returns `RepairOutcome::AlreadyApplied`.
+//!   When replaying from a durable capture, requires the current document and snapshot hashes to
+//!   still match the captured baseline; otherwise fails closed.
 //!   Template/CRDT documents always replay through the template write path
 //!   (`write::apply_template_from_string`) even when the captured response is raw text
 //!   without `<!-- patch:... -->` fences (for example `compact exchange` closeouts).
@@ -37,6 +38,7 @@
 //! - recover_append_response: pending plain text response → applied as Assistant section, file updated, pending file removed, run returns Ok(true)
 //! - empty_pending_cleaned_up: pending file with only whitespace → run returns Ok(false), pending file removed
 //! - recover_skips_duplicate_apply: pending response already present in document → run returns Ok(false), pending file removed, document unchanged
+//! - recover_already_applied_template_canonicalizes_prompt_prefixes: template dedup still restores missing `❯ ` transcript prefixes before cleanup
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
@@ -121,11 +123,32 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     Ok(RepairOutcome::StalePreflightLockRepaired)
 }
 
-fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<String> {
-    match crate::template::repair_conversation_tail_outside_exchange(doc_content)? {
-        Some(repaired) => {
-            write::atomic_write_pub(file, &repaired)?;
-            snapshot::save(file, &repaired)?;
+fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
+    let tail_repaired = crate::template::repair_conversation_tail_outside_exchange(doc_content)?
+        .unwrap_or_else(|| doc_content.to_string());
+    let tail_changed = tail_repaired != doc_content;
+
+    let (fm, _) = frontmatter::parse(&tail_repaired)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+
+    let mut repaired = tail_repaired.clone();
+    if fm.resolve_mode().is_template()
+        && let Some(snapshot_content) = snapshot::load(file)?
+    {
+        repaired = write::normalize_user_prompts_in_exchange_safe(
+            &repaired,
+            &repaired,
+            &snapshot_content,
+            file,
+        );
+        repaired = write::normalize_template_structure_or_fail(&repaired, file)?;
+    }
+    let prompt_changed = repaired != tail_repaired;
+
+    if tail_changed || prompt_changed {
+        write::atomic_write_pub(file, &repaired)?;
+        snapshot::save(file, &repaired)?;
+        if tail_changed {
             crate::ops_log::log_op(
                 file,
                 &format!("repair_exchange_tail file={}", file.display()),
@@ -134,10 +157,20 @@ fn repair_template_tail_if_needed(file: &Path, doc_content: &str) -> Result<Stri
                 "[repair] repaired escaped conversation tail in {}",
                 file.display()
             );
-            Ok(repaired)
         }
-        None => Ok(doc_content.to_string()),
+        if prompt_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_prompt_prefixes file={}", file.display()),
+            );
+            eprintln!(
+                "[repair] repaired transcript prompt prefixes in {}",
+                file.display()
+            );
+        }
     }
+
+    Ok(repaired)
 }
 
 fn same_content_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
@@ -253,7 +286,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
-        let repaired_doc = repair_template_tail_if_needed(file, &doc_content)?;
+        let repaired_doc = repair_template_doc_if_needed(file, &doc_content)?;
         let state_is_open = crate::cycle_state::load(file)?
             .map(|state| state.is_open())
             .unwrap_or(true);
@@ -579,6 +612,54 @@ mod tests {
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Recovered from capture."));
+    }
+
+    #[test]
+    fn recover_already_applied_template_canonicalizes_prompt_prefixes() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Prior question?\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response =
+            "<!-- patch:exchange -->\n### Re: topic — gpt-5\n\nBody\n<!-- /patch:exchange -->";
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Prior question?\n",
+            "Why was this missed?\n",
+            "### Re: topic — gpt-5\n\n",
+            "Body\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+
+        save_pending(&doc, response).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::AlreadyApplied);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains("❯ Why was this missed?"),
+            "repair should restore the missing prompt prefix:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\nWhy was this missed?\n"),
+            "bare prompt target should not remain after repair:\n{repaired}"
+        );
+
+        let saved_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            saved_snapshot, repaired,
+            "snapshot should advance to the canonicalized repaired document"
+        );
     }
 
     #[test]

@@ -605,6 +605,10 @@ fn test_skill_md_contains_required_steps() {
         ),
         "SKILL.md should treat response persistence as the close-out boundary"
     );
+    assert!(
+        content.contains("Imperative edits are executable directives"),
+        "SKILL.md should treat document-local `do` edits as executable work directives"
+    );
 }
 
 #[test]

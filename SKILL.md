@@ -29,6 +29,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 ## Core Principles
 
 - **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
+- **Imperative edits are executable directives** — when the user writes `do #id`, `go`, `fix this`, `run tests`, `build + install`, `commit + push`, or similar inside the session document, treat that as authorization to perform the requested repo work from the document context. Do not require the same instruction to be repeated in chat.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
 - **Show progress** — stream your response in the console so the user sees real-time feedback.
 
@@ -68,6 +69,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, inline annotations (blockquotes, comments, edits to previous responses), and structural changes.
+- If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 

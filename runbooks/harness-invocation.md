@@ -3,6 +3,12 @@
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 
+## Directive Semantics
+
+- Imperative user edits inside an `agent-doc` session document are executable directives, not just topics to comment on.
+- `do #qj5w now`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar document edits authorize the same underlying repo work they would authorize in chat.
+- The agent should either perform that work before `finalize` / `write --commit`, or stop on a concrete blocker. Do **not** emit status-only progress prose while doing neither.
+
 ## Manual Repair Default
 
 - For both **Claude Code** and **Codex**, the default documented manual-repair path is `agent-doc write --commit <FILE>` once the user prompt is already present in the document.

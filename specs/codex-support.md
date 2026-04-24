@@ -159,6 +159,7 @@ Key differences from Claude Code:
    - Added "Harness Compatibility" section referencing `runbooks/harness-invocation.md`
    - Abstracted Claude-specific tool references (`Skill` tool, `AskUserQuestion`) behind generic + runbook dispatch
    - Slash command section (0b) now conditionally dispatches per harness
+   - Shared directive semantics: imperative edits inside the session document authorize the underlying repo work directly; agents should execute that work or stop on a concrete blocker instead of replying with status-only/meta prose
    - Success criteria uses "agent console" instead of "Claude console"
 
 2. ✅ **New runbook `runbooks/harness-invocation.md`:**

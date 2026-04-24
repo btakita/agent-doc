@@ -783,6 +783,17 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_treats_imperative_document_edits_as_executable_work() {
+        assert!(SKILL_TEMPLATE.contains("Imperative edits are executable directives"));
+        assert!(
+            SKILL_TEMPLATE.contains("Do not require the same instruction to be repeated in chat")
+        );
+        assert!(SKILL_TEMPLATE.contains(
+            "Do not keep appending \"starting/continuing\" status prose while the requested work remains undone"
+        ));
+    }
+
+    #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
         assert!(SKILL_TEMPLATE.contains("Manual repair / missed patchback rule (all harnesses)"));
         assert!(
@@ -831,6 +842,8 @@ mod tests {
         assert!(content.contains("last_assistant_message"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
+        assert!(content.contains("Imperative edits are executable directives"));
+        assert!(content.contains("Do not require the same instruction to be repeated in chat"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
     }
 
@@ -882,6 +895,11 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "harness-invocation.md")
             .expect("harness-invocation.md not found");
+        assert!(content.contains("## Directive Semantics"));
+        assert!(content.contains(
+            "Imperative user edits inside an `agent-doc` session document are executable directives"
+        ));
+        assert!(content.contains("Do **not** emit status-only progress prose while doing neither"));
         assert!(content.contains("## Manual Repair Default"));
         assert!(content.contains("For both **Claude Code** and **Codex**"));
         assert!(content.contains("Claude Code"));
@@ -977,6 +995,7 @@ mod tests {
             assert!(content.contains("requires the cycle to reach `committed`"));
             assert!(content.contains("agent-doc session-check <FILE>"));
             assert!(content.contains("final document-mutation boundary for the cycle"));
+            assert!(content.contains("Imperative edits are executable directives"));
             assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
             assert!(content.contains("Agent harnesses own full-suite verification"));
             assert!(content.contains("Do not rely on a pre-commit hook"));

@@ -168,13 +168,46 @@ That is a different failure mode from the earlier snapshot-lag case.
 On the `doc-lint.sh` substance: the quoted Codex explanation looks directionally right for the README bug itself. The original miss was that `doc-lint` validated relative links against the local checkout shape and lacked a repo-boundary rule, so submodule-relative links could look valid on disk while still being wrong for GitHub. The missing-header short-circuit I called out is still a real masking bug in the current checker, but it does **not** explain this specific missing patchback.
 
 I added a pending item for the actual `tasks/docs.md` closeout failure.
-<!-- agent:boundary:746649a1 -->
+❯ do #hj0x
+### Re: `#hj0x` Codex closeout for `src/session-share/tasks/docs.md` — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+Root cause:
+
+- The Codex Stop hook scoped active-session state to a single `.agent-doc` root derived from the current CWD and also required an exact `turn_id` match.
+- If `UserPromptSubmit` ran from the superproject and a later `Stop` ran from `src/session-share` (or the reverse), or if the closeout opportunity arrived on a later turn in the same Codex session, the hook could miss the tracked doc and silently no-op. That matches the `tasks/docs.md` failure shape: `preflight_started` with no later write/capture/stop-closeout event.
+
+What changed:
+
+- `src/codex_hook.rs` now mirrors tracked-session state across all nested `.agent-doc` roots reachable from the CWD and tracked document path.
+- `Stop` now searches those candidate roots, clears state across them, and still inspects the tracked document even when the stop arrives on a later turn in the same Codex session.
+- Added regression coverage for the nested-root + later-turn replay path and updated the Codex hook contract in `README.md`, `SPEC.md`, `SKILL.md`, `runbooks/harness-invocation.md`, and `VERSIONS.md`.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml codex_hook::tests:: -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+- `agent-doc skill install`
+
+Commit / push:
+
+- `src/agent-doc`: `b893c29` — `fix: harden codex stop-hook closeout`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#hj0x` is done.
+- A later Codex `Stop` can no longer skip auto-closeout just because the workspace CWD moved between nested `.agent-doc` roots or because the stop event's `turn_id` is newer than the original submit event.
+<!-- agent:boundary:a6f32666 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hj0x] Investigate/fix Codex closeout for src/session-share/tasks/docs.md: console response existed, but no finalize/hook capture wrote it into the document; current cycle is left stuck at preflight_started.
+- [x] [#hj0x] Investigate/fix Codex closeout for src/session-share/tasks/docs.md: console response existed, but no finalize/hook capture wrote it into the document; current cycle is left stuck at preflight_started.
 - [ ] [#w199] Fix doc-lint check ordering so missing Document Header does not short-circuit strict link validation; README.md should still report broken/cross-repo links.
 - [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

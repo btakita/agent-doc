@@ -13,8 +13,8 @@ codex_args: -s danger-full-access
 
 <!-- agent:status patch=replace -->
 
-✅ Verified and landed the bare-path compatibility alias plus committed-historical snapshot self-heal in `src/agent-doc`. `agent-doc <FILE>` now routes to `run`, and `commit` / `session-check` repair already-committed historical `### Re:` drift when `HEAD` proves the response is no longer out-of-band. The latest `src/agent-doc` change is built, installed locally, committed, and pushed.
-Remaining open work in this bug doc is still only the multi-user pending auto-create policy follow-up (`#ha3h`), but it remains gated: the linked issue explicitly says not to ship it before multi-user workspace support, and the current `src/agent-doc` tree still documents the product as single-user only.
+✅ Verified and landed delayed-recovery patchback provenance in `src/agent-doc`. Durable captures now preserve whether a response only reached the document/commit boundary later via recovery replay, instead of flattening that history into a generic final `committed` state.
+The latest `src/agent-doc` change is built, installed locally, committed, and pushed. Remaining open work in this bug doc is again only the gated multi-user pending auto-create policy follow-up (`#ha3h`).
 <!-- /agent:status -->
 
 ## Exchange
@@ -847,13 +847,58 @@ So the precise conclusion is:
 - the quoted explanation rationalized the miss incorrectly
 
 I added a recommended backlog item for the remaining product gap: when a later synthetic/file-delivery recovery closes the turn, `agent-doc` should explain that as delayed recovered patchback after out-of-band closeout, not as operator error.
-<!-- agent:boundary:7c7730b5 -->
+
+❯ do #vezj. Note that the patchback did not happen. `  If you want, I can patch back the response into tasks/claudescore-3.md now.`
+### Re: `#vezj` delayed recovery patchback provenance — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- `src/capture.rs` now preserves capture lifecycle provenance with `write_applied_at`, `replayed_at`, `committed_at`, and `discarded_at` instead of collapsing everything into the last terminal state only.
+- When a response reaches `committed` after an earlier recovery replay, `ops.log` now records `capture_committed_after_replay ...`, so later forensics can say the response only patchbacked during recovery/closeout.
+- Updated `README.md`, `specs/07-commands.md`, and `VERSIONS.md` so the durable-capture contract explicitly says delayed recovered patchbacks remain distinguishable from original same-turn patchbacks.
+
+On your specific note: yes, the quoted line `If you want, I can patch back the response into tasks/claudescore-3.md now.` did **not** patch back on the original turn. Before this fix, once the later recovery path committed, the durable capture record no longer preserved that distinction clearly enough. `#vezj` fixes that product gap.
+
+Verification:
+
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml committed_capture_preserves_replay_provenance -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_crosses_commit_boundary_for_git_backed_replay -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `cdbd81c` — `fix: preserve recovery patchback provenance`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#vezj` is done.
+- A later recovered patchback is now durably distinguishable from an original same-turn patchback, both in capture JSON and in `ops.log`.
+<!-- agent:boundary:2f7156f1 -->
 <!-- /agent:exchange -->
+
+<!--
+In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. update spec + tests. build + install for local testing. commit + push
+
+```
+  It also left tasks/monsterrodholders.md dirty again. The remaining uncommitted diff is:
+
+  - the broken line split before .invalid
+  - the added question I see https://boost-health.monsterrodholder74.workers.dev/ having a 401 response. You see a 503 from where?
+  - a new boundary marker < !-- agent:boundary:2fd364cc -- >
+
+  So the writeback commit exists, but there is still a follow-on working-tree edit in tasks/monsterrodholders.md:38.
+```
+-->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#vezj] [recommended] Distinguish delayed recovered patchbacks after out-of-band closeout from operator-missed-step failures in logs and forensic explanations.
+- [x] [#vezj] [recommended] Distinguish delayed recovered patchbacks after out-of-band closeout from operator-missed-step failures in logs and forensic explanations.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -668,12 +668,49 @@ Current result:
   - `route::tests::wait_for_agent_ready_codex_prompt`
 
 So there is no live repo bug for me to patch in this cycle. I closed `#tdps` as verified / non-reproducible on the current tree.
-<!-- agent:boundary:56d31934 -->
+
+❯ In the claudescore-3.md codex terminal:
+```
+› Why did you not patchback into claudescore-3.md?
+
+
+• Because I did not have new response content to write at that point.
+
+  What happened, in order:
+
+  1. agent-doc run tasks/claudescore-3.md already patchbacked a response into tasks/claudescore-3.md.
+  2. After that, you said write response back into claudescore-3.md, so I checked the agent-doc write flow and the
+     document state._
+  3. Before you gave the actual response text to append, you changed the instruction to commit.
+  4. I followed that and committed the already-written document state instead of inventing a new assistant block.
+
+  So the short answer is: I did not do a second patchback because there was no new response body specified, and I
+  should not fabricate one or patch the file by hand outside the agent-doc workflow.
+
+  If you want, I can append a specific response now via agent-doc write once you tell me the exact text or the
+  substance you want written.
+```
+### Re: `claudescore-3.md` "no new response content" explanation — gpt-5
+
+That explanation does **not** match the retained `src/session-share` artifacts.
+
+What I could verify:
+
+- By commit `898e0b4` (`agent-doc: record qj5w closeout response`) at **April 24, 2026 02:36:24 EDT**, `tasks/claudescore-3.md` already contained a concrete `Implemented and pushed #qj5w.` assistant response. So this was not a state where the system was still waiting for you to provide a response body.
+- The later `agent-doc(claudescore-3)` commit `b434931` at **April 24, 2026 02:45:48 EDT** did not append a missing response. It rewound the document: it removed the existing `Implemented and pushed #qj5w.` block and moved the status back to `Implementing ...`.
+- The `ops.log` entry at that same second shows `out_of_band_write ... drift=1322` followed by `commit_success` for `tasks/claudescore-3.md`, with **no** `write_origin`, `ipc_write_attempt`, or `ipc_write_consumed` event. That means the normal live write / finalize path did not run for that mutation.
+- The next `agent-doc(claudescore-3)` commit `b6f79af` at **April 24, 2026 02:46:01 EDT** then re-added the `Implemented and pushed #qj5w.` block and appended the `#007c` start response.
+
+So the real problem was not "there was no new response content to write." The real problem was that the session hit an out-of-band closeout path that reshuffled existing document state instead of doing a clean same-turn `finalize` patchback.
+
+The quoted terminal answer rationalized the miss as a content-specification issue, but the file and log history point to a **closeout-boundary bug** instead.
+<!-- agent:boundary:d7c9265c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#y9d6] [recommended] Investigate claudescore-3 closeout path that rewound and re-added an existing assistant response via out-of-band commit instead of same-turn finalize patchback.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

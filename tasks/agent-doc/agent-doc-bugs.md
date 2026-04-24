@@ -546,7 +546,7 @@ Verification:
 Commit / push:
 - committed locally in `src/agent-doc` as `9aa0b4e`
 - `origin/20260422/codex-agent-backend` had advanced to `b623b2f`, so I pushed the equivalent change on top of that tip as `9e99645`
-<!-- agent:boundary:7c73047c -->
+<!-- agent:boundary:bd63b4a9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -576,7 +576,6 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

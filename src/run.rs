@@ -294,7 +294,7 @@ fn build_prompt(
     the_diff: &str,
     content: &str,
 ) -> String {
-    let required_targets = diff::format_required_response_targets(the_diff)
+    let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     match (run_mode, fm.resume.is_some()) {
@@ -307,7 +307,7 @@ fn build_prompt(
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, required_targets, content
+            the_diff, prompt_bearing_changes, content
         ),
         (RunMode::Template, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
@@ -325,15 +325,15 @@ fn build_prompt(
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user asked questions inline (e.g., in blockquotes), address those too.",
-            the_diff, required_targets, content
+             If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
+            the_diff, prompt_bearing_changes, content
         ),
         (RunMode::Append, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user asked questions inline (e.g., in blockquotes), address those too.",
+             If the user asked questions or prompt-bearing edits inline (e.g., in blockquotes or prior responses), address those too.",
             content
         ),
     }
@@ -503,8 +503,9 @@ mod tests {
             +\n\
             +❯ Second unresolved question?\n";
         let prompt = build_prompt(RunMode::Template, &fm, diff, "doc");
-        assert!(prompt.contains("Required response targets (oldest first):"));
+        assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
         assert!(prompt.contains("Do not stop at the newest question"));
+        assert!(prompt.contains("kind=\"prompt_target\""));
         assert!(prompt.contains("❯ First unresolved question?"));
         assert!(prompt.contains("❯ Second unresolved question?"));
     }

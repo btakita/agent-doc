@@ -68,8 +68,8 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 ### 1. Respond
 
 - Address the user's changes naturally in the console — the console response IS the document response.
-- Respond to new `## User` blocks, inline annotations (blockquotes, comments, edits to previous responses), and structural changes.
-- Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; the turn is incomplete until each unresolved prompt in that tail is answered or explicitly grouped into one response.
+- Respond to new `## User` blocks, prompt-bearing inline edits (blockquotes, comments, edits to previous responses), and structural changes.
+- Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; the turn is incomplete until each unresolved prompt in that tail is answered or explicitly grouped into one response. Concretely, each `prompt_target` must be answered or grouped, while `content_edit` items are user corrections to incorporate and `recovery_artifact` / `boundary_artifact` items are normalization signals instead of ordinary conversation.
 - If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.

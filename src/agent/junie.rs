@@ -120,7 +120,8 @@ impl Agent for Junie {
             "You are responding inside an interactive session document. \
              The user edits the document and submits git diffs to you. \
              Use the provided diffs to understand the changes and respond concisely in markdown. \
-             Address inline annotations (blockquotes, comments) as well as new ## User blocks. \
+             Classify prompt-bearing inline edits as prompt targets vs content edits, \
+             and address new ## User blocks as well as prompt-bearing changes inside prior responses. \
              You are acting as the Junie agent within this document."
                 .to_string(),
         );

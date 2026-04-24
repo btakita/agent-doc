@@ -104,17 +104,22 @@
 //!   `[#id] Fix the cross-repo ...`, skipping code fences and blockquotes
 //! - `diff_contains_imperative_directive(diff)`: true when the diff contains either an explicit
 //!   imperative directive line or a one-word approval like `go`
+//! - `classify_prompt_bearing_changes(diff)`: extracts ordered user-authored changes that need
+//!   prompt-aware handling. Each item is typed as `prompt_target`, `content_edit`,
+//!   `recovery_artifact`, or `boundary_artifact`.
 //! - `extract_required_response_blocks_multiple_prompts`: changed exchange tail with two prompt
 //!   starts → both blocks returned oldest-first
 //! - `extract_required_response_blocks_preserves_code_fence_context`: prompt block followed by an
 //!   added fenced code block → returned block keeps the fence content intact
-//! - `format_required_response_targets_mentions_turn_completeness`: rendered section includes the
-//!   "do not stop at the newest question" contract
+//! - `format_prompt_bearing_changes_mentions_turn_completeness`: rendered section includes the
+//!   "do not stop at the newest question" contract plus edit/artifact handling guidance
 //! - `extract_required_response_blocks(diff)`: extracts ordered user request blocks from added
 //!   diff lines (for example `❯` prompts, questions, or imperative directives) so prompt builders
 //!   can restate the full changed exchange tail instead of anchoring only on the newest question
-//! - `format_required_response_targets(diff)`: renders those blocks into a prompt-ready section
-//!   with an explicit turn-completeness instruction
+//! - `format_required_response_targets(diff)`: compatibility wrapper that returns only the
+//!   `prompt_target` blocks from `classify_prompt_bearing_changes`
+//! - `format_prompt_bearing_changes(diff)`: renders the typed change list into a prompt-ready
+//!   section with explicit turn-completeness and edit/artifact instructions
 
 use anyhow::Result;
 use serde::Serialize;
@@ -180,6 +185,23 @@ pub enum DiffType {
 pub struct DiffClassification {
     pub diff_type: DiffType,
     pub diff_type_reason: String,
+}
+
+/// Canonical classification for user-authored prompt-bearing changes in a diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptBearingChangeKind {
+    PromptTarget,
+    ContentEdit,
+    RecoveryArtifact,
+    BoundaryArtifact,
+}
+
+/// Ordered user-authored change that the harness should surface to the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PromptBearingChange {
+    pub kind: PromptBearingChangeKind,
+    pub text: String,
 }
 
 /// Strip comments from document content for diff comparison.
@@ -262,32 +284,16 @@ pub fn annotate_diff(diff_text: &str) -> Option<String> {
 /// excluded from the "agent lines after" check to avoid false positives where
 /// end-of-exchange user input is followed only by closing markers.
 pub fn extract_inline_annotations(annotated_diff: &str) -> Vec<String> {
-    let lines: Vec<&str> = annotated_diff.lines().collect();
-    let mut annotations = Vec::new();
-
-    for (i, line) in lines.iter().enumerate() {
-        let content = if let Some(c) = line.strip_prefix("[user+] ") {
-            c
-        } else if let Some(c) = line.strip_prefix("[user~] ") {
-            c
-        } else {
-            continue;
-        };
-        if content.trim().is_empty() {
-            continue;
-        }
-        // Exclude [user~] lines that are only boundary marker additions ("(HEAD)" suffix).
-        if is_head_boundary_artifact(content) {
-            continue;
-        }
-        let has_substantive_agent_after =
-            lines[i + 1..].iter().any(|l| is_substantive_agent_line(l));
-        if has_substantive_agent_after {
-            annotations.push(content.to_string());
-        }
-    }
-
-    annotations
+    classify_prompt_bearing_changes_from_annotated(annotated_diff)
+        .into_iter()
+        .filter_map(|change| match change.kind {
+            PromptBearingChangeKind::PromptTarget | PromptBearingChangeKind::ContentEdit => {
+                Some(change.text)
+            }
+            PromptBearingChangeKind::RecoveryArtifact
+            | PromptBearingChangeKind::BoundaryArtifact => None,
+        })
+        .collect()
 }
 
 /// Returns true if the annotated line is a substantive agent line (not a structural marker).
@@ -310,6 +316,301 @@ fn is_head_boundary_artifact(content: &str) -> bool {
             || base.contains("### Re:")
             || base.contains("## ")
     }
+}
+
+fn is_boundary_artifact_line(content: &str) -> bool {
+    let trimmed = content.trim();
+    trimmed.starts_with("<!-- agent:boundary:")
+        || is_head_boundary_artifact(trimmed)
+        || trimmed == "(HEAD)"
+}
+
+fn is_recovery_artifact_line(content: &str) -> bool {
+    let trimmed = content.trim_start();
+    trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed == "## Assistant"
+        || trimmed == "## User"
+        || trimmed.starts_with("<!-- patch:")
+        || trimmed.starts_with("<!-- /patch:")
+}
+
+fn line_looks_like_prompt_target(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with("<!--")
+        && !trimmed.starts_with("```")
+        && !trimmed.starts_with("~~~")
+        && !trimmed.starts_with("### Re:")
+        && (trimmed.starts_with('❯')
+            || trimmed.ends_with('?')
+            || looks_like_imperative_directive(trimmed))
+}
+
+fn block_looks_like_prompt_target(block: &str) -> bool {
+    block.lines().any(line_looks_like_prompt_target)
+}
+
+fn classify_prompt_bearing_block(
+    block_text: &str,
+    has_substantive_agent_after: bool,
+) -> Option<PromptBearingChangeKind> {
+    let trimmed = block_text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let non_blank: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if non_blank.is_empty() {
+        return None;
+    }
+    if non_blank.iter().all(|line| is_boundary_artifact_line(line)) {
+        return Some(PromptBearingChangeKind::BoundaryArtifact);
+    }
+    if non_blank
+        .first()
+        .is_some_and(|line| is_recovery_artifact_line(line))
+    {
+        return Some(PromptBearingChangeKind::RecoveryArtifact);
+    }
+    if block_looks_like_prompt_target(trimmed) {
+        return Some(PromptBearingChangeKind::PromptTarget);
+    }
+    if has_substantive_agent_after {
+        return Some(PromptBearingChangeKind::ContentEdit);
+    }
+    None
+}
+
+pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
+    let mut changes: Vec<PromptBearingChange> = extract_prompt_target_blocks(diff)
+        .into_iter()
+        .map(|text| PromptBearingChange {
+            kind: PromptBearingChangeKind::PromptTarget,
+            text,
+        })
+        .collect();
+
+    if let Some(annotated) = annotate_diff(diff) {
+        for change in classify_prompt_bearing_changes_from_annotated(&annotated) {
+            if changes
+                .iter()
+                .any(|existing| existing.kind == change.kind && existing.text == change.text)
+            {
+                continue;
+            }
+            changes.push(change);
+        }
+    }
+
+    changes
+}
+
+fn classify_prompt_bearing_changes_from_annotated(
+    annotated_diff: &str,
+) -> Vec<PromptBearingChange> {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    let lines: Vec<&str> = annotated_diff.lines().collect();
+    let mut changes = Vec::new();
+    let mut i = 0usize;
+
+    while i < lines.len() {
+        let Some(mut block) = lines[i]
+            .strip_prefix("[user+] ")
+            .or_else(|| lines[i].strip_prefix("[user~] "))
+            .map(|line| vec![line.to_string()])
+        else {
+            i += 1;
+            continue;
+        };
+
+        let mut in_fence = false;
+        let mut fence_char = '`';
+        let mut fence_len = 3usize;
+        let first_trimmed = block[0].trim();
+        if let Some((fc, fl)) = fence_open(first_trimmed) {
+            in_fence = true;
+            fence_char = fc;
+            fence_len = fl;
+        }
+
+        i += 1;
+        while i < lines.len() {
+            if let Some(content) = lines[i]
+                .strip_prefix("[user+] ")
+                .or_else(|| lines[i].strip_prefix("[user~] "))
+            {
+                let trimmed = content.trim();
+                let starts_new_block = !in_fence
+                    && block.last().is_some_and(|line| line.trim().is_empty())
+                    && !trimmed.is_empty()
+                    && !trimmed.starts_with("```")
+                    && !trimmed.starts_with("~~~");
+                if starts_new_block {
+                    break;
+                }
+                block.push(content.to_string());
+                if !in_fence {
+                    if let Some((fc, fl)) = fence_open(trimmed) {
+                        in_fence = true;
+                        fence_char = fc;
+                        fence_len = fl;
+                    }
+                } else if fence_close(trimmed, fence_char, fence_len) {
+                    in_fence = false;
+                }
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        while block.first().is_some_and(|line| line.trim().is_empty()) {
+            block.remove(0);
+        }
+        while block.last().is_some_and(|line| line.trim().is_empty()) {
+            block.pop();
+        }
+        if block.is_empty() {
+            continue;
+        }
+
+        let has_substantive_agent_after = lines[i..]
+            .iter()
+            .any(|line| is_substantive_agent_line(line));
+        let text = block.join("\n");
+        let Some(kind) = classify_prompt_bearing_block(&text, has_substantive_agent_after) else {
+            continue;
+        };
+        changes.push(PromptBearingChange { kind, text });
+    }
+
+    changes
+}
+
+fn extract_prompt_target_blocks(diff: &str) -> Vec<String> {
+    fn is_response_heading(line: &str) -> bool {
+        line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:")
+    }
+
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    fn trim_block_lines(lines: &mut Vec<String>) {
+        while lines.first().is_some_and(|line| line.trim().is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.pop();
+        }
+    }
+
+    fn block_start(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("<!--")
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("~~~")
+            || is_response_heading(trimmed)
+        {
+            return false;
+        }
+        line_looks_like_prompt_target(trimmed)
+    }
+
+    fn flush(blocks: &mut Vec<String>, current: &mut Vec<String>) {
+        trim_block_lines(current);
+        if !current.is_empty() {
+            blocks.push(current.join("\n"));
+            current.clear();
+        }
+    }
+
+    let mut blocks = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+
+    for line in diff.lines() {
+        if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("@@ ") {
+            if !in_fence {
+                flush(&mut blocks, &mut current);
+            }
+            continue;
+        }
+
+        let Some(content) = line.strip_prefix('+') else {
+            if !in_fence {
+                flush(&mut blocks, &mut current);
+            }
+            continue;
+        };
+
+        let trimmed = content.trim();
+        let starts_new_block = !current.is_empty()
+            && !in_fence
+            && ((current.last().is_some_and(|line| line.trim().is_empty()) && !trimmed.is_empty())
+                || trimmed.starts_with('❯'));
+        if starts_new_block && current.iter().any(|line| !line.trim().is_empty()) {
+            flush(&mut blocks, &mut current);
+        }
+
+        if current.is_empty() && !block_start(content) {
+            continue;
+        }
+
+        current.push(content.to_string());
+
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+        }
+    }
+
+    flush(&mut blocks, &mut current);
+    blocks
 }
 
 /// Flush buffered remove lines as `[user-]`.
@@ -590,115 +891,13 @@ pub fn diff_contains_imperative_directive(diff: &str) -> bool {
 /// was answered. It makes the changed exchange tail explicit so the agent is
 /// reminded to address the full oldest-first set of prompts instead of only the
 /// newest visible question.
+#[allow(dead_code)]
 pub fn extract_required_response_blocks(diff: &str) -> Vec<String> {
-    fn is_response_heading(line: &str) -> bool {
-        line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:")
-    }
-
-    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
-        let fc = trimmed.chars().next()?;
-        if fc != '`' && fc != '~' {
-            return None;
-        }
-        let fl = trimmed.chars().take_while(|&c| c == fc).count();
-        if fl >= 3 { Some((fc, fl)) } else { None }
-    }
-
-    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
-        let fc = trimmed.chars().next().unwrap_or('\0');
-        if fc != fence_char {
-            return false;
-        }
-        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
-        fl >= fence_len && trimmed[fl..].trim().is_empty()
-    }
-
-    fn trim_block_lines(lines: &mut Vec<String>) {
-        while lines.first().is_some_and(|line| line.trim().is_empty()) {
-            lines.remove(0);
-        }
-        while lines.last().is_some_and(|line| line.trim().is_empty()) {
-            lines.pop();
-        }
-    }
-
-    fn block_start(line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("<!--")
-            || trimmed.starts_with("```")
-            || trimmed.starts_with("~~~")
-            || is_response_heading(trimmed)
-        {
-            return false;
-        }
-        trimmed.starts_with('❯')
-            || trimmed.ends_with('?')
-            || looks_like_imperative_directive(trimmed)
-    }
-
-    fn flush(blocks: &mut Vec<String>, current: &mut Vec<String>) {
-        trim_block_lines(current);
-        if !current.is_empty() {
-            blocks.push(current.join("\n"));
-            current.clear();
-        }
-    }
-
-    let mut blocks = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    let mut in_fence = false;
-    let mut fence_char = '`';
-    let mut fence_len = 3usize;
-
-    for line in diff.lines() {
-        if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("@@ ") {
-            if !in_fence {
-                flush(&mut blocks, &mut current);
-            }
-            continue;
-        }
-
-        let Some(content) = line.strip_prefix('+') else {
-            if !in_fence {
-                flush(&mut blocks, &mut current);
-            }
-            continue;
-        };
-
-        let trimmed = content.trim();
-
-        let starts_new_block = !current.is_empty()
-            && !in_fence
-            && (trimmed.starts_with('❯')
-                || (current.last().is_some_and(|line| line.trim().is_empty())
-                    && block_start(content)));
-        if starts_new_block && current.iter().any(|line| !line.trim().is_empty()) {
-            flush(&mut blocks, &mut current);
-        }
-
-        if current.is_empty() && !block_start(content) {
-            continue;
-        }
-
-        current.push(content.to_string());
-
-        if !in_fence {
-            if let Some((fc, fl)) = fence_open(trimmed) {
-                in_fence = true;
-                fence_char = fc;
-                fence_len = fl;
-            }
-        } else if fence_close(trimmed, fence_char, fence_len) {
-            in_fence = false;
-        }
-    }
-
-    flush(&mut blocks, &mut current);
-    blocks
+    extract_prompt_target_blocks(diff)
 }
 
 /// Render extracted request blocks as a prompt-ready turn-completeness section.
+#[allow(dead_code)]
 pub fn format_required_response_targets(diff: &str) -> Option<String> {
     let blocks = extract_required_response_blocks(diff);
     if blocks.is_empty() {
@@ -714,6 +913,31 @@ pub fn format_required_response_targets(diff: &str) -> Option<String> {
             "<target index=\"{}\">\n{}\n</target>\n\n",
             idx + 1,
             block
+        ));
+    }
+    Some(out)
+}
+
+/// Render all prompt-bearing changes as a prompt-ready section.
+pub fn format_prompt_bearing_changes(diff: &str) -> Option<String> {
+    let changes = classify_prompt_bearing_changes(diff);
+    if changes.is_empty() {
+        return None;
+    }
+
+    let mut out = String::from(
+        "User-authored prompt-bearing changes (oldest first):\n\
+         Do not stop at the newest question. The turn is incomplete until each `prompt_target` item below is answered or explicitly grouped into one response.\n\
+         Treat `content_edit` items as user corrections to incorporate, and treat `recovery_artifact` / `boundary_artifact` items as document-state signals to normalize rather than ordinary conversation.\n\n",
+    );
+    for (idx, change) in changes.iter().enumerate() {
+        out.push_str(&format!(
+            "<change index=\"{}\" kind=\"{}\">\n{}\n</change>\n\n",
+            idx + 1,
+            serde_json::to_string(&change.kind)
+                .unwrap_or_else(|_| "\"prompt_target\"".to_string())
+                .trim_matches('"'),
+            change.text
         ));
     }
     Some(out)
@@ -2184,6 +2408,60 @@ Please fix the bug.\n\
         );
     }
 
+    #[test]
+    fn classify_prompt_bearing_changes_promotes_inline_prompt_to_prompt_target() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            The prior explanation was incomplete\n\
+            +Why was the `❯` prefix omitted here?\n\
+            The rest of the response stays the same\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::PromptTarget);
+        assert_eq!(changes[0].text, "Why was the `❯` prefix omitted here?");
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_marks_inline_correction_as_content_edit() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            The service returned 401 from this endpoint\n\
+            +The service returned 503 from this endpoint\n\
+            The rest of the response stays the same\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::ContentEdit);
+        assert_eq!(
+            changes[0].text,
+            "The service returned 503 from this endpoint"
+        );
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_marks_response_heading_as_recovery_artifact() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n\
+            ctx\n\
+            +### Re: missed patchback — gpt-5\n\
+            +Patched after the fact.\n\
+            context end\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::RecoveryArtifact);
+        assert_eq!(
+            changes[0].text,
+            "### Re: missed patchback — gpt-5\nPatched after the fact."
+        );
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_marks_boundary_only_edit_as_boundary_artifact() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,2 @@\n\
+            -### Re: Something\n\
+            +### Re: Something (HEAD)\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::BoundaryArtifact);
+        assert_eq!(changes[0].text, "### Re: Something (HEAD)");
+    }
+
     // parse_slash_commands tests
 
     #[test]
@@ -2381,5 +2659,20 @@ Please fix the bug.\n\
         assert!(rendered.contains("Do not stop at the newest question"));
         assert!(rendered.contains("<target index=\"1\">"));
         assert!(rendered.contains("❯ Why were two prompts left unresolved?"));
+    }
+
+    #[test]
+    fn format_prompt_bearing_changes_mentions_edit_and_artifact_contract() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,6 @@\n\
+            context before\n\
+            +❯ Why was this missed?\n\
+            +\n\
+            +This line should say 503.\n\
+            context after\n";
+        let rendered = format_prompt_bearing_changes(diff).unwrap();
+        assert!(rendered.contains("User-authored prompt-bearing changes (oldest first):"));
+        assert!(rendered.contains("kind=\"prompt_target\""));
+        assert!(rendered.contains("kind=\"content_edit\""));
+        assert!(rendered.contains("Treat `content_edit` items as user corrections"));
     }
 }

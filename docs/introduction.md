@@ -15,7 +15,7 @@ Terminal prompts are ephemeral. You type, the agent responds, the context scroll
 3. **The agent responds** — the response is appended as a new `## Assistant` block
 4. **Your editor reloads** — the document now contains the full conversation
 
-The diff-based approach means you can also edit previous responses, delete noise, add inline annotations, and restructure the document freely. The agent sees exactly what changed.
+The diff-based approach means you can also edit previous responses, add prompt-bearing inline edits or corrections, delete noise, and restructure the document freely. The agent sees exactly what changed.
 
 ## Features
 

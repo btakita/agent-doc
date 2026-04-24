@@ -201,10 +201,15 @@ pub struct PreflightOutput {
     /// JSON to keep the common case quiet.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub pending_gated_count: usize,
-    /// User additions found inside agent response blocks (inline annotations).
-    /// These are `[user+]`/`[user~]` lines from the annotated diff that have
-    /// `[agent]` lines after them — corrections or questions the user inserted
-    /// into a previous agent response rather than appending at the end.
+    /// Canonical ordered list of user-authored changes that need prompt-aware handling.
+    /// `prompt_target` items require a response, `content_edit` items are corrections
+    /// the agent must incorporate, and `recovery_artifact` / `boundary_artifact`
+    /// items indicate document-state cleanup rather than ordinary conversation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_bearing_changes: Vec<crate::diff::PromptBearingChange>,
+    /// Legacy compatibility field: inline user edits inside prior agent responses.
+    /// Derived from `prompt_bearing_changes` by keeping only `prompt_target` and
+    /// `content_edit` items.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_annotations: Vec<String>,
     /// Short model name for attribution in `### Re:` response headers.
@@ -904,7 +909,14 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
-    // Step 4c2: Extract inline annotations (user edits inside agent response blocks).
+    // Step 4c2: Classify user-authored prompt-bearing changes across prompts, edits,
+    // and response/boundary artifacts.
+    let prompt_bearing_changes = diff_result
+        .as_ref()
+        .map(|d| diff::classify_prompt_bearing_changes(d))
+        .unwrap_or_default();
+
+    // Legacy compatibility surface for older skill consumers.
     let inline_annotations = annotated_diff
         .as_ref()
         .map(|a| diff::extract_inline_annotations(a))
@@ -989,6 +1001,7 @@ pub fn run(file: &Path) -> Result<()> {
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
+        prompt_bearing_changes,
         inline_annotations,
         slash_commands,
         builtin_commands,
@@ -2205,6 +2218,44 @@ mod tests {
         assert!(
             parsed.get("inline_annotations").is_none(),
             "inline_annotations should be omitted when empty"
+        );
+    }
+
+    #[test]
+    fn preflight_output_includes_prompt_bearing_changes() {
+        let output = PreflightOutput {
+            prompt_bearing_changes: vec![
+                crate::diff::PromptBearingChange {
+                    kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                    text: "❯ Why was this missed?".to_string(),
+                },
+                crate::diff::PromptBearingChange {
+                    kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+                    text: "This line should say 503, not 401.".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let changes = parsed["prompt_bearing_changes"].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0]["kind"], "prompt_target");
+        assert_eq!(changes[0]["text"], "❯ Why was this missed?");
+        assert_eq!(changes[1]["kind"], "content_edit");
+    }
+
+    #[test]
+    fn preflight_output_omits_prompt_bearing_changes_when_empty() {
+        let output = PreflightOutput {
+            prompt_bearing_changes: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("prompt_bearing_changes").is_none(),
+            "prompt_bearing_changes should be omitted when empty"
         );
     }
 

@@ -492,7 +492,7 @@ pub(crate) fn flush_to_document(
 
 /// Build the prompt for the streaming agent.
 fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) -> String {
-    let required_targets = diff::format_required_response_targets(the_diff)
+    let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     if fm.resume.is_some() {
@@ -505,7 +505,7 @@ fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) ->
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, required_targets, content
+            the_diff, prompt_bearing_changes, content
         )
     } else {
         format!(
@@ -786,8 +786,9 @@ mod tests {
             +\n\
             +❯ Second unresolved question?\n";
         let prompt = build_prompt(&fm, diff, "doc content");
-        assert!(prompt.contains("Required response targets (oldest first):"));
+        assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
         assert!(prompt.contains("Do not stop at the newest question"));
+        assert!(prompt.contains("kind=\"prompt_target\""));
         assert!(prompt.contains("❯ First unresolved question?"));
         assert!(prompt.contains("❯ Second unresolved question?"));
     }

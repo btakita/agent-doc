@@ -97,8 +97,9 @@ impl Agent for Claude {
         args.push(
             "You are responding inside an interactive session document. \
              The user edits the document and submits diffs to you. \
-             Respond concisely in markdown. Address inline annotations \
-             (blockquotes, comments) as well as new ## User blocks."
+             Respond concisely in markdown. Classify prompt-bearing inline edits \
+             as prompt targets vs content edits, and address new ## User blocks \
+             as well as prompt-bearing changes inside prior responses."
                 .to_string(),
         );
 
@@ -198,8 +199,9 @@ impl StreamingAgent for Claude {
         args.push(
             "You are responding inside an interactive session document. \
              The user edits the document and submits diffs to you. \
-             Respond concisely in markdown. Address inline annotations \
-             (blockquotes, comments) as well as new ## User blocks."
+             Respond concisely in markdown. Classify prompt-bearing inline edits \
+             as prompt targets vs content edits, and address new ## User blocks \
+             as well as prompt-bearing changes inside prior responses."
                 .to_string(),
         );
 

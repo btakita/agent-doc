@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.13
 
+- **Unified prompt-bearing change classifier.** The diff/prompt contract no longer splits explicit `required response targets` from `inline_annotations`. `diff.rs` now classifies ordered user-authored changes as `prompt_target`, `content_edit`, `recovery_artifact`, or `boundary_artifact`, prompt builders render that typed section directly, and preflight surfaces the canonical list as `prompt_bearing_changes` while keeping `inline_annotations` as a compatibility projection. Added regression coverage for inline prompt promotion, inline correction classification, and response-artifact detection.
+
 - **Committed captures no longer trigger repeat recovery dedup on later preflights.** `repair` now ignores terminal durable-capture states (`committed`, `discarded`) unless there is still a pending response file to reconcile, so routine `preflight` runs stop emitting the "`Response already present in document`" self-heal message after a cycle has already closed cleanly. Added regression coverage for the committed-capture/no-pending shape.
 
 - **Post-commit editor refresh now reuses the committed boundary ID.** Standalone IPC `reposition` messages can carry the exact exchange `boundary_id`, and both editor helpers now preserve that marker instead of minting a new one after `commit()`. This closes the boundary-only dirty-worktree shape where the response was already committed but the editor saved a fresh marker afterward. Added Rust, JetBrains, and VS Code regression coverage for explicit-ID repositioning.
@@ -74,7 +76,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.6
 
-- **Inline annotation surfacing.** Preflight JSON now includes `inline_annotations: Vec<String>` — user additions (`[user+]`/`[user~]`) that appear inside agent response blocks rather than at the end of the exchange. These are corrections or questions the user inserted into previous agent responses, requiring direct response before new content. SKILL.md updated with priority handling rule. Empty when no inline annotations exist (field omitted from JSON).
+- **Inline annotation surfacing.** Preflight JSON added `inline_annotations: Vec<String>` as the original surface for user additions (`[user+]`/`[user~]`) inside agent response blocks. In later versions this becomes the compatibility projection of the broader `prompt_bearing_changes` contract.
 
 - **False positive fixes for `inline_annotations`.** Two exclusion rules eliminate boundary artifacts: (1) `[user~]` lines where the only change is appending ` (HEAD)` to a heading are skipped — these are binary reposition artifacts. (2) `[agent]` lines that are component tags (`<!-- ... -->`), section headers (`# ...`), or blank are excluded from the "substantive agent lines after" check — end-of-exchange user input followed only by structural markers is now correctly classified as regular input, not inline annotations.
 

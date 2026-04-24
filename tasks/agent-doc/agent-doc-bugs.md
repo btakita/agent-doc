@@ -177,7 +177,27 @@ Result:
 - local `main`, `origin/main`, and `20260422/codex-agent-backend` now all resolve to `4f4a21d`
 
 So the branch is merged, and `main` now contains the full `20260422/codex-agent-backend` history.
-<!-- agent:boundary:563899ca -->
+
+❯ Please clean up the git history to exclude any committed .agent-doc file. No .agent-doc should be in the history.
+### Re: remove `.agent-doc` from `src/agent-doc` history — gpt-5
+Done in `src/agent-doc`.
+
+I rewrote the git history to strip the tracked `.agent-doc` runtime files out of every reachable ref, removed the local `refs/original` backups, expired reflogs, ran GC, and force-pushed the rewritten refs back to `origin`. `.gitignore` already had `.agent-doc/`, so the remaining fix was historical cleanup rather than a working-tree ignore change.
+
+This touched many descendant refs, not just the recent releases, because the polluted commits were in shared ancestry.
+
+Verification:
+- `git -C src/agent-doc rev-list --all -- .agent-doc` now returns nothing
+- local and remote `main` / `20260422/codex-agent-backend` now resolve to `bcc1044`
+- `20260421/release-0.33.10` now resolves to `4ae8620`
+- rewritten release tags:
+  - `v0.33.10` -> `c4fb197`
+  - `v0.33.11` -> `4ae8620`
+  - `v0.33.12` -> `b2c4379`
+  - `v0.33.13` -> `d9f27ce`
+
+Any other clone of `btakita/agent-doc` now needs a fresh `git fetch --prune --tags` and then a reset/rebase onto the rewritten refs, or a fresh clone, before pushing more work.
+<!-- agent:boundary:633983f4 -->
 <!-- /agent:exchange -->
 
 

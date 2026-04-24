@@ -564,7 +564,30 @@ That pattern means the document content already matched `HEAD`; only transient w
 - later snapshot / boundary cleanup made the file look a few bytes ahead of the snapshot, which can read like “uncommitted patchback” even though the response was already in `HEAD`
 
 One extra detail from that cycle: the write went through the **file-delivery fallback** (`patches=0`, `ipc_patches=1`, `unmatched_len=179`) instead of a clean template-patch apply. So the compaction content still got written and committed, but it did so through the fallback path rather than the normal matched-template patch path. That likely made the state feel more suspicious, but the commit record shows it still closed successfully.
-<!-- agent:boundary:7d8ae41c -->
+
+❯ In monsterrodholders.md, `*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/archives/7b9f2a6394de97c213efeb3ec1e3d33b7b966229655f4720376409f6abef299f-20260424-062627.md`*` is currently uncommitted. This should not happen. Fix it
+### Re: `monsterrodholders.md` compact closeout targeted the wrong file — gpt-5
+
+Found the actual bug.
+
+When `agent-doc` runs inside a submodule with a **relative** document path like `tasks/monsterrodholders.md`, `resolve_to_git_root()` was checking the superproject first. In this repo the outer tree also has `tasks/monsterrodholders.md`, so commit/show-head paths could silently resolve to the outer document instead of the submodule document. That explains the false-success shape: `commit_success` was real, but for the wrong file, so the compacted `src/boost-client/tasks/monsterrodholders.md` remained uncommitted.
+
+What I changed in `src/agent-doc`:
+
+- `src/git.rs` now resolves an existing cwd-local relative file **before** superproject fallback, then still returns the superproject root for IPC/project-root coordination.
+- Added a regression test for the exact shadow-path case: outer repo + submodule both contain `tasks/monsterrodholders.md`; resolution now selects the submodule file.
+- Updated `VERSIONS.md` with the new fix note.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_relative_path_prefers_existing_submodule_file_over_superproject_shadow -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+
+Result: full `make check` passed, including the new regression.
+
+I did **not** commit / push / install this turn because this prompt only said to fix the bug.
+<!-- agent:boundary:829d2cc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

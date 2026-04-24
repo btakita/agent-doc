@@ -176,3 +176,40 @@ fn finalize_rejects_status_only_response_for_imperative_directive() {
         "finalize should fail before patching a status-only response into the document"
     );
 }
+
+#[test]
+fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &original);
+    let edited = original.replace(
+        "<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+        "<!-- agent:pending -->\n- [ ] [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE\n<!-- /agent:pending -->\n",
+    );
+    fs::write(&doc, edited).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: test — gpt-5\nI’m starting #n8q4 now. First pass is underway.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "imperative document directive requires concrete execution evidence or a concrete blocker",
+        ));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !after.contains("### Re: test — gpt-5"),
+        "finalize should fail before patching a status-only response into the document"
+    );
+}

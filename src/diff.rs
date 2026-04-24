@@ -100,7 +100,8 @@
 //! - `parse_slash_commands_with_args`: `/agent-doc foo.md` → `["/agent-doc foo.md"]`
 //! - `parse_slash_commands_requires_letter_after_slash`: `/ `, `//comment` → empty
 //! - `extract_imperative_directives(diff)`: finds added user directive lines like `do #id`,
-//!   `run tests`, `build + install`, or `commit + push`, skipping code fences and blockquotes
+//!   `run tests`, `build + install`, `commit + push`, or pending-item prose like
+//!   `[#id] Fix the cross-repo ...`, skipping code fences and blockquotes
 //! - `diff_contains_imperative_directive(diff)`: true when the diff contains either an explicit
 //!   imperative directive line or a one-word approval like `go`
 
@@ -110,6 +111,38 @@ use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
 use crate::{component, snapshot};
+
+const IMPERATIVE_LEADING_VERBS: &[&str] = &[
+    "add",
+    "audit",
+    "benchmark",
+    "build",
+    "check",
+    "clean",
+    "close",
+    "commit",
+    "document",
+    "fix",
+    "harden",
+    "implement",
+    "install",
+    "investigate",
+    "note",
+    "preserve",
+    "push",
+    "record",
+    "refactor",
+    "remove",
+    "repair",
+    "rerun",
+    "revisit",
+    "run",
+    "test",
+    "trace",
+    "update",
+    "verify",
+    "write",
+];
 
 /// Classification of a user diff for skill routing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -519,18 +552,12 @@ pub fn extract_imperative_directives(diff: &str) -> Vec<String> {
             continue;
         }
 
-        let normalized = content
-            .trim()
-            .trim_start_matches('❯')
-            .trim_start()
-            .trim_end_matches(|c: char| c.is_ascii_punctuation())
-            .trim();
-        if normalized.is_empty() {
+        let Some(normalized) = normalize_imperative_candidate(content) else {
             continue;
-        }
+        };
 
-        if looks_like_imperative_directive(normalized) {
-            directives.push(normalized.to_string());
+        if looks_like_imperative_directive(&normalized) {
+            directives.push(normalized);
         }
     }
 
@@ -568,6 +595,73 @@ fn looks_like_imperative_directive(line: &str) -> bool {
         || compact.starts_with("commit + push")
         || compact.contains(" commit and push")
         || compact.starts_with("commit and push")
+        || starts_with_imperative_verb(compact)
+}
+
+fn normalize_imperative_candidate(line: &str) -> Option<String> {
+    let mut trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        trimmed = rest.trim_start();
+    }
+
+    trimmed = strip_pending_checkbox_prefix(trimmed);
+
+    if let Some(rest) = trimmed.strip_prefix("[#")
+        && let Some(close) = rest.find(']')
+    {
+        let id = &rest[..close];
+        if !id.is_empty() && id.len() <= 8 && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+            trimmed = rest[close + 1..].trim_start();
+        }
+    }
+
+    let normalized = trimmed
+        .trim_start_matches('❯')
+        .trim_start()
+        .trim_end_matches(|c: char| c.is_ascii_punctuation())
+        .trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn strip_pending_checkbox_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    for prefix in ["[ ]", "[/]", "[x]", "[X]"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return rest.trim_start();
+        }
+    }
+    if let Some(inner) = trimmed.strip_prefix("[/")
+        && let Some(close) = inner.find(']')
+    {
+        let gate_type = &inner[..close];
+        if !gate_type.is_empty()
+            && gate_type
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return inner[close + 1..].trim_start();
+        }
+    }
+    trimmed
+}
+
+fn starts_with_imperative_verb(line: &str) -> bool {
+    let mut words = line.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    if IMPERATIVE_LEADING_VERBS.contains(&first) {
+        return true;
+    }
+    matches!((first, words.next()), ("clean", Some("up")))
 }
 
 /// Compute a unified diff between the snapshot and the current document.
@@ -2059,6 +2153,18 @@ Please fix the bug.\n\
                 "do #6zyp. update spec + tests. build + install for local testing. commit + push",
                 "run benchmarks",
             ]
+        );
+        assert!(diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn extract_imperative_directives_detects_pending_item_natural_language() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n\
+            +- [ ] [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE\n";
+        let directives = extract_imperative_directives(diff);
+        assert_eq!(
+            directives,
+            vec!["Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE"]
         );
         assert!(diff_contains_imperative_directive(diff));
     }

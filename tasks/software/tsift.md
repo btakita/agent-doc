@@ -2,7 +2,9 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
+agent: claude
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
 ---
 
 ## Status
@@ -866,14 +868,35 @@ The session wasn't just doing document exchange — it was doing deep debugging 
 **Compare:** session `7b749dfa` (also agent-doc-bugs) hit 165K tokens by turn 161, then got compacted down to 39K. After compaction it was fast again, growing slowly from 39K → 57K over 60 more turns.
 
 **Remediation:** `/clear` + restart the session, or let Claude Code's auto-compaction kick in. For sessions with lots of code investigation, compaction events are the natural relief valve.
-<!-- agent:boundary:3cd465f3 -->
-<!-- agent:boundary:e2fc4bc4 -->
+
+❯ do #xksz. update spec + tests. build + install for local testing. commit + push
+### Re: #xksz Kotlin query patterns — opus-4-6
+
+Done. Expanded Kotlin `.scm` queries from 3 patterns to 8:
+
+| Pattern | Kind | Example |
+|---------|------|---------|
+| `function_declaration` | function | `fun main()` |
+| `class_declaration "class"` | class | `class Foo` |
+| `class_declaration "interface"` | interface | `interface Bar` |
+| `class_declaration (class_modifier "data")` | data_class | `data class Baz(val x: Int)` |
+| `class_declaration (class_modifier "sealed")` | sealed_class | `sealed class Qux` |
+| `class_declaration (class_modifier "enum")` | enum_class | `enum class Color` |
+| `object_declaration` | object | `object Singleton` |
+| `companion_object` | companion_object | `companion object Named` |
+
+Added deduplication in `extract_symbols` — when overlapping patterns capture the same identifier (e.g. `data class Foo` matches both `data_class.name` and `class.name`), the more specific kind wins.
+
+Fixed SPEC.md: grammar crate name corrected from `tree-sitter-kotlin` 0.3.8 to `tree-sitter-kotlin-ng` 1.1.0.
+
+122 tests pass. Committed + pushed both tsift and agent-loop.
+<!-- agent:boundary:0ad2de1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
+- [x] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)

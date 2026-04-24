@@ -118,12 +118,63 @@ Why it did not catch the bad README links:
 - the script does `continue` immediately after that missing-header error, so it never reaches the strict relative-link checks for that file
 
 So the broken/cross-repo README links were masked by the earlier header failure. I added that as pending work too: `doc-lint` should still run the strict link checks even when the header is missing, otherwise exactly this class of bug slips through.
-<!-- agent:boundary:a61a5c5e -->
+
+❯ This is uncommitted in docs.md.
+❯ > README.md has links claudescore-plugin/ and claudescore.com/ pointing to a relative path...which breaks on github. Why did doc-lint.sh not catch this?
+
+❯ There really was no response patchback. The Codex session says:
+```
+• It didn’t catch it because doc-lint was checking local filesystem validity, not GitHub repo-boundary validity.
+
+  In the old logic, a relative link passed if the target existed on disk. In an initialized checkout, claudescore-plug
+  in/README.md and claudescore.com/README.md do exist, so the check passed locally even though GitHub renders those as
+  links crossing out of the parent repo. The missing rule was: “fail or warn if a relative link resolves into a differ
+  ent git root.”
+
+  I fixed that in two places:
+
+  - README.md:53 now uses absolute GitHub links for the two submodules instead of parent-repo-relative paths.
+  - scripts/doc-lint.sh:390 now warns on cross-repo relative link by comparing the source file’s git root to the
+    target’s git root.
+  - specs/doc-lint.md:82 now documents that warning explicitly.
+
+  Verification: ./scripts/doc-lint.sh check --strict now flags this class of issue elsewhere in the repo (AGENTS.md,
+  SECURITY.md, several news/*.md files). README.md is no longer in that bucket.
+
+  The edits are local only; I haven’t committed or pushed them.
+```
+
+❯ None of this is in doc.md.
+### Re: `tasks/docs.md` really had no patchback — gpt-5
+
+You're right. My previous answer was too broad, and for this specific quoted response it was wrong.
+
+What I could verify:
+
+- the quoted reply is **not** present in `src/session-share/tasks/docs.md`
+- that quoted text is **not** present in the `src/session-share/.agent-doc` captures/log search either
+- the only capture under the current `tasks/docs.md` doc hash is the older `synthetic-1777004426488.json`
+- `agent-doc session-check src/session-share/tasks/docs.md` currently reports an **interrupted** cycle: `cycle-1777005555107` is still `preflight_started`
+- after the older successful write at `1777004639`, the later ops log only shows the new preflight/commit drift check at `1777005555`; there is no later `write_origin` / `ipc_write_attempt` for that missing quoted response
+
+So the right diagnosis for this turn is:
+
+- there really was **no response patchback** for that quoted reply
+- the turn appears to have produced console text, but it never crossed the binary-owned persistence boundary (`agent-doc finalize` / `write --commit`)
+- the Codex stop-hook backstop also did not close it, because there is no new pending/capture record for that body and the session is still open at `preflight_started`
+
+That is a different failure mode from the earlier snapshot-lag case.
+
+On the `doc-lint.sh` substance: the quoted Codex explanation looks directionally right for the README bug itself. The original miss was that `doc-lint` validated relative links against the local checkout shape and lacked a repo-boundary rule, so submodule-relative links could look valid on disk while still being wrong for GitHub. The missing-header short-circuit I called out is still a real masking bug in the current checker, but it does **not** explain this specific missing patchback.
+
+I added a pending item for the actual `tasks/docs.md` closeout failure.
+<!-- agent:boundary:746649a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#hj0x] Investigate/fix Codex closeout for src/session-share/tasks/docs.md: console response existed, but no finalize/hook capture wrote it into the document; current cycle is left stuck at preflight_started.
 - [ ] [#w199] Fix doc-lint check ordering so missing Document Header does not short-circuit strict link validation; README.md should still report broken/cross-repo links.
 - [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.

@@ -44,11 +44,8 @@ Verification:
 - `cargo install --path .`
 
 Shipped in `src/agent-doc` as `f4b9f59` on branch `20260422/codex-agent-backend`, then pushed to `origin`.
-<!-- agent:boundary:e541d4cc -->
-<!-- /agent:exchange -->
 
-<!--
-In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. update spec + tests. build + install for local testing. commit + push
+❯ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. update spec + tests. build + install for local testing. commit + push
 
 ```
   It also left tasks/monsterrodholders.md dirty again. The remaining uncommitted diff is:
@@ -59,7 +56,28 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 
   So the writeback commit exists, but there is still a follow-on working-tree edit in tasks/monsterrodholders.md:38.
 ```
--->
+### Re: `src/boost-client` patchback drift — gpt-5
+
+I traced the remaining `tasks/monsterrodholders.md` dirtiness to the post-commit editor refresh path, not the response write itself.
+
+Root cause:
+- `commit()` already stages a fresh exchange boundary into `HEAD`.
+- The standalone IPC `reposition` signal then told the editor helper to mint another fresh boundary ID.
+- When the editor saved that buffer, the repo was left dirty by a boundary-only delta even though the response was already committed.
+
+I fixed that in `src/agent-doc` by sending the committed `boundary_id` with standalone reposition IPC and teaching the Rust, JetBrains, and VS Code helpers to reuse it when present. I also updated the editor spec and added regression coverage in Rust, JetBrains, and VS Code for explicit-ID reposition.
+
+Verification:
+- `make check`
+- `npm test` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc lib-install`
+
+Shipped in `src/agent-doc` as `896da1c` on branch `20260422/codex-agent-backend`, then pushed to `origin`.
+<!-- agent:boundary:b56cc84f -->
+<!-- /agent:exchange -->
 
 ## Pending / Not Built
 

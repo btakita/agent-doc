@@ -236,8 +236,11 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
         );
     }
 
-    if crate::recover::run(file)? {
+    let recover_outcome = crate::recover::run(file)?;
+    if recover_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
+    } else if recover_outcome.repaired() {
+        note.push_str(" The hook repaired the pending closeout state before auto-close.");
     }
 
     if !crate::git::is_in_git_repo(file) {

@@ -162,7 +162,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd(
         "/agent-doc repair",
         "<FILE>",
-        "Repair orphaned response / stale document cycle (`recover` alias kept)",
+        "Repair orphaned response / stale document cycle and auto-close git-backed repairs (`recover` alias kept)",
     ));
     cmds.push(cmd(
         "/agent-doc template-info",

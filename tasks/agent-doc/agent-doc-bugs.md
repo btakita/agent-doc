@@ -386,7 +386,35 @@ Verification:
 - `cargo install --path .`
 
 Shipped in `src/agent-doc` as `6fa4c8e` on `20260422/codex-agent-backend`, then pushed to `origin`.
-<!-- agent:boundary:ada8ded1 -->
+
+❯ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. Please fix. See my inquiry:
+```
+• Because I treated the patchback as an assistant-only response block, not as a transcript entry.
+
+  The local evidence shows two different patterns:
+
+  - agent-doc capture response_body values are response-only and do not include ❯.
+  - The archived/baseline session docs do use ❯  to mark user prompts inline in the transcript.
+
+  I followed the first pattern while writing directly into tasks/monsterrodholders.md, but that was the wrong fit for
+  this document. In this file’s exchange history, ❯  is part of the transcript format, so omitting it made the
+  patchback inconsistent with the surrounding record.
+
+  So the short answer is: I excluded it because I was patching “response text” rather than reconstructing the full
+  prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
+  I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
+```
+### Re: `src/boost-client` `❯` prompt prefix normalization — gpt-5
+
+Fixed the specific transcript issue in `src/boost-client/tasks/monsterrodholders.md`.
+
+I normalized the four recent user prompt lines in the exchange tail so they now use the same `❯ ` prefix as the surrounding session history:
+- `❯ do #h7cq. commit + push` (both occurrences)
+- `❯ I see https://boost-health.monsterrodholder74.workers.dev/ having a 401 response. You see a 503 from where?`
+- `❯ What needs to be done with https://boost-health.monsterrodholder74.workers.dev/ to make it work for the monit job? Are using the proper auth headers + post data?`
+
+I did not change the surrounding answer text, pending list, or any `agent-doc` product code in this cycle. This was a document-format repair in an already-dirty session file, not a shared formatter change. The `src/boost-client` repo still has uncommitted local changes, and I did not commit or push there in this cycle.
+<!-- agent:boundary:ad0bf485 -->
 <!-- /agent:exchange -->
 
 <!--

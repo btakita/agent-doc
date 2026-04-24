@@ -438,12 +438,11 @@ Outcome:
 
 - `#x87q` is done.
 - The installed `agent-doc` instruction surface now tells the agent to execute document-local directives like `do #id`, `run tests`, `build + install`, and `commit + push` as real work from the session document, or stop on a concrete blocker instead of emitting false-progress status prose.
-<!-- agent:boundary:157cfcd5 -->
+<!-- agent:boundary:fd8fd559 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#x87q] Treat imperative user edits in agent-doc session docs as executable work; do not misroute them into status-only/meta replies or require the same instruction to be repeated in chat. Add regression coverage around repeated `do #id now` prompts that previously produced false progress.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -8,6 +8,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Codex closeout contract hardened.** `agent-doc finalize` is now the strict happy path for normal session responses, Codex/direct-exec instructions require an immediate `agent-doc session-check <FILE>` after `finalize` or `write --commit`, and the installed Codex `Stop` hook can auto-close a pending response cycle from `last_assistant_message` before failing closed. Added CLI/integration coverage for the `finalize + session-check` path and the real Codex hook flow.
 
+- **Codex hook state now survives root / turn drift.** The repo-local `UserPromptSubmit` / `Stop` bridge now mirrors active-session state across nested `.agent-doc` roots and still inspects the tracked document on later `Stop` events in the same Codex session, so a closeout cannot be skipped just because the harness CWD moved between the superproject and a submodule or because the next `Stop` arrives with a newer turn id. Added regression coverage for the nested-root replay path.
+
 - **Interrupted-cycle + historical-drift repair.** `preflight` now fails closed on unrecoverable `preflight_started` cycles instead of snapshot-committing over newer live content, while `commit` / `session-check` can narrowly repair already-committed historical `### Re:` drift when `HEAD` proves the response is no longer out-of-band.
 
 - **Bare-path compatibility restored.** `agent-doc <FILE>` once again aliases to `agent-doc run <FILE>`, keeping older wrappers working while the explicit subcommand form remains canonical.

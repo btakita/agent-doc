@@ -1172,7 +1172,39 @@ What I can do to fix it:
 4. Add a regression that reproduces the `claudescore-3` shape exactly: pre-response commit succeeds, final response lands, process stops before commit, and the next cycle must close cleanly without duplicate patchback.
 
 I tightened the existing pending item for this bug instead of adding a duplicate entry.
-<!-- agent:boundary:2b47c1f1 -->
+
+do #n5hs. update spec + tests. build + install for local testing. commit + push
+### Re: `#n5hs` delivered-but-uncommitted patchback closeout — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- Tightened `src/run.rs` so `agent-doc <FILE>` / `agent-doc run <FILE>` now persist the final post-write state as `write_applied` after the response lands on disk and again after any `resume` update, before the post-write commit attempt.
+- Made git-backed `run` fail closed unless that post-write commit actually leaves the cycle in `committed`, instead of returning success while the cycle can still be left open.
+- Fixed the related recovery regression in `src/recover.rs` / `src/capture.rs`: once a cycle is already committed, the later dedup cleanup path no longer downgrades it back to `write_applied`.
+- Added integration coverage for the exact interrupted-run shape: simulate an abort after `write_applied`, confirm the response is already present, then prove `agent-doc preflight` finishes the commit without duplicating the patchback.
+- Updated `README.md`, `SPEC.md`, and `specs/07-commands.md` so the run closeout contract matches the new behavior.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --test run_integration -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml mark_write_applied_does_not_regress_committed_capture -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make -C src/agent-doc check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `5da28bc` — `fix: persist run closeout before commit`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#n5hs` is done.
+- Interrupted `run` closeouts now record the truthful `write_applied` phase, and the follow-up `preflight` path can finish that pending commit deterministically instead of leaving the document stranded as stale `response_captured` drift.
+<!-- agent:boundary:648a5453 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1180,7 +1212,7 @@ I tightened the existing pending item for this bug instead of adding a duplicate
 <!-- agent:pending patch=replace -->
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
-- [ ] [#n5hs] Prevent final response delivery from stopping at write_applied: after the last ipc_file_delivered/write_template_done, persist recoverable post-write/pre-commit state with owning repo/submodule metadata and deterministically finish commit + session-check on resume instead of leaving an uncommitted patchback or appending duplicates.
+- [x] [#n5hs] Prevent final response delivery from stopping at write_applied: after the last ipc_file_delivered/write_template_done, persist recoverable post-write/pre-commit state with owning repo/submodule metadata and deterministically finish commit + session-check on resume instead of leaving an uncommitted patchback or appending duplicates.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

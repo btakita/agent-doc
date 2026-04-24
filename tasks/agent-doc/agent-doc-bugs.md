@@ -457,13 +457,49 @@ So the remaining why is:
 In other words, `#x87q` removed the explicit "say it in chat" interpretation, but there is still no hard stop that says: after `do #qj5w now`, either produce concrete repo-side work or fail on a blocker. Without that guard, the model can still get stuck in a false-progress loop.
 
 That is why `claudescore-3.md` still looks broken even after `#x87q`: the refusal wording changed, but the harness still allowed repeated non-executing progress responses.
-<!-- agent:boundary:d4fce2c9 -->
+
+❯ do #6zyp. update spec + tests. build + install for local testing. commit + push
+### Re: `#6zyp` imperative directive fail-closed guard — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- Added a binary-side directive detector in `src/diff.rs` so pending diffs now recognize explicit work directives like `do #id`, `run tests`, `build + install`, `commit + push`, plus approval turns like `go`.
+- Added write/run enforcement in `src/write.rs` and `src/run.rs`: when a pending diff contains an imperative directive, `run` / `write` / `finalize` now fail closed on status-only or meta-only replies. The response must include either concrete execution evidence or a concrete blocker.
+- Added regression coverage for directive extraction, response classification, and the `finalize` reject path; updated `README.md`, `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the new invariant.
+
+Verification:
+
+- Focused tests passed:
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml diff::tests:: -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml future_work_signal_tests:: -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml --test finalize_integration -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+- `make -C src/agent-doc check` still fails on existing route tests:
+  - `route::tests::send_keys_delivers_claude_command_with_enter`
+  - `route::tests::send_keys_delivers_codex_command_with_enter`
+- Re-ran `cargo test --manifest-path src/agent-doc/Cargo.toml send_keys_delivers_ -- --nocapture`; the same two route tests still fail.
+
+Commit / push:
+
+- `src/agent-doc`: `c478bd9` — `fix: fail closed on directive-only replies`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#6zyp` is done.
+- Imperative document directives now have a binary backstop instead of relying only on instruction text, so status-only/meta-only replies no longer count as a successful closeout.
+<!-- agent:boundary:2c87172b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#6zyp] Enforce executable document directives end-to-end: after document-local commands like do #id / run tests / commit + push, require real repo work or fail closed instead of allowing repeated status-only progress replies.
+- [ ] [#tdps] [recommended] Investigate route::tests::send_keys_delivers_{claude,codex}_command_with_enter failing in make check
+- [x] [#6zyp] Enforce executable document directives end-to-end: after document-local commands like do #id / run tests / commit + push, require real repo work or fail closed instead of allowing repeated status-only progress replies.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

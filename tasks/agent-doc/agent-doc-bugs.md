@@ -50,13 +50,12 @@ Outcome:
 
 - `#3sd5` is done.
 - `agent-doc audit-docs` no longer audits the outer monorepo root when it is launched from that root via `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs`; it scopes discovery to the `src/agent-doc` crate workspace instead.
-<!-- agent:boundary:34468f16 -->
+<!-- agent:boundary:6d4fa018 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

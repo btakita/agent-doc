@@ -407,12 +407,43 @@ The correct behavior is:
 but not keep emitting status prose while doing neither.
 
 I added a pending item to track fixing that behavior.
-<!-- agent:boundary:2d227fe7 -->
+❯ do #x87q. update spec + tests. build + install for local testing. commit + push
+### Re: `#x87q` execute imperative document directives — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- Tightened the shared `SKILL.md` contract so imperative edits inside an `agent-doc` session document are treated as executable directives for the underlying repo work, not as requests to explain the workflow or restate the prompt in chat.
+- Added the same directive-semantics rule to the shared harness runbook and mirrored it in `README.md`, `SPEC.md`, and `specs/codex-support.md` so the Codex/Claude install surface and the product spec stay aligned.
+- Added regression coverage in `src/skill.rs` and `tests/test_cli.rs` to assert the generated skill / AGENTS content carries the new rule.
+
+Verification:
+
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml bundled_skill_treats_imperative_document_edits_as_executable_work -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml codex_content_uses_plain_text_invocation -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml harness_invocation_runbook_content -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml test_skill_md_contains_required_steps -- --nocapture`
+- `make -C src/agent-doc check` still fails on an existing unrelated route test: `route::tests::send_keys_delivers_claude_command_with_enter`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Commit / push:
+
+- `src/agent-doc`: `c7dc2f3` — `fix: execute imperative session directives`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#x87q` is done.
+- The installed `agent-doc` instruction surface now tells the agent to execute document-local directives like `do #id`, `run tests`, `build + install`, and `commit + push` as real work from the session document, or stop on a concrete blocker instead of emitting false-progress status prose.
+<!-- agent:boundary:157cfcd5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#x87q] Treat imperative user edits in agent-doc session docs as executable work; do not misroute them into status-only/meta replies or require the same instruction to be repeated in chat. Add regression coverage around repeated `do #id now` prompts that previously produced false progress.
+- [x] [#x87q] Treat imperative user edits in agent-doc session docs as executable work; do not misroute them into status-only/meta replies or require the same instruction to be repeated in chat. Add regression coverage around repeated `do #id now` prompts that previously produced false progress.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -445,7 +445,29 @@ I would treat this as a real product invariant, not agent guidance. The current 
 I did not patch `src/agent-doc` in this cycle.
 ### Re: no new prompt-bearing changes — gpt-5
 Preflight only found a boundary/pending-order artifact in this cycle, not a new prompt or repo-work request. I left the pending list order untouched because `pending_reordered: true` was already set by preflight, and there was nothing else to act on.
-<!-- agent:boundary:1ec88a73 -->
+
+❯ do #3fjy. update spec + tests. build + install for local testing. commit + push
+### Re: prompt-prefix invariant — gpt-5
+Shipped `#3fjy` in `src/agent-doc`.
+
+What changed:
+- `src/diff.rs` now exposes shared prompt-prefix targets from the canonical `prompt_target` classifier, so prompt-prefix preservation is tied to the same prompt-bearing contract the agent prompt/session logic already uses.
+- `src/write.rs` now feeds those classifier-derived targets into append-mode exchange normalization, instead of relying only on the older line-shape heuristic.
+- `src/session_check.rs` now reports bare prompt-target lines when a bypassed `### Re:` / `## Assistant` patchback leaves the transcript without the binary-owned `❯ ` prefix.
+- Updated the shipped instruction/spec surface (`SPEC.md`, `SKILL.md`, `specs/07-commands.md`, `VERSIONS.md`) to state that prompt-prefix preservation is a binary-enforced invariant derived from `prompt_bearing_changes`.
+
+Verification:
+- `cargo test prompt_prefix_`
+- `cargo test detect_bypassed_response_write_reports_bare_prompt_target -- --exact --nocapture`
+- `make check` (blocked by existing unrelated failure: `route::tests::send_keys_delivers_codex_command_with_enter`)
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc lib-install`
+
+Commit / push:
+- committed in `src/agent-doc` as `5b8fd9c`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:9fb913f8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -466,14 +488,12 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
   prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
   I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
 ```
-
-do #3fjy. update spec + tests. build + install for local testing. commit + push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3fjy] [recommended] Make prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
+- [x] [#3fjy] [recommended] Make prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
 - [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md

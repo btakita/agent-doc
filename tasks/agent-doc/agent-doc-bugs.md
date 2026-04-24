@@ -944,10 +944,48 @@ So the precise correction is:
 2. there was no same-turn response patchback for that failed run
 3. the pending item still looked semantically live, so the auto-close behavior is worth revisiting
 
+❯ I manually unchecked the box. Notice that `[ ]` is uncommitted. The committed state is `[x]`.
+❯ > the pending item still looked semantically live, so the auto-close behavior is worth revisiting
+
 There is also a code-level gap behind your point. In `src/agent-doc/src/diff.rs`, `looks_like_imperative_directive()` currently recognizes `fix #...` and `fix this`, but not a generic imperative like `Fix the cross-repo ...`. So if we want pending-item prose of that form to count as executable intent, or to block auto-close after a failed same-turn run, that needs explicit product support rather than assuming the current extractor already covers it.
 
+❯ Can we broaden the recognition to include imperitive operations expressed in natural language?
+
 I added a pending follow-up for that auto-close / imperative-text gap.
-<!-- agent:boundary:f4bf9f42 -->
+
+❯ do #3gwn. update spec + tests. build + install for local testing. commit + push
+### Re: `#3gwn` natural-language imperative pending tasks — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+
+- `src/diff.rs` now normalizes pending-item lines before imperative detection, stripping list / checkbox / `[#id]` prefixes so actionable text like `[#n8q4] Fix the cross-repo ...` is classified as executable intent.
+- The imperative detector now accepts a conservative set of leading imperative verbs, so natural-language task prose is no longer invisible to the executable-directive guard.
+- Added regression coverage in `src/diff.rs` and `tests/finalize_integration.rs`, and updated `SPEC.md`, `specs/07-commands.md`, `README.md`, and `VERSIONS.md` to document the broader contract.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml extract_imperative_directives_ -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml finalize_rejects_status_only_response_for_ -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Full-suite note:
+
+- `make -C src/agent-doc check` is still not green in this environment because `route::tests::send_keys_delivers_codex_command_with_enter` failed twice, including on direct rerun. That failure is in the tmux route/input path and is outside this diff's write/imperative codepath, but I am not claiming a fully green suite.
+
+Commit / push:
+
+- `src/agent-doc`: `b77c037` — `fix: detect natural-language imperative pending tasks`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- `#3gwn` is done.
+- Pending-item prose like `Fix the cross-repo ...` now counts as imperative executable intent, so status-only replies like `I'm starting now` are rejected instead of misclassifying that task text as non-directive continuation prose.
+<!-- agent:boundary:1c228688 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -967,7 +1005,7 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3gwn] Revisit pending auto-close when a same-turn `agent-doc` run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like `Fix the cross-repo ...`). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
+- [x] [#3gwn] Revisit pending auto-close when a same-turn `agent-doc` run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like `Fix the cross-repo ...`). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

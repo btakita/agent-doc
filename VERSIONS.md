@@ -16,6 +16,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Boundary cleanup invariants locked.** Boundary/head-marker cleanup is now regression-covered across the Rust path plus both editor helpers so stale boundary IDs and duplicate visible `(HEAD)` churn do not survive reposition.
 
+- **Repo-scoped commit closeout serialization.** `git::commit()` now keys its advisory closeout lock by the resolved git dir / submodule git dir, blocks for the short critical section instead of proceeding unlocked, and retries the full stage+commit transaction when `index.lock` contention hits `update-index`, `git add`, or `git commit`. Added regression coverage for a staged `index.lock` retry and two different docs contending on closeout in the same repo.
+
 ## 0.33.12
 
 - **Codex agent backend (Phase 1).** New `agent/codex.rs` implements `Agent` + `StreamingAgent` for the OpenAI Codex CLI. Parses Codex JSONL event stream (`thread.started`, `item.completed`, `turn.completed`). Session resume via `codex exec resume <id>`, fork via `codex exec resume --last`. Registered in `agent::resolve("codex")`. 11 unit tests covering event parsing, session ID propagation, and stream iterator behavior.

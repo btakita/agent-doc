@@ -52,7 +52,8 @@
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
 //! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob and post-commit cleanup leaves the working tree/snapshot clean
-//! - commit_lock_nonblocking_when_held: CommitLock::acquire returns None immediately when another process holds the lock (no indefinite blocking)
+//! - commit_retries_full_transaction_when_stage_hits_index_lock: `update-index` index.lock contention retries the full stage+commit transaction until the lock clears
+//! - commit_serializes_closeout_per_git_root: two different docs in the same repo contend on one repo-scoped lock and both close out cleanly
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
@@ -70,25 +71,28 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// RAII guard for an exclusive advisory lock serializing `git::commit()` runs
-/// on the same document across concurrent preflight sessions. Protects the
-/// read-modify-write on the working tree + index from interleaving.
+/// per git repo / submodule across concurrent sessions. Protects the short
+/// stage+commit critical section so two different docs in the same repo do not
+/// race on one shared git index.
 ///
-/// Lock file lives at `<project_root>/.agent-doc/locks/commit-<hash>.lock`.
-/// Uses `try_lock_exclusive()` (non-blocking): if another process holds the
-/// lock, returns `None` immediately and the caller proceeds unlocked. Git's
-/// own index.lock retry loop handles serialization at the git layer.
-/// Best-effort: if the path cannot be resolved (no project root yet), returns
-/// `None` and the caller proceeds unlocked.
+/// Lock file lives under the resolved git dir (`git rev-parse
+/// --absolute-git-dir`) at `agent-doc-locks/commit-repo-<hash>.lock`. That
+/// means nested docs in the same repo/submodule all share one lock, while
+/// different repos do not block each other, and lock creation does not alter
+/// `.agent-doc` project-root discovery.
+///
+/// Best-effort: if the path cannot be resolved or opened, returns `None` and
+/// the caller proceeds unlocked. When the lock is already held, acquisition
+/// blocks for the short commit critical section instead of proceeding unlocked.
 struct CommitLock {
     _file: File,
 }
 
 impl CommitLock {
-    fn acquire(doc: &Path) -> Option<Self> {
-        let canonical = doc.canonicalize().ok()?;
-        let root = crate::snapshot::find_project_root(&canonical)?;
-        let hash = crate::snapshot::doc_hash(doc).ok()?;
-        let lock_dir = root.join(".agent-doc/locks");
+    fn acquire(git_root: &Path) -> Option<Self> {
+        let lock_path = commit_lock_path_for_git_root(git_root)?;
+        let scope = commit_lock_scope_path(git_root)?;
+        let lock_dir = lock_path.parent()?.to_path_buf();
         if let Err(e) = std::fs::create_dir_all(&lock_dir) {
             eprintln!(
                 "[commit] commit-lock dir create failed: {} (proceeding unlocked)",
@@ -96,7 +100,6 @@ impl CommitLock {
             );
             return None;
         }
-        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
         let file = match OpenOptions::new()
             .create(true)
             .write(true)
@@ -114,10 +117,18 @@ impl CommitLock {
         };
         if let Err(e) = file.try_lock_exclusive() {
             eprintln!(
-                "[commit] commit-lock contended: {} (proceeding unlocked)",
+                "[commit] repo commit-lock contended for {}: {} (waiting)",
+                scope.display(),
                 e
             );
-            return None;
+            if let Err(e) = file.lock_exclusive() {
+                eprintln!(
+                    "[commit] commit-lock wait failed for {}: {} (proceeding unlocked)",
+                    scope.display(),
+                    e
+                );
+                return None;
+            }
         }
         Some(Self { _file: file })
     }
@@ -127,6 +138,35 @@ impl Drop for CommitLock {
     fn drop(&mut self) {
         let _ = self._file.unlock();
     }
+}
+
+fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(raw);
+    path.canonicalize().ok().or(Some(path))
+}
+
+fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
+    let scope_path = commit_lock_scope_path(git_root)
+        .or_else(|| git_root.canonicalize().ok())
+        .unwrap_or_else(|| git_root.to_path_buf());
+    let key = crate::snapshot::doc_hash_from_str(scope_path.to_string_lossy().as_ref());
+    Some(
+        scope_path
+            .join("agent-doc-locks")
+            .join(format!("commit-repo-{}.lock", key)),
+    )
 }
 
 /// Resolve a relative path against the git root (superproject root if in a submodule).
@@ -242,6 +282,7 @@ pub(crate) fn narrow_to_submodule(super_root: &Path, file: &Path) -> (PathBuf, b
 /// updated submodule pointer in the superproject. Uses an explicit pathspec on
 /// the commit so any other staged files in the parent index are preserved.
 fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg: &str) {
+    let _commit_lock = CommitLock::acquire(super_root);
     let rel = match submodule_root.strip_prefix(super_root) {
         Ok(r) => r,
         Err(_) => {
@@ -608,13 +649,6 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
 pub fn commit(file: &Path) -> Result<bool> {
     let t_total = std::time::Instant::now();
 
-    // Serialize concurrent preflight runs against each other: without this,
-    // step 2 (commit target doc) and step 2d (cross-document sweep) from two
-    // independent preflight processes can race through the read-modify-write
-    // on the working tree (e.g. the (HEAD)-strip rewrite) and produce a second
-    // commit that stages a shrunken file. Held until function return.
-    let _commit_lock = CommitLock::acquire(file);
-
     let (super_root, resolved) = resolve_to_git_root(file)?;
     // If the file lives inside a submodule, run git ops in the submodule itself.
     // The parent repo refuses to stage/commit paths that cross a submodule boundary
@@ -636,6 +670,10 @@ pub fn commit(file: &Path) -> Result<bool> {
             ),
         );
     }
+    // Serialize the short git index transaction per resolved repo / submodule.
+    // Without this, two different docs in the same repo can still interleave on
+    // one shared index even if their document hashes differ.
+    let _commit_lock = CommitLock::acquire(&git_root);
     let timestamp = chrono_timestamp();
     let doc_name = file
         .file_stem()
@@ -842,71 +880,48 @@ pub fn commit(file: &Path) -> Result<bool> {
         eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
     }
 
-    let t_staging = std::time::Instant::now();
-    if let Some(ref snap) = snapshot_content {
-        // Stage a CLEAN copy of the snapshot — `(HEAD)` is transient metadata
-        // and must never appear in the committed blob. Post-commit cleanup also
-        // collapses the working tree/snapshot back to the same clean shape, so
-        // moving the boundary across cycles cannot produce phantom marker-only
-        // diffs on previously committed headings.
-        let staged_content = strip_head_markers(snap);
-
-        let rel_path = relative_to(&resolved, &git_root);
-
-        if let Ok(hash) = hash_object(&git_root, &staged_content) {
-            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
-            let status = Command::new("git")
-                .current_dir(&git_root)
-                .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
-                .status()?;
-            if !status.success() {
-                eprintln!("[commit] update-index failed, falling back to git add");
-                git_add_force(&git_root, &resolved)?;
-            }
-        } else {
-            git_add_force(&git_root, &resolved)?;
-        }
-    } else {
-        // No snapshot — fall back to staging the entire file
-        git_add_force(&git_root, &resolved)?;
-    }
-    let elapsed_staging = t_staging.elapsed().as_millis();
-    if elapsed_staging > 0 {
-        eprintln!(
-            "[perf] commit.staging (hash_object+update-index): {}ms",
-            elapsed_staging
-        );
-    }
-
-    // Commit — ignore failure (nothing to commit is fine).
-    // Use .output() to capture stdout (prevents git status leaking to stdout
-    // when called from `preflight` which reserves stdout for JSON).
     let t_commit = std::time::Instant::now();
-    // Fix 3: retry up to 3 times on index.lock contention (concurrent sessions).
     let mut commit_attempts = 0u32;
     let commit_output = loop {
-        let out = Command::new("git")
-            .current_dir(&git_root)
-            .args(["commit", "-m", &msg, "--no-verify"])
-            .output();
-        match &out {
-            Ok(o) if !o.status.success() && commit_attempts < 3 => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                if stderr.contains("index.lock") || stderr.contains("Unable to create") {
-                    commit_attempts += 1;
+        let t_staging = std::time::Instant::now();
+        match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg) {
+            Ok(out) => {
+                let elapsed_staging = t_staging.elapsed().as_millis();
+                if elapsed_staging > 0 {
                     eprintln!(
-                        "[commit] index.lock contention, retry {}/3",
-                        commit_attempts
+                        "[perf] commit.staging (hash_object+update-index): {}ms",
+                        elapsed_staging
                     );
-                    std::thread::sleep(std::time::Duration::from_millis(
-                        50 * (1 << commit_attempts),
-                    ));
-                    continue;
                 }
+                break Ok(out);
             }
-            _ => {}
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail })
+                if commit_attempts < 3 =>
+            {
+                commit_attempts += 1;
+                let elapsed_staging = t_staging.elapsed().as_millis();
+                if elapsed_staging > 0 {
+                    eprintln!(
+                        "[perf] commit.staging (hash_object+update-index): {}ms",
+                        elapsed_staging
+                    );
+                }
+                eprintln!(
+                    "[commit] index.lock contention during {} (retry {}/3): {}",
+                    phase, commit_attempts, detail
+                );
+                std::thread::sleep(commit_retry_backoff(commit_attempts));
+                continue;
+            }
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                break Err(anyhow::anyhow!(
+                    "git {} failed after index.lock retries: {}",
+                    phase,
+                    detail
+                ));
+            }
+            Err(CommitTransactionError::Fatal(err)) => break Err(err),
         }
-        break out;
     };
     let commit_status = commit_output.as_ref().map(|o| o.status);
     let elapsed_commit = t_commit.elapsed().as_millis();
@@ -1195,6 +1210,125 @@ fn hash_object(git_root: &Path, content: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+enum CommitTransactionError {
+    RetryableIndexLock { phase: &'static str, detail: String },
+    Fatal(anyhow::Error),
+}
+
+fn commit_retry_backoff(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(50 * (1u64 << attempt))
+}
+
+fn is_index_lock_contention_text(text: &str) -> bool {
+    text.contains("index.lock") || text.contains("Unable to create")
+}
+
+fn render_git_output(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match (stderr.is_empty(), stdout.is_empty()) {
+        (false, true) => stderr,
+        (true, false) => stdout,
+        (false, false) => format!("{} | {}", stderr, stdout),
+        (true, true) => "no git output".to_string(),
+    }
+}
+
+fn output_has_index_lock_contention(output: &std::process::Output) -> bool {
+    is_index_lock_contention_text(&String::from_utf8_lossy(&output.stderr))
+        || is_index_lock_contention_text(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn git_add_force(
+    git_root: &Path,
+    resolved: &Path,
+) -> std::result::Result<(), CommitTransactionError> {
+    let rel_path = relative_to(resolved, git_root);
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["add", "-f", &rel_path.to_string_lossy()])
+        .output()
+        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
+    if !output.status.success() {
+        let detail = render_git_output(&output);
+        if output_has_index_lock_contention(&output) {
+            return Err(CommitTransactionError::RetryableIndexLock {
+                phase: "git add",
+                detail,
+            });
+        }
+        return Err(CommitTransactionError::Fatal(anyhow::anyhow!(
+            "git add failed: {}",
+            detail
+        )));
+    }
+    Ok(())
+}
+
+fn stage_snapshot_for_commit(
+    git_root: &Path,
+    resolved: &Path,
+    snapshot_content: Option<&str>,
+) -> std::result::Result<(), CommitTransactionError> {
+    if let Some(snap) = snapshot_content {
+        // Stage a CLEAN copy of the snapshot — `(HEAD)` is transient metadata
+        // and must never appear in the committed blob. Post-commit cleanup also
+        // collapses the working tree/snapshot back to the same clean shape, so
+        // moving the boundary across cycles cannot produce phantom marker-only
+        // diffs on previously committed headings.
+        let staged_content = strip_head_markers(snap);
+        let rel_path = relative_to(resolved, git_root);
+
+        if let Ok(hash) = hash_object(git_root, &staged_content) {
+            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
+            let output = Command::new("git")
+                .current_dir(git_root)
+                .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
+                .output()
+                .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
+            if !output.status.success() {
+                if output_has_index_lock_contention(&output) {
+                    return Err(CommitTransactionError::RetryableIndexLock {
+                        phase: "update-index",
+                        detail: render_git_output(&output),
+                    });
+                }
+                eprintln!("[commit] update-index failed, falling back to git add");
+                return git_add_force(git_root, resolved);
+            }
+            return Ok(());
+        }
+    }
+
+    // No snapshot or hash-object fallback — stage the live file path.
+    git_add_force(git_root, resolved)
+}
+
+fn stage_and_commit_once(
+    git_root: &Path,
+    resolved: &Path,
+    snapshot_content: Option<&str>,
+    msg: &str,
+) -> std::result::Result<std::process::Output, CommitTransactionError> {
+    stage_snapshot_for_commit(git_root, resolved, snapshot_content)?;
+
+    // Commit — ignore failure (nothing to commit is fine).
+    // Use .output() to capture stdout (prevents git status leaking to stdout
+    // when called from `preflight` which reserves stdout for JSON).
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["commit", "-m", msg, "--no-verify"])
+        .output()
+        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
+    if !output.status.success() && output_has_index_lock_contention(&output) {
+        return Err(CommitTransactionError::RetryableIndexLock {
+            phase: "git commit",
+            detail: render_git_output(&output),
+        });
+    }
+    Ok(output)
+}
+
 /// Compute `path` relative to `root`, canonicalizing both sides so symlinks
 /// don't cause `strip_prefix` mismatches. Falls back gracefully through
 /// non-canonical strip → original path.
@@ -1208,19 +1342,6 @@ fn relative_to(path: &Path, root: &Path) -> PathBuf {
         return rel.to_path_buf();
     }
     path.to_path_buf()
-}
-
-/// Force-add a file to the index (fallback path).
-fn git_add_force(git_root: &Path, resolved: &Path) -> Result<()> {
-    let rel_path = relative_to(resolved, git_root);
-    let status = Command::new("git")
-        .current_dir(git_root)
-        .args(["add", "-f", &rel_path.to_string_lossy()])
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("git add failed");
-    }
-    Ok(())
 }
 
 fn snapshot_blob_already_matches_head(file: &Path, snapshot_content: Option<&str>) -> Result<bool> {
@@ -1835,27 +1956,81 @@ mod tests {
         );
     }
 
-    // --- Fix 3: index.lock retry ---
+    // --- #73tv: repo-scoped commit serialization + full transaction retry ---
 
     #[test]
-    fn commit_retry_logic_handles_index_lock_error() {
-        // Verify the retry loop triggers when git commit stderr contains "index.lock".
-        // We simulate this by checking that the retry backoff constants are correct:
-        // attempts 1→100ms, 2→200ms, 3→400ms (50 * 2^attempt).
-        assert_eq!(
-            50u64 * (1u64 << 1u32),
-            100,
-            "retry 1 backoff should be 100ms"
+    fn commit_retries_full_transaction_when_stage_hits_index_lock() {
+        use std::fs;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let initial = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
+        fs::write(&doc, initial).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let updated =
+            "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nFixed.\n\n";
+        fs::write(&doc, updated).unwrap();
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, updated).unwrap();
+
+        let index_lock = root.join(".git/index.lock");
+        fs::write(&index_lock, "held").unwrap();
+
+        let remover = thread::spawn({
+            let index_lock = index_lock.clone();
+            move || {
+                thread::sleep(Duration::from_millis(200));
+                fs::remove_file(index_lock).unwrap();
+            }
+        });
+
+        let did_commit = commit(&doc).expect("commit should retry until index.lock clears");
+        remover.join().unwrap();
+
+        assert!(
+            did_commit,
+            "commit should create a git commit after retrying"
         );
-        assert_eq!(
-            50u64 * (1u64 << 2u32),
-            200,
-            "retry 2 backoff should be 200ms"
-        );
-        assert_eq!(
-            50u64 * (1u64 << 3u32),
-            400,
-            "retry 3 backoff should be 400ms"
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-2"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(session):"),
+            "git log should contain the retried agent-doc commit, got:\n{log_str}"
         );
     }
 
@@ -2808,7 +2983,6 @@ mod tests {
             snap, committed,
             "snapshot should also be restored to clean HEAD after transient cleanup"
         );
-
     }
 
     // --- Fix 1: snapshot saved before process::exit(75) (structural test) ---
@@ -3472,8 +3646,12 @@ mod tests {
     }
 
     #[test]
-    fn commit_lock_nonblocking_when_held() {
+    fn commit_serializes_closeout_per_git_root() {
         use std::fs;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         Command::new("git")
@@ -3481,20 +3659,46 @@ mod tests {
             .args(["init"])
             .output()
             .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
-        let doc = root.join("plan.md");
-        fs::write(&doc, "test").unwrap();
+        let doc_a = root.join("plan-a.md");
+        let doc_b = root.join("plan-b.md");
+        let initial = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
+        fs::write(&doc_a, initial).unwrap();
+        fs::write(&doc_b, initial).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "plan-a.md", "plan-b.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
-        // Create .agent-doc structure so CommitLock can resolve paths
-        let lock_dir = root.join(".agent-doc/locks");
-        fs::create_dir_all(&lock_dir).unwrap();
-        // Create snapshots dir so doc_hash works
+        let updated_a =
+            "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nA\n\n";
+        let updated_b =
+            "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nB\n\n";
+        fs::write(&doc_a, updated_a).unwrap();
+        fs::write(&doc_b, updated_b).unwrap();
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc_a, updated_a).unwrap();
+        crate::snapshot::save(&doc_b, updated_b).unwrap();
 
-        // Acquire lock manually to simulate contention
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
-        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
+        let lock_path = commit_lock_path_for_git_root(root).unwrap();
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
         let held = OpenOptions::new()
             .create(true)
             .write(true)
@@ -3503,19 +3707,50 @@ mod tests {
             .unwrap();
         held.lock_exclusive().unwrap();
 
-        // CommitLock::acquire should return None immediately (non-blocking)
-        let start = std::time::Instant::now();
-        let result = CommitLock::acquire(&doc);
-        let elapsed = start.elapsed();
+        let (tx, rx) = mpsc::channel();
+        let mut handles = Vec::new();
+        for doc in [doc_a.clone(), doc_b.clone()] {
+            let tx = tx.clone();
+            handles.push(thread::spawn(move || {
+                let result = commit(&doc);
+                tx.send((doc, result)).unwrap();
+            }));
+        }
+        drop(tx);
 
-        assert!(result.is_none(), "should return None when lock is held");
         assert!(
-            elapsed.as_millis() < 100,
-            "should not block — took {}ms",
-            elapsed.as_millis()
+            rx.recv_timeout(Duration::from_millis(150)).is_err(),
+            "both commit threads should be waiting on the shared repo lock"
         );
 
-        // Clean up
         held.unlock().unwrap();
+
+        let mut results = Vec::new();
+        results.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        results.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        for (doc, result) in results {
+            let did_commit = result
+                .unwrap_or_else(|e| panic!("commit should succeed for {}: {e}", doc.display()));
+            assert!(did_commit, "{} should create a git commit", doc.display());
+        }
+
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-4"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(plan-a):"),
+            "git log should contain the plan-a closeout, got:\n{log_str}"
+        );
+        assert!(
+            log_str.contains("agent-doc(plan-b):"),
+            "git log should contain the plan-b closeout, got:\n{log_str}"
+        );
     }
 }

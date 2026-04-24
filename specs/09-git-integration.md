@@ -2,7 +2,7 @@
 
 # Git Integration
 
-- Commit: `git add -f {file}` (bypasses .gitignore) + `git commit -m "agent-doc: {timestamp}" --no-verify`
+- Commit: stage the snapshot-selected blob (fallback `git add -f {file}` when needed), hold a blocking advisory lock per resolved git dir / submodule git dir for the short closeout critical section, and retry the full stage+commit transaction when git reports `index.lock` contention
 - Branch: `git checkout -b agent-doc/{filestem}`
 - Squash: soft-reset to before first `agent-doc:` commit, recommit as one
 

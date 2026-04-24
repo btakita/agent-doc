@@ -619,7 +619,35 @@ Commit / push:
 Outcome:
 
 - The shadowed relative-path bug is fixed, spec'd, regression-covered, built/installed locally, committed, and pushed.
-<!-- agent:boundary:1f5380b2 -->
+
+❯ In src/session-share running agent-doc tasks/claudescore-3.md...why did the last 2 patchbacks not happen?
+### Re: `src/session-share/tasks/claudescore-3.md` last two patchbacks — gpt-5
+
+They did not fail for template-matching reasons. The normal `agent-doc` write path was bypassed.
+
+What the artifacts show:
+
+- For the `Implemented and pushed #qj5w` turn, the `src/session-share/.agent-doc/logs/ops.log` entry at **2026-04-24 02:45:48 EDT** (`1777013148`) shows only `commit_staging`, `out_of_band_write`, and `commit_success` for `tasks/claudescore-3.md`. There is **no** matching `write_origin`, `ipc_write_attempt`, or `ipc_write_consumed` event for that file.
+- For the `I’m starting #007c now` turn, the same file again did **not** go through the live finalize/IPC path. At **2026-04-24 02:46:01 EDT** (`1777013161`) `agent-doc` committed a **synthetic capture** instead: `src/session-share/.agent-doc/captures/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac/synthetic-1776969401288.json`.
+- That synthetic capture contains only the `#007c` start response. It is recovery closeout, not the normal same-turn patchback path.
+- The earlier `claudescore-3.md` turns at **01:58:46**, **02:07:04**, and **02:08:05 EDT** show the same pattern: out-of-band drift followed by commit/snapshot cleanup, not normal `finalize` writes.
+
+So the concrete answer is:
+
+- the last two responses were not persisted by a normal `agent-doc finalize ... && agent-doc session-check ...` cycle
+- one was later committed as an out-of-band document mutation
+- the other was later replayed from a synthetic recovery capture
+
+That is why they looked like “no patchback happened” in real time.
+
+What I can prove vs infer:
+
+- **Proven:** the normal patchback boundary did not run for those turns
+- **Proven:** this was not a template-patch parsing miss; there are no live IPC write events to fail
+- **Inference:** the Codex session likely answered without executing the required `finalize` path, or otherwise relied on stop-hook recovery instead of the documented happy path. I cannot prove from the retained logs alone whether the stop hook failed to fire, fired late, or was only able to recover the second turn.
+
+If you want, I can turn this into a tracked `agent-doc` bug focused specifically on: "Codex `agent-doc` sessions can still bypass live finalize in nested repo work and fall back to out-of-band commit / synthetic recovery instead of same-turn patchback."
+<!-- agent:boundary:c8d3e780 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

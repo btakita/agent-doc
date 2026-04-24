@@ -365,12 +365,11 @@ Outcome:
 
 - `#f3nj` is done.
 - Running `agent-doc repair <FILE>` on a git-backed doc now closes the repaired response through the commit boundary immediately instead of leaving it uncommitted for the next prompt.
-<!-- agent:boundary:5a0c743f -->
+<!-- agent:boundary:ca5b0925 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

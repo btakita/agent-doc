@@ -587,7 +587,39 @@ Verification:
 Result: full `make check` passed, including the new regression.
 
 I did **not** commit / push / install this turn because this prompt only said to fix the bug.
-<!-- agent:boundary:829d2cc1 -->
+
+❯ update spec + tests. build + install for local testing. commit + push
+### Re: shipped shadow-path fix in `src/agent-doc` — gpt-5
+
+Done in `src/agent-doc`.
+
+What changed:
+
+- Kept the relative-path resolution fix in `src/git.rs` so an existing cwd-local submodule doc wins over an outer-repo shadow file with the same relative path.
+- Kept the regression test for the exact `tasks/monsterrodholders.md` shadow-path case.
+- Updated `specs/07-commands.md` so the commit contract explicitly requires cwd-local relative-path resolution before superproject fallback.
+- Kept the `VERSIONS.md` note for the fix.
+- Kept the `Cargo.lock` change because this repo has a local patch override at `.cargo/config.toml`:
+  - `[patch.crates-io]`
+  - `tmux-router = { path = "../tmux-router" }`
+  so the lockfile is expected to record the local patched source shape.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_relative_path_prefers_existing_submodule_file_over_superproject_shadow -- --nocapture`
+- `make -C src/agent-doc check`
+- `cargo install --path src/agent-doc`
+  - completed successfully and replaced the local `agent-doc` binary
+
+Commit / push:
+
+- `src/agent-doc`: `58a421c` — `fix: resolve shadowed submodule doc paths`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Outcome:
+
+- The shadowed relative-path bug is fixed, spec'd, regression-covered, built/installed locally, committed, and pushed.
+<!-- agent:boundary:1f5380b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

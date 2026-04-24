@@ -46,6 +46,7 @@ struct UserPromptSubmitInput {
 #[derive(Debug, Deserialize)]
 struct StopInput {
     session_id: String,
+    #[allow(dead_code)]
     turn_id: String,
     cwd: String,
     #[serde(default)]
@@ -122,19 +123,19 @@ pub fn handle_stop() -> Result<()> {
 
 fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     let cwd = PathBuf::from(&input.cwd);
-    let Some(root) = project_root_for(&cwd) else {
-        return Ok(());
-    };
-
     let doc_path = resolve_agent_doc_path(&input.prompt, &cwd).or_else(|| {
-        load_state(&root, &input.session_id)
+        load_state_any(&project_roots_for(&cwd), &input.session_id)
             .ok()
             .flatten()
-            .map(|s| PathBuf::from(s.doc_path))
+            .map(|(_, s)| PathBuf::from(s.doc_path))
     });
     let Some(doc_path) = doc_path else {
         return Ok(());
     };
+    let roots = tracking_roots(&cwd, Some(&doc_path));
+    if roots.is_empty() {
+        return Ok(());
+    }
 
     let state = SessionState {
         session_id: input.session_id.clone(),
@@ -142,38 +143,39 @@ fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         last_turn_id: input.turn_id.clone(),
         updated_at: now_secs(),
     };
-    save_state(&root, &state)?;
+    for root in roots {
+        save_state(&root, &state)?;
+    }
     Ok(())
 }
 
 fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     let cwd = PathBuf::from(&input.cwd);
-    let Some(root) = project_root_for(&cwd) else {
-        return Ok(StopResponse::Continue { continue_: true });
-    };
-    let Some(state) = load_state(&root, &input.session_id)? else {
-        return Ok(StopResponse::Continue { continue_: true });
-    };
-    if state.last_turn_id != input.turn_id {
+    let roots = project_roots_for(&cwd);
+    if roots.is_empty() {
         return Ok(StopResponse::Continue { continue_: true });
     }
+    let Some((loaded_root, state)) = load_state_any(&roots, &input.session_id)? else {
+        return Ok(StopResponse::Continue { continue_: true });
+    };
 
     let file = PathBuf::from(&state.doc_path);
+    let cleanup_roots = tracking_roots(&cwd, Some(&file));
     if !file.exists() {
-        clear_state(&root, &input.session_id)?;
+        clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
         return Ok(StopResponse::Continue { continue_: true });
     }
 
     match crate::session_check::inspect(&file)? {
         crate::session_check::SessionCheckStatus::Ok(_) => {
-            clear_state(&root, &input.session_id)?;
+            clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
             Ok(StopResponse::Continue { continue_: true })
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
             if !input.stop_hook_active {
                 match attempt_stop_closeout(&file, input)? {
                     StopCloseAttempt::Closed => {
-                        clear_state(&root, &input.session_id)?;
+                        clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
                     StopCloseAttempt::StillOpen { note } => {
@@ -309,9 +311,63 @@ fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
     Some(joined.canonicalize().unwrap_or(joined))
 }
 
+#[cfg(test)]
 fn project_root_for(path: &Path) -> Option<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     crate::snapshot::find_project_root(&canonical)
+}
+
+fn project_roots_for(path: &Path) -> Vec<PathBuf> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut roots = Vec::new();
+    let mut current = if canonical.is_file() {
+        canonical.parent()
+    } else {
+        Some(canonical.as_path())
+    };
+
+    while let Some(path) = current {
+        if path.join(".agent-doc").is_dir() {
+            push_unique_root(&mut roots, path.to_path_buf());
+        }
+        current = path.parent();
+    }
+
+    roots
+}
+
+fn tracking_roots(cwd: &Path, doc_path: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = project_roots_for(cwd);
+    if let Some(doc_path) = doc_path {
+        for root in project_roots_for(doc_path) {
+            push_unique_root(&mut roots, root);
+        }
+    }
+    roots
+}
+
+fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !roots.iter().any(|existing| existing == &root) {
+        roots.push(root);
+    }
+}
+
+fn load_state_any(roots: &[PathBuf], session_id: &str) -> Result<Option<(PathBuf, SessionState)>> {
+    for root in roots {
+        if let Some(state) = load_state(root, session_id)? {
+            return Ok(Some((root.clone(), state)));
+        }
+    }
+    Ok(None)
+}
+
+fn clear_state_across_roots(roots: &[PathBuf], loaded_root: &Path, session_id: &str) -> Result<()> {
+    let mut all_roots = roots.to_vec();
+    push_unique_root(&mut all_roots, loaded_root.to_path_buf());
+    for root in all_roots {
+        clear_state(&root, session_id)?;
+    }
+    Ok(())
 }
 
 fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
@@ -372,6 +428,7 @@ mod tests {
     }
 
     fn init_git_repo(root: &Path, tracked: &Path) {
+        let relative = tracked.strip_prefix(root).unwrap();
         ProcessCommand::new("git")
             .current_dir(root)
             .args(["init"])
@@ -389,7 +446,7 @@ mod tests {
             .unwrap();
         ProcessCommand::new("git")
             .current_dir(root)
-            .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+            .args(["add", relative.to_str().unwrap()])
             .status()
             .unwrap();
         ProcessCommand::new("git")
@@ -401,6 +458,16 @@ mod tests {
 
     fn write_doc(dir: &tempfile::TempDir) -> PathBuf {
         let doc = dir.path().join("task.md");
+        let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        doc
+    }
+
+    fn write_nested_doc(dir: &tempfile::TempDir) -> PathBuf {
+        let nested = dir.path().join("nested");
+        fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
@@ -475,6 +542,55 @@ mod tests {
         );
         let root = project_root_for(dir.path()).unwrap();
         assert!(load_state(&root, "codex-session").unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_auto_closes_open_cycle_across_nested_roots_and_turn_drift() {
+        let dir = setup_project();
+        let doc = write_nested_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!(
+                "agent-doc nested/{}",
+                doc.file_name().unwrap().to_string_lossy()
+            ),
+        })
+        .unwrap();
+
+        let nested_root = project_root_for(doc.parent().unwrap()).unwrap();
+        assert!(
+            load_state(&nested_root, "codex-session").unwrap().is_some(),
+            "expected state to be mirrored into nested project root"
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: doc.parent().unwrap().display().to_string(),
+            last_assistant_message: "Recovered from nested root drift.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Recovered from nested root drift."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+
+        let outer_root = project_root_for(dir.path()).unwrap();
+        assert!(load_state(&outer_root, "codex-session").unwrap().is_none());
+        assert!(load_state(&nested_root, "codex-session").unwrap().is_none());
     }
 
     #[test]

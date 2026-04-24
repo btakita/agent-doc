@@ -197,7 +197,44 @@ Verification:
   - `v0.33.13` -> `d9f27ce`
 
 Any other clone of `btakita/agent-doc` now needs a fresh `git fetch --prune --tags` and then a reset/rebase onto the rewritten refs, or a fresh clone, before pushing more work.
-<!-- agent:boundary:633983f4 -->
+
+❯ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
+```
+• Because I treated the patchback as an assistant-only response block, not as a transcript entry.
+
+  The local evidence shows two different patterns:
+
+  - agent-doc capture response_body values are response-only and do not include ❯.
+  - The archived/baseline session docs do use ❯  to mark user prompts inline in the transcript.
+
+  I followed the first pattern while writing directly into tasks/monsterrodholders.md, but that was the wrong fit for
+  this document. In this file’s exchange history, ❯  is part of the transcript format, so omitting it made the
+  patchback inconsistent with the surrounding record.
+
+  So the short answer is: I excluded it because I was patching “response text” rather than reconstructing the full
+  prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
+  I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
+```
+### Re: `Test <test@test.com>` commit authorship — gpt-5
+
+The short answer is: those commits were created while `git` thought the author/committer identity was `Test <test@test.com>`. Codex did not invent that name on its own.
+
+What I checked in this workspace:
+- `git -C src/agent-doc config --show-origin --get user.name` returns `Brian Takita`
+- `git -C src/agent-doc config --show-origin --get user.email` returns `brian.takita@gmail.com`
+- global git config is the same
+- there are no live `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars in this session
+- the `Test` strings inside `src/agent-doc` are in test setup/helpers that create isolated throwaway repos, not in the production commit path
+
+So the evidence points to a historical config/environment issue at commit time: either the repo/global git config was `Test <test@test.com>` then, or the harness shell exported that identity for those commit commands. The commits now in history still preserve that metadata.
+
+One concrete sign of that: current `src/agent-doc` history still has recent real commits like `5484c1b` authored and committed as `Test <test@test.com>`, even though the live config is now Brian. So the earlier author rewrite fixed a range of history, but it did not eliminate the source that kept producing new `Test`-authored commits afterward.
+
+If you want, I can do the next step in a follow-up cycle:
+1. trace where that historical identity was being injected
+2. lock `src/agent-doc` to an explicit local `user.name` / `user.email`
+3. rewrite the remaining `Test`-authored commits again
+<!-- agent:boundary:3dcb0f12 -->
 <!-- /agent:exchange -->
 
 

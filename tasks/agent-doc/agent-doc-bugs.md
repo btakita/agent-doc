@@ -566,14 +566,46 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I preserved the separate uncommitted local changes already present in `src/agent-doc` (`src/skill.rs`, `specs/07-commands.md`, `VERSIONS.md`) and kept them out of this `#r4kp` commit.
-<!-- agent:boundary:7c89f03c -->
+
+❯ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
+```
+• Because I treated the patchback as an assistant-only response block, not as a transcript entry.
+
+  The local evidence shows two different patterns:
+
+  - agent-doc capture response_body values are response-only and do not include ❯.
+  - The archived/baseline session docs do use ❯  to mark user prompts inline in the transcript.
+
+  I followed the first pattern while writing directly into tasks/monsterrodholders.md, but that was the wrong fit for
+  this document. In this file’s exchange history, ❯  is part of the transcript format, so omitting it made the
+  patchback inconsistent with the surrounding record.
+
+  So the short answer is: I excluded it because I was patching “response text” rather than reconstructing the full
+  prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
+  I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
+```
+### Re: `src/boost-client` missing `❯ ` prompt prefix — gpt-5
+
+The quoted explanation is directionally right, but it misses the concrete failure mode.
+
+The immediate cause was that the `monsterrodholders.md` patchback fell out of the binary-owned `agent-doc finalize` / `agent-doc write --commit` path and was written directly into the markdown file instead. The live `src/boost-client/tasks/monsterrodholders.md` exchange makes that explicit:
+
+- `agent-doc` failed during git/session write with `index.lock: Read-only file system`
+- the follow-up response says `I wrote this response directly into the task doc instead`
+- once that happened, `src/agent-doc/src/write.rs` never got to run append-mode exchange normalization, so the bare user-prompt lines in that tail never received the binary-owned `❯ ` transcript prefix
+
+So the real root cause was not just "response text vs transcript text" in the abstract. It was a bypassed repair/writeback path:
+
+1. binary closeout failed
+2. harness/manual recovery patched the document directly
+3. transcript canonicalization was skipped
+4. the closeout guard at the time did not fail closed hard enough to stop that drift
+
+That is why this showed up in `src/boost-client/tasks/monsterrodholders.md` specifically, and why the durable fix belongs in `agent-doc` itself rather than in one-off document cleanup. The later `#3fjy` change is the right product-level correction: prompt-prefix preservation now derives from the canonical `prompt_target` classifier, and `session-check` rejects bypassed patchbacks that leave bare prompt-target lines without `❯ `.
+<!-- agent:boundary:729dd48d -->
 <!-- /agent:exchange -->
 
 <!--
-Please run the following prompt chain sequentially in a gpt-5.4 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
-- #8cmb
-- #r4kp
-
 In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
 ```
 • Because I treated the patchback as an assistant-only response block, not as a transcript entry.

@@ -598,7 +598,7 @@ fn test_skill_md_contains_required_steps() {
     );
     assert!(
         content.contains("agent-doc session-check <FILE>"),
-        "SKILL.md should require session-check after final response persistence"
+        "SKILL.md should still mention the direct session-check command"
     );
     assert!(
         content.contains(

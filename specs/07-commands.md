@@ -330,7 +330,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Manual-repair contract:** For documented manual repair across Claude Code and Codex, once the user prompt already exists in the document the assistant response path is `agent-doc write --commit <FILE>`. Do not document or rely on a repair flow that stops after bare `agent-doc write`; that leaves the cycle open on the wrong side of the response-commit boundary.
 
-**`--commit` behavior:** `agent-doc write --commit <FILE>` remains a best-effort convenience: it runs the normal write path, then tries `git::commit()`. Outside git it warns and skips commit; inside git it warns on commit failure but still reports the underlying write result. This is the documented manual-repair path because it preserves the older CLI surface while crossing the write/commit boundary in one invocation.
+**`--commit` behavior:** `agent-doc write --commit <FILE>` remains a best-effort convenience at the raw git-commit step: it runs the normal write path, then tries `git::commit()`. Outside git it warns and skips commit. Inside git it still warns on commit failure, but it now immediately runs the same post-closeout `session-check` guard that the skill used to invoke explicitly. That means a git-backed `write --commit` only exits 0 when the document is actually in a terminal closeout state (or the historical-drift self-heal proves it from `HEAD`). This is the documented manual-repair path because it preserves the older CLI surface while crossing the write/commit/session-check boundary in one invocation.
 
 **Response-commit invariant:** Every appended response must cross a commit boundary unless the user explicitly asks to leave it uncommitted. The default happy-path command for normal response cycles is `agent-doc finalize <FILE>`; bare `agent-doc write` is for explicit no-commit exceptions or intermediate checkpoints, not for the final response.
 
@@ -375,13 +375,14 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 2. Reuse the same mutation surface as `write`: pending/status mutations are applied first, then the response write path is selected from `--ipc` / `--stream` / `--template` / auto-detect.
 3. Run the normal write pipeline (`write`, `run_template`, `run_stream`, or `run_ipc`) with the same snapshot/capture/merge semantics as `agent-doc write`.
 4. Invoke `git::commit(<FILE>)` even if the write path returned an error, because the write may have partially succeeded after persisting snapshot/cycle state.
-5. Fail unless the final persisted cycle state for the document is `committed`.
+5. Run the same post-closeout `session-check` guard internally.
+6. Fail unless the final persisted cycle state for the document is `committed` and the internal `session-check` returns `ok`.
 
 **Contract:** `finalize` is the binary-owned happy path for normal session responses. Unlike `write --commit`, it is not best-effort:
 
 - non-git documents are rejected before any write
 - `--pending-only` is rejected because `finalize` is for response cycles, not standalone pending maintenance
-- success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed`
+- success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed` and the binary-owned `session-check` guard accepted the result
 - a write error plus a commit error is still a command failure even if some recovery work ran
    - imperative directive diffs (`do #id`, `run tests`, `build + install`, `commit + push`, `go`, or pending-item prose like `[#id] Fix ...`) reject status-only/meta-only responses unless they contain concrete execution evidence or a concrete blocker
 
@@ -394,10 +395,10 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - dedup and clean stale pending/capture state when the response is already present in the document
    - respect safe manual removal of an escaped template conversation tail
    - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly
-2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`
+2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>` and then the same internal `session-check` closeout guard
 3. If no pending/captured repair path exists, print the usual "No pending response found" note and stop without committing
 
-**Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content.
+**Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit/session-check boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content.
 
 ## watch
 
@@ -554,7 +555,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 - `pending_capture_guard: off` disables the guard; `<!-- no-pending-capture -->` in the response suppresses it for that cycle
 - A cycle closed by `agent-doc commit` as `commit_already_current` counts as terminal / committed: it means the staged snapshot was already identical to `HEAD`, so no duplicate git commit was necessary
 - Exit `0` when the cycle state is committed or no state/log file exists
-- Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.
+- Intended skill/runbook use: `session-check` remains the direct debugging / hook surface, but git-backed `agent-doc finalize <FILE> ...`, `agent-doc write --commit <FILE> ...`, and `agent-doc repair <FILE>` now invoke the same guard internally before they report success. If a direct `session-check` exits nonzero, or one of those commands surfaces the same interruption, the cycle is still open and the agent must fail closed instead of reporting success.
 
 **URL link processing:**
 - URLs (`http://`/`https://`) in `links` frontmatter are fetched with a 10s timeout

@@ -111,6 +111,17 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
     Ok(report)
 }
 
+pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
+    let report = inspect_with_warnings(file)?;
+    for warning in report.warnings {
+        eprintln!("{}", warning);
+    }
+    match report.status {
+        SessionCheckStatus::Ok(_) => Ok(()),
+        SessionCheckStatus::Interrupted(message) => anyhow::bail!(message),
+    }
+}
+
 fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {

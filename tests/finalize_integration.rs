@@ -55,6 +55,15 @@ fn write_baseline(root: &Path, content: &str) -> PathBuf {
     baseline
 }
 
+fn enable_strict_pending_capture(doc: &Path) {
+    let current = fs::read_to_string(doc).unwrap();
+    let updated = current.replace(
+        "agent: codex\nmodel: gpt-5\n",
+        "agent: codex\nmodel: gpt-5\npending_capture_guard: strict\n",
+    );
+    fs::write(doc, updated).unwrap();
+}
+
 #[test]
 fn finalize_requires_git_repo_before_mutating_document() {
     let (_tmp, doc) = setup_template_doc();
@@ -211,5 +220,67 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
     assert!(
         !after.contains("### Re: test — gpt-5"),
         "finalize should fail before patching a status-only response into the document"
+    );
+}
+
+#[test]
+fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
+    let (tmp, doc) = setup_template_doc();
+    enable_strict_pending_capture(&doc);
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[session-check] error:"))
+        .stderr(predicates::str::contains("recommendation-like items"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: recommendations — gpt-5"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: recommendations — gpt-5"),
+        "HEAD blob should still contain the committed response when internal session-check fails"
+    );
+}
+
+#[test]
+fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
+    let (tmp, doc) = setup_template_doc();
+    enable_strict_pending_capture(&doc);
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[session-check] error:"))
+        .stderr(predicates::str::contains("recommendation-like items"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: recommendations — gpt-5"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: recommendations — gpt-5"),
+        "HEAD blob should still contain the committed response when internal session-check fails"
     );
 }

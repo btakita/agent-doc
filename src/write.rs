@@ -386,6 +386,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 if let Err(e) = crate::git::commit(file) {
                     eprintln!("[commit] warning: {}", e);
                 }
+                crate::session_check::enforce_clean_closeout(file)?;
             } else {
                 eprintln!("[commit] skipped (not in git repo)");
             }
@@ -393,7 +394,8 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
         }
         CommitMode::Required => {
             crate::git::commit(file)?;
-            ensure_cycle_committed(file)
+            ensure_cycle_committed(file)?;
+            crate::session_check::enforce_clean_closeout(file)
         }
     }
 }

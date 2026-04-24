@@ -298,13 +298,45 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed in `src/agent-doc` as `38942ad` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:cd8baacb -->
+❯ Would the new invariant also cover inline prompts? The diff is the prompt. The surrounding content, using the markdown AST, is important for provide context for inline prompts. Can we have the invariant ensure that all inline prompts are applied as prompts?
+
+❯ We should also have a special process for editing content in the agent doc. The agent should address the change and figure out whether it is prompt or an edit. The edit could be correcting a previous proposal or fixing a typo. The edit could also be caused by an agent-doc turn bug where part or all of the response is uncommitted.
+### Re: inline prompts and agent-doc edits — gpt-5
+Yes, but I would specify it one level higher than "inline prompts."
+
+Right now `agent-doc` has two separate concepts:
+- ordered `required response targets` for explicit prompt blocks in the diff
+- `inline_annotations` for some user edits inside prior agent text
+
+That split is why the current invariant does **not** fully guarantee that every prompt-bearing inline edit is treated as a prompt. It only guarantees explicit prompt-block coverage, plus a narrower side-channel for some inline edits.
+
+The stronger invariant should be:
+- every user-authored change in the changed exchange/document context is classified as one of: `prompt_target`, `content_edit`, `structural_edit`, `recovery_artifact`, or `boundary_artifact`
+- the turn is incomplete until every `prompt_target` is answered or explicitly grouped into one response
+- `content_edit` is not auto-answered as a new prompt; it becomes the new source of truth the agent must reconcile against
+- `recovery_artifact` / `boundary_artifact` must be normalized by the binary and must not be promoted into prompt targets unless residual user-authored content remains after normalization
+
+So yes: inline prompts should be covered, but the spec should say **prompt-bearing inline changes**, not all inline changes. A typo fix, a wording correction, and a partially-uncommitted response repair are different classes and should not all be forced through the same response path.
+
+I also agree that the diff alone is not enough for this classification. The diff is the trigger, but the surrounding markdown structure is the context. For inline edits, the classifier should look at where the change landed: exchange prose, blockquote, list item, heading, code fence, component boundary, or edited prior response text. That is the level where `agent-doc` can distinguish "this is a new question inserted into prior prose" from "this is a correction to existing content" or "this is a closeout artifact."
+
+The processing order I would specify is:
+1. normalize known binary artifacts first
+2. classify remaining user-authored changes with markdown-context awareness
+3. emit ordered response targets for every `prompt_target`
+4. surface `content_edit` items as edits the agent must incorporate, not necessarily answer separately
+5. if an edit looks like a missed/uncommitted response, route through repair/session-check logic before treating it as ordinary conversation
+
+So the root change I would want in the spec is: replace the current split between "required response targets" and "inline annotations" with one unified `user-authored prompt-bearing change` contract, then let prompt-vs-edit-vs-artifact be explicit subtypes under that contract.
+<!-- agent:boundary:50fab450 -->
 <!-- /agent:exchange -->
 
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#3xmb] [recommended] Unify required response targets and inline annotations into one prompt-bearing change classifier with markdown-context awareness
+- [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

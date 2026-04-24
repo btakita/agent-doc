@@ -225,12 +225,17 @@ pub fn run(file: &Path) -> Result<bool> {
             "[recover] Response already present in document — skipping apply, cleaning up pending file"
         );
         let repaired_doc = repair_template_tail_if_needed(file, &doc_content)?;
-        if let Err(e) = crate::cycle_state::mark_write_applied(
-            file,
-            "recover_already_applied",
-            Some(&repaired_doc),
-            Some(&repaired_doc),
-        ) {
+        let state_is_open = crate::cycle_state::load(file)?
+            .map(|state| state.is_open())
+            .unwrap_or(true);
+        if state_is_open
+            && let Err(e) = crate::cycle_state::mark_write_applied(
+                file,
+                "recover_already_applied",
+                Some(&repaired_doc),
+                Some(&repaired_doc),
+            )
+        {
             eprintln!("[recover] cycle-state update failed: {} (non-fatal)", e);
         }
         clear_pending(&canonical)?;

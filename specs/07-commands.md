@@ -6,11 +6,13 @@
 
 `agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
 
-1. Compute diff → 2. Resolve document mode from frontmatter (`resolve_mode()`, default template) → 3. Build the matching append/template prompt (diff + full doc) → 4. Branch if `-b` → 5. Send to agent → 6. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 7. Apply the response through the matching append/template write path → 8. Update session resume ID → 9. Save snapshot → 10. Commit the response write
+1. Compute diff → 2. Resolve document mode from frontmatter (`resolve_mode()`, default template) → 3. Build the matching append/template prompt (diff + full doc) → 4. Branch if `-b` → 5. Send to agent → 6. Durably capture the final parsed response in `.agent-doc/captures/<doc-hash>/<cycle-id>.json` → 7. Apply the response through the matching append/template write path → 8. Update session resume ID → 9. Persist the final post-write cycle state as `write_applied` → 10. Save snapshot → 11. Commit the response write and require the cycle to close in `committed` for git-backed runs
 
 First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `<diff>` tags + full doc in `<document>`.
 
 `agent-doc <FILE>` and `agent-doc run <FILE>` are equivalent. Both dispatch by document mode from frontmatter, with template as the default when no explicit format is present.
+
+**Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `recover` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
 
 ## init
 

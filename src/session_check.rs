@@ -10,6 +10,10 @@
 //! - Also fails closed when the current document diverges from its snapshot in
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
+//! - When that bypassed patchback also leaves prompt-target lines in the same
+//!   diff without the binary-owned `❯ ` transcript prefix, `session-check`
+//!   reports the bare prompt target in the failure marker so the write path can
+//!   be repaired instead of silently accepted.
 //! - Narrow self-heal: when that drift is already committed in `HEAD` and the
 //!   current working tree matches `HEAD` modulo transient boundary / `(HEAD)`
 //!   markers, `session-check` repairs the stale snapshot instead of reporting
@@ -348,6 +352,10 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
         return Ok(None);
     }
 
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&snapshot, &current) else {
+        return Ok(None);
+    };
+
     let diff = similar::TextDiff::from_lines(&snapshot, &current);
     for change in diff.iter_all_changes() {
         if change.tag() != similar::ChangeTag::Insert {
@@ -355,6 +363,12 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
         }
         let trimmed = change.value().trim();
         if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
+            if let Some(bare_target) = crate::diff::first_bare_prompt_prefix_target(&diff_text) {
+                return Ok(Some(format!(
+                    "{} (bare prompt target missing `❯ `: {})",
+                    trimmed, bare_target
+                )));
+            }
             return Ok(Some(trimmed.to_string()));
         }
     }
@@ -511,6 +525,25 @@ mod tests {
         fs::write(&doc, format!("{snapshot}\nWhy is this still dirty?\n")).unwrap();
 
         assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_reports_bare_prompt_target() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n❯ Prior question?\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n❯ Prior question?\nWhy was this missed?\n### Re: test — gpt-5\n\nBody\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
+        assert!(marker.contains("### Re: test — gpt-5"));
+        assert!(marker.contains("Why was this missed?"));
     }
 
     #[test]

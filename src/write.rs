@@ -580,6 +580,9 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
 /// Compares the exchange content in `baseline` against `snapshot` to identify
 /// lines the user typed this cycle (Insert lines in the diff). Those lines are
 /// then prefixed with `❯ ` in `content` (content_ours = baseline + agent patches).
+/// Prompt-bearing lines derived from the canonical diff classifier are also
+/// treated as mandatory normalization targets so repair/write/session-check
+/// share one prompt-prefix contract.
 ///
 /// Using `baseline` (not `content_ours`) for the diff is critical: after
 /// `apply_patches_with_overrides`, the boundary marker is repositioned to the end
@@ -752,6 +755,14 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !is_fence_delim
         {
             user_added.insert(line.to_string());
+        }
+    }
+
+    if let Some(diff_text) =
+        crate::diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped)
+    {
+        for line in crate::diff::prompt_prefix_normalization_targets(&diff_text) {
+            user_added.insert(line);
         }
     }
 

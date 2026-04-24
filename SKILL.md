@@ -110,7 +110,7 @@ RESPONSE
 
 **End-of-turn guard:** after any final response persistence command (`agent-doc finalize <FILE> ...` for the normal path, or `agent-doc write --commit <FILE> ...` for manual repair), run `agent-doc session-check <FILE>`. If it exits nonzero, the cycle is still open or the document shows a likely direct assistant patchback that bypassed `agent-doc`: do **not** report success, and continue recovery instead of ending the turn. The only self-heal exception is already-committed historical snapshot drift that `session-check` can prove from `HEAD`.
 
-`session-check` also enforces the pending-capture backstop: when a committed response contains a recommendation batch but no `--pending-add` / `--pending-add-gated` was recorded for that cycle, it warns by default and can fail closed when `pending_capture_guard: strict` (or project `[guards] pending_capture = "strict"`) is set.
+`session-check` also enforces the pending-capture backstop: when a committed response contains a recommendation batch but no `--pending-add` / `--pending-add-gated` was recorded for that cycle, it warns by default and can fail closed when `pending_capture_guard: strict` (or project `[guards] pending_capture = "strict"`) is set. It also fails closed on likely bypassed patchbacks that leave bare prompt-target lines without the binary-owned `❯ ` prefix.
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is the immediate `session-check`, minimal recovery if it fails, and concise result reporting.
 

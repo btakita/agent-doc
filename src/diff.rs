@@ -204,6 +204,12 @@ pub struct PromptBearingChange {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PromptPrefixLine {
+    raw: String,
+    prefixed: bool,
+}
+
 /// Strip comments from document content for diff comparison.
 ///
 /// Delegates to `component::strip_comments` — the shared implementation
@@ -410,6 +416,45 @@ pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
     changes
 }
 
+/// Return the prompt-bearing exchange lines that must carry a `❯ ` prefix.
+///
+/// This derives from the canonical `prompt_target` classifier rather than a
+/// separate line-shape heuristic, so write-path normalization and session-check
+/// can enforce the same invariant.
+pub fn prompt_prefix_normalization_targets(diff: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut lines = Vec::new();
+    for change in classify_prompt_bearing_changes(diff) {
+        if change.kind != PromptBearingChangeKind::PromptTarget {
+            continue;
+        }
+        for line in prompt_prefix_lines_from_block(&change.text) {
+            if line.prefixed {
+                continue;
+            }
+            if seen.insert(line.raw.clone()) {
+                lines.push(line.raw);
+            }
+        }
+    }
+    lines
+}
+
+/// Return the first prompt-bearing line that should have had a `❯ ` prefix but did not.
+pub fn first_bare_prompt_prefix_target(diff: &str) -> Option<String> {
+    for change in classify_prompt_bearing_changes(diff) {
+        if change.kind != PromptBearingChangeKind::PromptTarget {
+            continue;
+        }
+        for line in prompt_prefix_lines_from_block(&change.text) {
+            if !line.prefixed {
+                return Some(line.raw);
+            }
+        }
+    }
+    None
+}
+
 fn classify_prompt_bearing_changes_from_annotated(
     annotated_diff: &str,
 ) -> Vec<PromptBearingChange> {
@@ -507,6 +552,57 @@ fn classify_prompt_bearing_changes_from_annotated(
     }
 
     changes
+}
+
+fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    let mut lines = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                continue;
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+            continue;
+        }
+
+        if in_fence || trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+
+        lines.push(PromptPrefixLine {
+            raw: line.to_string(),
+            prefixed: trimmed.starts_with('❯'),
+        });
+    }
+
+    lines
 }
 
 fn extract_prompt_target_blocks(diff: &str) -> Vec<String> {
@@ -2674,5 +2770,37 @@ Please fix the bug.\n\
         assert!(rendered.contains("kind=\"prompt_target\""));
         assert!(rendered.contains("kind=\"content_edit\""));
         assert!(rendered.contains("Treat `content_edit` items as user corrections"));
+    }
+
+    #[test]
+    fn prompt_prefix_normalization_targets_preserve_prompt_context_and_skip_fences() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
+            ctx\n\
+            +❯ In src/boost-client, why did patchback miss the prefix?\n\
+            +See my inquiry:\n\
+            +```text\n\
+            +line one\n\
+            +line two\n\
+            +```\n";
+
+        let targets = prompt_prefix_normalization_targets(diff);
+        assert_eq!(
+            targets,
+            vec!["See my inquiry:".to_string(),],
+            "only the bare prompt-context line should need fresh prefixing"
+        );
+    }
+
+    #[test]
+    fn first_bare_prompt_prefix_target_detects_unprefixed_prompt_block_line() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,5 @@\n\
+            ctx\n\
+            +❯ Existing question?\n\
+            +Follow-up context.\n\
+            +### Re: answer — gpt-5\n\
+            +Body\n";
+
+        let bare = first_bare_prompt_prefix_target(diff);
+        assert_eq!(bare.as_deref(), Some("Follow-up context."));
     }
 }

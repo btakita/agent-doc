@@ -735,13 +735,12 @@ Outcome:
 
 - `#y9d6` is done.
 - A stale snapshot can no longer win over an already-committed `### Re:` block just because the next turn added a follow-up prompt.
-<!-- agent:boundary:fa399b07 -->
+<!-- agent:boundary:48c764f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#y9d6] [recommended] Investigate claudescore-3 closeout path that rewound and re-added an existing assistant response via out-of-band commit instead of same-turn finalize patchback.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

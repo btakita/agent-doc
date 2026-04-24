@@ -639,7 +639,7 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I left the pre-existing unrelated local edits in `src/agent-doc` (`VERSIONS.md`, `src/skill.rs`, and other unstaged changes in `specs/07-commands.md`) out of this commit.
-<!-- agent:boundary:deeacc94 -->
+<!-- agent:boundary:3f2ca49e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -662,7 +662,6 @@ See src/session-share/tasks/claudescore-3.md
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#npme] [recommended] Fix repair-time transcript canonicalization so template-doc AlreadyApplied dedup still restores missing ❯ prompt prefixes instead of only cleaning up pending/capture state
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

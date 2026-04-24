@@ -414,7 +414,36 @@ I normalized the four recent user prompt lines in the exchange tail so they now 
 - `❯ What needs to be done with https://boost-health.monsterrodholder74.workers.dev/ to make it work for the monit job? Are using the proper auth headers + post data?`
 
 I did not change the surrounding answer text, pending list, or any `agent-doc` product code in this cycle. This was a document-format repair in an already-dirty session file, not a shared formatter change. The `src/boost-client` repo still has uncommitted local changes, and I did not commit or push there in this cycle.
-<!-- agent:boundary:ad0bf485 -->
+
+❯ Please analyze how the agent-doc harness + deterministic binary needs to change to fix the monsterrodholders.md not having a `❯ ` issue.
+### Re: `monsterrodholders.md` `❯` prefix root cause — gpt-5
+
+This needs two changes: one in the harness, one in the deterministic binary.
+
+Harness side:
+
+The `monsterrodholders.md` failure came from a bypassed repair/writeback path. The live file shows direct document prose like "I wrote this response directly into the task doc instead" plus status-only narration mixed into `agent:exchange`, which means the harness fell out of the normal `agent-doc finalize` / `agent-doc write --commit` path and reconstructed exchange text manually.
+
+That should fail closed. In Codex/manual repair, once the user prompt already exists in the document, the only allowed response path should be `agent-doc write --commit <FILE>` or the normal `agent-doc finalize <FILE> ...`, followed immediately by `agent-doc session-check <FILE>`. No direct assistant patchback into `exchange`.
+
+Binary side:
+
+`src/agent-doc/src/diff.rs:339-410` and `:512-614` already classify ordered `prompt_target` blocks deterministically. But `src/agent-doc/src/write.rs:578-760` still restores `❯ ` only from the `snapshot -> baseline` added-line diff. That is enough for normal user-typed additions, but it is not strong enough for repair/reconstruction paths that rewrite exchange text and need transcript canonicalization.
+
+So the invariant should be stronger: before commit, every prompt-bearing user line in the pre-boundary exchange region must either preserve an existing `❯ ` prefix from snapshot or receive one during canonicalization. That should be driven from the same prompt-bearing classifier, not from a separate added-line heuristic.
+
+`session-check` should then enforce the same rule. Right now `src/agent-doc/src/session_check.rs:339-361` only flags likely bypassed writes when snapshot drift inserts `### Re:` or `## Assistant`. It should also fail when the changed exchange tail contains bare prompt-target lines that should have been canonicalized as `❯ ...`.
+
+Concretely, I would change it this way:
+
+1. Move transcript canonicalization into a binary-owned exchange normalizer that runs on every finalize/write path, including repair/manual writeback paths, not only the normal snapshot→baseline user-add path.
+2. Feed that normalizer from `prompt_bearing_changes` / `extract_prompt_target_blocks`, so the same classifier that says "this is a user prompt" also decides it needs transcript prefixing.
+3. Extend `session-check` with a transcript-format bypass guard: if post-snapshot drift adds a `### Re:` response and leaves matching bare prompt-target lines in the same exchange tail, fail closed instead of accepting the write.
+
+I would treat this as a real product invariant, not agent guidance. The current split is the bug: prompt classification is deterministic, but transcript formatting is still partly heuristic and partly harness-discipline.
+
+I did not patch `src/agent-doc` in this cycle.
+<!-- agent:boundary:3d2f034e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -440,6 +469,8 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#3fjy] [recommended] Make  prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
+- [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass / plus
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

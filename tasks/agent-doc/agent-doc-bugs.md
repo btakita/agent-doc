@@ -254,7 +254,30 @@ My earlier explanation inside the quoted inquiry was also not sufficient as a se
 So the right answer is: yes, I overlooked an outstanding question in the transcript. That was my mistake, not a formatting problem in your `agent-doc` file.
 
 If you want the substantive follow-up on that `src/boost-client` `❯`-prefix issue, I can answer it directly in the next cycle and keep it scoped to whether the bug is in transcript reconstruction, patchback formatting, or document normalization.
-<!-- agent:boundary:7d95345b -->
+
+❯ Why were you confused? The prompt was in the agent-doc diff. There seems to be a root cause to this problem. This is a bug.
+### Re: root cause of the missed prompt — gpt-5
+
+Yes. This is a bug.
+
+The root cause was not that the prompt was absent from the diff. The root cause was that I used the wrong turn-selection rule when reading the document delta.
+
+What happened:
+- the diff contained multiple unresolved user-authored items in the same exchange tail
+- I latched onto the most recent explicit question (`Test <test@test.com>`) as if it were the whole turn
+- I failed to run the stricter check that asks: "are there any earlier unresolved prompts in the newly changed exchange that still require a `### Re:` response?"
+- because of that, I left the earlier `src/boost-client` `❯`-prefix question unanswered even though it was plainly present in the diff
+
+So the bug is basically: latest-question selection overrode unresolved-prompt reconciliation.
+
+A correct `agent-doc` response pass should do both of these before answering:
+- scan the changed exchange region for all newly introduced or still-unanswered user prompts
+- only treat the turn as complete once each of those prompts is either answered or explicitly grouped into one response
+
+I did not do that here. So your diagnosis is right: this was a response-completeness bug, not a missing-context problem.
+
+If you want, the next step is to treat this as a real `agent-doc` product bug and specify the invariant more concretely: pre-response validation should fail if the changed exchange tail still contains an unanswered user prompt ahead of the candidate response target.
+<!-- agent:boundary:259e8d47 -->
 <!-- /agent:exchange -->
 
 

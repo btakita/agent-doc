@@ -438,11 +438,35 @@ Outcome:
 
 - `#x87q` is done.
 - The installed `agent-doc` instruction surface now tells the agent to execute document-local directives like `do #id`, `run tests`, `build + install`, and `commit + push` as real work from the session document, or stop on a concrete blocker instead of emitting false-progress status prose.
-<!-- agent:boundary:fd8fd559 -->
+❯ In src/session-share `agent-doc tasks/claudescore-3.md`...the prompt `do #qj5w now. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push`  still causes Codex to refuse to perform the work. Why?
+### Re: why `src/session-share/tasks/claudescore-3.md` still did not execute `#qj5w` — gpt-5
+
+Because `#x87q` fixed the **instruction text**, but it did not fully fix the **execution guard**.
+
+What I could verify:
+
+- the old "Because you asked me to run agent-doc..." refusal is from the earlier captured/baselined exchange, not from the current live `src/session-share/tasks/claudescore-3.md`
+- the current `claudescore-3.md` failure mode is different: it keeps appending `In progress`, `Continuing`, and similar status lines after `do #qj5w now`, but no scorer/tests/benchmark/news/commit work lands
+- the updated instruction surface now does say these document-local directives are executable work, so the remaining bug is not "the contract still says no"
+
+So the remaining why is:
+
+1. the earlier refusal came from the pre-`#x87q` wrong-layer interpretation
+2. the current bug is that Codex can still satisfy the session badly by emitting status prose without any enforcement that the requested repo work actually happened
+
+In other words, `#x87q` removed the explicit "say it in chat" interpretation, but there is still no hard stop that says: after `do #qj5w now`, either produce concrete repo-side work or fail on a blocker. Without that guard, the model can still get stuck in a false-progress loop.
+
+That is why `claudescore-3.md` still looks broken even after `#x87q`: the refusal wording changed, but the harness still allowed repeated non-executing progress responses.
+<!-- agent:boundary:d4fce2c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#6zyp] Enforce executable document directives end-to-end: after document-local commands like do #id / run tests / commit + push, require real repo work or fail closed instead of allowing repeated status-only progress replies.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
+
+<!-- 
+Why are all of the commits done by Codex in agent-doc authored by `Test <test@test.com>`?
+-->

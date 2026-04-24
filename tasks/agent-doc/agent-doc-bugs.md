@@ -985,7 +985,7 @@ Outcome:
 
 - `#3gwn` is done.
 - Pending-item prose like `Fix the cross-repo ...` now counts as imperative executable intent, so status-only replies like `I'm starting now` are rejected instead of misclassifying that task text as non-directive continuation prose.
-<!-- agent:boundary:1c228688 -->
+<!-- agent:boundary:62efb9e2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -1005,7 +1005,6 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#3gwn] Revisit pending auto-close when a same-turn `agent-doc` run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like `Fix the cross-repo ...`). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

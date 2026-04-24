@@ -234,13 +234,49 @@ So "why?":
 - likely caused by concurrent `agent-doc` activity in that repo, with the residual symptom now being the interrupted cycle rather than an active lock file
 
 If you want, I can take the next step on the actual broken state: either recover `src/session-share/tasks/docs.md` cleanly, or investigate whether `git::commit` needs a stronger lock-contention path than the current retry behavior.
-<!-- agent:boundary:daf164fd -->
+❯ investigate whether `git::commit` needs a stronger lock-contention path than the current retry behavior
+### Re: `git::commit` lock-contention path — gpt-5
+
+I do think the current path is too weak for repo-level contention.
+
+Why:
+
+- `CommitLock` is keyed per **document hash**, not per git repo, and it is explicitly **non-blocking**. If the lock is held, the code logs and proceeds unlocked. That is in `src/agent-doc/src/git.rs:72-80` and the behavior is exercised by `commit_lock_nonblocking_when_held` in `src/agent-doc/src/git.rs:3475`.
+- But git index contention is repo-scoped. Two different docs inside the same repo or submodule still share one index, so per-doc locking does not prevent `index.lock` collisions.
+- The retry loop only wraps the final `git commit` call, not the whole staging+commit transaction, and it only waits `100ms + 200ms + 400ms` before giving up. That is the loop in `src/agent-doc/src/git.rs:885-909`, and the only direct test for it today just asserts those backoff constants in `src/agent-doc/src/git.rs:1841-1859`.
+
+So my conclusion is:
+
+- yes, a stronger lock-contention path is warranted
+- the main gap is not "retry more" by itself; it is that the serialization boundary is wrong
+- the safer design is a **repo/submodule-scoped blocking lock** around the whole staging+commit closeout, with `index.lock` retry as a secondary backstop rather than the primary coordinator
+
+On the specific `src/session-share/tasks/docs.md` evidence, I would separate two things:
+
+- the repo-level design gap above is real
+- but the `1777005555` log entry we inspected does **not** show a commit failing on `index.lock`; it shows `commit_already_current`, then `preflight_diff_start`, and later the doc is still stuck in `preflight_started`
+
+Relevant lines from `src/session-share/.agent-doc/logs/ops.log`:
+
+- `13258`: submodule routing into `src/session-share`
+- `13262`: `commit_already_current file=src/session-share/tasks/docs.md basis=head`
+- `13264`: later detection that the cycle is still interrupted at `preflight_started`
+
+So the exact stale-lock console message the user saw likely came from a different later attempt in that same repo, or from another concurrent writer in `src/session-share`, not from the `1777005555` closeout record itself.
+
+What I would change:
+
+1. Key the advisory commit lock by resolved git root / submodule git dir, not by document hash.
+2. Make that lock blocking for the short commit critical section instead of "proceed unlocked".
+3. If git still returns `index.lock`, retry the **whole transaction** from staging through commit, not only the final `git commit` call.
+4. Add a real concurrency test with two different docs in the same repo/submodule contending on closeout.
+<!-- agent:boundary:d6a27b88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#w199] Fix doc-lint check ordering so missing Document Header does not short-circuit strict link validation; README.md should still report broken/cross-repo links.
+- [ ] [#73tv] [recommended] Serialize git-backed commit closeout per git root/submodule and retry the full staging+commit transaction on repo index.lock contention instead of only retrying git commit for ~700ms.
 - [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

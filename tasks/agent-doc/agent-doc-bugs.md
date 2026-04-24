@@ -492,14 +492,13 @@ Outcome:
 
 - `#6zyp` is done.
 - Imperative document directives now have a binary backstop instead of relying only on instruction text, so status-only/meta-only replies no longer count as a successful closeout.
-<!-- agent:boundary:2c87172b -->
+<!-- agent:boundary:63241ec5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#tdps] [recommended] Investigate route::tests::send_keys_delivers_{claude,codex}_command_with_enter failing in make check
-- [x] [#6zyp] Enforce executable document directives end-to-end: after document-local commands like do #id / run tests / commit + push, require real repo work or fail closed instead of allowing repeated status-only progress replies.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -566,7 +566,7 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I preserved the separate uncommitted local changes already present in `src/agent-doc` (`src/skill.rs`, `specs/07-commands.md`, `VERSIONS.md`) and kept them out of this `#r4kp` commit.
-<!-- agent:boundary:4f71ede9 -->
+<!-- agent:boundary:7c89f03c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -596,7 +596,6 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

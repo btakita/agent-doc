@@ -947,7 +947,7 @@ So the precise correction is:
 There is also a code-level gap behind your point. In `src/agent-doc/src/diff.rs`, `looks_like_imperative_directive()` currently recognizes `fix #...` and `fix this`, but not a generic imperative like `Fix the cross-repo ...`. So if we want pending-item prose of that form to count as executable intent, or to block auto-close after a failed same-turn run, that needs explicit product support rather than assuming the current extractor already covers it.
 
 I added a pending follow-up for that auto-close / imperative-text gap.
-<!-- agent:boundary:355be918 -->
+<!-- agent:boundary:f4bf9f42 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -967,7 +967,7 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3gwn] Revisit pending auto-close when a same-turn  run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like ). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
+- [ ] [#3gwn] Revisit pending auto-close when a same-turn `agent-doc` run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like `Fix the cross-repo ...`). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

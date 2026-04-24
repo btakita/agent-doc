@@ -1204,7 +1204,7 @@ Outcome:
 
 - `#n5hs` is done.
 - Interrupted `run` closeouts now record the truthful `write_applied` phase, and the follow-up `preflight` path can finish that pending commit deterministically instead of leaving the document stranded as stale `response_captured` drift.
-<!-- agent:boundary:648a5453 -->
+<!-- agent:boundary:0b6a0a68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1212,7 +1212,6 @@ Outcome:
 <!-- agent:pending patch=replace -->
 - [ ] [#3sd5] [recommended] Fix audit-docs root selection when invoked via cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs from the monorepo root; scope discovery to the crate workspace instead of the outer repo.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
-- [x] [#n5hs] Prevent final response delivery from stopping at write_applied: after the last ipc_file_delivered/write_template_done, persist recoverable post-write/pre-commit state with owning repo/submodule metadata and deterministically finish commit + session-check on resume instead of leaving an uncommitted patchback or appending duplicates.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

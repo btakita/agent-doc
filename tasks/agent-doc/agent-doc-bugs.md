@@ -919,7 +919,35 @@ What landed:
 - `tasks/claudescore-3.md` now records the completed `#n8q4` closeout and marks it done
 
 So the bug here was not that imperative-document enforcement is too strict. The problem was that the nested turn tried to satisfy an executable directive with progress prose instead of actually doing the work. The current fail-closed check was correct for that case.
-<!-- agent:boundary:69f76b87 -->
+
+❯ "Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE" is actionable. Why do you think this is "continuation/status prose"?
+❯ > [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE (`aider` and `superpowers` both under-score in `bootstrap-20260424T071600Z`).
+
+❯ We should revisit automatically closing the pending item in this case:
+❯ - There was no response patchback to claudescore-3.md
+❯ - Both you and the claudescore-3.md codex session seems to have misidentified a prompt with actionable language (`Fix the cross-rep ...`) as "continuation/status prose".
+### Re: `#n8q4` imperative wording — gpt-5
+
+You were right to call out my wording. I was imprecise.
+
+I do **not** think `[#n8q4] Fix the cross-repo \`no-permissions-bypass\` miss now dominating benchmark MAE ...` is continuation/status prose.
+
+What the retained `src/session-share` artifacts show is a split between the **directive**, the **pending text**, and the **rejected response**:
+
+- `src/session-share/.agent-doc/logs/ops.log` records `imperative_response_rejected ... trigger=do #n8q4...`, so the binary did recognize the explicit `do #n8q4. Add tests. Run benchmarks ... commit + push` line as an imperative directive.
+- The rejected response body in `src/session-share/.agent-doc/captures/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac/synthetic-1776969401288.json` is `I’m starting #n8q4 now.` plus `First pass is ...`. That is the status-only / continuation prose the guard rejected.
+- The pending line `- [ ] [#n8q4] Fix the cross-repo ...` is actionable task text. It was **not** the thing that tripped the status-only check.
+
+So the precise correction is:
+
+1. my previous sentence conflated the rejected **response** with the actionable **task text**
+2. there was no same-turn response patchback for that failed run
+3. the pending item still looked semantically live, so the auto-close behavior is worth revisiting
+
+There is also a code-level gap behind your point. In `src/agent-doc/src/diff.rs`, `looks_like_imperative_directive()` currently recognizes `fix #...` and `fix this`, but not a generic imperative like `Fix the cross-repo ...`. So if we want pending-item prose of that form to count as executable intent, or to block auto-close after a failed same-turn run, that needs explicit product support rather than assuming the current extractor already covers it.
+
+I added a pending follow-up for that auto-close / imperative-text gap.
+<!-- agent:boundary:355be918 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -939,6 +967,7 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#3gwn] Revisit pending auto-close when a same-turn  run fails without response patchback but the surviving pending text is still actionable (for example, generic imperative prose like ). Distinguish rejected status-only responses from the underlying task text, and do not silently treat the pending item as completed/continuation-only.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

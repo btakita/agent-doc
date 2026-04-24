@@ -878,7 +878,48 @@ Outcome:
 
 - `#vezj` is done.
 - A later recovered patchback is now durably distinguishable from an original same-turn patchback, both in capture JSON and in `ops.log`.
-<!-- agent:boundary:d28d02e1 -->
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md`, run failed. update spec + tests. build + install for local testing. commit + push
+```
+• The rerun failed.
+
+  agent-doc reached Codex submission, then rejected the document state with:
+
+  imperative document directive requires concrete execution evidence or a concrete blocker; rejected status-only/meta
+  response for "do #n8q4. Add tests. Run benchmarks. Add to standing today's news. Use Line Grap..."
+
+  No new agent-doc commit was created. session-share is still at c9a30b7, and tasks/claudescore-3.md has local drift on
+  top of that commit.
+
+  If you want, I can do one of two things next:
+
+  1. inspect and fix tasks/claudescore-3.md so agent-doc accepts it on the next run
+  2. execute #n8q4 directly and write the concrete evidence back into the document
+```
+### Re: `tasks/claudescore-3.md` imperative-run failure — gpt-5
+
+I traced this one to the nested document turn, not to a bad `agent-doc` gate.
+
+The failure was valid. `#n8q4` in `src/session-share/tasks/claudescore-3.md` only had continuation/status prose, while the directive in the document explicitly required concrete execution evidence: update spec + tests, build + install for local testing, run benchmarks, refresh standing/news, commit, and push. Preflight is supposed to fail closed in that situation, and it did.
+
+I completed the requested work instead of weakening the invariant:
+
+- `claudescore.com`: `2524aeb` on `origin/main` — `feat: route permission evidence for no-permissions-bypass`
+- `SessionShare`: `7d6334c` on `origin/main` — `docs: record permission evidence routing`
+
+What landed:
+
+- scorer/test changes in `scoring-api` for permission-evidence extraction and routing
+- focused tests plus full `uv run pytest -q` (**556 passed**)
+- `uv build`
+- wheel install into `scoring-api/.venv`
+- benchmark artifact `bootstrap-20260424T160205Z`
+- standing/history refresh for Apr 22-24
+- spec/findings/news/task updates in `src/session-share`
+- `tasks/claudescore-3.md` now records the completed `#n8q4` closeout and marks it done
+
+So the bug here was not that imperative-document enforcement is too strict. The problem was that the nested turn tried to satisfy an executable directive with progress prose instead of actually doing the work. The current fail-closed check was correct for that case.
+<!-- agent:boundary:69f76b87 -->
 <!-- /agent:exchange -->
 
 <!--

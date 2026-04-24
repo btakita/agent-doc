@@ -328,14 +328,49 @@ The processing order I would specify is:
 5. if an edit looks like a missed/uncommitted response, route through repair/session-check logic before treating it as ordinary conversation
 
 So the root change I would want in the spec is: replace the current split between "required response targets" and "inline annotations" with one unified `user-authored prompt-bearing change` contract, then let prompt-vs-edit-vs-artifact be explicit subtypes under that contract.
-<!-- agent:boundary:50fab450 -->
+
+❯ do #3xmb. update spec + tests. build + install for local testing. commit + push
+### Re: unified prompt-bearing change classifier — gpt-5
+Shipped `#3xmb` in `src/agent-doc`.
+
+What changed:
+- replaced the split between explicit required-response targets and `inline_annotations` with a canonical `prompt_bearing_changes` classifier in `src/diff.rs`
+- added typed kinds: `prompt_target`, `content_edit`, `recovery_artifact`, and `boundary_artifact`
+- updated preflight, run/stream prompt builders, backend prompt instructions, and the spec/skill/docs surfaces so inline prompt-bearing edits and response-artifact triage use the same contract
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Committed and pushed in `src/agent-doc` as `3fb65d8` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:6a69944e -->
 <!-- /agent:exchange -->
 
+<!--
+In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
+```
+• Because I treated the patchback as an assistant-only response block, not as a transcript entry.
+
+  The local evidence shows two different patterns:
+
+  - agent-doc capture response_body values are response-only and do not include ❯.
+  - The archived/baseline session docs do use ❯  to mark user prompts inline in the transcript.
+
+  I followed the first pattern while writing directly into tasks/monsterrodholders.md, but that was the wrong fit for
+  this document. In this file’s exchange history, ❯  is part of the transcript format, so omitting it made the
+  patchback inconsistent with the surrounding record.
+
+  So the short answer is: I excluded it because I was patching “response text” rather than reconstructing the full
+  prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
+  I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
+```
+-->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3xmb] [recommended] Unify required response targets and inline annotations into one prompt-bearing change classifier with markdown-context awareness
+- [x] [#3xmb] [recommended] Unify required response targets and inline annotations into one prompt-bearing change classifier with markdown-context awareness
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

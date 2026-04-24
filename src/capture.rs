@@ -184,9 +184,22 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     let Some(mut record) = load_active(file)? else {
         return Ok(());
     };
+    if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
+        return Ok(());
+    }
     record.state = state;
     record.updated_at = now_secs();
     write_record(file, &record)
+}
+
+fn capture_state_rank(state: CaptureState) -> u8 {
+    match state {
+        CaptureState::Captured => 0,
+        CaptureState::WriteApplied => 1,
+        CaptureState::Replayed => 2,
+        CaptureState::Committed => 3,
+        CaptureState::Discarded => 4,
+    }
 }
 
 fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
@@ -310,6 +323,21 @@ mod tests {
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
+        let active = load_active(&doc).unwrap().unwrap();
+        assert_eq!(active.state, CaptureState::Committed);
+    }
+
+    #[test]
+    fn mark_write_applied_does_not_regress_committed_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        capture_response(&doc, "response body").unwrap();
+
+        mark_committed(&doc).unwrap();
+        mark_write_applied(&doc).unwrap();
+
         let active = load_active(&doc).unwrap().unwrap();
         assert_eq!(active.state, CaptureState::Committed);
     }

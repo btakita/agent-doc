@@ -30,12 +30,18 @@
 //!   ID after the response write succeeds.
 //! - Captures the final parsed response in the durable response ledger before
 //!   any file mutation so interrupted cycles can be replayed deterministically.
+//! - Marks the final post-write document state as `write_applied` before the
+//!   post-write commit so interrupted runs can be resumed from the exact
+//!   already-written response instead of looking like generic `response_captured`
+//!   drift.
 //! - Acquires an advisory `flock` on a per-document lock file before writing so
 //!   concurrent `agent-doc run` / watch-daemon invocations are serialized.
 //! - Re-reads the file under lock; if the user edited concurrently, performs a
 //!   3-way merge for append/merge docs or a CRDT merge for template+CRDT docs.
 //! - Tries IPC write to the IDE plugin first; on IPC miss, falls back to
 //!   `atomic_write` (temp file + POSIX rename) and saves a snapshot.
+//! - In git-backed runs, refuses success unless the post-write commit closes
+//!   the cycle in `committed`.
 //! - `acquire_doc_lock(path)`: opens/creates `.agent-doc/locks/<hash>.lock` and
 //!   acquires an exclusive `flock`; returned `File` releases the lock on drop.
 //! - `atomic_write(path, content)`: writes to a sibling temp file and renames
@@ -63,6 +69,9 @@
 //!   calling the agent or modifying anything.
 //! - `run_dry_run`: `dry_run=true` → diff and prompt size printed to stderr;
 //!   file unchanged, no agent call, no git operations.
+//! - `run_marks_write_applied_before_post_write_commit`: once the final
+//!   response is written (and any `resume` update lands), the cycle state is
+//!   advanced to `write_applied` before the post-write commit attempt.
 //! - `acquire_doc_lock_succeeds`: lock file created and exclusive lock acquired
 //!   on a fresh document path → `Ok(File)`.
 //! - `doc_lock_released_on_drop`: after dropping the lock handle, a second
@@ -207,18 +216,66 @@ pub fn run(
             fm.resolve_mode().is_crdt(),
         )?,
     }
+    mark_run_write_applied(file, "run_write_applied")?;
 
     if let Some(ref sid) = response.session_id {
         update_resume_id(file, sid)?;
+        mark_run_write_applied(file, "run_write_applied_resume")?;
     }
 
     crate::recover::clear_pending(file)?;
+    maybe_abort_after_write_applied_for_test()?;
 
     if !no_git {
         git::commit(file)?;
+        ensure_cycle_committed(file)?;
     }
 
     eprintln!("Response written to {}", file.display());
+    Ok(())
+}
+
+fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
+    let file_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} after run write", file.display()))?;
+    let snapshot_content = snapshot::load(file)?;
+    crate::cycle_state::mark_write_applied(
+        file,
+        event,
+        snapshot_content.as_deref(),
+        Some(&file_content),
+    )?;
+    Ok(())
+}
+
+fn ensure_cycle_committed(file: &Path) -> Result<()> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        anyhow::bail!("run did not persist cycle state");
+    };
+    if state.is_open() {
+        anyhow::bail!(
+            "run left cycle `{}` open at `{}` ({})",
+            state.cycle_id,
+            cycle_phase_name(state.phase),
+            state.last_event
+        );
+    }
+    Ok(())
+}
+
+fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+    }
+}
+
+fn maybe_abort_after_write_applied_for_test() -> Result<()> {
+    if std::env::var_os("AGENT_DOC_TEST_ABORT_AFTER_RUN_WRITE_APPLIED").is_some() {
+        anyhow::bail!("test abort after run write_applied");
+    }
     Ok(())
 }
 

@@ -1,5 +1,7 @@
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use predicates::prelude::*;
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -10,6 +12,11 @@ fn agent_doc() -> Command {
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/pending")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/locks")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/captures")).unwrap();
     ProcessCommand::new("git")
         .current_dir(root)
         .args(["init"])
@@ -82,6 +89,17 @@ fn append_doc() -> String {
     "---\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n# Session\n\n## User\n\nPlease reply\n".to_string()
 }
 
+fn read_cycle_phase(root: &Path) -> String {
+    let state_dir = root.join(".agent-doc/state/cycles");
+    let entry = fs::read_dir(&state_dir)
+        .unwrap()
+        .next()
+        .expect("expected cycle state file")
+        .unwrap();
+    let value: Value = serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap();
+    value["phase"].as_str().unwrap().to_string()
+}
+
 #[test]
 fn run_template_mode_writes_inside_exchange_and_commits() {
     let tmp = TempDir::new().unwrap();
@@ -123,6 +141,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
     let head_blob = String::from_utf8_lossy(&head.stdout);
     assert!(head_blob.contains("### Re: topic — gpt-5"));
     assert!(head_blob.contains("resume: sess-123"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
 }
 
 #[test]
@@ -174,4 +193,65 @@ fn run_append_mode_keeps_inline_response_shape() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("## Assistant\n\nAppend answer."));
     assert!(content.contains("resume: sess-123"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+}
+
+#[test]
+fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: interrupted closeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_TEST_ABORT_AFTER_RUN_WRITE_APPLIED", "1")
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "test abort after run write_applied",
+        ));
+
+    let content_after_abort = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content_after_abort.contains("### Re: interrupted closeout — gpt-5"),
+        "response should already be in the document after the simulated abort"
+    );
+    assert_eq!(read_cycle_phase(tmp.path()), "write_applied");
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let repaired = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        repaired
+            .matches("### Re: interrupted closeout — gpt-5")
+            .count(),
+        1,
+        "preflight recovery should finish the pending commit without duplicating the response"
+    );
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+
+    let head = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head_blob = String::from_utf8_lossy(&head.stdout);
+    assert!(
+        head_blob.contains("### Re: interrupted closeout — gpt-5"),
+        "HEAD should contain the recovered response"
+    );
 }

@@ -443,7 +443,9 @@ Concretely, I would change it this way:
 I would treat this as a real product invariant, not agent guidance. The current split is the bug: prompt classification is deterministic, but transcript formatting is still partly heuristic and partly harness-discipline.
 
 I did not patch `src/agent-doc` in this cycle.
-<!-- agent:boundary:7ba733fb -->
+### Re: no new prompt-bearing changes — gpt-5
+Preflight only found a boundary/pending-order artifact in this cycle, not a new prompt or repo-work request. I left the pending list order untouched because `pending_reordered: true` was already set by preflight, and there was nothing else to act on.
+<!-- agent:boundary:1ec88a73 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -464,15 +466,17 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
   prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
   I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
 ```
+
+do #3fjy. update spec + tests. build + install for local testing. commit + push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [ ] [#3fjy] [recommended] Make prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
 - [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
+- [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

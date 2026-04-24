@@ -344,7 +344,31 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed in `src/agent-doc` as `3fb65d8` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:32ede22c -->
+
+❯ In src/session-share, the `agent-doc tasks/claudescore-3.md` response had recommendations but did not add the recommendations 
+```
+❯ Why did you not add all of the actionalbe recommendations into agent:pending?
+
+● You're right — the report has 7 concrete, actionable recommendations and the pending capture rule requires tracking
+  those. Let me fix that now.
+```
+### Re: pending capture enforcement — opus-4-6
+
+The agent failed to add 7 actionable recommendations to `agent:pending` during the `finalize` call in `tasks/claudescore-3.md`. The prompt contract says to capture these, but there's no binary-level enforcement — only LLM memory, which is unreliable for this pattern.
+
+**Spec written:** [`tasks/agent-doc/spec-pending-capture-guard.md`](spec-pending-capture-guard.md)
+
+The design adds a post-commit heuristic to `session-check` that detects uncaptured recommendations in the committed response:
+
+- **Detection patterns:** priority labels (P0/P1/P2), numbered action lists with imperative verbs, recommendation headers, imperative sentences near "recommend" keywords
+- **Guard behavior:** warn by default (stderr, exit 0), strict mode via frontmatter `pending_capture_guard: strict` (exit 1)
+- **Suppression:** `<!-- no-pending-capture -->` in the response for intentional skips (e.g., mutually exclusive options)
+- **Threshold:** only triggers when `estimated_count >= 2` and `confidence >= 0.5` to avoid noise on single action items
+
+Implementation touches: `session_check.rs` (guard logic), `cycle_state.rs` (track `had_pending_mutations`), `write.rs` (set flag on pending-add), `config.rs` (parse guard setting), new `heuristics.rs` module (isolated detection logic). 9 test cases specified.
+
+The guard goes in `session-check` rather than `finalize` so the agent gets a self-correction window — it can add pending items via a follow-up `write --commit --pending-add` in the same turn.
+<!-- agent:boundary:99be89fc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -370,6 +394,7 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#pb76] Implement pending capture guard in session-check — spec at tasks/agent-doc/spec-pending-capture-guard.md. Detect uncaptured recommendations in committed responses (priority labels, numbered action lists, recommendation headers). Warn by default, strict mode opt-in via frontmatter/config. Add heuristics module, cycle state tracking, config parsing, and test coverage.
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -813,12 +813,47 @@ Commit / push:
 Outcome:
 
 - `agent-doc preflight` / `commit` now explains the monsterrodholders-style case correctly: if `HEAD` already has the committed response and the live file has later local edits, that is reported as post-commit local drift rather than a half-committed patchback.
-<!-- agent:boundary:2aba42ca -->
+
+❯ In src/session-share agent-doc tasks/claudescore-3.md did not do a response patchback.
+
+```
+› why did you not patchback the response
+
+
+• Because I missed that step.
+
+  I updated the durable record around the task instead of appending a new assistant reply into the agent:exchange block
+  in tasks/claudescore-3.md. Concretely, I patched status, pending, findings, specs, and news, then committed, but I
+  did not run the patchback/write step for the actual response body. That was a workflow error, not an intentional
+  choice.
+
+  If you want, I can patch back the response into tasks/claudescore-3.md now.
+```
+### Re: `src/session-share/tasks/claudescore-3.md` patchback explanation — gpt-5
+
+That quoted `Because I missed that step` answer is not the real failure mode.
+
+What the retained `src/session-share` artifacts show on **April 24, 2026**:
+
+- At **02:45:48 EDT**, `agent-doc(claudescore-3)` commit `b434931` did not go through the normal write/finalize path. `ops.log` shows `commit_staging`, `out_of_band_write`, and `commit_success` for `tasks/claudescore-3.md`, but no `write_origin`, `ipc_write_attempt`, or `ipc_write_consumed`.
+- The diff from `898e0b4` to `b434931` shows the already-written `Implemented and pushed #qj5w.` assistant block was removed and status regressed back to `Implementing ...`. So the problem was not `no response body was available`; committed response content was rewound.
+- At **02:46:01 EDT**, commit `b6f79af` re-added the `#qj5w` response and appended the `#007c` start response.
+- Later, at **03:00:12-03:00:24 EDT**, the exact quoted explanation was captured in `src/session-share/.agent-doc/captures/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac/synthetic-1776969401288.json`, then written via `ipc_file_delivered` fallback and committed. So that response eventually did patch back, but only as a later recovery/closeout, not as the original same-turn finalize.
+
+So the precise conclusion is:
+
+- for the original turn, the normal same-turn response patchback was missed
+- but the root cause was an out-of-band closeout / rewind bug, not a simple `I forgot to append the response`
+- the quoted explanation rationalized the miss incorrectly
+
+I added a recommended backlog item for the remaining product gap: when a later synthetic/file-delivery recovery closes the turn, `agent-doc` should explain that as delayed recovered patchback after out-of-band closeout, not as operator error.
+<!-- agent:boundary:7c7730b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#vezj] [recommended] Distinguish delayed recovered patchbacks after out-of-band closeout from operator-missed-step failures in logs and forensic explanations.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

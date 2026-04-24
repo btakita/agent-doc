@@ -668,13 +668,12 @@ Current result:
   - `route::tests::wait_for_agent_ready_codex_prompt`
 
 So there is no live repo bug for me to patch in this cycle. I closed `#tdps` as verified / non-reproducible on the current tree.
-<!-- agent:boundary:4d1cb049 -->
+<!-- agent:boundary:56d31934 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#tdps] [recommended] Investigate route::tests::send_keys_delivers_{claude,codex}_command_with_enter failing in make check
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -104,6 +104,17 @@
 //!   `[#id] Fix the cross-repo ...`, skipping code fences and blockquotes
 //! - `diff_contains_imperative_directive(diff)`: true when the diff contains either an explicit
 //!   imperative directive line or a one-word approval like `go`
+//! - `extract_required_response_blocks_multiple_prompts`: changed exchange tail with two prompt
+//!   starts → both blocks returned oldest-first
+//! - `extract_required_response_blocks_preserves_code_fence_context`: prompt block followed by an
+//!   added fenced code block → returned block keeps the fence content intact
+//! - `format_required_response_targets_mentions_turn_completeness`: rendered section includes the
+//!   "do not stop at the newest question" contract
+//! - `extract_required_response_blocks(diff)`: extracts ordered user request blocks from added
+//!   diff lines (for example `❯` prompts, questions, or imperative directives) so prompt builders
+//!   can restate the full changed exchange tail instead of anchoring only on the newest question
+//! - `format_required_response_targets(diff)`: renders those blocks into a prompt-ready section
+//!   with an explicit turn-completeness instruction
 
 use anyhow::Result;
 use serde::Serialize;
@@ -571,6 +582,141 @@ pub fn diff_contains_imperative_directive(diff: &str) -> bool {
         return true;
     }
     matches!(classify_diff(diff).diff_type, DiffType::Approval)
+}
+
+/// Extract ordered user-authored request blocks from added diff lines.
+///
+/// This is a prompt-building helper, not a semantic proof that every request
+/// was answered. It makes the changed exchange tail explicit so the agent is
+/// reminded to address the full oldest-first set of prompts instead of only the
+/// newest visible question.
+pub fn extract_required_response_blocks(diff: &str) -> Vec<String> {
+    fn is_response_heading(line: &str) -> bool {
+        line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:")
+    }
+
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    fn trim_block_lines(lines: &mut Vec<String>) {
+        while lines.first().is_some_and(|line| line.trim().is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.pop();
+        }
+    }
+
+    fn block_start(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("<!--")
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("~~~")
+            || is_response_heading(trimmed)
+        {
+            return false;
+        }
+        trimmed.starts_with('❯')
+            || trimmed.ends_with('?')
+            || looks_like_imperative_directive(trimmed)
+    }
+
+    fn flush(blocks: &mut Vec<String>, current: &mut Vec<String>) {
+        trim_block_lines(current);
+        if !current.is_empty() {
+            blocks.push(current.join("\n"));
+            current.clear();
+        }
+    }
+
+    let mut blocks = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+
+    for line in diff.lines() {
+        if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("@@ ") {
+            if !in_fence {
+                flush(&mut blocks, &mut current);
+            }
+            continue;
+        }
+
+        let Some(content) = line.strip_prefix('+') else {
+            if !in_fence {
+                flush(&mut blocks, &mut current);
+            }
+            continue;
+        };
+
+        let trimmed = content.trim();
+
+        let starts_new_block = !current.is_empty()
+            && !in_fence
+            && (trimmed.starts_with('❯')
+                || (current.last().is_some_and(|line| line.trim().is_empty())
+                    && block_start(content)));
+        if starts_new_block && current.iter().any(|line| !line.trim().is_empty()) {
+            flush(&mut blocks, &mut current);
+        }
+
+        if current.is_empty() && !block_start(content) {
+            continue;
+        }
+
+        current.push(content.to_string());
+
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+        }
+    }
+
+    flush(&mut blocks, &mut current);
+    blocks
+}
+
+/// Render extracted request blocks as a prompt-ready turn-completeness section.
+pub fn format_required_response_targets(diff: &str) -> Option<String> {
+    let blocks = extract_required_response_blocks(diff);
+    if blocks.is_empty() {
+        return None;
+    }
+
+    let mut out = String::from(
+        "Required response targets (oldest first):\n\
+         Do not stop at the newest question. The turn is incomplete until each item below is answered or explicitly grouped into one response.\n\n",
+    );
+    for (idx, block) in blocks.iter().enumerate() {
+        out.push_str(&format!(
+            "<target index=\"{}\">\n{}\n</target>\n\n",
+            idx + 1,
+            block
+        ));
+    }
+    Some(out)
 }
 
 fn looks_like_imperative_directive(line: &str) -> bool {
@@ -2189,5 +2335,51 @@ Please fix the bug.\n\
     fn diff_contains_imperative_directive_for_approval_word() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+go\n";
         assert!(diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn extract_required_response_blocks_multiple_prompts() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,9 @@\n\
+            ctx\n\
+            +❯ First question?\n\
+            +Context line.\n\
+            +\n\
+            +❯ Second question?\n\
+            +do #n8q4. run tests. build + install. commit + push\n";
+
+        let blocks = extract_required_response_blocks(diff);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0], "❯ First question?\nContext line.");
+        assert_eq!(
+            blocks[1],
+            "❯ Second question?\ndo #n8q4. run tests. build + install. commit + push"
+        );
+    }
+
+    #[test]
+    fn extract_required_response_blocks_preserves_code_fence_context() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
+            ctx\n\
+            +❯ In src/boost-client, why did patchback miss the prefix?\n\
+            +See my inquiry:\n\
+            +```text\n\
+            +line one\n\
+            +line two\n\
+            +```\n";
+
+        let blocks = extract_required_response_blocks(diff);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].contains("❯ In src/boost-client"));
+        assert!(blocks[0].contains("```text\nline one\nline two\n```"));
+    }
+
+    #[test]
+    fn format_required_response_targets_mentions_turn_completeness() {
+        let diff =
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Why were two prompts left unresolved?\n";
+        let rendered = format_required_response_targets(diff).unwrap();
+        assert!(rendered.contains("Do not stop at the newest question"));
+        assert!(rendered.contains("<target index=\"1\">"));
+        assert!(rendered.contains("❯ Why were two prompts left unresolved?"));
     }
 }

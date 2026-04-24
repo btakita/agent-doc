@@ -16,7 +16,9 @@
 //!   explicit format is present.
 //! - Builds one of four prompt shapes: append/template × resume/fork. Template
 //!   prompts require `patch:exchange` blocks; append prompts require plain
-//!   markdown without `## Assistant`.
+//!   markdown without `## Assistant`. Resumed prompts also restate ordered
+//!   request blocks extracted from the diff so the agent does not anchor only
+//!   on the newest question in a changed exchange tail.
 //! - In `--dry-run` mode: prints the diff and prompt size to stderr and returns
 //!   without calling the agent, writing files, or touching git.
 //! - Optionally creates a git branch via `git::create_branch` before committing
@@ -93,6 +95,8 @@
 //!   lock sees the completed write, not a partial state.
 //! - `merge_clean_no_conflicts`: agent response appended as "ours" + user
 //!   unchanged as "theirs" → clean 3-way merge containing the response.
+//! - `build_prompt_resume_lists_required_response_targets`: resumed prompt with
+//!   two user request blocks → prompt includes the ordered turn-completeness section
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -290,16 +294,20 @@ fn build_prompt(
     the_diff: &str,
     content: &str,
 ) -> String {
+    let required_targets = diff::format_required_response_targets(the_diff)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
     match (run_mode, fm.resume.is_some()) {
         (RunMode::Template, true) => format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
+             {}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, content
+            the_diff, required_targets, content
         ),
         (RunMode::Template, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
@@ -312,12 +320,13 @@ fn build_prompt(
         (RunMode::Append, true) => format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
+             {}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user asked questions inline (e.g., in blockquotes), address those too.",
-            the_diff, content
+            the_diff, required_targets, content
         ),
         (RunMode::Append, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
@@ -480,6 +489,24 @@ mod tests {
         let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc");
         assert!(prompt.contains("Do not include a ## Assistant heading"));
         assert!(!prompt.contains("patch:exchange"));
+    }
+
+    #[test]
+    fn build_prompt_resume_lists_required_response_targets() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
+            ctx\n\
+            +❯ First unresolved question?\n\
+            +\n\
+            +❯ Second unresolved question?\n";
+        let prompt = build_prompt(RunMode::Template, &fm, diff, "doc");
+        assert!(prompt.contains("Required response targets (oldest first):"));
+        assert!(prompt.contains("Do not stop at the newest question"));
+        assert!(prompt.contains("❯ First unresolved question?"));
+        assert!(prompt.contains("❯ Second unresolved question?"));
     }
 
     #[test]

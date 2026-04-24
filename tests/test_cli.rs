@@ -610,6 +610,10 @@ fn test_skill_md_contains_required_steps() {
         content.contains("Imperative edits are executable directives"),
         "SKILL.md should treat document-local `do` edits as executable work directives"
     );
+    assert!(
+        content.contains("Do not stop at the newest question"),
+        "SKILL.md should require reconciling the changed exchange tail oldest-first"
+    );
 }
 
 #[test]

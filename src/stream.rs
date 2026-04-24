@@ -20,7 +20,9 @@
 //! - `flush_to_document()` tries IPC to the IDE plugin first; falls back to flock +
 //!   atomic write on IPC absence or timeout.
 //! - `build_prompt()` produces distinct prompts for first submit (no `resume`) vs.
-//!   resumed sessions (includes diff + full document).
+//!   resumed sessions (includes diff + full document). Resumed prompts also restate
+//!   ordered request blocks extracted from the diff so the agent does not anchor only
+//!   on the newest question in a changed exchange tail.
 //!
 //! Write-back loop:
 //! ```text
@@ -47,6 +49,8 @@
 //! - build_prompt_first_submit: no resume → prompt says "starting a session", no diff included
 //! - build_prompt_resume: resume ID set → prompt includes diff and full document
 //! - build_prompt_mentions_patch_blocks: prompt always references `patch:exchange` format
+//! - build_prompt_resume_lists_required_response_targets: resumed prompt with two user request
+//!   blocks → prompt includes the ordered turn-completeness section
 //! - stream_loop_thinking_to_separate_component: thinking_target="log" → thinking in log, response in exchange
 //! - stream_loop_thinking_interleaved: no thinking_target → `<details>` block in target component
 //! - stream_loop_no_thinking_skips_thinking_blocks: thinking_cfg=None → thinking content absent from doc
@@ -488,16 +492,20 @@ pub(crate) fn flush_to_document(
 
 /// Build the prompt for the streaming agent.
 fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) -> String {
+    let required_targets = diff::format_required_response_targets(the_diff)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
     if fm.resume.is_some() {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
+             {}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, content
+            the_diff, required_targets, content
         )
     } else {
         format!(
@@ -764,6 +772,24 @@ mod tests {
             prompt.contains("patch:exchange"),
             "prompt should mention patch block format"
         );
+    }
+
+    #[test]
+    fn build_prompt_resume_lists_required_response_targets() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
+            ctx\n\
+            +❯ First unresolved question?\n\
+            +\n\
+            +❯ Second unresolved question?\n";
+        let prompt = build_prompt(&fm, diff, "doc content");
+        assert!(prompt.contains("Required response targets (oldest first):"));
+        assert!(prompt.contains("Do not stop at the newest question"));
+        assert!(prompt.contains("❯ First unresolved question?"));
+        assert!(prompt.contains("❯ Second unresolved question?"));
     }
 
     #[test]

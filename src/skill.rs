@@ -827,6 +827,12 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_requires_oldest_first_exchange_tail_reconciliation() {
+        assert!(SKILL_TEMPLATE.contains("Do not stop at the newest question"));
+        assert!(SKILL_TEMPLATE.contains("each unresolved prompt in that tail"));
+    }
+
+    #[test]
     fn codex_content_uses_plain_text_invocation() {
         let content = super::content_for_env(Environment::Codex);
 

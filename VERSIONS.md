@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.13
 
+- **Relative submodule doc resolution no longer falls through to outer-repo shadows.** When `agent-doc` is invoked from inside a submodule with a relative document path like `tasks/monsterrodholders.md`, path resolution now prefers the caller's existing cwd-local file before consulting the superproject root. This fixes the case where `commit` / `show_head` / related git paths could silently target an outer-repo document with the same relative path, leaving the intended submodule doc uncommitted even though the closeout logged success. Added regression coverage for the shadowed-path shape.
+
 - **Executable-directive backstop in `run` + `finalize`.** The binary now inspects the pending user diff for imperative document directives (`do #id`, `run tests`, `build + install`, `commit + push`, and approval words like `go`) and rejects status-only/meta-only replies unless they include either concrete execution evidence or a concrete blocker. Added unit coverage for directive extraction + response classification and finalize integration coverage for the reject path.
 
 - **Codex closeout contract hardened.** `agent-doc finalize` is now the strict happy path for normal session responses, Codex/direct-exec instructions require an immediate `agent-doc session-check <FILE>` after `finalize` or `write --commit`, and the installed Codex `Stop` hook can auto-close a pending response cycle from `last_assistant_message` before failing closed. Added CLI/integration coverage for the `finalize + session-check` path and the real Codex hook flow.

@@ -169,27 +169,31 @@ fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Resolve a relative path against the git root (superproject root if in a submodule).
-/// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
-pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
-    if file.is_absolute() {
-        // Find git root from the file's directory.
-        // Prefer the superproject root when the file is inside a submodule, so
-        // submodule files resolve to the parent repo (matches the relative-path
-        // branch below). Without this, IPC patches for submodule documents land
-        // in the submodule's `.agent-doc/patches/` instead of the parent's,
-        // which is the only directory the IDE plugin watches.
-        let parent = file.parent().unwrap_or(Path::new("/"));
-        if let Some(superproject) = git_superproject_at(parent) {
-            return Ok((superproject, file.to_path_buf()));
-        }
-        let root =
-            git_toplevel_at(parent).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        return Ok((root, file.to_path_buf()));
+fn resolve_absolute_to_git_root(
+    file: &Path,
+    cwd_fallback: &Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let parent = file.parent().unwrap_or(Path::new("/"));
+    if let Some(superproject) = git_superproject_at(parent) {
+        return (superproject, file.to_path_buf());
+    }
+    let root = git_toplevel_at(parent).unwrap_or_else(|| cwd_fallback.to_path_buf());
+    (root, file.to_path_buf())
+}
+
+fn resolve_relative_to_git_root_from(
+    cwd: &Path,
+    file: &Path,
+) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let cwd_candidate = cwd.join(file);
+    if cwd_candidate.exists() {
+        let resolved = cwd_candidate.canonicalize().unwrap_or(cwd_candidate);
+        return Ok(resolve_absolute_to_git_root(&resolved, cwd));
     }
 
     // Try superproject first (handles submodule CWD case)
     let output = Command::new("git")
+        .current_dir(cwd)
         .args(["rev-parse", "--show-superproject-working-tree"])
         .output();
     if let Ok(ref o) = output {
@@ -205,6 +209,7 @@ pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, st
 
     // Try git toplevel
     let output = Command::new("git")
+        .current_dir(cwd)
         .args(["rev-parse", "--show-toplevel"])
         .output();
     if let Ok(ref o) = output {
@@ -218,9 +223,21 @@ pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, st
         }
     }
 
-    // Fallback: use as-is (relative to CWD)
+    Ok((cwd.to_path_buf(), file.to_path_buf()))
+}
+
+/// Resolve a relative path against the git root (superproject root if in a submodule).
+/// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
+pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+    if file.is_absolute() {
+        return Ok(resolve_absolute_to_git_root(
+            file,
+            &std::env::current_dir().unwrap_or_default(),
+        ));
+    }
+
     let cwd = std::env::current_dir().unwrap_or_default();
-    Ok((cwd, file.to_path_buf()))
+    resolve_relative_to_git_root_from(&cwd, file)
 }
 
 /// Get git toplevel from a specific directory.
@@ -3443,6 +3460,127 @@ mod tests {
         assert!(
             cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
             "fallback cwd should be the process cwd or an existing path"
+        );
+    }
+
+    #[test]
+    fn resolve_relative_path_prefers_existing_submodule_file_over_superproject_shadow() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+
+        let shadow_dir = outer.join("tasks");
+        fs::create_dir_all(&shadow_dir).unwrap();
+        fs::write(shadow_dir.join("monsterrodholders.md"), "outer shadow\n").unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let sub_origin_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_origin_dir.path();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        fs::create_dir_all(sub_origin.join("tasks")).unwrap();
+        fs::write(
+            sub_origin.join("tasks/monsterrodholders.md"),
+            "submodule doc\n",
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_add = Command::new("git")
+            .current_dir(outer)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/boost-client",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            sub_add.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_add.stderr)
+        );
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let submodule_root = outer.join("src/boost-client");
+        let (super_root, resolved) = resolve_relative_to_git_root_from(
+            &submodule_root,
+            Path::new("tasks/monsterrodholders.md"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            super_root, outer,
+            "superproject root should still be returned for IPC/project-root coordination"
+        );
+        assert_eq!(
+            resolved,
+            submodule_root
+                .join("tasks/monsterrodholders.md")
+                .canonicalize()
+                .unwrap(),
+            "relative path should resolve to the existing submodule file, not the outer shadow file"
         );
     }
 

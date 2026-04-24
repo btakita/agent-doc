@@ -757,6 +757,17 @@ mod tests {
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Committed);
+        assert!(
+            capture.replayed_at.is_some(),
+            "recovered patchback should retain replay provenance"
+        );
+        assert!(
+            capture.committed_at.is_some(),
+            "recovered patchback should record the later commit boundary"
+        );
     }
 
     #[test]

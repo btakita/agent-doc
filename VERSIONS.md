@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.13
 
+- **Delayed recovery patchbacks now keep provenance.** Durable capture records now retain lifecycle timestamps like `replayed_at` and `committed_at`, and `ops.log` emits `capture_committed_after_replay` when a response only reaches the commit boundary after recovery replay. This preserves the distinction between "same-turn patchback succeeded" and "the response was written back later during recovery/closeout" for forensic analysis and user-facing explanations.
+
 - **`commit` now explains post-commit local drift explicitly.** When the stripped snapshot already matches `HEAD` but the working tree still has later local edits, `agent-doc commit` now classifies that state as post-commit local drift, logs whether it was a user follow-up or broader working-tree edits, and closes the cycle without mislabeling the state as a generic out-of-band patchback warning. Added regression coverage for both the safe follow-up and later-local-edit shapes.
 
 - **Stale snapshots can no longer rewind already-committed responses on no-op closeout.** If the snapshot lags behind a response that is already in `HEAD`, and the working tree only adds a new user follow-up on top of that committed state, `agent-doc commit` now repairs the snapshot up to `HEAD` before the `HEAD`-current no-op path runs. This prevents a later closeout from staging the old snapshot blob and momentarily rewinding the document before recovery re-adds the response. Added regression coverage for the exact stale-snapshot + follow-up shape.

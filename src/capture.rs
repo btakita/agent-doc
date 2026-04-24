@@ -59,6 +59,14 @@ pub struct CaptureRecord {
     pub captured_at: u64,
     pub updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_applied_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replayed_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub committed_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discarded_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
@@ -98,6 +106,10 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         write_strategy: metadata.write_strategy,
         captured_at: now_secs(),
         updated_at: now_secs(),
+        write_applied_at: None,
+        replayed_at: None,
+        committed_at: None,
+        discarded_at: None,
         snapshot_hash: snapshot_content
             .as_deref()
             .map(crate::ops_log::content_hash),
@@ -187,8 +199,42 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
         return Ok(());
     }
+    let now = now_secs();
+    match state {
+        CaptureState::Captured => {}
+        CaptureState::WriteApplied => {
+            if record.write_applied_at.is_none() {
+                record.write_applied_at = Some(now);
+            }
+        }
+        CaptureState::Replayed => {
+            if record.replayed_at.is_none() {
+                record.replayed_at = Some(now);
+            }
+        }
+        CaptureState::Committed => {
+            if record.committed_at.is_none() {
+                record.committed_at = Some(now);
+            }
+        }
+        CaptureState::Discarded => {
+            if record.discarded_at.is_none() {
+                record.discarded_at = Some(now);
+            }
+        }
+    }
     record.state = state;
-    record.updated_at = now_secs();
+    record.updated_at = now;
+    if matches!(record.state, CaptureState::Committed) && record.replayed_at.is_some() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "capture_committed_after_replay file={} capture_id={}",
+                file.display(),
+                record.capture_id
+            ),
+        );
+    }
     write_record(file, &record)
 }
 
@@ -325,6 +371,7 @@ mod tests {
         mark_committed(&doc).unwrap();
         let active = load_active(&doc).unwrap().unwrap();
         assert_eq!(active.state, CaptureState::Committed);
+        assert!(active.committed_at.is_some());
     }
 
     #[test]
@@ -340,5 +387,22 @@ mod tests {
 
         let active = load_active(&doc).unwrap().unwrap();
         assert_eq!(active.state, CaptureState::Committed);
+    }
+
+    #[test]
+    fn committed_capture_preserves_replay_provenance() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        capture_response(&doc, "response body").unwrap();
+
+        mark_replayed(&doc).unwrap();
+        mark_committed(&doc).unwrap();
+
+        let active = load_active(&doc).unwrap().unwrap();
+        assert_eq!(active.state, CaptureState::Committed);
+        assert!(active.replayed_at.is_some());
+        assert!(active.committed_at.is_some());
     }
 }

@@ -527,7 +527,26 @@ Verification:
 Commit / push:
 - committed in `src/agent-doc` as `b623b2f`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:acb40693 -->
+
+❯ do #8cmb. update spec + tests. build + install for local testing. commit + push
+### Re: prompt-bearing diff triage order — gpt-5
+Shipped `#8cmb` in `src/agent-doc`.
+
+What changed:
+- `src/diff.rs` now preserves oldest-first encounter order across mixed `prompt_bearing_changes`; earlier `content_edit`, `recovery_artifact`, and `boundary_artifact` entries no longer get reordered behind later `prompt_target` blocks.
+- Added a regression covering the mixed triage sequence and updated `specs/04-diff-computation.md` plus `specs/05-agent-backend.md` to make the cross-kind ordering contract explicit.
+
+Verification:
+- `cargo test preserves_mixed_triage_order`
+- `cargo test prompt_bearing_changes_marks_boundary_only_edit_as_boundary_artifact`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commit / push:
+- committed locally in `src/agent-doc` as `9aa0b4e`
+- `origin/20260422/codex-agent-backend` had advanced to `b623b2f`, so I pushed the equivalent change on top of that tip as `9e99645`
+<!-- agent:boundary:7c73047c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -557,7 +576,7 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
+- [x] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

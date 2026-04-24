@@ -616,12 +616,36 @@ Plan:
 5. Update the shipped contract surface (`SPEC.md`, `SKILL.md`, `specs/07-commands.md`, and the `repair.rs` module contract/tests) so it is explicit that `AlreadyApplied` on template docs still owns transcript normalization, not just duplicate suppression.
 
 That is the fix I would implement. The key design choice is to treat `AlreadyApplied` as a canonicalization-capable repair outcome, not as proof that no document mutation is still needed.
-<!-- agent:boundary:ed4b0c4c -->
+
+❯ do #npme. update spec + tests. build + install for local testing. commit + push
+### Re: repair dedup prompt-prefix canonicalization — gpt-5
+
+Shipped `#npme` in `src/agent-doc`.
+
+What changed:
+- `src/repair.rs` now treats template-doc `AlreadyApplied` dedup as a canonicalization-capable repair path: before pending cleanup it repairs escaped exchange tails and reuses the binary-owned prompt-prefix normalizer against the saved snapshot, so bare prompt-target lines regain the required `❯ ` prefix even when the response body is already present.
+- Added a regression covering the exact shape: template response already present, stale pending file still exists, missing `❯ ` on the user prompt, and `repair` now canonicalizes the transcript plus advances the snapshot instead of only cleaning up state.
+- Updated the shipped contract surface in `SPEC.md`, `SKILL.md`, and `specs/07-commands.md` so it is explicit that template-doc `repair` still owns transcript normalization on `AlreadyApplied`.
+
+Verification:
+- `cargo test recover_already_applied_template_canonicalizes_prompt_prefixes`
+- `cargo test detect_bypassed_response_write_reports_bare_prompt_target`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commit / push:
+- committed in `src/agent-doc` as `4558536`
+- pushed to `origin/20260422/codex-agent-backend`
+
+I left the pre-existing unrelated local edits in `src/agent-doc` (`VERSIONS.md`, `src/skill.rs`, and other unstaged changes in `specs/07-commands.md`) out of this commit.
+<!-- agent:boundary:deeacc94 -->
 <!-- /agent:exchange -->
 
 <!--
+Please plan a command for agent-doc to orchestrate sequential tasks. It could be `sequential`, `chain`, or another good name. I also plan on support additional orchestration patterns such as fan out, fan in, dependency graph, etc.
 
-Please make a command for agent-doc to orchestrate sequential tasks. It could be `sequential`, `chain`, or another good name. I also plan on support additional orchestration patterns such as fan out, fan in, dependency graph, etc.
+See src/session-share/tasks/claudescore-3.md
 
 ```
 ❯ Please run the following prompt chain sequentially in a claude-opus-4-6 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
@@ -638,7 +662,7 @@ Please make a command for agent-doc to orchestrate sequential tasks. It could be
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#npme] [recommended] Fix repair-time transcript canonicalization so template-doc AlreadyApplied dedup still restores missing ❯ prompt prefixes instead of only cleaning up pending/capture state
+- [x] [#npme] [recommended] Fix repair-time transcript canonicalization so template-doc AlreadyApplied dedup still restores missing ❯ prompt prefixes instead of only cleaning up pending/capture state
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

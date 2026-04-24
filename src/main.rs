@@ -64,6 +64,7 @@ mod focus;
 mod gc;
 mod git;
 mod harness;
+mod heuristics;
 mod history;
 mod hook_cmd;
 mod hooks;

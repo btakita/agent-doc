@@ -59,6 +59,8 @@ pub struct CycleState {
     pub capture_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_sha256: Option<String>,
+    #[serde(default)]
+    pub had_pending_mutations: bool,
 }
 
 impl CycleState {
@@ -97,6 +99,7 @@ pub fn start_preflight(
         file_hash: file_content.map(crate::ops_log::content_hash),
         capture_id: None,
         response_sha256: None,
+        had_pending_mutations: false,
     };
     save(file, &state)?;
     Ok(state)
@@ -139,6 +142,18 @@ pub fn mark_response_captured(
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
     Ok(state)
+}
+
+pub fn mark_pending_mutations(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.had_pending_mutations {
+        state.had_pending_mutations = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
 }
 
 pub fn mark_committed(
@@ -211,6 +226,7 @@ fn synthetic_state_with_id(
         file_hash: None,
         capture_id: None,
         response_sha256: None,
+        had_pending_mutations: false,
     }
 }
 
@@ -286,6 +302,18 @@ mod tests {
         assert_eq!(state.phase, CyclePhase::ResponseCaptured);
         assert_eq!(state.capture_id.as_deref(), Some(state.cycle_id.as_str()));
         assert_eq!(state.response_sha256.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn mark_pending_mutations_sets_flag() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = mark_pending_mutations(&doc).unwrap().unwrap();
+        assert!(state.had_pending_mutations);
+        assert!(load(&doc).unwrap().unwrap().had_pending_mutations);
     }
 
     #[test]

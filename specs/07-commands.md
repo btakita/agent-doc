@@ -547,6 +547,10 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 - Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
 - Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
 - Narrow self-heal: if that marker is only historical drift already committed in `HEAD`, and the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers, `session-check` repairs the stale snapshot first and exits `0`
+- Pending-capture guard: after a committed cycle, `session-check` inspects the committed response capture for recommendation-like batches that were not accompanied by any `--pending-add` / `--pending-add-gated` flags in that cycle
+- Default guard mode is `warn`: emits stderr warnings but still exits `0`
+- `pending_capture_guard: strict` in document frontmatter or `.agent-doc/config.toml` `[guards] pending_capture = "strict"` upgrades that condition to exit `1`
+- `pending_capture_guard: off` disables the guard; `<!-- no-pending-capture -->` in the response suppresses it for that cycle
 - A cycle closed by `agent-doc commit` as `commit_already_current` counts as terminal / committed: it means the staged snapshot was already identical to `HEAD`, so no duplicate git commit was necessary
 - Exit `0` when the cycle state is committed or no state/log file exists
 - Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.

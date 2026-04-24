@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GuardConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_capture: Option<crate::frontmatter::PendingCaptureGuardMode>,
+}
+
 /// Component patch configuration (mode, timestamps, max entries, hooks).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ComponentConfig {
@@ -69,6 +75,9 @@ pub struct ProjectConfig {
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,
+    /// Guard behavior overrides (for example pending-capture enforcement).
+    #[serde(default)]
+    pub guards: GuardConfig,
     /// Component-specific configuration (patch modes, timestamps, max_entries, hooks).
     #[serde(default)]
     pub components: BTreeMap<String, ComponentConfig>,
@@ -78,6 +87,23 @@ pub struct ProjectConfig {
 /// Also performs one-time migration from legacy `components.toml` if present.
 pub fn load_project() -> ProjectConfig {
     load_project_from(&project_config_path())
+}
+
+/// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
+pub fn load_project_for_doc(file: &Path) -> ProjectConfig {
+    let start = file.parent().unwrap_or(file);
+    let mut current = start;
+    loop {
+        let candidate = current.join(".agent-doc").join("config.toml");
+        if candidate.exists() {
+            return load_project_from(&candidate);
+        }
+        match current.parent() {
+            Some(p) if p != current => current = p,
+            _ => break,
+        }
+    }
+    load_project()
 }
 
 /// Load project config from an explicit path. Used by `load_project()` and tests.
@@ -252,6 +278,18 @@ mod tests {
         let cfg = load_project_from(&config_path);
         assert_eq!(cfg.tmux_session.as_deref(), Some("test"));
         assert_eq!(cfg.components["exchange"].patch, "append");
+    }
+
+    #[test]
+    fn load_guard_config() {
+        let dir = TempDir::new().unwrap();
+        let config_path = setup_project(dir.path());
+        std::fs::write(&config_path, "[guards]\npending_capture = \"strict\"\n").unwrap();
+        let cfg = load_project_from(&config_path);
+        assert_eq!(
+            cfg.guards.pending_capture,
+            Some(crate::frontmatter::PendingCaptureGuardMode::Strict)
+        );
     }
 
     #[test]

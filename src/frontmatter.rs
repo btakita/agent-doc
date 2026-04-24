@@ -194,6 +194,15 @@ pub struct StreamConfig {
     pub max_lines: Option<usize>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingCaptureGuardMode {
+    #[default]
+    Warn,
+    Strict,
+    Off,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -303,6 +312,10 @@ pub struct Frontmatter {
         rename = "agent_doc_model_tier"
     )]
     pub model_tier: Option<Tier>,
+    /// Pending-capture guard mode for `session-check`.
+    /// Values: `warn` (default when absent), `strict`, `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_capture_guard: Option<PendingCaptureGuardMode>,
     /// Document-level lifecycle hooks: shell commands executed at key events.
     ///
     /// Supported events: `session_start`, `post_write`, `post_commit`.
@@ -493,6 +506,14 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                     fm.write_mode = Some(w);
                 }
             }
+            "pending_capture_guard" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(mode) =
+                        serde_yaml::from_str::<PendingCaptureGuardMode>(&format!("\"{}\"", s))
+                {
+                    fm.pending_capture_guard = Some(mode);
+                }
+            }
             "agent_args" => fm.agent_args = val_str(),
             "claude_args" => fm.claude_args = val_str(),
             "codex_args" => fm.codex_args = val_str(),
@@ -610,6 +631,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_pending_capture_guard_strict() {
+        let content = "---\npending_capture_guard: strict\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(
+            fm.pending_capture_guard,
+            Some(PendingCaptureGuardMode::Strict)
+        );
+    }
+
+    #[test]
+    fn parse_pending_capture_guard_invalid_rejected() {
+        let content = "---\npending_capture_guard: loudly\n---\nBody\n";
+        assert!(parse(content).is_err());
+    }
+
+    #[test]
     fn parse_model_tier_invalid_rejected() {
         let content = "---\nagent_doc_model_tier: ultra\n---\nBody\n";
         let result = parse(content);
@@ -684,6 +721,7 @@ mod tests {
             links: vec![],
             auto_compact: None,
             model_tier: None,
+            pending_capture_guard: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
             agent_doc_env_inherit: None,
@@ -853,6 +891,21 @@ mod tests {
         let result = write(&fm, "body\n").unwrap();
         assert!(result.contains("agent_doc_session:"));
         assert!(!result.contains("\nsession:"));
+    }
+
+    #[test]
+    fn write_pending_capture_guard_roundtrip() {
+        let fm = Frontmatter {
+            pending_capture_guard: Some(PendingCaptureGuardMode::Strict),
+            ..Default::default()
+        };
+        let written = write(&fm, "body\n").unwrap();
+        assert!(written.contains("pending_capture_guard: strict"));
+        let (parsed, _) = parse(&written).unwrap();
+        assert_eq!(
+            parsed.pending_capture_guard,
+            Some(PendingCaptureGuardMode::Strict)
+        );
     }
 
     // --- resolve_mode tests ---

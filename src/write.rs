@@ -284,6 +284,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
         crate::pending_cmd::add_many(file, &options.pending_add, false)?;
         crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?;
+        if !options.pending_add.is_empty() || !options.pending_add_gated.is_empty() {
+            crate::cycle_state::mark_pending_mutations(file)?;
+        }
         for pair in &options.pending_edit {
             let (id, text) = pair
                 .split_once('=')

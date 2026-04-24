@@ -53,13 +53,28 @@ pub enum SessionCheckStatus {
     Interrupted(String),
 }
 
+pub struct SessionCheckReport {
+    pub status: SessionCheckStatus,
+    pub warnings: Vec<String>,
+}
+
+enum PendingCaptureGuardResult {
+    None,
+    Warn(Vec<String>),
+    Error(String),
+}
+
 /// CLI entry: check the end-of-cycle write invariant for `file`.
 ///
 /// Prints a short status line to stdout and exits with:
 /// - `0` — log empty/missing, or last entry is a terminal event
 /// - `1` — last entry is `preflight_diff_start` (interrupted cycle)
 pub fn run(file: &Path) -> Result<()> {
-    match inspect(file)? {
+    let report = inspect_with_warnings(file)?;
+    for warning in &report.warnings {
+        eprintln!("{}", warning);
+    }
+    match report.status {
         SessionCheckStatus::Ok(message) => {
             println!("{}", message);
             Ok(())
@@ -72,6 +87,27 @@ pub fn run(file: &Path) -> Result<()> {
 }
 
 pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
+    Ok(inspect_with_warnings(file)?.status)
+}
+
+pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
+    let mut report = SessionCheckReport {
+        status: inspect_core(file)?,
+        warnings: Vec::new(),
+    };
+    if matches!(report.status, SessionCheckStatus::Ok(_)) {
+        match check_pending_capture_guard(file)? {
+            PendingCaptureGuardResult::None => {}
+            PendingCaptureGuardResult::Warn(lines) => report.warnings = lines,
+            PendingCaptureGuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
             return Ok(SessionCheckStatus::Interrupted(format!(
@@ -148,6 +184,113 @@ pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
             )))
         }
     }
+}
+
+fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
+    let mode = resolve_pending_capture_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    if state.is_open() || state.had_pending_mutations {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-pending-capture -->")
+    {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let response_text = response_text_for_pending_guard(&capture.response_body);
+    if response_text.trim().is_empty() {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    if signal.estimated_count < 2 || signal.confidence < 0.5 {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let warn_line = format!(
+        "[session-check] warn: response contains ~{} recommendation-like items but no --pending-add flags were used this cycle",
+        signal.estimated_count
+    );
+    let hint_line =
+        "[session-check] hint: consider adding pending items for actionable follow-up work"
+            .to_string();
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => {
+            PendingCaptureGuardResult::Warn(vec![warn_line, hint_line])
+        }
+        crate::frontmatter::PendingCaptureGuardMode::Strict => {
+            PendingCaptureGuardResult::Error(format!(
+                "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
+                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
+            ))
+        }
+        crate::frontmatter::PendingCaptureGuardMode::Off => PendingCaptureGuardResult::None,
+    })
+}
+
+fn resolve_pending_capture_guard_mode(
+    file: &Path,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.pending_capture_guard {
+        return Ok(mode);
+    }
+    Ok(crate::project_config::load_project_for_doc(file)
+        .guards
+        .pending_capture
+        .unwrap_or_default())
+}
+
+fn response_text_for_pending_guard(response: &str) -> String {
+    let Ok((patches, unmatched)) = crate::template::parse_patches(response) else {
+        return response.to_string();
+    };
+
+    let preferred: Vec<String> = patches
+        .iter()
+        .filter(|patch| matches!(patch.name.as_str(), "exchange" | "findings"))
+        .map(|patch| patch.content.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if !preferred.is_empty() {
+        return preferred.join("\n\n");
+    }
+
+    if !unmatched.trim().is_empty() {
+        return unmatched.trim().to_string();
+    }
+
+    let fallback: Vec<String> = patches
+        .iter()
+        .filter(|patch| patch.name != "pending")
+        .map(|patch| patch.content.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if !fallback.is_empty() {
+        return fallback.join("\n\n");
+    }
+
+    response.to_string()
 }
 
 fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
@@ -229,6 +372,30 @@ mod tests {
         fs::create_dir_all(tmp.join(".agent-doc/snapshots")).unwrap();
         let doc = tmp.join("doc.md");
         fs::write(&doc, "body").unwrap();
+        doc
+    }
+
+    fn setup_committed_capture(
+        root: &Path,
+        frontmatter: Option<&str>,
+        response: &str,
+        had_pending_mutations: bool,
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let prefix = frontmatter.unwrap_or("---\nagent_doc_session: test\n---\n\n");
+        let current = format!("{prefix}## Exchange\n\nHello\n");
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        if had_pending_mutations {
+            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        }
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
+            .unwrap();
+        crate::capture::mark_committed(&doc).unwrap();
         doc
     }
 
@@ -444,5 +611,91 @@ mod tests {
             detect_bypassed_response_write(&doc).unwrap().is_none(),
             "snapshot repair should clear the interrupted marker"
         );
+    }
+
+    #[test]
+    fn session_check_warns_on_uncaptured_recommendations() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            None,
+            "### Re: recommendations — gpt-5\n\n## Recommendations\n1. Add regression coverage\n2. Fix the stale closeout path\n3. Update the command spec\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert_eq!(report.warnings.len(), 2);
+        assert!(report.warnings[0].contains("recommendation-like items"));
+    }
+
+    #[test]
+    fn session_check_skips_warning_when_pending_was_added() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            None,
+            "### Re: recommendations — gpt-5\n\n## Recommendations\n1. Add regression coverage\n2. Fix the stale closeout path\n",
+            true,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_strict_mode_blocks_uncaptured_recommendations() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n"),
+            "### Re: recommendations — gpt-5\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("[session-check] error:"));
+                assert!(message.contains("pending_capture_guard = \"warn\""));
+            }
+            other => panic!("expected strict-mode failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_suppression_marker_disables_guard() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            None,
+            "### Re: recommendations — gpt-5\n\n<!-- no-pending-capture -->\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_frontmatter_overrides_project_guard_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "[guards]\npending_capture = \"off\"\n",
+        )
+        .unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n"),
+            "### Re: recommendations — gpt-5\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Interrupted(_)));
     }
 }

@@ -44,7 +44,7 @@ Verification:
 - `cargo install --path .`
 
 Shipped in `src/agent-doc` as `f4b9f59` on branch `20260422/codex-agent-backend`, then pushed to `origin`.
-<!-- agent:boundary:61998674 -->
+<!-- agent:boundary:e541d4cc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -64,7 +64,6 @@ In src/boost-client, agent-doc tasks/monsterrodholders.md did not patchback. upd
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#mmn2] [recommended] Fix frontmatter::parse off-by-one body_start so frontmatter rewrites do not accumulate blank lines before the first body heading; add a regression test for repeated parse/write cycles.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -647,13 +647,34 @@ What I can prove vs infer:
 - **Inference:** the Codex session likely answered without executing the required `finalize` path, or otherwise relied on stop-hook recovery instead of the documented happy path. I cannot prove from the retained logs alone whether the stop hook failed to fire, fired late, or was only able to recover the second turn.
 
 If you want, I can turn this into a tracked `agent-doc` bug focused specifically on: "Codex `agent-doc` sessions can still bypass live finalize in nested repo work and fall back to out-of-band commit / synthetic recovery instead of same-turn patchback."
-<!-- agent:boundary:c8d3e780 -->
+
+❯ do #tdps
+### Re: `#tdps` route test investigation — gpt-5
+
+Investigated on current `src/agent-doc` HEAD. I could not reproduce the old `route::tests::send_keys_delivers_{claude,codex}_command_with_enter` failure.
+
+What I ran:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml send_keys_delivers_ -- --nocapture`
+- `make -C src/agent-doc check`
+
+Current result:
+
+- both route tests pass in isolation
+- full `make check` is green on current `src/agent-doc` HEAD, including:
+  - `route::tests::send_keys_delivers_claude_command_with_enter`
+  - `route::tests::send_keys_delivers_codex_command_with_enter`
+  - `route::tests::wait_for_agent_ready_detects_prompt`
+  - `route::tests::wait_for_agent_ready_codex_prompt`
+
+So there is no live repo bug for me to patch in this cycle. I closed `#tdps` as verified / non-reproducible on the current tree.
+<!-- agent:boundary:4d1cb049 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#tdps] [recommended] Investigate route::tests::send_keys_delivers_{claude,codex}_command_with_enter failing in make check
+- [x] [#tdps] [recommended] Investigate route::tests::send_keys_delivers_{claude,codex}_command_with_enter failing in make check
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -506,7 +506,28 @@ I did not commit or push `src/agent-doc` in this cycle.
 Yes, if you give me a task list and want explicit delegation, I can spawn a worker per task and patch back each completed result into this document in sequence.
 
 It will not be exactly identical to manually running one task at a time in a single session. I can make the document experience close, but each worker runs in its own isolated context/worktree, so I still need to integrate the result, verify it, and write the final patchback for that task from the parent session. For independent tasks that works well; for tightly coupled tasks, sequential single-agent work is usually cleaner.
-<!-- agent:boundary:3fb8e439 -->
+
+❯ do #tswc. update spec + tests. build + install for local testing. commit + push
+### Re: closeout `session-check` ownership — gpt-5
+Shipped `#tswc` in `src/agent-doc`.
+
+What changed:
+- git-backed `agent-doc finalize`, `agent-doc write --commit`, and `agent-doc repair` now run the same post-closeout `session-check` guard internally before they report success
+- added a shared `session_check::enforce_clean_closeout(...)` helper and wired it into the write/repair closeout path so Codex/manual-repair flows cannot skip the terminal-cycle guard just because the harness forgot the extra command
+- updated the shipped skill/spec surface (`SKILL.md`, `specs/07-commands.md`, `VERSIONS.md`) so the documented closeout contract matches the binary behavior
+- added regression coverage proving both `finalize` and `write --commit` fail closed when the internal `session-check` catches a strict pending-capture violation after commit
+
+Verification:
+- `cargo test --test finalize_integration internal_session_check_rejects_closeout`
+- `cargo test --lib enforce_clean_closeout`
+- `make check` reached the route test suite, but failed on `route::tests::full_auto_start_flow`; rerunning that exact test directly reproduced the same failure
+- `cargo build --release`
+- `cargo install --path .`
+
+Commit / push:
+- committed in `src/agent-doc` as `b623b2f`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:4d8dad12 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -536,7 +557,7 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
+- [x] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

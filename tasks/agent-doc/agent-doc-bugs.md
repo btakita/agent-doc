@@ -333,12 +333,44 @@ Current local checkout note:
 - I left the current checkout untouched rather than hard-resetting it locally
 
 On the id mismatch: the existing pending `#f3nj` item is still the repair/commit-boundary bug. I treated your new instruction as the outstanding branch-normalization work and closed `#ndyy`.
-<!-- agent:boundary:06bc9cd0 -->
+❯ do #f3nj
+### Re: `#f3nj` repair commit-boundary closeout — gpt-5
+
+Implemented and verified in `src/agent-doc`.
+
+What changed:
+
+- `agent-doc repair` now runs the recovery path plus the normal git commit boundary in one command when recovery work actually happened in a git-backed doc, so replayed or deduped assistant responses no longer wait for a later `preflight` to become committed.
+- `recover` now returns a typed `RecoverOutcome` instead of a bare bool, which lets the CLI distinguish no-op vs replayed vs already-applied vs manual-tail-cleanup vs stale-preflight-lock repair without printing the misleading `No pending response found` line on real repair work.
+- Updated `preflight`, the Codex stop-hook note path, command help, `README.md`, `specs/07-commands.md`, and `VERSIONS.md`; added regression tests for both replayed-response and already-applied template-tail repair paths.
+
+Verification:
+
+- `cargo test --manifest-path /tmp/agent-doc-f3nj/Cargo.toml recover::tests:: -- --nocapture`
+- `make -C /tmp/agent-doc-f3nj check`
+- `cargo build --manifest-path /tmp/agent-doc-f3nj/Cargo.toml --release`
+- `cargo install --path /tmp/agent-doc-f3nj`
+
+Commit / push:
+
+- `src/agent-doc`: `f4a4009` — `fix: make repair close git-backed cycles`
+- pushed to `origin 20260422/codex-agent-backend`
+
+Local checkout note:
+
+- `src/agent-doc` in this workspace still points at local `f0d6eb9`
+- `origin/20260422/codex-agent-backend` now points at `f4a4009`
+
+Outcome:
+
+- `#f3nj` is done.
+- Running `agent-doc repair <FILE>` on a git-backed doc now closes the repaired response through the commit boundary immediately instead of leaving it uncommitted for the next prompt.
+<!-- agent:boundary:5a0c743f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
+- [x] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

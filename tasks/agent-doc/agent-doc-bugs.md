@@ -602,32 +602,43 @@ So the real root cause was not just "response text vs transcript text" in the ab
 4. the closeout guard at the time did not fail closed hard enough to stop that drift
 
 That is why this showed up in `src/boost-client/tasks/monsterrodholders.md` specifically, and why the durable fix belongs in `agent-doc` itself rather than in one-off document cleanup. The later `#3fjy` change is the right product-level correction: prompt-prefix preservation now derives from the canonical `prompt_target` classifier, and `session-check` rejects bypassed patchbacks that leave bare prompt-target lines without `❯ `.
-<!-- agent:boundary:729dd48d -->
+
+❯ Please plan a fix for the issue.
+### Re: plan for the missing `❯ ` repair gap — gpt-5
+
+Yes. The remaining gap is narrow enough to plan concretely now.
+
+Plan:
+1. Add a regression at the `repair` layer for the exact `monsterrodholders.md` shape: pending/captured response already present in the template doc, user prompt lines in that changed exchange tail are bare, and `repair` currently returns `AlreadyApplied` after cleanup. The expected result should be: transcript canonicalized, pending/capture cleaned up, then normal closeout.
+2. Refactor the `repair` dedup branch in `src/agent-doc/src/repair.rs`. Today it only runs `repair_template_tail_if_needed(...)` before clearing pending. It should also run a shared exchange canonicalization step for template docs so the same prompt-target driven `❯ ` restoration used by write/finalize can repair an already-applied response.
+3. Keep the ownership boundary binary-side, not harness-side. The harness should still be told to use `finalize` / `write --commit`, but the deterministic fix belongs in `repair` so a partial/manual/bypassed write does not depend on the agent remembering transcript formatting rules.
+4. Tighten the closeout invariant: if `repair` sees `AlreadyApplied` but the changed tail still contains bare prompt-target lines that should have been canonicalized, it should either self-heal them before returning success or fail closed with a specific repair/session-check error. Silent cleanup is the bug.
+5. Update the shipped contract surface (`SPEC.md`, `SKILL.md`, `specs/07-commands.md`, and the `repair.rs` module contract/tests) so it is explicit that `AlreadyApplied` on template docs still owns transcript normalization, not just duplicate suppression.
+
+That is the fix I would implement. The key design choice is to treat `AlreadyApplied` as a canonicalization-capable repair outcome, not as proof that no document mutation is still needed.
+<!-- agent:boundary:ed4b0c4c -->
 <!-- /agent:exchange -->
 
 <!--
-In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback does not have a `❯ ` prefix for user prompts. See my inquiry:
+
+Please make a command for agent-doc to orchestrate sequential tasks. It could be `sequential`, `chain`, or another good name. I also plan on support additional orchestration patterns such as fan out, fan in, dependency graph, etc.
+
 ```
-• Because I treated the patchback as an assistant-only response block, not as a transcript entry.
+❯ Please run the following prompt chain sequentially in a claude-opus-4-6 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
+❯ - do #bt0q. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+❯ - do #keab. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+❯ - do #1vqr. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+❯ - do #t107. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+❯ - do #09wc. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+❯ - do #18nq. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
 
-  The local evidence shows two different patterns:
-
-  - agent-doc capture response_body values are response-only and do not include ❯.
-  - The archived/baseline session docs do use ❯  to mark user prompts inline in the transcript.
-
-  I followed the first pattern while writing directly into tasks/monsterrodholders.md, but that was the wrong fit for
-  this document. In this file’s exchange history, ❯  is part of the transcript format, so omitting it made the
-  patchback inconsistent with the surrounding record.
-
-  So the short answer is: I excluded it because I was patching “response text” rather than reconstructing the full
-  prompt/response transcript. That was a format mismatch on my side, not an intentional convention change. If you want,
-  I can normalize the recent entries to use the same ❯  prompt style as the rest of the archived exchange.
 ```
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#npme] [recommended] Fix repair-time transcript canonicalization so template-doc AlreadyApplied dedup still restores missing ❯ prompt prefixes instead of only cleaning up pending/capture state
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

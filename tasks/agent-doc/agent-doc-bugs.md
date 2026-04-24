@@ -443,7 +443,7 @@ Concretely, I would change it this way:
 I would treat this as a real product invariant, not agent guidance. The current split is the bug: prompt classification is deterministic, but transcript formatting is still partly heuristic and partly harness-discipline.
 
 I did not patch `src/agent-doc` in this cycle.
-<!-- agent:boundary:3d2f034e -->
+<!-- agent:boundary:bef5f05f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -469,8 +469,8 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#3fjy] [recommended] Make  prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
-- [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass / plus
+- [ ] [#3fjy] [recommended] Make prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
+- [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

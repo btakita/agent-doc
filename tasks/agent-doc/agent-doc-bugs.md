@@ -467,7 +467,7 @@ Verification:
 Commit / push:
 - committed in `src/agent-doc` as `5b8fd9c`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:9fb913f8 -->
+<!-- agent:boundary:b7e9e551 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -493,7 +493,6 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#3fjy] [recommended] Make prompt-prefix preservation a binary-enforced exchange invariant tied to prompt-bearing change classification
 - [ ] [#tswc] [recommended] Harden Codex/manual-repair writeback so response persistence cannot bypass finalize/write-commit plus session-check
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [ ] [#r4kp] --pending-add embeds [#id] as literal text instead of using id=<custom> prefix, producing double-bracketed IDs. Spec: tasks/agent-doc/spec-pending-add-id-prefix.md

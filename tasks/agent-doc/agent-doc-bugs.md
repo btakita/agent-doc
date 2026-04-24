@@ -70,12 +70,34 @@ The documented commands that are supposed to cross the commit boundary are:
 So if you run `agent-doc repair` by itself, a commit is not guaranteed. In your case the later `agent-doc preflight tasks/agent-doc/agent-doc-bugs.md` did the commit during its recover/commit sweep, which is why this session started with a fresh preflight commit (`8ba82014`).
 
 If you want, I can turn that mismatch into a follow-up bug/doc task so `repair` vs `write --commit` is harder to confuse.
-<!-- agent:boundary:fe5559e1 -->
+
+❯ `agent-doc repair` should commit. Because if I run repair there is uncommitted content in the document. Which can confuse the next prompt.
+### Re: `agent-doc repair` should commit — gpt-5
+
+I think that is a real product bug, not just a docs mismatch.
+
+The current implementation treats `repair` as a low-level recovery primitive, so it can leave the file ahead of the snapshot and rely on a later `preflight` / `commit` sweep to catch up. But that is a bad user-facing contract for exactly the reason you called out: after `repair`, the document can contain recovered assistant content that is still uncommitted, and the next turn sees a dirty, slightly ambiguous state.
+
+This turn's preflight showed the symptom directly:
+
+- `file is 140 bytes larger than snapshot`
+- `staged snapshot already matches HEAD`
+
+So the recovered document state and the recorded snapshot/commit boundary were temporarily out of sync.
+
+Given the current product contract that appended responses should cross a commit boundary, I think the better behavior is:
+
+- for git-backed docs, `agent-doc repair` should attempt the same closeout path and not stop after recovery alone
+- if that commit cannot complete, it should fail closed instead of silently leaving recovered response state hanging around for the next prompt
+
+I added this as pending work in the doc backlog.
+<!-- agent:boundary:759cbc69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

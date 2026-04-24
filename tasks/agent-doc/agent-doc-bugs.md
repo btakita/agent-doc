@@ -91,12 +91,40 @@ Given the current product contract that appended responses should cross a commit
 - if that commit cannot complete, it should fail closed instead of silently leaving recovered response state hanging around for the next prompt
 
 I added this as pending work in the doc backlog.
-<!-- agent:boundary:759cbc69 -->
+❯ Why did src/session-share `agent-doc tasks/docs.md` not patchback the response into the document?
+### Re: `src/session-share/tasks/docs.md` patchback + `doc-lint.sh` miss — gpt-5
+
+The `tasks/docs.md` response did patch back into the document. The evidence in `src/session-share/.agent-doc` is pretty clear:
+
+- the captured response for that cycle is recorded in `captures/.../synthetic-1777004426488.json`
+- that capture is marked `state: "committed"`
+- the same response body is present verbatim in `src/session-share/tasks/docs.md`
+
+So this was not the old "IPC patch vanished before it hit disk" failure mode.
+
+What actually happened is the same snapshot/commit-boundary lag we were discussing in the other thread. The later preflight on `src/session-share/tasks/docs.md` reported:
+
+- `file is 153 bytes larger than snapshot`
+- `staged snapshot already matches HEAD`
+
+That means the live document had already moved ahead, while the snapshot bookkeeping lagged briefly behind. From the user side that can look like "the patchback didn't land", but the response was already in the file and effectively already in `HEAD`.
+
+On the `doc-lint.sh` question: that miss is a separate bug.
+
+Why it did not catch the bad README links:
+
+- link validation only runs in `check --strict`
+- `README.md` currently fails earlier with `[E] missing header: README.md`
+- the script does `continue` immediately after that missing-header error, so it never reaches the strict relative-link checks for that file
+
+So the broken/cross-repo README links were masked by the earlier header failure. I added that as pending work too: `doc-lint` should still run the strict link checks even when the header is missing, otherwise exactly this class of bug slips through.
+<!-- agent:boundary:a61a5c5e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#w199] Fix doc-lint check ordering so missing Document Header does not short-circuit strict link validation; README.md should still report broken/cross-repo links.
 - [ ] [#f3nj] Make git-backed agent-doc repair cross the commit boundary after successful recovery so repaired response content does not remain uncommitted into the next prompt.
 - [ ] [#ndyy] Normalize src/agent-doc before rebasing: remove tracked .agent-doc runtime files from the index, remove the typo .gitgnore file if accidental, keep the real ignore rule, then rebase 20260422/codex-agent-backend onto origin/main.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

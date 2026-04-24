@@ -344,7 +344,7 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed in `src/agent-doc` as `3fb65d8` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:6a69944e -->
+<!-- agent:boundary:32ede22c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -370,7 +370,6 @@ In src/boost-client, `agent-doc tasks/monsterrodholders.md` response patchback d
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#3xmb] [recommended] Unify required response targets and inline annotations into one prompt-bearing change classifier with markdown-context awareness
 - [ ] [#8cmb] [recommended] Add edit triage for agent-doc diffs: prompt target vs content edit vs recovery artifact/boundary artifact
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

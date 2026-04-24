@@ -485,10 +485,12 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         ),
     );
 
-    let recovered = recover::run(file).unwrap_or_else(|e| {
-        eprintln!("[preflight] interrupted-cycle recover warning: {}", e);
-        false
-    });
+    let recovered = recover::run(file)
+        .unwrap_or_else(|e| {
+            eprintln!("[preflight] interrupted-cycle recover warning: {}", e);
+            recover::RecoverOutcome::Noop
+        })
+        .repaired();
 
     if matches!(
         state.phase,
@@ -588,10 +590,12 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: recover");
     let recovered = recovered_prior
-        || recover::run(file).unwrap_or_else(|e| {
-            eprintln!("[preflight] recover warning: {}", e);
-            false
-        });
+        || recover::run(file)
+            .unwrap_or_else(|e| {
+                eprintln!("[preflight] recover warning: {}", e);
+                recover::RecoverOutcome::Noop
+            })
+            .repaired();
 
     // Step 1b: Ensure document is initialized (snapshot + git baseline).
     // If no snapshot exists, creates one and commits the file.

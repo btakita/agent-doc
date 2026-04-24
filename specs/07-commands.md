@@ -379,6 +379,20 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed`
 - a write error plus a commit error is still a command failure even if some recovery work ran
 
+## repair
+
+`agent-doc repair <FILE>` (legacy alias: `agent-doc recover`) — recover orphaned pending/captured response state and close git-backed repairs through the normal commit boundary.
+
+1. Run the same recovery engine as `preflight` step 1:
+   - replay a pending/captured response when the response still needs to be written
+   - dedup and clean stale pending/capture state when the response is already present in the document
+   - respect safe manual removal of an escaped template conversation tail
+   - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly
+2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`
+3. If no pending/captured repair path exists, print the usual "No pending response found" note and stop without committing
+
+**Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content.
+
 ## watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.

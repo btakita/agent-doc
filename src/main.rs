@@ -1355,8 +1355,8 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Recover { file } => {
-            let recovered = recover::run(&file)?;
-            if !recovered {
+            let outcome = recover::repair(&file)?;
+            if !outcome.repaired() {
                 eprintln!("[recover] No pending response found for {}", file.display());
             }
             Ok(())

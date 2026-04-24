@@ -533,7 +533,38 @@ or:
 git -C src/agent-doc config --unset user.name
 git -C src/agent-doc config --unset user.email
 ```
-<!-- agent:boundary:566f0309 -->
+
+❯ In src/boost-client I ran `agent-doc tasks/monsterrodholders.md` with the diff `compact exchange`. Why was the patchback uncommitted?
+### Re: `src/boost-client` `compact exchange` looked uncommitted — gpt-5
+
+It was not actually an uncommitted missing patchback. The `compact exchange` write for `src/boost-client/tasks/monsterrodholders.md` **did** cross the write+commit boundary.
+
+What I verified in `src/boost-client/.agent-doc/logs/ops.log`:
+
+- `1776962657`: `ipc_write_attempt ... patches=0 ipc_patches=1 unmatched_len=179`
+- `1776962657`: `ipc_file_delivered ... snap_len=125290`
+- `1776962660`: `commit_staging ... file_len=125290`
+- `1776962660`: `commit_success file=tasks/monsterrodholders.md`
+
+And the repo history confirms it: [tasks/monsterrodholders.md](/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md) is compacted at commit `e521dad` (`2026-04-23 12:44:20 -0400`).
+
+So why did it look uncommitted afterward?
+
+Because later preflights were seeing a **small post-commit drift** between the snapshot and working tree, not a missing response body:
+
+- `1777009278`: `out_of_band_write ... drift=17`
+- same cycle: `commit_already_current ... basis=head`
+- `1777009307`: `transient_cleanup ... basis=head`
+- later cycles repeat the same `drift=17` + `commit_already_current`
+
+That pattern means the document content already matched `HEAD`; only transient working-tree/snapshot bookkeeping differed slightly. In other words:
+
+- the compacted patchback landed
+- the commit landed
+- later snapshot / boundary cleanup made the file look a few bytes ahead of the snapshot, which can read like “uncommitted patchback” even though the response was already in `HEAD`
+
+One extra detail from that cycle: the write went through the **file-delivery fallback** (`patches=0`, `ipc_patches=1`, `unmatched_len=179`) instead of a clean template-patch apply. So the compaction content still got written and committed, but it did so through the fallback path rather than the normal matched-template patch path. That likely made the state feel more suspicious, but the commit record shows it still closed successfully.
+<!-- agent:boundary:7d8ae41c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

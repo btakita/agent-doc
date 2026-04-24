@@ -492,7 +492,48 @@ Outcome:
 
 - `#6zyp` is done.
 - Imperative document directives now have a binary backstop instead of relying only on instruction text, so status-only/meta-only replies no longer count as a successful closeout.
-<!-- agent:boundary:63241ec5 -->
+
+❯ In src/boost-client I ran `agent-doc tasks/monsterrodholders.md` with the diff `compact exchange`. Why was the patchback uncommitted?
+### Re: Codex commits in `src/agent-doc` authored as `Test <test@test.com>` — gpt-5
+
+Because the `src/agent-doc` repo itself has a **local git config override** setting that identity.
+
+What I verified:
+
+- Global config is your normal identity: `~/.gitconfig` has `Brian Takita <brian.takita@gmail.com>`.
+- But `src/agent-doc` resolves to the git dir config at `.git/modules/agent-doc/config`, and that file currently contains:
+  - `user.name = Test`
+  - `user.email = test@test.com`
+- The runtime commit path in [src/agent-doc/src/git.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/git.rs:1297) just runs plain `git commit -m ... --no-verify`; it does **not** set `GIT_AUTHOR_*` or `GIT_COMMITTER_*` for normal commits.
+
+So Git is doing the expected precedence order:
+
+- repo-local config in `src/agent-doc` wins
+- global `~/.gitconfig` loses
+
+That means this is not Codex inventing `Test <test@test.com>` on each commit. Codex is committing inside a repo whose local config is already pinned to that test identity.
+
+The `test@test.com` strings you see in the Rust tree are mostly test scaffolding for temp repos; they are separate from the live repo config and are not what caused these real commits.
+
+If you want, the direct fix is either:
+
+- set the correct local identity in `src/agent-doc`, or
+- unset the local override so it falls back to your global config
+
+For example:
+
+```bash
+git -C src/agent-doc config user.name "Brian Takita"
+git -C src/agent-doc config user.email "brian.takita@gmail.com"
+```
+
+or:
+
+```bash
+git -C src/agent-doc config --unset user.name
+git -C src/agent-doc config --unset user.email
+```
+<!-- agent:boundary:566f0309 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

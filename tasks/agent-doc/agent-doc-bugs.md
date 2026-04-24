@@ -106,7 +106,32 @@ I would treat the snippet you pasted as a safe self-heal, not as an active bug b
 Concretely:
 - Safe/expected after interruption: response is already visible in the doc, and `preflight` or `session-check` finishes cleanly.
 - Worth investigating: the message appears over and over for the same cycle, pending files keep reappearing, or the next steps fail to reach `committed`.
-<!-- agent:boundary:48cbca91 -->
+
+❯ This "self-heal" runs regularly. Can we address the root cause that forces the "self-heal" to the document, snapshots, and other agent-doc bookkeeping is in a consistent state?
+### Re: repeated recover self-heal root cause — gpt-5
+Yes. I patched the root cause in `src/agent-doc`.
+
+The issue was not that the document or snapshot was inconsistent after a clean closeout. The issue was that `recover` treated any cycle-addressable durable capture as replayable, even when that capture was already in a terminal state like `Committed`.
+
+That meant a later `preflight` could still do this:
+- load the committed capture via the cycle state's `capture_id`
+- enter `recover`
+- notice the response was already in the document
+- emit the dedup/self-heal message and clean up again
+
+So the repeated self-heal was largely a recovery-gating bug, not evidence that the document/snapshot/HEAD state was still wrong.
+
+I changed `src/agent-doc/src/recover.rs` so recovery now ignores terminal durable-capture states (`Committed`, `Discarded`) unless there is still an actual pending response file to reconcile. In other words: later preflights no longer try to "recover" captures that have already crossed the closeout boundary.
+
+I also added regression coverage for the exact shape: committed capture, no pending file, later `preflight`/`recover` run should return `Noop` instead of taking the dedup path. I updated `src/agent-doc/VERSIONS.md` to record the behavior change.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+
+I did **not** commit or push this `src/agent-doc` change in this cycle.
+<!-- agent:boundary:db1344fb -->
 <!-- /agent:exchange -->
 
 <!--

@@ -37,7 +37,23 @@ So the practical answer for `#fppr` is:
 - if you edit `prompt_presets` in frontmatter and then trigger the next `preflight` / `orchestrate` cycle, `agent-doc` should use the updated presets
 - if you want changed harness startup args to apply, restart that active Claude/Codex session
 - if a task was already launched before the edit, that already-running task will not retroactively re-read the updated preset text
-<!-- agent:boundary:307493f3 -->
+
+❯ do #fppr. update spec + tests. commit + push
+### Re: #fppr prompt presets for orchestrate — gpt-5
+
+Implemented the remaining `#fppr` contract in `src/agent-doc`:
+- frontmatter now round-trips `prompt_presets`
+- preflight emits and validates `prompt_presets_requested`
+- orchestrate resolves `preset ...` / `presets ...` directives and expands labeled preset blocks into sequential, dag, and parallel task prompts
+- spec and skill docs now describe the binary-owned preset flow
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+
+Committed and pushed in `src/agent-doc` as `ed38f01` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:0d6c0951 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -49,7 +65,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#fppr] Add frontmatter prompt presets for orchestrated tasks; support exchange-side `preset #1` style references that expand into the prepared task prompt with a visible `(preset #1)` label. Plan: tasks/agent-doc/plan-frontmatter-prompt-presets.md
+- [x] [#fppr] Add frontmatter prompt presets for orchestrated tasks; support exchange-side `preset #1` style references that expand into the prepared task prompt with a visible `(preset #1)` label. Plan: tasks/agent-doc/plan-frontmatter-prompt-presets.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

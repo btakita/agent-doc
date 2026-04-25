@@ -805,16 +805,29 @@ Created `tasks/agent-doc/agent-queue-plan.md` with the full implementation plan 
 - **Four phases** — parser+model → preflight integration → consumption+dispatch → CLI scaffolding (`queue add/list/clear`)
 
 Added to pending as `#queue` with the plan path.
-<!-- agent:boundary:b9569599 -->
+
+❯ We should support `/clear` or any other harness cli command. This will either use the supervisor or directly send `tmux sent-keys`. Please add a plan and to pending.
+### Re: queue harness command dispatch — opus-4-6
+
+Created `tasks/agent-doc/queue-harness-dispatch-plan.md` covering three dispatch paths:
+
+1. **Supervisor IPC** (preferred) — queue consumer sends the command over `.agent-doc/supervisor.sock`, supervisor executes in the harness session and replies with status
+2. **tmux send-keys** (fallback) — detect the target pane, send the command via `tmux send-keys`, poll for completion
+3. **Inline execution** (subset) — commands like `/model` and `/compact` that don't need the harness session can run directly
+
+Queue items starting with `/` are classified as commands; everything else is a prompt. Execution is strictly ordered — a command must complete before the next item starts, and failures halt the queue.
+
+Added to pending as `#qdisp` with the plan path.
+<!-- agent:boundary:cf5adeb8 -->
 <!-- /agent:exchange -->
 
 <!--
-We should support `/clear` or any other harness cli command. This will either use the supervisor or directly send `tmux sent-keys`. 
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#qdisp] Queue harness command dispatch — /clear, /compact, /model via supervisor IPC or tmux send-keys — tasks/agent-doc/queue-harness-dispatch-plan.md
 - [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

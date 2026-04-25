@@ -258,7 +258,39 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:c6c015a5 -->
+
+❯ In src/session-share, `agent-doc tasks/docs.md`, the "Synchronous orchestra" uses orchestrate. The response patchback should stream the full response of each agent. Then the summary. The response of each agent is not included in docs.md. How can we make the orchestrate command stream patchback each task's response?
+### Re: orchestrate step patchback streaming — gpt-5
+
+Right now `orchestrate` does **not** have a streaming patchback path for sequential steps. In [`src/agent-doc/src/orchestrate.rs:460`](/home/brian/work/btakita/agent-loop/src/agent-doc/src/orchestrate.rs:460), each step does:
+
+1. inject prompt
+2. run `preflight`
+3. call blocking `send_fresh`
+4. call `finalize`
+5. call `session-check`
+
+That means the document only gets one binary-owned write after the child agent is already finished. There is no checkpoint loop that can stream the child response into `exchange` while the step is running.
+
+The good news is the machinery already exists elsewhere:
+- [`src/agent-doc/src/agent/streaming.rs:41`](/home/brian/work/btakita/agent-loop/src/agent-doc/src/agent/streaming.rs:41) defines `StreamChunk`
+- [`src/agent-doc/src/stream.rs:163`](/home/brian/work/btakita/agent-loop/src/agent-doc/src/stream.rs:163) resolves a streaming backend
+- [`src/agent-doc/src/stream.rs:237`](/home/brian/work/btakita/agent-loop/src/agent-doc/src/stream.rs:237) already has the timed flush loop
+
+So the clean fix is:
+
+1. Add a sequential-step streaming path in `orchestrate.rs` instead of always using blocking `send_fresh`.
+2. After `inject_prompt` + `preflight`, capture the current `exchange` content as the seed.
+3. As chunks arrive, flush **seed exchange + in-progress task response** back into `exchange` with replace semantics.
+4. On the final chunk, run the same imperative-response guard, then close the step with the normal `finalize -> session-check` boundary.
+5. Keep the orchestration summary as a later parent response, not as a replacement for the step responses.
+
+The important detail is step 3: you cannot reuse `stream.rs` unchanged by flushing only the partial response text, because its current replace-mode writer would overwrite the whole `exchange` component. For orchestrate, the streamed buffer has to be "existing exchange through injected prompt" plus the child response so far.
+
+So the missing behavior is in the binary, not in `tasks/docs.md`. That document only showed the summary because the current orchestrate lifecycle has no per-step streaming write path.
+
+If you want the smallest MVP, I would ship this first as `agent-doc orchestrate --stream-steps` for sequential mode and make it Claude-only initially, since Claude already has `stream-json` support. Once that is stable, make it the default sequential behavior and add Codex parity later.
+<!-- agent:boundary:645ef5a1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -268,6 +300,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#4qja] [recommended] Stream per-step orchestrate patchback into exchange so each task response lands before the orchestration summary
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

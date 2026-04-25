@@ -707,7 +707,27 @@ Notes:
 - VS Code packaging succeeded, with the existing warning that no `LICENSE` file is present in `editors/vscode`
 - I did not commit or push in `src/agent-doc` this cycle
 - I preserved the unrelated pre-existing local edits in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
-<!-- agent:boundary:c54de067 -->
+
+❯ release + publish
+### Re: plugin release + publish — gpt-5
+Released the plugin artifacts through the existing GitHub release that `agent-doc plugin install` reads.
+
+What I shipped:
+- committed the editor version bumps in `src/agent-doc` as `1b50d4a` (`chore: bump editor plugin versions`)
+- pushed `20260422/codex-agent-backend` to `origin`
+- uploaded these assets to the current latest release `v0.33.11`:
+  - `agent-doc-0.2.8.vsix`
+  - `agent-doc-jetbrains-0.2.75.zip`
+  - `agent-doc-jetbrains-0.2.75-signed.zip`
+
+Why I used `v0.33.11`:
+- GitHub tags `v0.33.12` and `v0.33.13` exist, but no corresponding GitHub Release exists yet
+- `agent-doc plugin install` pulls from the latest GitHub Release, so attaching the new plugin artifacts to the existing latest release is the safe publish path without creating a newer latest release that would still be missing the normal binary release payload
+
+Notes:
+- I did not publish the VS Code Marketplace or JetBrains Marketplace listings in this cycle
+- I preserved the unrelated existing local edits in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
+<!-- agent:boundary:fa67261e -->
 <!-- /agent:exchange -->
 
 <!--

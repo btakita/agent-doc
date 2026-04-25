@@ -484,7 +484,7 @@ Implemented the JB plugin preserve_head IPC path. Five files changed across the 
 **Build** — Bumped plugin to 0.2.76, built both unsigned + signed zips. All Rust tests pass (337 lib + 1120 integration; the one pre-existing `detect_install_env_treats_codex_thread_id_as_codex` failure is unrelated). JB Gradle tests pass (15 tasks).
 
 Committed as `b5d162d` in agent-doc, submodule pointer updated + pushed in parent.
-<!-- agent:boundary:14f527d1 -->
+<!-- agent:boundary:850fb700 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -493,7 +493,6 @@ Committed as `b5d162d` in agent-doc, submodule pointer updated + pushed in paren
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#hfix5] JB plugin: read preserve_head from IPC reposition JSON, call agent_doc_reposition_boundary_to_end_preserve_head[_with_id] FFI when true (PatchWatcher.kt + NativeLib.kt)
 - [ ] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
 - [ ] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
 - [ ] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

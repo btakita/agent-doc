@@ -6,6 +6,7 @@ agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
 
@@ -579,7 +580,25 @@ Verification:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml`
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
 - `cargo install --path src/agent-doc`
-<!-- agent:boundary:884a6213 -->
+
+❯ do #orsyn1. preset #spec-test-build-install-commit-push
+### Re: do #orsyn1 — gpt-5
+
+Implemented `#orsyn1` in `src/agent-doc` and pushed `b09c087` to `20260422/codex-agent-backend`.
+
+Root cause:
+- `orchestrate.rs` already stripped the `❯ ` prompt prefix when parsing exchange list items, but preflight's orchestration detector still counted raw `❯ - do ...` lines literally. That let prefixed synchronous batches miss the binary-owned `orchestration_request` handoff and fall back to ordinary imperative handling.
+
+What changed:
+- `src/diff.rs`: normalize `❯ ` prompt prefixes before markdown-list detection, so preflight routes `❯ - do #...` batches the same way as bare list items.
+- Added a regression test for the exact `❯ synchronous opera` + preset + two-task shape that showed up in this document.
+- Updated `specs/07-commands.md` to document prefixed-batch normalization and the already-seen malformed sequential aliases.
+
+Verification:
+- `cargo test --manifest-path Cargo.toml`
+- `cargo build --manifest-path Cargo.toml --release`
+- `cargo install --path .`
+<!-- agent:boundary:c2c20d1c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -588,7 +607,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
+- [x] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

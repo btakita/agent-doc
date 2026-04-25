@@ -912,17 +912,13 @@ tree-sitter-bash 0.25 parses `alias` as a generic `command`, not a dedicated nod
 #### #hscz Markdown (headings h1-h6 + fenced code blocks)
 
 Added `(fenced_code_block (info_string (language) @code_block.name))` to capture the language tag from fenced code blocks. Headings already worked.
-<!-- agent:boundary:a0570455 -->
+<!-- agent:boundary:40ce7e6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
-- [x] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
-- [x] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
 - [ ] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
-- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity

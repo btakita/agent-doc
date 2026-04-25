@@ -58,7 +58,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Route readiness is binary-owned** — prompt detection / trigger acceptance lives in `route.rs` and must tolerate shell startup noise; the skill should not try to infer pane readiness from echoed command text
 - **Harness-specific arg aliases** — `agent_args` is the generic override; `claude_args` and `codex_args` are harness-specific aliases used only by their matching backends
 - **Streaming** — real-time CRDT write-back loop (`agent-doc stream`) with optional chain-of-thought routing
-- **Task orchestration** — `agent-doc orchestrate --mode sequential|parallel|dag` gives one surface for stepwise fresh-agent execution and existing worktree fan-out; sequential injects each prompt into `exchange`, runs a fresh agent session per step, then closes the step with `finalize` + `session-check`
+- **Task orchestration** — `agent-doc orchestrate --mode sequential|parallel|dag` gives one surface for stepwise fresh-agent execution and worktree fan-out; sequential injects each prompt into `exchange`, runs a fresh agent session per step, then closes the step with `finalize` + `session-check`, while the legacy `agent-doc parallel` command now routes through the same orchestration dispatch as a compatibility wrapper
 - **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
 - **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
 - **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight

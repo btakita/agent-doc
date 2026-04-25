@@ -1480,7 +1480,7 @@ fn main() -> anyhow::Result<()> {
             no_worktree,
             timeout,
             dry_run,
-        } => parallel::run(
+        } => orchestrate::run_parallel_compat(
             &file,
             parallel::ParallelConfig {
                 tasks: tasks_explicit,
@@ -1490,6 +1490,7 @@ fn main() -> anyhow::Result<()> {
                 timeout_secs: timeout,
                 dry_run,
             },
+            &config,
         ),
         Commands::Orchestrate {
             file,

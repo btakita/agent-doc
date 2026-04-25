@@ -663,10 +663,11 @@ Notes:
 
 ### `--mode parallel`
 
-Parallel orchestration is a front-door wrapper over the existing `agent-doc parallel` worktree fan-out:
+Parallel orchestration resolves tasks through the shared orchestrate surface, then runs the existing worktree fan-out backend:
 
 - `--task` / `--from-file` / `--from-exchange` are resolved first.
 - The resolved tasks are then passed to the existing parallel engine with `--model`, `--no-git`, `--no-worktree`, and `--timeout`.
+- The legacy `agent-doc parallel` command is a compatibility wrapper over this same dispatch path with explicit `--task` entries only, so both surfaces share task normalization and mode routing.
 
 ### `--mode dag`
 

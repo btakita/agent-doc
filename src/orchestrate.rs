@@ -9,7 +9,8 @@
 //!   resume/session reuse, then persists the response through `finalize`
 //!   followed by `session-check`.
 //! - `--mode parallel` reuses the existing `parallel` worktree fan-out path
-//!   after task resolution.
+//!   after task resolution, and the legacy `agent-doc parallel` command routes
+//!   through this same orchestrate dispatch surface.
 //! - `--mode dag` is reserved for future work and currently errors.
 //! - `extract_tasks_from_text(text)` prefers the last fenced code block or
 //!   contiguous markdown list that contains task-like lines; falls back to
@@ -94,6 +95,10 @@ trait FreshAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<String>;
+}
+
+trait ParallelRunner {
+    fn run(&self, file: &Path, config: parallel::ParallelConfig) -> Result<()>;
 }
 
 struct CliLifecycleOps;
@@ -209,6 +214,14 @@ impl FreshAgentRunner for CliAgentRunner {
     }
 }
 
+struct CliParallelRunner;
+
+impl ParallelRunner for CliParallelRunner {
+    fn run(&self, file: &Path, config: parallel::ParallelConfig) -> Result<()> {
+        parallel::run(file, config)
+    }
+}
+
 fn send_fresh_response(
     backend: &dyn agent::Agent,
     prompt: &str,
@@ -218,12 +231,66 @@ fn send_fresh_response(
 }
 
 pub fn run(file: &Path, config: OrchestrateConfig, global_config: &Config) -> Result<()> {
+    let lifecycle = CliLifecycleOps;
+    let agent_runner = CliAgentRunner;
+    let parallel_runner = CliParallelRunner;
+    run_with_dependencies(
+        file,
+        config,
+        global_config,
+        &lifecycle,
+        &agent_runner,
+        &parallel_runner,
+        false,
+    )
+}
+
+pub fn run_parallel_compat(
+    file: &Path,
+    config: parallel::ParallelConfig,
+    global_config: &Config,
+) -> Result<()> {
+    let lifecycle = CliLifecycleOps;
+    let agent_runner = CliAgentRunner;
+    let parallel_runner = CliParallelRunner;
+    run_with_dependencies(
+        file,
+        OrchestrateConfig {
+            mode: OrchestrateMode::Parallel,
+            tasks_explicit: config.tasks,
+            from_file: None,
+            from_exchange: false,
+            agent: None,
+            model: config.model,
+            no_git: config.no_git,
+            no_worktree: config.no_worktree,
+            timeout_secs: config.timeout_secs,
+            dry_run: config.dry_run,
+        },
+        global_config,
+        &lifecycle,
+        &agent_runner,
+        &parallel_runner,
+        true,
+    )
+}
+
+fn run_with_dependencies(
+    file: &Path,
+    config: OrchestrateConfig,
+    global_config: &Config,
+    lifecycle: &impl LifecycleOps,
+    agent_runner: &impl FreshAgentRunner,
+    parallel_runner: &impl ParallelRunner,
+    allow_empty_parallel_tasks: bool,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
 
     let tasks = resolve_tasks(file, &config)?;
-    if tasks.is_empty() {
+    if tasks.is_empty() && !(allow_empty_parallel_tasks && config.mode == OrchestrateMode::Parallel)
+    {
         anyhow::bail!("no orchestration tasks found");
     }
 
@@ -236,31 +303,28 @@ pub fn run(file: &Path, config: OrchestrateConfig, global_config: &Config) -> Re
         eprintln!("[orchestrate]   {}: {}", idx + 1, task);
     }
 
-    if config.dry_run {
-        eprintln!("[orchestrate] dry run — exiting without executing tasks");
-        return Ok(());
-    }
-
     match config.mode {
         OrchestrateMode::Sequential => {
+            if config.dry_run {
+                eprintln!("[orchestrate] dry run — exiting without executing tasks");
+                return Ok(());
+            }
             if config.no_git {
                 anyhow::bail!(
                     "`agent-doc orchestrate --mode sequential` requires git-backed finalize"
                 );
             }
-            let lifecycle = CliLifecycleOps;
-            let agent_runner = CliAgentRunner;
             run_sequential_internal(
                 file,
                 &tasks,
                 config.agent.as_deref(),
                 config.model.as_deref(),
                 global_config,
-                &lifecycle,
-                &agent_runner,
+                lifecycle,
+                agent_runner,
             )
         }
-        OrchestrateMode::Parallel => parallel::run(
+        OrchestrateMode::Parallel => parallel_runner.run(
             file,
             parallel::ParallelConfig {
                 tasks,
@@ -268,10 +332,14 @@ pub fn run(file: &Path, config: OrchestrateConfig, global_config: &Config) -> Re
                 no_git: config.no_git,
                 no_worktree: config.no_worktree,
                 timeout_secs: config.timeout_secs,
-                dry_run: false,
+                dry_run: config.dry_run,
             },
         ),
         OrchestrateMode::Dag => {
+            if config.dry_run {
+                eprintln!("[orchestrate] dry run — exiting without executing tasks");
+                return Ok(());
+            }
             anyhow::bail!("`agent-doc orchestrate --mode dag` is not implemented yet")
         }
     }
@@ -666,6 +734,26 @@ mod tests {
         seen_fork: RefCell<Vec<bool>>,
     }
 
+    #[derive(Default)]
+    struct FakeParallelRunner {
+        calls: RefCell<Vec<(String, Vec<String>, Option<String>, bool, bool, u64, bool)>>,
+    }
+
+    impl ParallelRunner for FakeParallelRunner {
+        fn run(&self, file: &Path, config: parallel::ParallelConfig) -> Result<()> {
+            self.calls.borrow_mut().push((
+                file.display().to_string(),
+                config.tasks,
+                config.model,
+                config.no_git,
+                config.no_worktree,
+                config.timeout_secs,
+                config.dry_run,
+            ));
+            Ok(())
+        }
+    }
+
     impl agent::Agent for CaptureAgent {
         fn send(
             &self,
@@ -777,5 +865,100 @@ mod tests {
             agent.prompts.borrow()[0].contains("❯ do #gkke"),
             "fresh agent prompt should include the injected task"
         );
+    }
+
+    #[test]
+    fn parallel_mode_uses_shared_parallel_runner() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            response: "unused".to_string(),
+        };
+        let parallel_runner = FakeParallelRunner::default();
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["  ❯ do #9pw9  ".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: Some("gpt-5".to_string()),
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 45,
+                dry_run: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
+
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, vec!["do #9pw9".to_string()]);
+        assert_eq!(calls[0].2.as_deref(), Some("gpt-5"));
+        assert!(calls[0].3);
+        assert!(calls[0].4);
+        assert_eq!(calls[0].5, 45);
+        assert!(calls[0].6);
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+
+    #[test]
+    fn legacy_parallel_compat_allows_empty_task_list() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            response: "unused".to_string(),
+        };
+        let parallel_runner = FakeParallelRunner::default();
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 600,
+                dry_run: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            true,
+        )
+        .unwrap();
+
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].1.is_empty());
     }
 }

@@ -445,7 +445,29 @@ So the sequence is: write adds `(HEAD)` correctly → commit sends IPC with `pre
 2. **VS Code extension** — same: read `preserve_head` from IPC message, call the preserve variant.
 
 3. **Editor SPEC.md** — update the reposition behavior section (lines 64-72) to document `preserve_head` field and the two FFI variants.
-<!-- agent:boundary:9f519032 -->
+
+plan + pending 
+### Re: plan + pending — opus-4-6
+
+**Plan for (HEAD) IPC fix:**
+
+The Rust-side FFI exports already exist (`agent_doc_reposition_boundary_to_end_preserve_head` and `_with_id` in ffi.rs:591/617). The IPC sender already passes `preserve_head: true` (ipc_socket.rs:156). The gap is the editor plugin receivers.
+
+1. **#hfix5 — JetBrains plugin** (PatchWatcher.kt + NativeLib.kt):
+   - `handleSocketMessage` line 323: extract `preserve_head` boolean from JSON (default false)
+   - Pass it to `repositionBoundaryViaDocument(file, boundaryId, preserveHead)`
+   - Inside that method: when `preserveHead` is true, call `NativePatching.repositionBoundaryToEndPreserveHead(content, boundaryId)` instead of `repositionBoundaryToEnd`
+   - Add `NativePatching.repositionBoundaryToEndPreserveHead()` wrapper that calls `lib.agent_doc_reposition_boundary_to_end_preserve_head` / `_with_id` FFI
+   - NativeLib.kt already declares both FFI signatures (lines 103-111 area) — but need to verify the preserve_head variants are declared
+
+2. **#hfix6 — VS Code extension**: same pattern — read `preserve_head` from IPC message, call the preserve variant FFI
+
+3. **#hfix7 — Editor SPEC.md**: update reposition behavior section (lines 64-72) to document the `preserve_head` IPC field and when plugins should use clean vs preserve variants
+
+4. **#hfix8 — Build + verify**: bump JB plugin version, build both zips, install, verify `(HEAD)` appears in a live session with the IPC listener active
+
+Added all four items to pending.
+<!-- agent:boundary:8b2b9264 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -454,6 +476,10 @@ So the sequence is: write adds `(HEAD)` correctly → commit sends IPC with `pre
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#hfix5] JB plugin: read preserve_head from IPC reposition JSON, call agent_doc_reposition_boundary_to_end_preserve_head[_with_id] FFI when true (PatchWatcher.kt + NativeLib.kt)
+- [ ] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
+- [ ] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
+- [ ] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

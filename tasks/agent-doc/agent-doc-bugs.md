@@ -640,7 +640,25 @@ Verification:
 - `cargo install --path .`
 
 `#pbdiag1` remains open in pending.
-<!-- agent:boundary:1aee3a10 -->
+
+❯ do #pbdiag1. preset #spec-test-build-install-commit-push
+### Re: do #pbdiag1 — gpt-5
+
+Implemented `#pbdiag1` in `src/agent-doc` and pushed `3b9d30d` to `20260422/codex-agent-backend`.
+
+What changed:
+- `agent-doc commit` now emits an explicit diagnostic when `HEAD` already contains the prior response and the working tree only adds later follow-up prompts: it says no new assistant response body was supplied and it will not synthesize a second assistant patchback.
+- That follow-up/no-body path now records `prior_patchback_without_response_body` in `ops.log`, so the classification is visible in diagnostics alongside the existing `post_commit_local_drift kind=user_follow_up` marker.
+- Added CLI regression coverage for `agent-doc commit <FILE>` and tightened the existing git-level no-op closeout test.
+- Updated `specs/07-commands.md` and `README.md` so the operator-facing contract requires that explicit explanation.
+
+Verification:
+- `cargo test test_commit_explains_prior_patchback_without_new_response_body`
+- `cargo test commit_repairs_committed_head_before_user_follow_up_noop`
+- `cargo test` (new coverage passes; full suite still has the unrelated pre-existing failures `autoclaim::tests::autoclaim_focuses_pane_with_claim` and `autoclaim::tests::autoclaim_syncs_layout_with_multiple_files`)
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:a3fd29eb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -649,7 +667,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
+- [x] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

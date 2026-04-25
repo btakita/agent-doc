@@ -609,7 +609,17 @@ On **April 9, 2026**, the old `compact exchange` issue was **not** that the summ
 On **April 24, 2026**, the `tasks/claudescore-3.md` case was different. That was not a failed compact-summary commit. The prior `agent-doc run` had already patchbacked a response, and the later request to “write response back” did not include any new response body; before new text was provided, the instruction changed to `commit`, so the system committed the already-written document state rather than invent a second assistant patchback. That sequence is captured in [a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac-20260424-193815.md](/home/brian/work/btakita/agent-loop/src/session-share/.agent-doc/archives/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac-20260424-193815.md:145).
 
 So the short answer is: the “summary was not committed” report came from the old **refresh-signal / raw `git commit`** bug, while the `claudescore-3.md` “no response patchback” report was a separate **no new response body existed to append** case. I do not see evidence here of a new live `compact exchange` persistence bug in current `src/agent-doc`.
-<!-- agent:boundary:6a4b067f -->
+
+❯ Add tasks to fix these 2 issues.
+### Re: add tasks for those two issues — gpt-5
+
+Added two open pending items at the front of `agent:pending`:
+
+- **#cmpcf1** — harden compact-exchange closeout so skill/harness paths cannot fall back to raw `git commit`; require and verify `agent-doc commit` plus VCS refresh behavior
+- **#pbdiag1** — add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so the system explains that it will not synthesize a second assistant patchback
+
+That splits the follow-up cleanly across the two distinct failure modes we identified: compact closeout correctness vs. patchback-state/operator-feedback clarity.
+<!-- agent:boundary:4efa8596 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -618,6 +628,8 @@ So the short answer is: the “summary was not committed” report came from the
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#cmpcf1] Harden compact-exchange closeout so skill/harness paths cannot fall back to raw git commit; require and verify agent-doc commit plus VCS refresh behavior
+- [ ] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

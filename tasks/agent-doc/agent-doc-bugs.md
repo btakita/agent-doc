@@ -92,18 +92,31 @@ Fixed. I updated the `agent-doc` source guidance so later additions from an alre
 I added regression checks for that guidance, then verified `src/agent-doc` with `cargo test`, `cargo build --release`, and `cargo install --path .`. The source change is committed in `src/agent-doc` as `6b7346d` (`docs: capture ordered pending insertion guidance`).
 
 I also corrected this document's pending order so the Step 3 item now sits after `#9pw9`.
-<!-- agent:boundary:63abcc29 -->
+
+do #gkke. update spec + tests. build + install for local testing. commit + push 
+### Re: orchestrate command implementation — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `0beb3c8` (`feat: add orchestrate command surface`).
+
+`agent-doc orchestrate <FILE>` now exists with `--mode sequential|parallel|dag`, shared task resolution from `--task`, `--from-file`, and `--from-exchange`, and a real sequential path that injects each task into `agent:exchange`, runs `preflight`, sends one fresh agent request with no resume/session reuse, then persists each step through `finalize` followed by `session-check`. `--mode parallel` routes through the existing fan-out engine, and `--mode dag` now fails explicitly as reserved future work.
+
+I updated the command spec / README / version notes and added orchestration-focused unit coverage for task extraction, boundary-aware prompt injection, fresh-session dispatch, and the sequential finalize path.
+
+Verification in `src/agent-doc`:
+- `cargo test orchestrate::`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc orchestrate --help`
+
+I also ran the full `cargo test`; the crate compiles, but the run is still blocked by existing unrelated failures in `autoclaim::tests::{autoclaim_focuses_pane_with_claim, autoclaim_syncs_layout_with_multiple_files, autoclaim_no_claim_skips_focus}`.
+<!-- agent:boundary:24159fec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#gkke] [recommended] Implement `agent-doc orchestrate` with `--mode sequential`, fresh agent context per step, prompt injection into exchange, and per-step `finalize` + `session-check`.
+- [x] [#gkke] [recommended] Implement `agent-doc orchestrate` with `--mode sequential`, fresh agent context per step, prompt injection into exchange, and per-step `finalize` + `session-check`.
 - [ ] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
 - [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
-
-<!-- 
-Why are all of the commits done by Codex in agent-doc authored by `Test <test@test.com>`?
--->

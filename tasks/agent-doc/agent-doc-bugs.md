@@ -5,9 +5,10 @@ agent_doc_write: crdt
 agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
+prompt_presets:
+  "#spec-test-commit-push": update spec + tests. commit + push
+
 ---
-
-
 
 ## Status
 
@@ -139,7 +140,35 @@ A dedicated `&lt;!-- agent:plan --&gt;` component is probably overkill for now. 
 **Recommended next step:**
 
 Add `agent-doc orchestrate --plan` (dry-run) — concrete, low-effort, closes the verification gap without redesigning the orchestration model.
-<!-- agent:boundary:6d3903d8 -->
+❯ do #0z3v. preset #spec-test-commit-push
+### Re: do #0z3v orchestrate --plan — sonnet-4-6
+
+Implemented `agent-doc orchestrate --plan` in `src/agent-doc` at commit `5547909` on `20260422/codex-agent-backend`.
+
+**What was added:**
+
+- `--plan` flag on `orchestrate` (all three modes: sequential, parallel, dag)
+- After resolving tasks and applying preset blocks, prints each task's fully expanded prompt and exits — no agent calls, no git writes
+- Output format:
+
+```
+[orchestrate] plan — N task(s) (no execution)
+[orchestrate] step 1/N: <label>
+[orchestrate] --- prompt ---
+[orchestrate] <preset block if any>
+[orchestrate] <task prompt>
+[orchestrate] --- end prompt ---
+```
+
+- `--dry-run` remains as-is (prints labels only, before preset expansion)
+- `--plan` is the deeper verification: shows exactly what the agent would receive
+
+**Tests:** 3 new tests — sequential exits without finalize calls, preset is expanded in output, parallel exits without calling the parallel runner.
+
+**Spec:** `specs/07-commands.md` updated with `--dry-run` / `--plan` section and example output.
+
+**Verification:** `cargo test orchestrate` (25 passed), `cargo build --release`, `cargo install --path .`.
+<!-- agent:boundary:94c56933 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -148,7 +177,7 @@ Add `agent-doc orchestrate --plan` (dry-run) — concrete, low-effort, closes th
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#0z3v] recommended: add orchestrate --plan (dry-run) to preview expanded task prompts before spawning — closes verification gap without adding a plan-mode concept
+- [x] [#0z3v] recommended: add orchestrate --plan (dry-run) to preview expanded task prompts before spawning — closes verification gap without adding a plan-mode concept
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

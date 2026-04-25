@@ -315,12 +315,55 @@ commit + push...including unstaged files
 ### Re: commit + push — sonnet-4-6
 
 Committed and pushed `equityfundingsource-dev` (`7aa6f2f`): 13 files — all HTML originals, converted markdown files, and `project-plan.md`. The `.docx` is excluded via `.gitignore`. Parent `agent-loop` submodule pointer updated and pushed (`04f6d801`).
-<!-- agent:boundary:49e702cc -->
+
+❯ Use corky to transcribe + diarize mail/contacts/robert-waldman/recordings/phone_20260424-180005_8059070885.m4a
+### Re: Robert Waldman call transcript (Apr 24) — sonnet-4-6
+
+Transcript transcribed, diarized, and saved:
+`mail/contacts/robert-waldman/recordings/phone_20260424-180005_8059070885.md` — 677 lines, ~90 min call
+
+#### Key topics
+
+**Design & look/feel**
+- FDL Group site (Robert's client, purple/gold) sent as reference — enterprise minimal, luxury feel. Use similar structure/hero image treatment
+- Navy blue: current AI-generated dark navy reads as black — use the lighter gradient highlight from upper-left of logo dollar sign for large swaths; dark navy OK for type instead of black
+- Logo: Robert sent JPEG during call; no transparent PNG yet — he'll convert or we can knock out background
+- Robert can generate AI hero images with Judith in them
+
+**Tech stack**
+- Front end: static HTML + Cloudflare Pages (fast, simple); portal back end separate app
+- TMO API (Mortgage Office): REST API, three parts — only loan origination API applies; webhooks unknown (Robert hasn't confirmed outbound yet; if none, may use Zapier or custom bridge)
+- All documents stored in TMO including LOEs and misc; Dropbox is legacy/redundant going forward (TMO data is fully exportable if we ever migrate)
+- GoHighLevel: Robert has enterprise access, can spin up free sub-account for EFS; good for CRM/drip/SMS but not doc storage (he links from GHL to Supabase)
+- Graph/vector database: Judith needs cross-document search dashboard — agreed this is the right approach; covers any doc type, not just loan docs; single source of truth + link to TMO for loan records
+
+**Marketing**
+- ~400 PBM orphan investors (PBM license suspended): know trustee investing already, just need attractive offer + opt-in permission; Robert wants 2-3 email HTML drip (combine emails 1+2, attach real offer)
+- Testimonials: 6–12 minimum for carousel (investors, brokers, borrowers); Robert will push Judith, wants Brian to help since she pays him
+
+**Automation**
+- Codex desktop automation for TMO tasks: run on in-house server (Judith has one) for reliability; both TMO seats stay logged in; Judith can remote desktop in
+- Google Calendar: integrate loan reminders + email campaign send dates; mark complete when fulfilled
+- OCR: handwritten + typed, for document intake automation
+
+**Credentials needed from Robert**
+- Google Suite admin access (SMTP + calendar)
+- FDL Group code zip (reference implementation)
+- AI-generated hero images
+
+**Robert's availability:** LA until Apr 29 → Vegas Apr 30–May 3 → back Texas May 4
+<!-- agent:boundary:8074d4f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
+- [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
+- [ ] [#q2x2] HTML email templates: lighter navy + gold, 2-3 drip for PBM orphan investor outreach
+- [ ] [#kzt6] Collect testimonials for carousel (6–12 min: investors, brokers, borrowers) — push Judith + Robert helping
+- [ ] [#k9zj] Graph/vector database for Judith's document search dashboard (cross-doc search, any doc type)
+- [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [ ] [#4vb5] Online presence cleanup (after Judith approves)
 - [ ] [#a3gc] Consolidate domains under equityfundingsource.com
 - [ ] [#zhyg] Take down/redirect Weebly and WordPress sites

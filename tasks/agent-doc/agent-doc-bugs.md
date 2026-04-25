@@ -76,7 +76,7 @@ prompt_presets:
 Then in `agent:exchange`:
 
 ```md
-synchronous orchestra
+❯ synchronous orchestra
 preset #1
 - do #prep
 - do #report
@@ -214,8 +214,8 @@ Committed as `b1a4cb9` on `20260422/codex-agent-backend` and pushed.
 
 ❯ Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
 ```
-synchronous orchestra
-preset #spec-test-commit-push
+❯ synchronous orchestra
+❯ preset #spec-test-commit-push
 - do #cenv2
 - do #cenv3
 - do #cenv4
@@ -329,7 +329,55 @@ My mistake. The previous response listed 4 concrete recommendations as a numbere
 **Why it was missed:** the `session-check` closeout guard would normally catch this via the pending-capture backstop, but that cycle hit the `INTERRUPTED` error on a false-positive `(HEAD)` patchback detection first (the `(HEAD)` suffix on the new response heading was misread as a direct patchback). The pending-capture check never ran because the earlier guard tripped.
 
 Added all four tasks to pending now: #hfix1 through #hfix4.
-<!-- agent:boundary:80d67716 -->
+
+❯ synchronous orchestra
+❯ preset #spec-test-commit-push
+❯ - do #hfix1
+❯ - do #hfix2
+❯ - do #hfix3
+❯ - do #hfix4
+
+❯ (preset #spec-test-commit-push)
+❯ update spec + tests. commit + push
+❯ do #cenv2
+### Re: synchronous orchestra #hfix1–#hfix4 — opus-4-6
+
+Binary orchestrate failed (parsed stale tasks #cenv2-4 instead of #hfix1-4, plus subprocess `--print + --output-format=stream-json` error). Fell back to skill-driven sequential execution.
+
+All four tasks completed in `src/agent-doc` commit `f0e70b2` on `20260422/codex-agent-backend`:
+
+#### #hfix1 — Working tree preserves (HEAD) on boundary reposition
+
+- **`template.rs`**: Added `reposition_boundary_to_end_preserve_head()` and `_with_id()` — same as clean variant but skips `strip_transient_head_markers()`.
+- **`git.rs`**: `reposition_boundary_in_snapshot()` now uses `preserve_head` for the working-tree path (line 1298), keeps `_clean` for the snapshot path (line 1263).
+
+#### #hfix2 — FFI exports + IPC signal for editor plugins
+
+- **`ffi.rs`**: Added `agent_doc_reposition_boundary_to_end_preserve_head()` and `_with_id()` FFI exports.
+- **`ipc_socket.rs`**: `send_reposition()` now takes a `preserve_head: bool` parameter. When true, includes `"preserve_head": true` in the JSON message.
+- **`write.rs`**: `try_ipc_reposition_boundary()` passes `preserve_head: true`.
+
+#### #hfix3 — Tests
+
+- **`template.rs`** (3 new tests): `preserve_head_keeps_head_markers_on_reposition`, `preserve_head_with_id_keeps_head_and_uses_explicit_id`, `clean_strips_head_but_preserve_head_keeps_it` — directly compare clean vs preserve_head output.
+- **`ffi.rs`** (2 new tests): `reposition_preserve_head_keeps_head_markers`, `reposition_preserve_head_with_id_keeps_head_and_id` — FFI round-trip tests.
+- **`git.rs`** (2 updated tests): `commit_staged_blob_has_no_head_markers` and `reposition_updates_working_tree_when_only_patches_dir_exists` now assert working tree retains `(HEAD)` while committed blob does not.
+
+All 1114 tests pass (pre-existing failures in skill/route tests unchanged).
+
+#### #hfix4 — Spec and convention updates
+
+- **`CLAUDE.md`**: Updated selective commit convention — snapshot collapses to clean; working tree preserves `(HEAD)`.
+- **`specs/06-config.md`**: Updated state invariant after commit.
+- **`specs/07-commands.md`**: Updated HEAD marker and post-commit cleanup sections. Documented all four FFI reposition variants.
+- **`specs/08-session-routing.md`**: Updated commit write contract, snapshot/working-tree cleanup, editor cleanup invariant, and boundary reposition lifecycle.
+
+**Note:** Two orchestrate bugs surfaced during this run:
+1. Parsed stale exchange tasks (#cenv2-4) instead of the user's latest (#hfix1-4)
+2. Subprocess error: `--print` + `--output-format=stream-json` requires `--verbose`
+
+These are separate from the #orch1/#orch2 fixes already shipped — the stale-task parsing and the `--print`+stream-json incompatibility are new issues.
+<!-- agent:boundary:848fdd07 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -338,10 +386,10 @@ Added all four tasks to pending now: #hfix1 through #hfix4.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hfix1] git.rs reposition_boundary_in_snapshot(): keep _clean for snapshot, switch working tree to new reposition_boundary_to_end_with_head() that preserves (HEAD) annotations
-- [ ] [#hfix2] ffi.rs: add agent_doc_reposition_boundary_to_end_with_head_with_id() for IPC path so editor plugin preserves (HEAD) on post-commit reposition
-- [ ] [#hfix3] Integration test: full write → commit → assert working tree retains (HEAD) on new headings while committed blob does not
-- [ ] [#hfix4] Update CLAUDE.md convention: boundary markers collapse post-commit; (HEAD) markers persist in working tree only
+- [x] [#hfix1] git.rs reposition_boundary_in_snapshot(): keep _clean for snapshot, switch working tree to new reposition_boundary_to_end_with_head() that preserves (HEAD) annotations
+- [x] [#hfix2] ffi.rs: add agent_doc_reposition_boundary_to_end_with_head_with_id() for IPC path so editor plugin preserves (HEAD) on post-commit reposition
+- [x] [#hfix3] Integration test: full write → commit → assert working tree retains (HEAD) on new headings while committed blob does not
+- [x] [#hfix4] Update CLAUDE.md convention: boundary markers collapse post-commit; (HEAD) markers persist in working tree only
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

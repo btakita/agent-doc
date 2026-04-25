@@ -1788,7 +1788,29 @@ Blocker:
 The code changes are present in the `src/agent-doc` worktree and `#fppr` Option A is complete at the implementation level; only the submodule commit step is blocked by the harness filesystem restriction.
 
 <!-- /patch:exchange -->
-<!-- agent:boundary:98b6b413 -->
+### Re: repair + prevention scope — gpt-5
+
+`agent-doc-bugs.md` is repaired.
+
+What happened just now:
+- `agent-doc preflight` normalized the remaining boundary-only drift and committed that closeout
+- `agent-doc repair tasks/agent-doc/agent-doc-bugs.md` then returned `No pending response found`, which is what we want after a clean closeout
+- the only remaining diff before this reply was a `(HEAD)` boundary artifact on `### Re: #fppr Option A`, not a structural duplicate `agent:exchange` close tag
+
+Does the bug fix prevent the incorrect patchbacks?
+- Yes for the specific bug we fixed: the Codex `Stop` hook no longer replays transcript-shaped `last_assistant_message` payloads into the document
+- the new guard blocks full `agent:exchange` dumps, prompt-target lines, transcript headings, repeated `### Re:` headings, and malformed/repeated `patch:exchange` payloads from entering the replay ledger
+- instead, those blocked payloads are captured only for diagnostics under `.agent-doc/codex-hooks/blocked-stop/`
+
+What it does **not** guarantee:
+- it does not solve every possible patchback issue in the system
+- it specifically closes the cancelled-run / Stop-hook replay path that could patch back the wrong content
+- other write-boundary or normalization bugs would still need their own fixes if they surface
+
+Fresh verification in `src/agent-doc`:
+- `cargo test stop_blocks_transcript_shaped_last_assistant_message`
+- `cargo test codex_hook_cli_blocks_transcript_shaped_last_assistant_message`
+<!-- agent:boundary:519fd9f0 -->
 <!-- /agent:exchange -->
 
 <!--

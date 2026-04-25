@@ -653,7 +653,7 @@ The intent is to give the skill/orchestrator an explicit, binary-owned execution
 
 ## orchestrate
 
-`agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL]`
+`agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL] [--dry-run] [--plan]`
 
 **Skill-side dispatch:** the bundled skill/runbook treats natural-language orchestration requests as aliases for this command. Ordered phrases like `run these in order`, `chain these`, `one by one`, and `orchestrate` map to `--mode sequential`; concurrency phrases like `fan out`, `concurrent`, and `simultaneously` map to `--mode parallel`; dependency phrases like `after #a do #b`, `depends on`, and `fan in` map to `--mode dag`.
 
@@ -667,6 +667,27 @@ Shared task-source resolution:
 4. Independently scan `--from-file` / `--from-exchange` text for batch-level `preset <name>` or `presets <a>, <b>` directives. These are not tasks; they request frontmatter `prompt_presets` by name. Preserve request order and de-duplicate repeated names.
 5. Validate requested presets against the document frontmatter `prompt_presets` map. Missing preset references fail closed.
 6. Concatenate all resolved tasks in source order. Error if the final task list is empty.
+
+### `--dry-run` and `--plan`
+
+Both flags exit without executing any agent tasks.
+
+- `--dry-run`: prints task labels only, before preset expansion. Stops after the initial task-list summary.
+- `--plan`: resolves tasks fully (including preset expansion via `apply_prompt_preset_block`), then prints each task's fully expanded prompt. Use this to verify what the agent will receive before committing to execution:
+
+```
+[orchestrate] plan — 2 task(s) (no execution)
+[orchestrate] step 1/2: do #prep
+[orchestrate] --- prompt ---
+[orchestrate] (preset #spec-test-commit-push)
+[orchestrate] update spec + tests. commit + push
+[orchestrate] do #prep
+[orchestrate] --- end prompt ---
+[orchestrate] step 2/2: do #report
+...
+```
+
+`--plan` is the recommended harness verification step before issuing a live `orchestrate` call. It applies to all three modes (`sequential`, `parallel`, `dag`).
 
 ### `--mode sequential`
 

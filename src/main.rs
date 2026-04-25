@@ -675,6 +675,9 @@ enum Commands {
         /// Show the resolved plan without executing
         #[arg(long)]
         dry_run: bool,
+        /// Show each task's fully expanded prompt (with presets applied) without executing
+        #[arg(long)]
+        plan: bool,
     },
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
@@ -1517,6 +1520,7 @@ fn main() -> anyhow::Result<()> {
             no_worktree,
             timeout,
             dry_run,
+            plan,
         } => orchestrate::run(
             &file,
             orchestrate::OrchestrateConfig {
@@ -1530,6 +1534,7 @@ fn main() -> anyhow::Result<()> {
                 no_worktree,
                 timeout_secs: timeout,
                 dry_run,
+                plan,
             },
             &config,
         ),

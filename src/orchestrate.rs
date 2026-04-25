@@ -86,6 +86,7 @@ pub struct OrchestrateConfig {
     pub no_worktree: bool,
     pub timeout_secs: u64,
     pub dry_run: bool,
+    pub plan: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,6 +340,7 @@ pub fn run_parallel_compat(
             no_worktree: config.no_worktree,
             timeout_secs: config.timeout_secs,
             dry_run: config.dry_run,
+            plan: false,
         },
         global_config,
         &lifecycle,
@@ -393,6 +395,10 @@ fn run_with_dependencies(
                     prompt: apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
                 })
                 .collect::<Vec<_>>();
+            if config.plan {
+                print_plan(&execution_tasks);
+                return Ok(());
+            }
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
@@ -417,20 +423,29 @@ fn run_with_dependencies(
             for (idx, task) in batch.tasks.iter().enumerate() {
                 eprintln!("[orchestrate]   {}: {}", idx + 1, task);
             }
+            let parallel_tasks = batch
+                .tasks
+                .into_iter()
+                .map(|task| parallel::ParallelTask {
+                    description: task.clone(),
+                    prompt: apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
+                })
+                .collect::<Vec<_>>();
+            if config.plan {
+                let exec: Vec<ExecutionTask> = parallel_tasks
+                    .iter()
+                    .map(|t| ExecutionTask {
+                        label: t.description.clone(),
+                        prompt: t.prompt.clone(),
+                    })
+                    .collect();
+                print_plan(&exec);
+                return Ok(());
+            }
             parallel_runner.run(
                 file,
                 parallel::ParallelConfig {
-                    tasks: batch
-                        .tasks
-                        .into_iter()
-                        .map(|task| parallel::ParallelTask {
-                            description: task.clone(),
-                            prompt: apply_prompt_preset_block(
-                                &task,
-                                prompt_preset_block.as_deref(),
-                            ),
-                        })
-                        .collect(),
+                    tasks: parallel_tasks,
                     model: config.model,
                     no_git: config.no_git,
                     no_worktree: config.no_worktree,
@@ -478,6 +493,10 @@ fn run_with_dependencies(
                     prompt: apply_prompt_preset_block(&task.prompt, prompt_preset_block.as_deref()),
                 })
                 .collect::<Vec<_>>();
+            if config.plan {
+                print_plan(&execution_tasks);
+                return Ok(());
+            }
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
@@ -928,6 +947,18 @@ fn apply_prompt_preset_block(task: &str, prompt_preset_block: Option<&str>) -> S
     match prompt_preset_block {
         Some(block) if !block.trim().is_empty() => format!("{}\n{}", block.trim_end(), task),
         _ => task.to_string(),
+    }
+}
+
+fn print_plan(tasks: &[ExecutionTask]) {
+    eprintln!("[orchestrate] plan — {} task(s) (no execution)", tasks.len());
+    for (idx, task) in tasks.iter().enumerate() {
+        eprintln!("[orchestrate] step {}/{}: {}", idx + 1, tasks.len(), task.label);
+        eprintln!("[orchestrate] --- prompt ---");
+        for line in task.prompt.lines() {
+            eprintln!("[orchestrate] {}", line);
+        }
+        eprintln!("[orchestrate] --- end prompt ---");
     }
 }
 
@@ -1451,6 +1482,7 @@ mod tests {
                 no_worktree: true,
                 timeout_secs: 30,
                 dry_run: true,
+                plan: false,
             },
         )
         .unwrap();
@@ -1649,6 +1681,7 @@ mod tests {
                 no_worktree: true,
                 timeout_secs: 30,
                 dry_run: false,
+                plan: false,
             },
             &Config::default(),
             &lifecycle,
@@ -1914,6 +1947,7 @@ mod tests {
                 no_worktree: true,
                 timeout_secs: 45,
                 dry_run: true,
+                plan: false,
             },
             &Config::default(),
             &lifecycle,
@@ -1979,6 +2013,7 @@ mod tests {
                 no_worktree: true,
                 timeout_secs: 30,
                 dry_run: true,
+                plan: false,
             },
             &Config::default(),
             &lifecycle,
@@ -2030,6 +2065,7 @@ mod tests {
                 no_worktree: false,
                 timeout_secs: 600,
                 dry_run: false,
+                plan: false,
             },
             &Config::default(),
             &lifecycle,
@@ -2042,5 +2078,147 @@ mod tests {
         let calls = parallel_runner.calls.borrow();
         assert_eq!(calls.len(), 1);
         assert!(calls[0].1.is_empty());
+    }
+
+    #[test]
+    fn plan_flag_sequential_prints_expanded_prompts_without_executing() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #prep".to_string(), "do #report".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
+
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+
+    #[test]
+    fn plan_flag_sequential_expands_preset_in_output() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n";
+        fs::write(&doc, preset_doc).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #prep".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
+
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+
+    #[test]
+    fn plan_flag_parallel_exits_without_calling_runner() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["do #a".to_string(), "do #b".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
+
+        assert!(parallel_runner.calls.borrow().is_empty());
     }
 }

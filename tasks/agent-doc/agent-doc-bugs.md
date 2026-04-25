@@ -20,7 +20,34 @@ prompt_presets:
 
 <!-- agent:exchange patch=append -->
 Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
-<!-- agent:boundary:0006dfcc -->
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+<!-- agent:boundary:1ca19da3 -->
 <!-- /agent:exchange -->
 
 <!--

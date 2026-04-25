@@ -256,7 +256,7 @@ Session closed cleanly. Here's a summary of what was done for `#jbpfx1`:
 - `gradle.properties` — bumped JB plugin to `0.2.77`
 
 `#jbpfx1` is now done. `#jbpfx2` (binary-side `content_ours` fallback) remains open in pending.
-<!-- agent:boundary:a210afaf -->
+<!-- agent:boundary:61b5593a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -266,7 +266,6 @@ In this document + src/session-share `agent-doc tasks/claudescore-3.md`: Why did
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#jbpfx1] [recommended] Fix JetBrains plugin normalizeExchangePrefixes: trim trailing whitespace on both sides of the match or use line-by-line scanning instead of substring replace (PatchWatcher.kt:742)
 - [ ] [#jbpfx2] [recommended] Binary-side fallback: use content_ours as snapshot source when ack_content_sidecar diverges from expected normalization count
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish

@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 pub struct GuardConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_capture: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
 }
 
 /// Component patch configuration (mode, timestamps, max entries, hooks).
@@ -284,10 +286,18 @@ mod tests {
     fn load_guard_config() {
         let dir = TempDir::new().unwrap();
         let config_path = setup_project(dir.path());
-        std::fs::write(&config_path, "[guards]\npending_capture = \"strict\"\n").unwrap();
+        std::fs::write(
+            &config_path,
+            "[guards]\npending_capture = \"strict\"\npending_done = \"strict\"\n",
+        )
+        .unwrap();
         let cfg = load_project_from(&config_path);
         assert_eq!(
             cfg.guards.pending_capture,
+            Some(crate::frontmatter::PendingCaptureGuardMode::Strict)
+        );
+        assert_eq!(
+            cfg.guards.pending_done,
             Some(crate::frontmatter::PendingCaptureGuardMode::Strict)
         );
     }

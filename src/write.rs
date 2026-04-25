@@ -311,6 +311,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         for id in &options.pending_done {
             crate::pending_cmd::done(file, id)?;
         }
+        if !options.pending_done.is_empty() {
+            crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
+        }
         if let Some(ref order) = options.pending_reorder {
             let ids: Vec<String> = order
                 .split(',')

@@ -100,11 +100,17 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         warnings: Vec::new(),
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
-        match check_pending_capture_guard(file)? {
-            PendingCaptureGuardResult::None => {}
-            PendingCaptureGuardResult::Warn(lines) => report.warnings = lines,
-            PendingCaptureGuardResult::Error(message) => {
-                report.status = SessionCheckStatus::Interrupted(message);
+        for guard in [
+            check_pending_capture_guard(file)?,
+            check_pending_done_guard(file)?,
+        ] {
+            match guard {
+                PendingCaptureGuardResult::None => {}
+                PendingCaptureGuardResult::Warn(lines) => report.warnings.extend(lines),
+                PendingCaptureGuardResult::Error(message) => {
+                    report.status = SessionCheckStatus::Interrupted(message);
+                    break;
+                }
             }
         }
     }
@@ -230,7 +236,7 @@ fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult>
         return Ok(PendingCaptureGuardResult::None);
     }
 
-    let response_text = response_text_for_pending_guard(&capture.response_body);
+    let response_text = response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
         return Ok(PendingCaptureGuardResult::None);
     }
@@ -276,7 +282,103 @@ fn resolve_pending_capture_guard_mode(
         .unwrap_or_default())
 }
 
-fn response_text_for_pending_guard(response: &str) -> String {
+fn resolve_pending_done_guard_mode(
+    file: &Path,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.pending_done_guard {
+        return Ok(mode);
+    }
+    Ok(crate::project_config::load_project_for_doc(file)
+        .guards
+        .pending_done
+        .unwrap_or_default())
+}
+
+fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
+    let mode = resolve_pending_done_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    if state.is_open() {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(PendingCaptureGuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-pending-done-guard -->")
+    {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let response_text = response_text_for_guards(&capture.response_body);
+    if response_text.trim().is_empty() {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let open_ids = open_pending_ids(file)?;
+    if open_ids.is_empty() {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let missing: Vec<String> = open_ids
+        .into_iter()
+        .filter(|id| response_clearly_completes_pending_id(&response_text, id))
+        .filter(|id| !state.pending_done_ids.iter().any(|done| done == id))
+        .collect();
+    if missing.is_empty() {
+        return Ok(PendingCaptureGuardResult::None);
+    }
+
+    let ids = missing
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let hint = missing
+        .iter()
+        .map(|id| format!("--pending-done {}", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let warn_line = format!(
+        "[session-check] warn: response appears to complete existing pending {} but no matching `--pending-done` was recorded this cycle",
+        ids
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => PendingCaptureGuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: re-run with {} or add `pending_done_guard: off` for this document when the item should stay open",
+                hint
+            ),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => {
+            PendingCaptureGuardResult::Error(format!(
+                "{}\n[session-check] hint: re-run with {} or set pending_done_guard = \"warn\" to downgrade",
+                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
+                hint
+            ))
+        }
+        crate::frontmatter::PendingCaptureGuardMode::Off => PendingCaptureGuardResult::None,
+    })
+}
+
+fn response_text_for_guards(response: &str) -> String {
     let Ok((patches, unmatched)) = crate::template::parse_patches(response) else {
         return response.to_string();
     };
@@ -306,6 +408,72 @@ fn response_text_for_pending_guard(response: &str) -> String {
     }
 
     response.to_string()
+}
+
+fn open_pending_ids(file: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(Vec::new());
+    };
+    let Some(pending) = components
+        .into_iter()
+        .find(|component| component.name == "pending")
+    else {
+        return Ok(Vec::new());
+    };
+
+    let body = &content[pending.open_end..pending.close_start];
+    let (_, items, _) = crate::pending::parse_items(body);
+    Ok(items
+        .into_iter()
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .collect())
+}
+
+fn response_clearly_completes_pending_id(response_text: &str, id: &str) -> bool {
+    let lines: Vec<String> = response_text
+        .lines()
+        .map(|line| line.trim().to_ascii_lowercase())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return false;
+    }
+
+    let needle = format!("#{}", id.to_ascii_lowercase());
+    for idx in 0..lines.len() {
+        if !lines[idx].contains(&needle) {
+            continue;
+        }
+        let end = (idx + 5).min(lines.len());
+        let window = lines[idx..end].join("\n");
+        if contains_completion_marker(&window) {
+            return true;
+        }
+    }
+    false
+}
+
+fn contains_completion_marker(text: &str) -> bool {
+    [
+        "implemented",
+        "fixed",
+        "done.",
+        "done ",
+        "completed",
+        "updated",
+        "verification:",
+        "verified",
+        "pushed",
+        "commit:",
+        "outcome:",
+        "what changed:",
+        "landed",
+        "shipped",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
@@ -406,17 +574,53 @@ mod tests {
         response: &str,
         had_pending_mutations: bool,
     ) -> std::path::PathBuf {
+        setup_committed_capture_with_pending(
+            root,
+            frontmatter,
+            response,
+            had_pending_mutations,
+            None,
+            &[],
+        )
+    }
+
+    fn setup_committed_capture_with_pending(
+        root: &Path,
+        frontmatter: Option<&str>,
+        response: &str,
+        had_pending_mutations: bool,
+        pending_body: Option<&str>,
+        pending_done_ids: &[&str],
+    ) -> std::path::PathBuf {
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
         let prefix = frontmatter.unwrap_or("---\nagent_doc_session: test\n---\n\n");
-        let current = format!("{prefix}## Exchange\n\nHello\n");
+        let mut current = format!("{prefix}## Exchange\n\nHello\n");
+        if let Some(pending_body) = pending_body {
+            current.push_str("\n<!-- agent:pending patch=replace -->\n");
+            current.push_str(pending_body);
+            if !pending_body.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("<!-- /agent:pending -->\n");
+        }
         fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, &current).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
             crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        }
+        if !pending_done_ids.is_empty() {
+            crate::cycle_state::record_pending_done_ids(
+                &doc,
+                &pending_done_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
         }
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
             .unwrap();
@@ -741,5 +945,81 @@ mod tests {
 
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Interrupted(_)));
+    }
+
+    #[test]
+    fn session_check_warns_on_missing_pending_done_for_completed_task() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert_eq!(report.warnings.len(), 2);
+        assert!(report.warnings[0].contains("#4qja"));
+        assert!(report.warnings[1].contains("--pending-done 4qja"));
+    }
+
+    #[test]
+    fn session_check_skips_pending_done_warning_when_id_was_recorded() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
+            &["4qja"],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_pending_done_strict_mode_blocks_missing_done() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_done_guard: strict\n---\n\n"),
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("[session-check] error:"));
+                assert!(message.contains("--pending-done 4qja"));
+                assert!(message.contains("pending_done_guard = \"warn\""));
+            }
+            other => panic!("expected strict-mode failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_pending_done_suppression_marker_disables_guard() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\n<!-- no-pending-done-guard -->\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
     }
 }

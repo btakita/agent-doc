@@ -61,6 +61,8 @@ pub struct CycleState {
     pub response_sha256: Option<String>,
     #[serde(default)]
     pub had_pending_mutations: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_done_ids: Vec<String>,
 }
 
 impl CycleState {
@@ -100,6 +102,7 @@ pub fn start_preflight(
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
+        pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
     Ok(state)
@@ -150,6 +153,34 @@ pub fn mark_pending_mutations(file: &Path) -> Result<Option<CycleState>> {
     };
     if !state.had_pending_mutations {
         state.had_pending_mutations = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+pub fn record_pending_done_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .pending_done_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.pending_done_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -227,7 +258,12 @@ fn synthetic_state_with_id(
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
+        pending_done_ids: Vec::new(),
     }
+}
+
+fn normalize_pending_id(id: &str) -> String {
+    id.trim().trim_start_matches('#').to_ascii_lowercase()
 }
 
 fn now_secs() -> u64 {
@@ -314,6 +350,30 @@ mod tests {
         let state = mark_pending_mutations(&doc).unwrap().unwrap();
         assert!(state.had_pending_mutations);
         assert!(load(&doc).unwrap().unwrap().had_pending_mutations);
+    }
+
+    #[test]
+    fn record_pending_done_ids_persists_normalized_ids() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_pending_done_ids(
+            &doc,
+            &["#AbC1".to_string(), "abc1".to_string(), "z9".to_string()],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            state.pending_done_ids,
+            vec!["abc1".to_string(), "z9".to_string()]
+        );
+        assert_eq!(
+            load(&doc).unwrap().unwrap().pending_done_ids,
+            vec!["abc1".to_string(), "z9".to_string()]
+        );
     }
 
     #[test]

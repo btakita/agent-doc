@@ -886,6 +886,9 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
         assert!(SKILL_TEMPLATE.contains("beginning of `agent:pending`"));
         assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
+        assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));
+        assert!(SKILL_TEMPLATE.contains("--pending-done <id>"));
+        assert!(SKILL_TEMPLATE.contains("pending_done_guard"));
     }
 
     #[test]
@@ -1083,6 +1086,8 @@ mod tests {
         assert!(content.contains("preserve the order you presented them in"));
         assert!(content.contains("follow-on step from an ordered batch"));
         assert!(content.contains("--pending-reorder gkke,9pw9,step3"));
+        assert!(content.contains("Existing `do #id` work that completed this cycle"));
+        assert!(content.contains("--pending-done <id>"));
     }
 
     #[test]

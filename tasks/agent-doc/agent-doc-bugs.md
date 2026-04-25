@@ -320,7 +320,7 @@ Push:
 `#4qja` stayed open because the previous `do #4qja ...` cycle implemented and committed the work, but that closeout did not record the matching `--pending-done 4qja` mutation. So `exchange` shows the completed implementation while `agent:pending` was left in its earlier recommended `[ ]` state.
 
 This was a response-lifecycle bookkeeping miss, not evidence that the implementation was still incomplete. I’m marking `#4qja` done in this cycle so preflight can reap it on the next turn.
-<!-- agent:boundary:aeb3cfe9 -->
+<!-- agent:boundary:8a812673 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -330,7 +330,6 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#4qja] [recommended] Stream per-step orchestrate patchback into exchange so each task response lands before the orchestration summary
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -598,7 +598,18 @@ Verification:
 - `cargo test --manifest-path Cargo.toml`
 - `cargo build --manifest-path Cargo.toml --release`
 - `cargo install --path .`
-<!-- agent:boundary:b3138215 -->
+
+❯ I src/session-share, `agent-doc tasks/claudescore-3.md` did not perform a response patchback. I previously ran a `compact exchange` and the summary was not committed. Why? preset #spec-test-build-install-commit-push
+### Re: claudescore-3 compact exchange + missed patchback — gpt-5
+
+These were two different incidents.
+
+On **April 9, 2026**, the old `compact exchange` issue was **not** that the summary failed to commit. The summary was already in git as `50f67f9`; the bug was that the old skill used a raw `git commit` instead of `agent-doc commit`, so the editor never got the VCS refresh signal and kept showing the summary as uncommitted. That older diagnosis is already recorded in [9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260409-184328.md](/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260409-184328.md:61). The current runbook now explicitly requires `agent-doc commit <FILE>` after compact ([compact-exchange.md](/home/brian/work/btakita/agent-loop/src/agent-doc/runbooks/compact-exchange.md:21)), and that path writes the refresh signal in [git.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/git.rs:1182).
+
+On **April 24, 2026**, the `tasks/claudescore-3.md` case was different. That was not a failed compact-summary commit. The prior `agent-doc run` had already patchbacked a response, and the later request to “write response back” did not include any new response body; before new text was provided, the instruction changed to `commit`, so the system committed the already-written document state rather than invent a second assistant patchback. That sequence is captured in [a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac-20260424-193815.md](/home/brian/work/btakita/agent-loop/src/session-share/.agent-doc/archives/a8cd714d61b9393aa3ebc83de32e141f642931655ac20ebdccd0c2564466f8ac-20260424-193815.md:145).
+
+So the short answer is: the “summary was not committed” report came from the old **refresh-signal / raw `git commit`** bug, while the `claudescore-3.md` “no response patchback” report was a separate **no new response body existed to append** case. I do not see evidence here of a new live `compact exchange` persistence bug in current `src/agent-doc`.
+<!-- agent:boundary:6a4b067f -->
 <!-- /agent:exchange -->
 
 <!--

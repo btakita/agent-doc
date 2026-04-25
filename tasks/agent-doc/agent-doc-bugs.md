@@ -484,7 +484,17 @@ Implemented the JB plugin preserve_head IPC path. Five files changed across the 
 **Build** — Bumped plugin to 0.2.76, built both unsigned + signed zips. All Rust tests pass (337 lib + 1120 integration; the one pre-existing `detect_install_env_treats_codex_thread_id_as_codex` failure is unrelated). JB Gradle tests pass (15 tasks).
 
 Committed as `b5d162d` in agent-doc, submodule pointer updated + pushed in parent.
-<!-- agent:boundary:850fb700 -->
+
+❯ bump JB plugin + build. I will install the next version
+### Re: bump JB plugin + build — opus-4-6
+
+Already done in the #hfix5 cycle — plugin is at 0.2.76 with both zips built:
+
+- `agent-doc-jetbrains-0.2.76.zip` (211 KB)
+- `agent-doc-jetbrains-0.2.76-signed.zip` (214 KB)
+
+Install path: IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select the signed zip from `src/agent-doc/editors/jetbrains/build/distributions/`.
+<!-- agent:boundary:42f062c9 -->
 <!-- /agent:exchange -->
 
 <!--

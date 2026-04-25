@@ -335,6 +335,47 @@ fn orchestrate_streams_step_patchback_before_finalize() {
 }
 
 #[test]
+fn orchestrate_rejects_raw_template_response_without_exchange_patch() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc_with_model()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let raw_response = "❯ do #orfmt1. update spec + tests. build + install for local testing. commit + push\n### Re: malformed closeout — gpt-5\nImplemented and verified.\n\nVerification:\n- `cargo test`\nCommit / push:\n- `abc1234`\nThis raw transcript must not be synthesized.\n";
+    let script = write_mock_agent(tmp.path(), raw_response);
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args([
+            "orchestrate",
+            doc.to_str().unwrap(),
+            "--mode",
+            "sequential",
+            "--task",
+            "do #orfmt1. update spec + tests. build + install for local testing. commit + push",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("patch:exchange"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content
+            .matches("❯ do #orfmt1. update spec + tests. build + install for local testing. commit + push")
+            .count(),
+        1,
+        "raw orchestrate transcript must not be replayed into exchange"
+    );
+    assert!(
+        !content.contains("This raw transcript must not be synthesized."),
+        "malformed raw content should not be written to the document"
+    );
+}
+
+#[test]
 fn run_append_mode_keeps_inline_response_shape() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
@@ -403,7 +444,7 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
         1,
         "preflight recovery should finish the pending commit without duplicating the response"
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(tmp.path()), "preflight_started");
 
     let head = ProcessCommand::new("git")
         .current_dir(tmp.path())

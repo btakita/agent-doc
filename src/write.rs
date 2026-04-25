@@ -357,15 +357,25 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref())
     } else if options.is_stream {
-        run_stream(file, baseline.as_deref(), options.force_disk)
+        run_stream(
+            file,
+            baseline.as_deref(),
+            options.force_disk,
+            options.origin.as_deref(),
+        )
     } else if options.is_template {
-        run_template(file, baseline.as_deref())
+        run_template(file, baseline.as_deref(), options.origin.as_deref())
     } else {
         let content =
             std::fs::read_to_string(file).context("failed to read document for mode detection")?;
         let (fm, _) = frontmatter::parse(&content)?;
         if fm.resolve_mode().is_crdt() {
-            run_stream(file, baseline.as_deref(), options.force_disk)
+            run_stream(
+                file,
+                baseline.as_deref(),
+                options.force_disk,
+                options.origin.as_deref(),
+            )
         } else {
             run(file, baseline.as_deref())
         }
@@ -1159,6 +1169,28 @@ pub fn verify_sidecar_normalization(
     true
 }
 
+fn enforce_orchestrate_template_patch_contract(
+    origin: Option<&str>,
+    patches: &[crate::template::PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    if origin != Some("orchestrate") {
+        return Ok(());
+    }
+
+    if !patches.iter().any(|patch| patch.name == "exchange") {
+        anyhow::bail!(
+            "orchestrate template-mode responses must include a <!-- patch:exchange --> block"
+        );
+    }
+    if !unmatched.trim().is_empty() {
+        anyhow::bail!(
+            "orchestrate template-mode responses must not include raw unmatched content outside patch blocks"
+        );
+    }
+    Ok(())
+}
+
 /// Lift `agent:pending` out of `agent:exchange` if nested.
 ///
 /// After patch application, pending may end up nested inside exchange due to
@@ -1546,7 +1578,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 /// Run the template write command: parse patch blocks and apply to components.
 ///
 /// `baseline` is the document content at the time the response was generated.
-pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
+pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -1566,9 +1598,6 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
-    // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
-
     // Parse patch blocks from response
     let (mut patches, unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
@@ -1578,10 +1607,14 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
+    enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
+
+    // Save response to pending store (survives context compaction)
+    repair::save_pending(file, &response)?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -1682,7 +1715,12 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 /// tries IPC first. On IPC timeout, leaves the patch file in place and exits
 /// with code 75 (EX_TEMPFAIL) instead of falling back to disk write.
 /// When `force_disk` is true, always uses direct disk write.
-pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Result<()> {
+pub fn run_stream(
+    file: &Path,
+    baseline: Option<&str>,
+    force_disk: bool,
+    origin: Option<&str>,
+) -> Result<()> {
     let t_total = std::time::Instant::now();
 
     if !file.exists() {
@@ -1707,9 +1745,6 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Lint: warn if response contains future-work signals without --pending-add
     warn_future_work_signals(&response);
 
-    // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
-
     // Parse patch blocks from response
     let (mut patches, unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
@@ -1719,6 +1754,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
+    enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -1734,6 +1770,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             "zero_patches_warning: response may be empty or malformed",
         );
     }
+
+    // Save response to pending store (survives context compaction)
+    repair::save_pending(file, &response)?;
 
     // Warn when patches target a file with no template components
     if patches.is_empty() && !unmatched.trim().is_empty() {
@@ -5213,6 +5252,86 @@ mod ack_content_snapshot_tests {
             "should not wait much longer than timeout"
         );
     }
+
+    #[test]
+    fn normalization_fallback_uses_content_ours_when_sidecar_missing_prefix() {
+        // When the sidecar is missing a ❯ prefix expected by normalize_prefix_lines,
+        // try_ipc must fall back to content_ours for the snapshot (#jbpfx2).
+        // Simulates the IntelliJ exact-match failure: plugin wrote sidecar without
+        // the ❯ prefix, so content_ours (binary's authoritative state) is used.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\n<!-- agent:boundary:test-bnd-001 -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+
+        // content_ours has the ❯ prefix — binary's authoritative state
+        let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
+        let normalize_prefix_lines = vec!["do #jbpfx2".to_string()];
+
+        // Simulate plugin: reads patch_id, writes sidecar WITHOUT prefix (bug), ACKs
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path) {
+                            if let Ok(json) =
+                                serde_json::from_str::<serde_json::Value>(&text)
+                            {
+                                if let Some(pid) =
+                                    json.get("patch_id").and_then(|v| v.as_str())
+                                {
+                                    // Write sidecar WITHOUT ❯ prefix (plugin failure)
+                                    let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
+                                    let _ = std::fs::write(
+                                        ack_dir.join(format!("{pid}.md")),
+                                        bad_sidecar,
+                                    );
+                                }
+                            }
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(result.success, "IPC should succeed when plugin consumes patch");
+
+        // Snapshot must use content_ours (has ❯ prefix), NOT the sidecar
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #jbpfx2"),
+            "snapshot must use content_ours with ❯ prefix; got: {}",
+            snap
+        );
+    }
 }
 
 #[cfg(test)]
@@ -5728,7 +5847,9 @@ response here
 
 #[cfg(test)]
 mod verify_sidecar_normalization_tests {
-    use super::verify_sidecar_normalization;
+    use super::{
+        enforce_orchestrate_template_patch_contract, verify_sidecar_normalization,
+    };
 
     #[test]
     fn empty_targets_always_passes() {
@@ -5779,5 +5900,47 @@ mod verify_sidecar_normalization_tests {
         let sidecar = "line one\nline two\n";
         let targets = vec!["nonexistent line".to_string()];
         assert!(!verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn sidecar_missing_prefix_when_target_has_trailing_whitespace() {
+        // Simulates the IntelliJ trailing-space bug: binary sent "do the thing "
+        // (trailing space), IntelliJ stripped to "do the thing" in the buffer,
+        // plugin's original exact-match failed silently, sidecar has no prefix.
+        // verify_sidecar_normalization must detect this.
+        let sidecar = "some other line\ndo the thing\nmore content";
+        let targets = vec!["do the thing ".to_string()];
+        assert!(
+            !verify_sidecar_normalization(sidecar, &targets),
+            "missing prefix must be detected even when target has trailing whitespace"
+        );
+    }
+
+    #[test]
+    fn orchestrate_contract_requires_exchange_patch() {
+        let patches = vec![crate::template::PatchBlock::new("status", "updated")];
+        let err =
+            enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+                .unwrap_err();
+        assert!(err.to_string().contains("patch:exchange"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_unmatched_transcript() {
+        let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &patches,
+            "### Re: raw transcript — gpt-5",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("raw unmatched content"));
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_exchange_only_patch() {
+        let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
+        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .expect("exchange-only orchestrate patch should be accepted");
     }
 }

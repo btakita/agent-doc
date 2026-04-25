@@ -329,7 +329,11 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **`--origin` flag:** Write-origin identifier for tracing (e.g., `skill`, `watch`, `stream`). Logged to `ops.log` as `write_origin file=<path> origin=<value>`. Used with the commit drift warning to trace which process wrote to a file.
 
-**IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot is saved from `content_ours` (baseline + response), NOT the current file on disk. This ensures user edits typed after the boundary marker are not absorbed into the snapshot and remain visible to the next diff. CRDT state is also saved from `content_ours`.
+**IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success with socket delivery, snapshot is saved from the ack-content sidecar written by the plugin after it applies the patch. On IPC success via file delivery (patch file consumed), snapshot is read from the sidecar if present, otherwise from the post-flush disk state.
+
+**`normalize_prefix_lines` IPC field:** When user-prompt normalization adds `❯ ` prefixes to exchange lines, the IPC payload includes a non-empty `normalize_prefix_lines` array listing those lines (un-prefixed). The plugin must apply the same `❯ ` prefixes in the editor buffer using `trimEnd()` matching (trailing-whitespace resilience). See `editors/PLUGIN-SPEC.md` § "Exchange prompt prefix normalization" for the full algorithm.
+
+**Sidecar normalization verification (`verify_sidecar_normalization`):** After receiving the ack-content sidecar from the plugin, the binary checks that each non-blank `normalize_prefix_lines` target appears with a `❯ ` prefix in the sidecar (using `trimEnd()` on both sides). If any target is missing its prefix — indicating the plugin's buffer-side normalization failed (e.g., trailing-whitespace divergence) — the binary falls back to `content_ours` as the snapshot source. This prevents plugin normalization failures from corrupting the committed snapshot baseline. The fallback is logged as `sidecar_normalization_fallback snap_source=content_ours reason=prefix_divergence` in `ops.log`.
 
 **Durable response capture (v0.33.13):** Before any write path mutates the document or fires hooks, the final parsed response is persisted to `.agent-doc/captures/<doc-hash>/<cycle-id>.json` with the cycle ID, session/agent/model metadata, response SHA-256, and the exact snapshot/document hashes the response was generated against. The capture ledger also preserves lifecycle provenance (`write_applied_at`, `replayed_at`, `committed_at`, `discarded_at`) so later recovery closeout remains distinguishable from an original same-turn patchback. `pending/<hash>.md` remains the short-lived queue, but it is now a projection of that durable capture rather than the only durable copy.
 
@@ -737,7 +741,7 @@ do #prep
 6. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
 7. For CRDT session docs with an `agent:exchange` component, if the chosen backend supports streaming (`claude` or `codex`), stream the in-progress step response into `exchange` before the normal write boundary. The streamed buffer is "existing exchange through injected prompt" plus the child response so far, with the boundary marker kept at the end.
 8. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state. When streaming is unavailable, sequential mode falls back to the blocking request path.
-9. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
+9. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs). Template-mode child responses must fail closed unless they include a real `<!-- patch:exchange -->` block and no raw unmatched transcript outside patch blocks; `orchestrate` must not rely on write-path synthesis to stuff malformed child output back into `agent:exchange`.
 10. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
 
 Notes:
@@ -747,6 +751,7 @@ Notes:
 - The injected prompt becomes part of the document/system-of-record before the agent runs.
 - The same `preflight` call shape is used for every task. Any inherited open-cycle cleanup happens inside `preflight` before the new diff is emitted.
 - Streamed step patchback is provisional until the final `finalize -> session-check` closeout succeeds. The stream path improves document visibility; the binary-owned commit boundary is still the authoritative persistence step.
+- CRDT streaming only flushes a provisional orchestrate step into `exchange` after the child output has started an `exchange` patch block. Raw transcript-shaped chunks without `<!-- patch:exchange -->` must not be flushed into the document.
 
 ### `--mode parallel`
 

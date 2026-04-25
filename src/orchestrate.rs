@@ -777,7 +777,7 @@ fn stream_step_response(
         let chunk = chunk_result.context("stream chunk error")?;
         if !chunk.text.is_empty() {
             response = chunk.text;
-            if !chunk.is_final {
+            if !chunk.is_final && should_stream_exchange_patch(&response) {
                 let exchange = render_streamed_exchange(seed, &response);
                 crate::stream::flush_to_document(file, &exchange, "exchange", "")?;
                 last_streamed_response = Some(response.clone());
@@ -801,6 +801,10 @@ fn stream_step_response(
         full_response: response,
         finalize_response,
     })
+}
+
+fn should_stream_exchange_patch(response: &str) -> bool {
+    response.contains("<!-- patch:exchange")
 }
 
 fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<String> {
@@ -1843,6 +1847,16 @@ mod tests {
         let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
         assert!(!delta.contains("### Re: streamed — gpt-5"));
         assert!(delta.contains("Implemented and verified."));
+    }
+
+    #[test]
+    fn streamed_flush_waits_for_exchange_patch_marker() {
+        assert!(!should_stream_exchange_patch(
+            "### Re: malformed streaming closeout — gpt-5\nBody"
+        ));
+        assert!(should_stream_exchange_patch(
+            "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n"
+        ));
     }
 
     #[test]

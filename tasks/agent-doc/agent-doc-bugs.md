@@ -693,7 +693,72 @@ The core concept is "prompts staged to survive a context clear." `agent:deck` wo
 My take: `agent:deck` or `agent:queue` are the strongest. `deck` is more evocative and fits the single-batch case (you're staging the next at-bat). `queue` is better if you foresee multiple ordered batches or FIFO semantics.
 
 One design question: does this component live in the document (like `agent:pending`) or is it a CLI-level mechanism (`agent-doc clear --with-prompts`)? Document-resident makes it visible and editable; CLI-level keeps it out of the document body.
-<!-- agent:boundary:d5718d68 -->
+
+❯ I like agent:queue and I want to be able to define multiple prompts. Some prompts are multiple lines, so we need a way to support that as well. Please propose how the interface would look like in an agent doc.
+### Re: agent:queue interface proposal — opus-4-6
+
+Here's how `agent:queue` could look as a document component, using the same HTML-comment boundaries as `agent:pending` and `agent:exchange`:
+
+#### Option A: Markdown list with continuation
+
+```markdown
+&lt;!-- agent:queue --&gt;
+- /agent-doc tasks/plan.md
+- do #fix1. preset #spec-test-build-install-commit-push
+- Review the changes in src/agent-doc/src/frontmatter.rs
+  and check for edge cases with empty body content.
+  Then run cargo test.
+&lt;!-- /agent:queue --&gt;
+```
+
+Multi-line prompts use standard markdown list continuation (indent to content level). The parser treats each top-level `- ` as one prompt. This is consistent with how `agent:pending` already works.
+
+#### Option B: Fenced prompt blocks
+
+```markdown
+&lt;!-- agent:queue --&gt;
+~~~prompt
+/agent-doc tasks/plan.md
+~~~
+
+~~~prompt
+Review the changes in src/agent-doc/src/frontmatter.rs
+and check for edge cases with empty body content.
+Then run cargo test.
+~~~
+&lt;!-- /agent:queue --&gt;
+```
+
+Each `~~~prompt` fence is one prompt. No ambiguity about where one ends and the next starts. More verbose but zero parsing edge cases with multi-line content that itself contains list markers or indentation.
+
+#### Option C: Hybrid — list for single-line, fence for multi-line
+
+```markdown
+&lt;!-- agent:queue --&gt;
+- /agent-doc tasks/plan.md
+- do #fix1. preset #spec-test-build-install-commit-push
+~~~prompt
+Review the changes in src/agent-doc/src/frontmatter.rs
+and check for edge cases with empty body content.
+Then run cargo test.
+~~~
+&lt;!-- /agent:queue --&gt;
+```
+
+#### My recommendation: Option A
+
+It's the most natural to write and edit, consistent with `agent:pending`, and markdown list continuation is well-defined. The only edge case is a multi-line prompt that itself starts lines with `- `, which is rare in natural-language prompts. If that ever bites, a `~~~prompt` escape hatch could be added later without breaking the list-based format.
+
+#### Lifecycle
+
+1. User populates `agent:queue` in the document
+2. User runs `/clear` in the terminal
+3. Next `/agent-doc` invocation detects the queue
+4. Each prompt is dispatched sequentially as if the user typed it — preflight, respond, persist per prompt
+5. Consumed prompts are removed from the queue after successful commit (or marked with `[x]` if you prefer an audit trail)
+
+One open question: should `/clear` be implicit when `agent:queue` is non-empty (the queue *triggers* the clear), or should the user always run `/clear` manually and the queue is just what survives it? The implicit version is more ergonomic; the explicit version is safer.
+<!-- agent:boundary:7f291281 -->
 <!-- /agent:exchange -->
 
 <!--

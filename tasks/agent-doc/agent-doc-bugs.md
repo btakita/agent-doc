@@ -423,7 +423,7 @@ Committed as `45bce9b` on `20260422/codex-agent-backend`.
 **Spec:** Updated `specs/07-commands.md` with streaming args construction subsection.
 
 Committed as `135ee1d` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:cd6b74f7 -->
+<!-- agent:boundary:05646db2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -432,8 +432,6 @@ Committed as `135ee1d` on `20260422/codex-agent-backend`.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#orch3] orchestrate --from-exchange parses stale task block: parse_list_item() in orchestrate.rs doesn't strip ❯ prefix, so list items like '❯ - do #hfix1' are missed and the parser falls back to an older block
-- [x] [#orch4] build_streaming_args() in claude.rs missing --verbose: Claude CLI requires --verbose when -p + --output-format stream-json are combined
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

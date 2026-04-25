@@ -8,12 +8,12 @@
 //!   problems (window index, session drift); issues are
 //!   included in output but do not abort the run.
 //! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
-//!   For an open prior `response_captured` / `write_applied` cycle, preflight
-//!   auto-attempts `repair::run(file)` + `git::commit(file)`. For an open
-//!   `preflight_started` cycle, preflight only auto-closes when `repair`
-//!   replays a pending/captured response first; otherwise it fails closed
-//!   instead of letting a stale snapshot commit silently revert newer live
-//!   document content.
+//!   For any open prior cycle, preflight auto-attempts `repair::run(file)` +
+//!   `git::commit(file)` before diffing again. For an open `preflight_started`
+//!   cycle with no recoverable response, the `git::commit(file)` path is the
+//!   narrow no-op closeout that stages the snapshot only and leaves later live
+//!   working-tree edits uncommitted; if that closeout still cannot prove the
+//!   prior cycle is durable, preflight fails closed instead of diffing again.
 //! - Step 1 — repair: calls `repair::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
@@ -497,22 +497,6 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         })
         .repaired();
 
-    if matches!(
-        state.phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    ) && !recovered
-    {
-        let bypassed_marker = crate::session_check::detect_bypassed_response_write(file)?;
-        let marker_note = bypassed_marker
-            .map(|marker| format!("; found likely direct response patchback: {}", marker))
-            .unwrap_or_default();
-        anyhow::bail!(
-            "previous cycle `{}` is still `preflight_started` with no recoverable response{}",
-            state.cycle_id,
-            marker_note
-        );
-    }
-
     let committed = match git::commit(file) {
         Ok(did_commit) => did_commit,
         Err(e) => {
@@ -524,8 +508,16 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     if let Some(after) = crate::cycle_state::load(file)?
         && after.is_open()
     {
+        let marker_note = if matches!(after.phase, crate::cycle_state::CyclePhase::PreflightStarted)
+        {
+            crate::session_check::detect_bypassed_response_write(file)?
+                .map(|marker| format!("; found likely direct response patchback: {}", marker))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         anyhow::bail!(
-            "previous cycle `{}` is still `{}` after recovery/commit ({})",
+            "previous cycle `{}` is still `{}` after recovery/commit ({}){}",
             after.cycle_id,
             match after.phase {
                 crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
@@ -533,7 +525,8 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
                 crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
                 crate::cycle_state::CyclePhase::Committed => "committed",
             },
-            after.last_event
+            after.last_event,
+            marker_note
         );
     }
 
@@ -1638,26 +1631,29 @@ mod tests {
     }
 
     #[test]
-    fn preflight_fails_closed_on_open_preflight_started_cycle() {
+    fn preflight_reruns_cleanly_after_open_preflight_started_cycle() {
         let dir = setup_project();
+        let root = dir.path();
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         crate::git::commit(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let prior = crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
-        let err = run(&doc).unwrap_err();
-        assert!(
-            err.to_string().contains("previous cycle"),
-            "unexpected error: {err}"
-        );
+        run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted);
+        assert_ne!(
+            state.cycle_id, prior.cycle_id,
+            "rerun should close the old preflight and open a fresh one"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_already_current file="),
+            "rerun should close the previous preflight via the no-op commit path:\n{log}"
         );
     }
 

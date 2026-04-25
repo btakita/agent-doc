@@ -450,7 +450,6 @@ fn run_ordered_tasks_internal(
             global_config,
             lifecycle,
             agent_runner,
-            idx == 0,
         )?;
     }
     Ok(())
@@ -464,17 +463,9 @@ fn run_ordered_task_step(
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
-    allow_open_preflight_reuse: bool,
 ) -> Result<()> {
-    let reuse_open_preflight = allow_open_preflight_reuse && can_reuse_open_preflight_cycle(file)?;
     inject_prompt(file, task)?;
-
-    let preflight = if reuse_open_preflight {
-        eprintln!("[orchestrate] reusing existing preflight cycle for step 1");
-        build_reused_preflight_output(file)?
-    } else {
-        lifecycle.preflight(file)?
-    };
+    let preflight = lifecycle.preflight(file)?;
     if preflight.no_changes {
         anyhow::bail!("orchestration step did not produce a prompt-bearing diff after injection");
     }
@@ -515,46 +506,6 @@ fn run_ordered_task_step(
     )?;
     lifecycle.session_check(file)?;
     Ok(())
-}
-
-fn can_reuse_open_preflight_cycle(file: &Path) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
-        return Ok(false);
-    };
-    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
-        return Ok(false);
-    }
-
-    let current = fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} for cycle reuse", file.display()))?;
-    let current_hash = crate::ops_log::content_hash(&current);
-    Ok(state.file_hash.as_deref() == Some(current_hash.as_str()))
-}
-
-fn build_reused_preflight_output(file: &Path) -> Result<PreflightOutput> {
-    let diff = diff::compute(file)?;
-    let no_changes = diff.is_none();
-    let baseline_file = baseline_file_path_for(file).filter(|path| Path::new(path).exists());
-    Ok(PreflightOutput {
-        diff,
-        no_changes,
-        baseline_file,
-        ..PreflightOutput::default()
-    })
-}
-
-fn baseline_file_path_for(file: &Path) -> Option<String> {
-    let canonical = file.canonicalize().ok()?;
-    let hash = crate::snapshot::doc_hash(&canonical).ok()?;
-    let baseline_dir = crate::snapshot::find_project_root(&canonical)
-        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
-        .join(".agent-doc/baselines");
-    Some(
-        baseline_dir
-            .join(format!("{}.md", hash))
-            .to_string_lossy()
-            .to_string(),
-    )
 }
 
 fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<String>)> {
@@ -1195,23 +1146,15 @@ mod tests {
     }
 
     #[test]
-    fn sequential_orchestration_reuses_matching_open_preflight_cycle_for_first_step() {
+    fn sequential_orchestration_always_reruns_preflight_after_injection() {
         let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
-
         let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
         fs::write(&doc, template_doc()).unwrap();
-        crate::snapshot::save(&doc, &template_doc()).unwrap();
-
-        let baseline = baseline_file_path_for(&doc).unwrap();
         fs::write(&baseline, template_doc()).unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(&template_doc()), Some(&template_doc()))
-            .unwrap();
-
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.clone(),
+            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
@@ -1242,8 +1185,8 @@ mod tests {
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert_eq!(
             *lifecycle.preflight_calls.borrow(),
-            0,
-            "first step should reuse the already-open preflight cycle"
+            1,
+            "sequential mode should always rerun preflight after prompt injection"
         );
         assert!(final_doc.contains("❯ do #opcc"));
         assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));

@@ -499,7 +499,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
    - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `repair` + `commit`
    - If that `commit` path finds the staged snapshot already matches `HEAD`, it closes the cycle as already committed instead of logging `commit_failed`
    - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `repair` repairs that stale preflight lock as a no-op closeout
-   - Otherwise, an open `preflight_started` cycle only auto-closes when `repair` replays a pending/captured response first; if neither repair path applies, preflight fails closed instead of letting a stale snapshot commit silently revert newer live content
+   - Otherwise, preflight still attempts the normal snapshot-only `agent-doc commit <FILE>` closeout before failing. That closeout stages the prior snapshot only, so later live working-tree edits stay uncommitted. If the cycle is still open after `repair` + `commit`, preflight fails closed instead of diffing again
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
    - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail
@@ -652,8 +652,8 @@ Shared task-source resolution:
 Sequential orchestration runs one full fresh-agent lifecycle per task:
 
 1. Inject `❯ <task>` into `agent:exchange`, immediately before the current boundary marker when one exists.
-2. For task 1, if the caller already has a matching open `preflight_started` cycle for this document (the normal skill-routing case after `/agent-doc` ran preflight), reuse that cycle instead of calling `preflight` again. Recompute the current diff locally after prompt injection and reuse the existing baseline file for response persistence.
-3. Otherwise run `agent-doc preflight <FILE>` and use its `baseline_file` for response persistence.
+2. Run `agent-doc preflight <FILE>` after each prompt injection and use its `baseline_file` for response persistence.
+3. If that preflight encounters an already-open `preflight_started` cycle from an outer skill/router pass, it first auto-attempts the safe snapshot-only `commit_already_current` closeout for that prior cycle, then continues into the new preflight. Sequential orchestration does not keep a bespoke task-1 reuse path anymore; `preflight` itself is the idempotent boundary.
 4. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
 5. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
 6. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state.
@@ -665,7 +665,7 @@ Notes:
 - Sequential orchestration requires the normal git-backed finalize path; `--no-git` is rejected.
 - The imperative-response contract still applies because persistence flows through `finalize`.
 - The injected prompt becomes part of the document/system-of-record before the agent runs.
-- Reuse is limited to the first task and only when the persisted open-cycle hash still matches the current document before injection; later tasks always open fresh cycles through normal `preflight`.
+- The same `preflight` call shape is used for every task. Any inherited open-cycle cleanup happens inside `preflight` before the new diff is emitted.
 
 ### `--mode parallel`
 

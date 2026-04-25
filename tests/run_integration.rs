@@ -188,7 +188,7 @@ fn bare_path_alias_uses_same_template_safe_path() {
 }
 
 #[test]
-fn orchestrate_reuses_open_preflight_cycle_for_first_step() {
+fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, template_doc_with_model()).unwrap();

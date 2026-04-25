@@ -842,7 +842,7 @@ Implemented the queue harness command dispatch feature (`queue_dispatch.rs`):
 
 All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unrelated). Built release, installed both binaries. Committed as `7ecd99b` in agent-doc, pushed.
 ****
-<!-- agent:boundary:14e2a0e2 -->
+<!-- agent:boundary:2e753fb9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -851,7 +851,7 @@ All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unr
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#qdisp] Queue harness command dispatch — /clear, /compact, /model via supervisor IPC or tmux send-keys — tasks/agent-doc/queue-harness-dispatch-plan.md
+- [x] [#qdisp] Queue harness command dispatch — /clear, /compact, /model via supervisor IPC or tmux send-keys — tasks/agent-doc/queue-harness-dispatch-plan.md
 - [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
 - [x] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

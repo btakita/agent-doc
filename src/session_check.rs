@@ -527,15 +527,22 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
-    if current == snapshot {
+    // Normalize transient markers before comparison — (HEAD) annotations and
+    // boundary IDs legitimately differ between snapshot (clean) and working tree
+    // (preserves HEAD). Without this, preserved (HEAD) markers cause false-positive
+    // "direct response patchback" detection.
+    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let snap_norm = norm(&snapshot);
+    let cur_norm = norm(&current);
+    if cur_norm == snap_norm {
         return Ok(None);
     }
 
-    let Some(diff_text) = crate::diff::unified_diff_from_contents(&snapshot, &current) else {
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
     };
 
-    let diff = similar::TextDiff::from_lines(&snapshot, &current);
+    let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
     for change in diff.iter_all_changes() {
         if change.tag() != similar::ChangeTag::Insert {
             continue;

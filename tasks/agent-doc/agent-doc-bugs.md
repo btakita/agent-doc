@@ -727,7 +727,25 @@ Why I used `v0.33.11`:
 Notes:
 - I did not publish the VS Code Marketplace or JetBrains Marketplace listings in this cycle
 - I preserved the unrelated existing local edits in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
-<!-- agent:boundary:fa67261e -->
+
+❯ commit + push all uncommitted code
+### Re: commit + push all uncommitted code — gpt-5
+Done in `src/agent-doc`.
+
+I committed the remaining held-back skill/spec change as `921b4e5` (`fix: target skill auto-update by harness`) and pushed it to `origin/20260422/codex-agent-backend`.
+
+What that commit includes:
+- `src/skill.rs`
+- `specs/07-commands.md`
+- `VERSIONS.md`
+
+Verification before commit:
+- `cargo test detect_install_env_treats_codex_thread_id_as_codex -- --exact`
+- `cargo build --release`
+- `cargo install --path .`
+
+`src/agent-doc` is now clean with no remaining uncommitted tracked changes.
+<!-- agent:boundary:7b52c544 -->
 <!-- /agent:exchange -->
 
 <!--

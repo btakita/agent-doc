@@ -546,7 +546,23 @@ Added recommended pending items for the fixes:
 - `#orfmt1` hard-fail template-mode orchestrate writes with no `patch:exchange`
 - `#stopr1` block transcript or full-exchange replay in Stop-hook and repair paths
 - `#orsyn1` route or reject "synchronous orchestra" synonyms deterministically
-<!-- agent:boundary:fa4e9733 -->
+
+❯ do #orfmt1. preset #spec-test-commit-push
+### Re: do #orfmt1 — gpt-5
+
+Implemented `#orfmt1` and pushed it in `src/agent-doc` as `b9516ab` on `20260422/codex-agent-backend`.
+
+What changed:
+- Template-mode orchestrate closeouts now fail closed unless the child response includes a real `<!-- patch:exchange -->` block and no raw unmatched transcript outside patch blocks.
+- CRDT orchestrate streaming now waits to flush until the child has actually started an `exchange` patch block, so transcript-shaped chunks do not get written into `agent:exchange` mid-stream.
+- Added regression coverage for the write-path contract and a run integration test that reproduces the malformed raw closeout shape.
+- Updated `specs/07-commands.md` to document the stricter orchestrate closeout contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+<!-- agent:boundary:25987970 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -555,7 +571,7 @@ Added recommended pending items for the fixes:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#orfmt1] [recommended] Orchestrate template-mode hard fail: reject child responses without <!-- patch:exchange -->; do not synthesize unmatched/raw transcript into exchange
+- [x] [#orfmt1] [recommended] Orchestrate template-mode hard fail: reject child responses without <!-- patch:exchange -->; do not synthesize unmatched/raw transcript into exchange
 - [ ] [#stopr1] [recommended] Stop-hook/repair replay hard fail: block transcript/full-exchange payloads and capture diagnostics only (plan: tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md)
 - [ ] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure

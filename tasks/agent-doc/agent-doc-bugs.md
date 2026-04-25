@@ -13626,7 +13626,7 @@ preset #spec-test-commit-push
 update spec + tests. commit + push
 do #cenv2
 The response committed successfully (doc grew from 854286→924605 bytes, `no_changes: true`). Now mark #hfix6 and #hfix7 done in pending:
-<!-- agent:boundary:92483d97 -->
+<!-- agent:boundary:f002870b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -13635,8 +13635,8 @@ The response committed successfully (doc grew from 854286→924605 bytes, `no_ch
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
-- [ ] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
+- [x] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
+- [x] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
 - [ ] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

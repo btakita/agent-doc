@@ -842,7 +842,7 @@ Implemented the queue harness command dispatch feature (`queue_dispatch.rs`):
 
 All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unrelated). Built release, installed both binaries. Committed as `7ecd99b` in agent-doc, pushed.
 ****
-<!-- agent:boundary:2e753fb9 -->
+<!-- agent:boundary:9f78c0ee -->
 <!-- /agent:exchange -->
 
 <!--
@@ -851,9 +851,7 @@ All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unr
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#qdisp] Queue harness command dispatch — /clear, /compact, /model via supervisor IPC or tmux send-keys — tasks/agent-doc/queue-harness-dispatch-plan.md
 - [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
-- [x] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

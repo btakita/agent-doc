@@ -658,7 +658,7 @@ Verification:
 - `cargo test` (new coverage passes; full suite still has the unrelated pre-existing failures `autoclaim::tests::autoclaim_focuses_pane_with_claim` and `autoclaim::tests::autoclaim_syncs_layout_with_multiple_files`)
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:a3fd29eb -->
+<!-- agent:boundary:8e5e1f40 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -667,7 +667,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

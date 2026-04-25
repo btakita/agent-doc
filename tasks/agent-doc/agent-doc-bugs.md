@@ -332,7 +332,12 @@ What I’d do:
 3. Only after that, consider optional auto-resolution in the binary for the narrow case where the prompt is explicitly `do #id` and there is exactly one matching open pending item. I would not start here, because silent mutation is harder to reason about than a deterministic guard.
 
 So the practical answer is: add a new closeout guard for missing `--pending-done`, then keep the skill guidance as the belt-and-suspenders layer. The current `pending_capture_guard` already proves the pattern: `session-check` is the right place to catch “response says the work happened, but the pending mutation never got recorded.”
-<!-- agent:boundary:472e581a -->
+
+❯ Please all 3 items into pending
+### Re: promote all three follow-ups to pending — gpt-5
+
+Done. Item 1 was already captured as `#pdng`, and I added items 2 and 3 as separate recommended pending entries so the three follow-ups now live together in `agent:pending` in the same 1-2-3 order as the response.
+<!-- agent:boundary:d1e1326d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -343,6 +348,8 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 
 <!-- agent:pending patch=replace -->
 - [ ] [#pdng] [recommended] Add a closeout guard that warns or fails when a response completes an existing #id task but no matching --pending-done <id> mutation was recorded in the cycle
+- [ ] [#pdsk] [recommended] Tighten the skill/runbook so do #id closeout explicitly decides whether the task gets --pending-done, --pending-gate, or remains open for a concrete reason
+- [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

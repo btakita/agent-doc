@@ -59,7 +59,26 @@ Done. Added three recommended pending items from the previous release assessment
 - **#orch5** — manual test orchestrate flows before publish
 
 All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
-<!-- agent:boundary:eb60b3cf -->
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+<!-- agent:boundary:23d4b8ff -->
 <!-- /agent:exchange -->
 
 <!--

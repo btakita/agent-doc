@@ -86,7 +86,21 @@ The model-related parts are narrower:
 - The helper for `agent_model` is frontmatter-only; it explicitly does not read the shell model env.
 
 So the running agent model is used by the skill after preflight, when it compares the current session tier against `effective_tier` / `required_tier`. Preflight itself does not use the live model for semantic analysis.
-<!-- agent:boundary:622a644b -->
+
+❯ Would it be helpful to have the preflight use the agent model to classify or plan?
+### Re: preflight model usage follow-up — gpt-5
+
+Probably not inside `preflight` itself.
+
+Using the live agent model to classify or plan would make preflight less deterministic, harder to test, slower, and more harness-dependent. The repo's current direction is the opposite: keep preflight binary-owned and structural, and push as much routing signal as possible into that deterministic layer before any model runs.
+
+What *is* useful:
+- keep extending structural detection in preflight when we find misses (`orchestration_request`, `model_switch`, diff heuristics, pending/path/code-block signals)
+- let the skill or orchestrator use the running model *after* preflight for semantic work like planning, decomposition, or subagent dispatch
+- if we ever want a model-assisted step, make it a separate explicit phase after preflight, not part of the core preflight contract
+
+So my recommendation is: no model-based planning/classification inside `agent-doc preflight`; yes to a later model-driven dispatch/planning layer that consumes preflight's structured output.
+<!-- agent:boundary:3f686100 -->
 <!-- /agent:exchange -->
 
 <!--

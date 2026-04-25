@@ -2,6 +2,8 @@
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+codex_args: -s danger-full-access
 links:
   - ./judith-krug.md
   - ./robert-waldman.md
@@ -385,12 +387,21 @@ Corky uses **pyannote-rs** (ONNX speaker segmentation + embedding models) for di
 - **Manual correction** is the most reliable fix for this specific transcript — the content is there, just misattributed
 
 Want me to manually re-diarize the transcript using the content cues (questions vs answers, "mm-hmm" interjections)?
-<!-- agent:boundary:f8fc17cf -->
+❯ Yes. Should we add this functionality to corky?
+### Re: transcript repair + Corky follow-up — gpt-5
+
+I manually corrected the four merged-speaker spans in `mail/contacts/robert-waldman/recordings/phone_20260424-180005_8059070885.md` inline using content cues. Those repaired sections are marked `manual` because I did not try to invent second-by-second speaker boundaries from the audio.
+
+Yes, this should go into corky, but as a deterministic recovery path, not a vague post-hoc AI fix. The failure here is specific: a bad 30-minute span inside a 90-minute mono call is still only about 33% of total duration, so the current `MAX_SPAN_RATIO = 0.6` gate can let a clearly broken diarization pass. The next corky iteration should do three things: keep diarization confidence separate from whisper confidence, tighten or localize the bad-span detector for long mono calls, and add a repair mode that forces smaller-window re-diarization on flagged spans before any optional LLM assistance.
+
+If you want, the next step is to implement that in `src/corky` and rerun this call through the binary so the repair lives in the tool instead of only in this transcript.
+<!-- agent:boundary:61f92e42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
 - [ ] [#q2x2] HTML email templates: lighter navy + gold, 2-3 drip for PBM orphan investor outreach

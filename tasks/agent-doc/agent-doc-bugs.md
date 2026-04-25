@@ -98,7 +98,20 @@ The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from
 
 **Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
 
-<!-- agent:boundary:d77cac80 -->
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+<!-- agent:boundary:4379565e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -107,6 +120,8 @@ The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#jbpfx1] [recommended] Fix JetBrains plugin normalizeExchangePrefixes: trim trailing whitespace on both sides of the match or use line-by-line scanning instead of substring replace (PatchWatcher.kt:742)
+- [ ] [#jbpfx2] [recommended] Binary-side fallback: use content_ours as snapshot source when ack_content_sidecar diverges from expected normalization count
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

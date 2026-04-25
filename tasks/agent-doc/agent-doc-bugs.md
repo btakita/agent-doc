@@ -74,7 +74,19 @@ Verification:
 - `agent-doc skill install --harness claude --reload compact`
 
 The short answer is: it missed because orchestration intent lived only in skill prose. The fix is to move detection into preflight so the agent gets a structured, non-optional dispatch signal.
-<!-- agent:boundary:c07af115 -->
+
+❯ Does agent-doc preflight use the agent model?
+### Re: preflight model usage — gpt-5
+
+Not in the sense of "preflight consults the live agent model to reason about the task." `agent-doc preflight` is binary-owned: it classifies the diff, detects commands/orchestration, and computes `suggested_tier` from structural signals.
+
+The model-related parts are narrower:
+- It scans inline `/model <x>` and emits `model_switch` / `model_switch_tier`.
+- It reads frontmatter `model` only to populate `agent_model` for header attribution.
+- The helper for `agent_model` is frontmatter-only; it explicitly does not read the shell model env.
+
+So the running agent model is used by the skill after preflight, when it compares the current session tier against `effective_tier` / `required_tier`. Preflight itself does not use the live model for semantic analysis.
+<!-- agent:boundary:622a644b -->
 <!-- /agent:exchange -->
 
 <!--

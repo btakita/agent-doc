@@ -53,7 +53,45 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed in `src/agent-doc` as `ed38f01` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:82139425 -->
+
+❯ How can I define a preset?
+### Re: defining a prompt preset — gpt-5
+
+Define it in the document frontmatter under `prompt_presets`, then reference it from the exchange with `preset <name>` or `presets <a>, <b>`.
+
+Example:
+
+```yaml
+---
+prompt_presets:
+  "#1": |
+    Today is 2026-04-25.
+    Keep the work tree clean.
+  release-check: |
+    Run the full verification suite before finalize.
+---
+```
+
+Then in `agent:exchange`:
+
+```md
+synchronous orchestra
+preset #1
+- do #prep
+- do #report
+```
+
+Or with multiple presets:
+
+```md
+parallel orchestra
+presets #1, release-check
+- do #a
+- do #b
+```
+
+`agent-doc orchestrate` expands those into each task prompt as labeled blocks like `(preset #1)` before the task text.
+<!-- agent:boundary:497d6f8d -->
 <!-- /agent:exchange -->
 
 <!--

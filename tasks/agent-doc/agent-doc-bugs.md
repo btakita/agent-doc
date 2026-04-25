@@ -673,7 +673,7 @@ Verification:
 - `cargo test` — 1147 passed, 4 pre-existing failures (autoclaim tmux + route send_keys)
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:e4c004b2 -->
+<!-- agent:boundary:15c9a8d0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -682,7 +682,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

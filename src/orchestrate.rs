@@ -64,6 +64,7 @@ use crate::{
     frontmatter::{self, ResolvedMode},
     parallel,
     preflight::PreflightOutput,
+    snapshot,
     write,
 };
 
@@ -946,7 +947,9 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     if config.from_exchange {
         let doc = fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        extend_task_batch_from_text(&mut batch, exchange_text(&doc)?);
+        let full_exchange = exchange_text(&doc)?;
+        let scoped = scope_exchange_for_tasks(full_exchange, file);
+        extend_task_batch_from_text(&mut batch, &scoped);
     }
 
     Ok(batch)
@@ -972,6 +975,56 @@ fn exchange_text(doc: &str) -> Result<&str> {
         .find(|comp| comp.name == "exchange")
         .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
     Ok(exchange.content(doc))
+}
+
+/// Scope exchange text to the user's latest additions by comparing against
+/// the snapshot. Prevents stale task lists in response content from being
+/// picked by `extract_tasks_from_text` when the user's directive is a bare
+/// line (not a list) at the exchange tail.
+fn scope_exchange_for_tasks(exchange: &str, file: &Path) -> String {
+    let snap_content = match snapshot::load(file) {
+        Ok(Some(s)) => s,
+        _ => return exchange.to_string(),
+    };
+    let snap_exchange = match exchange_text(&snap_content) {
+        Ok(s) => s.to_string(),
+        Err(_) => return exchange.to_string(),
+    };
+
+    let current_lines: Vec<&str> = exchange.lines().collect();
+    let snap_lines: Vec<&str> = snap_exchange.lines().collect();
+
+    // Compare lines, ignoring boundary artifacts like (HEAD) markers
+    let normalize_for_compare = |line: &str| -> String {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            return String::new();
+        }
+        line.replace(" (HEAD)", "")
+    };
+
+    let mut matching = 0;
+    for (curr, snap) in current_lines.iter().zip(snap_lines.iter()) {
+        if normalize_for_compare(curr) == normalize_for_compare(snap) {
+            matching += 1;
+        } else {
+            break;
+        }
+    }
+
+    if matching >= snap_lines.len() && current_lines.len() > snap_lines.len() {
+        let tail: String = current_lines[snap_lines.len()..]
+            .iter()
+            .filter(|line| !line.trim().starts_with("<!--"))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tail.trim().is_empty() {
+            return tail;
+        }
+    }
+
+    exchange.to_string()
 }
 
 fn resolve_dag_tasks(batch: &ResolvedTaskBatch) -> Result<Vec<DagTask>> {
@@ -2403,5 +2456,236 @@ mod tests {
         let blocks = collect_markdown_list_blocks(text);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0], vec!["do #a".to_string(), "do #b".to_string()]);
+    }
+
+    fn setup_snapshot_dir(dir: &Path) {
+        fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+    }
+
+    #[test]
+    fn from_exchange_scopes_to_tail_bare_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted summary.\n\n",
+            "❯ Previous prompt\n\n",
+            "### Re: response — opus-4-6\n\n",
+            "Recommendations:\n\n",
+            "- **#stale1** — fix stale-task parsing\n",
+            "- **#envt1** — fix env test\n\n",
+            "All marked [recommended].\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted summary.\n\n",
+            "❯ Previous prompt\n\n",
+            "### Re: response — opus-4-6 (HEAD)\n\n",
+            "Recommendations:\n\n",
+            "- **#stale1** — fix stale-task parsing\n",
+            "- **#envt1** — fix env test\n\n",
+            "All marked [recommended].\n\n",
+            "do #stale1\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #stale1".to_string()],
+            "should extract user's bare directive, not response list items"
+        );
+    }
+
+    #[test]
+    fn from_exchange_scopes_to_tail_list_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "❯ Old prompt\n\n",
+            "### Re: old response — opus-4-6\n\n",
+            "Old list:\n\n",
+            "- old item 1\n",
+            "- old item 2\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "❯ Old prompt\n\n",
+            "### Re: old response — opus-4-6 (HEAD)\n\n",
+            "Old list:\n\n",
+            "- old item 1\n",
+            "- old item 2\n\n",
+            "- do #new1\n",
+            "- do #new2\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #new1".to_string(), "do #new2".to_string()],
+            "should extract user's new list items, not old response list items"
+        );
+    }
+
+    #[test]
+    fn from_exchange_falls_back_without_snapshot() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "- do #task1\n",
+            "- do #task2\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #task1".to_string(), "do #task2".to_string()],
+            "without snapshot should fall back to full exchange extraction"
+        );
+    }
+
+    #[test]
+    fn from_exchange_multiple_responses_picks_latest_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
+            "❯ What should we do next?\n\n",
+            "### Re: next steps — opus-4-6\n\n",
+            "I recommend:\n\n",
+            "1. Fix stale-task parsing\n",
+            "2. Fix env test\n",
+            "3. Manual test orchestrate\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
+            "❯ What should we do next?\n\n",
+            "### Re: next steps — opus-4-6 (HEAD)\n\n",
+            "I recommend:\n\n",
+            "1. Fix stale-task parsing\n",
+            "2. Fix env test\n",
+            "3. Manual test orchestrate\n\n",
+            "do #stale1\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #stale1".to_string()],
+            "should extract user's directive, not the numbered list from the response"
+        );
     }
 }

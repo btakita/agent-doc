@@ -64,8 +64,8 @@ use crate::{
     frontmatter::{self, ResolvedMode},
     parallel,
     preflight::PreflightOutput,
-    snapshot,
-    write,
+    queue_dispatch::{self, QueueItemKind},
+    snapshot, write,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -520,6 +520,9 @@ fn run_ordered_tasks_internal(
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
 ) -> Result<()> {
+    let mut effective_model: Option<String> = model_override.map(String::from);
+    let dispatch_ctx = build_dispatch_context(file);
+
     for (idx, task) in tasks.iter().enumerate() {
         eprintln!(
             "[orchestrate] step {}/{}: {}",
@@ -527,17 +530,42 @@ fn run_ordered_tasks_internal(
             tasks.len(),
             task.label
         );
-        run_ordered_task_step(
-            file,
-            &task.prompt,
-            agent_override,
-            model_override,
-            global_config,
-            lifecycle,
-            agent_runner,
-        )?;
+
+        let item = queue_dispatch::classify(&task.label);
+        match item.kind {
+            QueueItemKind::Command => {
+                let result = queue_dispatch::dispatch_command(&item, &dispatch_ctx)?;
+                if let queue_dispatch::DispatchResult::ModelOverride(tier) = result {
+                    eprintln!("[orchestrate] model override updated to: {}", tier);
+                    effective_model = Some(tier);
+                }
+            }
+            QueueItemKind::Prompt => {
+                run_ordered_task_step(
+                    file,
+                    &task.prompt,
+                    agent_override,
+                    effective_model.as_deref(),
+                    global_config,
+                    lifecycle,
+                    agent_runner,
+                )?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Build a dispatch context for command dispatch from a document file.
+fn build_dispatch_context(file: &Path) -> queue_dispatch::DispatchContext {
+    queue_dispatch::DispatchContext::from_file(file).unwrap_or_else(|_| {
+        queue_dispatch::DispatchContext {
+            file: file.to_path_buf(),
+            project_root: None,
+            session_uuid: None,
+            pane_id: None,
+        }
+    })
 }
 
 /// Resolve frontmatter/config harness args using the same precedence as `start.rs`:
@@ -585,10 +613,8 @@ fn build_effective_agent_config(
         };
         args.extend(args_str.split_whitespace().map(String::from));
         Some(AgentConfig {
-            command: global_agent_config.map_or_else(
-                || agent_name.to_string(),
-                |c| c.command.clone(),
-            ),
+            command: global_agent_config
+                .map_or_else(|| agent_name.to_string(), |c| c.command.clone()),
             args,
             result_path: global_agent_config.and_then(|c| c.result_path.clone()),
             session_path: global_agent_config.and_then(|c| c.session_path.clone()),
@@ -1074,9 +1100,17 @@ fn apply_prompt_preset_block(task: &str, prompt_preset_block: Option<&str>) -> S
 }
 
 fn print_plan(tasks: &[ExecutionTask]) {
-    eprintln!("[orchestrate] plan — {} task(s) (no execution)", tasks.len());
+    eprintln!(
+        "[orchestrate] plan — {} task(s) (no execution)",
+        tasks.len()
+    );
     for (idx, task) in tasks.iter().enumerate() {
-        eprintln!("[orchestrate] step {}/{}: {}", idx + 1, tasks.len(), task.label);
+        eprintln!(
+            "[orchestrate] step {}/{}: {}",
+            idx + 1,
+            tasks.len(),
+            task.label
+        );
         eprintln!("[orchestrate] --- prompt ---");
         for line in task.prompt.lines() {
             eprintln!("[orchestrate] {}", line);
@@ -2408,16 +2442,18 @@ mod tests {
     #[test]
     fn build_effective_config_claude_with_frontmatter_args() {
         let config = Config::default();
-        let effective = build_effective_agent_config(
-            "claude",
-            Some("--dangerously-skip-permissions"),
-            &config,
-        );
+        let effective =
+            build_effective_agent_config("claude", Some("--dangerously-skip-permissions"), &config);
         let effective = effective.unwrap();
         assert_eq!(effective.command, "claude");
         assert_eq!(
             effective.args,
-            vec!["-p", "--output-format", "json", "--dangerously-skip-permissions"]
+            vec![
+                "-p",
+                "--output-format",
+                "json",
+                "--dangerously-skip-permissions"
+            ]
         );
     }
 
@@ -2428,7 +2464,10 @@ mod tests {
             build_effective_agent_config("codex", Some("-s danger-full-access"), &config);
         let effective = effective.unwrap();
         assert_eq!(effective.command, "codex");
-        assert_eq!(effective.args, vec!["exec", "--json", "-s", "danger-full-access"]);
+        assert_eq!(
+            effective.args,
+            vec!["exec", "--json", "-s", "danger-full-access"]
+        );
     }
 
     #[test]

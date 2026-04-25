@@ -103,6 +103,7 @@ src/
     junie.rs        # Junie backend (Agent + StreamingAgent)
     streaming.rs    # StreamingAgent trait + stream-json parser
   terminal.rs       # Launch external terminal with tmux session
+  queue_dispatch.rs # Classify orchestration items as prompt/command; dispatch commands via supervisor IPC, tmux, or inline
   parallel.rs       # Parallel fan-out with git worktrees
   worktree.rs       # Git worktree management for parallel sessions
   audit_docs.rs     # Audit instruction files (via instruction-files crate)

@@ -731,6 +731,23 @@ When the subprocess exits successfully but stderr is non-empty (warnings, deprec
 
 `build_streaming_args()` transforms the base args for streaming: it strips any existing `--output-format` value and replaces it with `--output-format stream-json`, then unconditionally adds `--verbose`. The `--verbose` flag is required by the Claude CLI when `-p` and `--output-format stream-json` are combined.
 
+### Queue item classification and command dispatch
+
+Orchestration items are classified before execution. Items starting with `/` are **commands** dispatched through a priority chain; all other items are **prompts** dispatched through the normal agent lifecycle.
+
+**Classification:** `queue_dispatch::classify(text)` returns a `QueueItem` with `kind` (`Prompt` or `Command`), the parsed `command` name (without `/`), and `args`.
+
+**Command dispatch priority:**
+
+1. **Inline execution** — `/model <tier>` updates the orchestrate-local model override for subsequent prompts (no document mutation); `/compact [file]` delegates to `agent-doc compact` + `agent-doc commit` as subprocesses.
+2. **Supervisor IPC** — if a supervisor socket is active for the document session (`.agent-doc/supervisor/<uuid>.sock`), the command text is sent via the `inject` IPC method, which writes it to the harness's pty stdin.
+3. **tmux send-keys** — if the document's session has a registered pane in `sessions.json`, the command is sent via `tmux send-keys` with Enter-retry polling (30s timeout).
+4. **Failure** — commands that cannot be dispatched through any path fail immediately; orchestration halts.
+
+**`/model` state:** the model override updated by `/model <tier>` applies to subsequent prompt items in the same orchestration batch. It does not persist to frontmatter.
+
+**Ordering:** command and prompt items execute strictly in sequence. A command must complete before the next item starts.
+
 ### `--mode sequential`
 
 Sequential orchestration runs one full fresh-agent lifecycle per task:

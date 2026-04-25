@@ -598,7 +598,7 @@ Verification:
 - `cargo test --manifest-path Cargo.toml`
 - `cargo build --manifest-path Cargo.toml --release`
 - `cargo install --path .`
-<!-- agent:boundary:c2c20d1c -->
+<!-- agent:boundary:b3138215 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -607,7 +607,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

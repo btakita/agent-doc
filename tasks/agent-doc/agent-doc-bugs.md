@@ -126,7 +126,7 @@ Verification in `src/agent-doc`:
 - `cargo install --path .`
 - `agent-doc orchestrate --help`
 
-do #d5xb. update spec + tests. build + install for local testing. commit + push 
+do #d5xb. update spec + tests. build + install for local testing. commit + push  
 ### Re: DAG orchestration implementation — gpt-5
 
 Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `f0c0afc` (`feat: execute dag orchestration batches`).
@@ -148,12 +148,13 @@ Verification in `src/agent-doc`:
 - `cargo build --release`
 - `cargo install --path .`
 - `agent-doc orchestrate --help`
-<!-- agent:boundary:65fb2d95 -->
+<!-- agent:boundary:2a85a2e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
+- [ ] [#osyn] Implement orchestrate command synonym recognition in skill/runbook — map natural-language triggers (orchestra, sequential, in order, chain, fan out, concurrent, etc.) to orchestrate subcommand modes. Plan: tasks/agent-doc/plan-orchestrate-synonyms.md
+- [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

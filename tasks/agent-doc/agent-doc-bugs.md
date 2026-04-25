@@ -100,18 +100,22 @@ What *is* useful:
 - if we ever want a model-assisted step, make it a separate explicit phase after preflight, not part of the core preflight contract
 
 So my recommendation is: no model-based planning/classification inside `agent-doc preflight`; yes to a later model-driven dispatch/planning layer that consumes preflight's structured output.
-<!-- agent:boundary:3f686100 -->
+
+❯ add recommendation to pending
+### Re: pending capture — gpt-5
+
+Added the recommendation to `agent:pending` as a `[recommended]` item rather than silently promoting it to accepted work.
+<!-- agent:boundary:a42362f8 -->
 <!-- /agent:exchange -->
 
 <!--
-In src/session-share, `agent-doc tasks/claudescore-3.md` has as "Today is 2026-04-25. Synchronous orcestra." prompt. However, agent-doc orcestrate was not called. Why?
-
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

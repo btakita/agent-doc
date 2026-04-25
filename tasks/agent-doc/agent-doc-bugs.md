@@ -168,7 +168,18 @@ Implemented `agent-doc orchestrate --plan` in `src/agent-doc` at commit `5547909
 **Spec:** `specs/07-commands.md` updated with `--dry-run` / `--plan` section and example output.
 
 **Verification:** `cargo test orchestrate` (25 passed), `cargo build --release`, `cargo install --path .`.
-<!-- agent:boundary:98b31e7b -->
+
+❯ In src/session-share/tasks/claudescore.md, why are there multiple `<!-- no-pending-capture -->` comments?
+### Re: multiple `<!-- no-pending-capture -->` in claudescore.md — opus-4-6
+
+Each `<!-- no-pending-capture -->` is a **per-cycle guard suppressor** — it tells `session-check` not to flag a missing `--pending-add` for that specific response cycle. There are three because three separate response cycles each contained recommendation-like content that the author intentionally chose not to promote to pending:
+
+1. **Line 450** — response listed a validation approach (docker compose, cdk synth, deploy) that reads like recommendations but was explanatory, not actionable backlog.
+2. **Line 551** — follows a "committed and pushed" confirmation. The subsequent response about CDK stack completeness listed gaps that could trigger the pending-capture guard.
+3. **Line 616** — response listed 4 pre-deploy fixes. The user then explicitly wrote "Add next steps to pending" on the next line, meaning the promotion was intentionally deferred to the next cycle rather than done inline.
+
+Each suppressor is scoped to exactly one response cycle — they don't carry forward. That's why you see multiples: every cycle where the author said "I know this looks like I should be adding pending items, but I'm deliberately not" needs its own annotation.
+<!-- agent:boundary:9321f20f -->
 <!-- /agent:exchange -->
 
 <!--

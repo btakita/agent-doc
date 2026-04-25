@@ -109,13 +109,29 @@ Verification in `src/agent-doc`:
 - `agent-doc orchestrate --help`
 
 I also ran the full `cargo test`; the crate compiles, but the run is still blocked by existing unrelated failures in `autoclaim::tests::{autoclaim_focuses_pane_with_claim, autoclaim_syncs_layout_with_multiple_files, autoclaim_no_claim_skips_focus}`.
-<!-- agent:boundary:eaf0dc60 -->
+
+❯ do #9pw9. update spec + tests. build + install for local testing. commit + push
+### Re: parallel orchestration refactor — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `43a1000` (`refactor: route legacy parallel through orchestrate`).
+
+`agent-doc parallel` now routes through the shared orchestrate dispatcher instead of bypassing it, so the legacy command and `agent-doc orchestrate --mode parallel` share task normalization and mode routing. I kept the existing parallel backend intact, preserved the legacy empty-task compatibility path, and added regression coverage for shared parallel dispatch plus the compatibility behavior.
+
+I also updated the command spec, README, and version notes to describe the compatibility surface.
+
+Verification in `src/agent-doc`:
+- `cargo test orchestrate::`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc orchestrate --help`
+<!-- agent:boundary:09eb29c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
+- [x] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
 - [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

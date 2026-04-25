@@ -65,6 +65,8 @@ Trust the preflight output — do not re-validate code fences or blockquotes.
 
 Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. `required_tier` is the hard gate, `suggested_tier` is advisory, and `model_switch_tier` is the resolved tier for the user's inline `/model` request. Full gate behavior: [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
 
+**Orchestration intent:** if the user asks to coordinate multiple document tasks in natural language (for example `run these in order`, `chain these`, `fan out these tasks`, `after #a do #b`), route through `agent-doc orchestrate` instead of manually simulating the batch. Use [runbooks/command-synonyms.md](runbooks/command-synonyms.md) to map the phrasing to `--mode sequential|parallel|dag`.
+
 ### 1. Respond
 
 - Address the user's changes naturally in the console — the console response IS the document response.
@@ -131,6 +133,7 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 - [runbooks/transfer-extract.md](runbooks/transfer-extract.md) — `transfer` / `extract` operations
 - [runbooks/pending-ops.md](runbooks/pending-ops.md) — pending mutation contract
 - [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
+- [runbooks/command-synonyms.md](runbooks/command-synonyms.md) — natural-language dispatch to `orchestrate --mode ...`
 - [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
 - [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
 - [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions

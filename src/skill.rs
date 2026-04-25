@@ -98,6 +98,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/model-tier-gate.md"),
     ),
     (
+        "command-synonyms.md",
+        include_str!("../runbooks/command-synonyms.md"),
+    ),
+    (
         "streaming-checkpoints.md",
         include_str!("../runbooks/streaming-checkpoints.md"),
     ),
@@ -868,6 +872,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("Harness Compatibility"));
         assert!(SKILL_TEMPLATE.contains("harness-invocation.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/commit.md"));
+        assert!(SKILL_TEMPLATE.contains("runbooks/command-synonyms.md"));
     }
 
     #[test]
@@ -998,6 +1003,16 @@ mod tests {
     }
 
     #[test]
+    fn bundled_runbooks_include_command_synonyms_runbook() {
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "command-synonyms.md"),
+            "command-synonyms.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
     fn harness_invocation_runbook_content() {
         let (_, content) = BUNDLED_RUNBOOKS
             .iter()
@@ -1068,6 +1083,21 @@ mod tests {
         assert!(content.contains("id=<custom>"));
         assert!(content.contains("id=#spec1"));
         assert!(content.contains("ASCII alphanumeric"));
+    }
+
+    #[test]
+    fn command_synonyms_runbook_content_covers_orchestrate_modes() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "command-synonyms.md")
+            .expect("command-synonyms.md not found");
+        assert!(content.contains("agent-doc orchestrate <FILE> --mode sequential"));
+        assert!(content.contains("agent-doc orchestrate <FILE> --mode parallel"));
+        assert!(content.contains("agent-doc orchestrate <FILE> --mode dag"));
+        assert!(content.contains("Run these in order"));
+        assert!(content.contains("fan out"));
+        assert!(content.contains("after X do Y"));
+        assert!(content.contains("default to `--mode sequential`"));
     }
 
     #[test]

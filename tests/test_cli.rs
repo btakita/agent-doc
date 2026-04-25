@@ -614,6 +614,10 @@ fn test_skill_md_contains_required_steps() {
         content.contains("Do not stop at the newest question"),
         "SKILL.md should require reconciling the changed exchange tail oldest-first"
     );
+    assert!(
+        content.contains("runbooks/command-synonyms.md"),
+        "SKILL.md should point agents to the orchestrate synonym runbook"
+    );
 }
 
 #[test]

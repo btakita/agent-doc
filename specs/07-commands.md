@@ -636,6 +636,8 @@ After removing duplicates and updating the snapshot, `dedupe` also deletes the c
 
 `agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL]`
 
+**Skill-side dispatch:** the bundled skill/runbook treats natural-language orchestration requests as aliases for this command. Ordered phrases like `run these in order`, `chain these`, `one by one`, and `orchestrate` map to `--mode sequential`; concurrency phrases like `fan out`, `concurrent`, and `simultaneously` map to `--mode parallel`; dependency phrases like `after #a do #b`, `depends on`, and `fan in` map to `--mode dag`.
+
 Shared task-source resolution:
 
 1. Collect tasks from repeated `--task` flags, preserving order.

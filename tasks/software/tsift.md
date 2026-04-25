@@ -96,7 +96,90 @@ update spec + tests. commit + push
 do #cdet
 ❯ Running preflight and exploring the tsift codebase in parallel.
 #cdet is done. `tsift communities` ships Louvain community detection over the call graph — 357 lines across 4 files, 8 new tests (139 total), committed to `btakita/tsift@400c199` and pushed.
-<!-- agent:boundary:b8fef603 -->
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #gpth
+❯ re #bamc: can and should we build in the functionality into tsift?
+### Re: #bamc — graphify evaluation — opus-4-6
+
+**Decision: build the deterministic graph layer into tsift, keep graphify as optional semantic layer.**
+
+tsift already owns AST extraction, call graph, symbol table, and incremental indexing. The natural extensions are community detection and graph queries — both deterministic, both feed from the existing SQLite graph.
+
+#### Build into tsift (deterministic, AST-derived)
+
+| Capability | Effort | Why |
+|---|---|---|
+| **Community detection (Louvain)** | ~200 lines Rust | Clusters call_edges + symbol refs into architectural subsystems. No new deps — Louvain is a simple iterative algorithm over adjacency. |
+| **Graph queries** (`tsift path`, `tsift explain`) | ~150 lines | BFS/DFS traversal, shortest path between symbols. Extends existing `tsift graph` subcommand. |
+| **Concept lint** (#cs4r) | Already planned | Cross-references markdown plain text against the symbol graph. |
+
+#### Keep in graphify (LLM-derived, semantic)
+
+| Capability | Why not tsift |
+|---|---|
+| LLM-based entity extraction | Needs API client, prompt orchestration, subagent coordination. graphify's core differentiator. |
+| HTML visualization | Nice-to-have, not essential for CLI. `tsift graph --json` can feed any viz tool. |
+| Semantic similarity (embeddings) | Requires vector index + embedding model. Overkill for structural code navigation. |
+| Non-code inputs (papers, images, video) | Out of scope for a code tool. |
+
+**Boundary rule:** tsift owns deterministic, AST-derived graph operations. graphify owns LLM-derived semantic operations. Interop: `tsift graph --json` exports to graphify-compatible format for merging.
+
+Closing #bamc. Reclassified #jzm8 from "graphify integration" to tsift-native community detection. Added #cdet (Louvain) and #gpth (path/explain queries) to pending.
+
+synchronous orchestra
+preset #spec-test-commit-push
+- do #cdet
+- do #gpth
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #cdet
+❯ re #bamc: can and should we build in the functionality into tsift?
+### Re: #bamc — graphify evaluation — opus-4-6
+
+**Decision: build the deterministic graph layer into tsift, keep graphify as optional semantic layer.**
+
+tsift already owns AST extraction, call graph, symbol table, and incremental indexing. The natural extensions are community detection and graph queries — both deterministic, both feed from the existing SQLite graph.
+
+#### Build into tsift (deterministic, AST-derived)
+
+| Capability | Effort | Why |
+|---|---|---|
+| **Community detection (Louvain)** | ~200 lines Rust | Clusters call_edges + symbol refs into architectural subsystems. No new deps — Louvain is a simple iterative algorithm over adjacency. |
+| **Graph queries** (`tsift path`, `tsift explain`) | ~150 lines | BFS/DFS traversal, shortest path between symbols. Extends existing `tsift graph` subcommand. |
+| **Concept lint** (#cs4r) | Already planned | Cross-references markdown plain text against the symbol graph. |
+
+#### Keep in graphify (LLM-derived, semantic)
+
+| Capability | Why not tsift |
+|---|---|
+| LLM-based entity extraction | Needs API client, prompt orchestration, subagent coordination. graphify's core differentiator. |
+| HTML visualization | Nice-to-have, not essential for CLI. `tsift graph --json` can feed any viz tool. |
+| Semantic similarity (embeddings) | Requires vector index + embedding model. Overkill for structural code navigation. |
+| Non-code inputs (papers, images, video) | Out of scope for a code tool. |
+
+**Boundary rule:** tsift owns deterministic, AST-derived graph operations. graphify owns LLM-derived semantic operations. Interop: `tsift graph --json` exports to graphify-compatible format for merging.
+
+Closing #bamc. Reclassified #jzm8 from "graphify integration" to tsift-native community detection. Added #cdet (Louvain) and #gpth (path/explain queries) to pending.
+
+synchronous orchestra
+preset #spec-test-commit-push
+- do #cdet
+- do #gpth
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #cdet
+❯ Running preflight and exploring the tsift codebase in parallel.
+#cdet is done. `tsift communities` ships Louvain community detection over the call graph — 357 lines across 4 files, 8 new tests (139 total), committed to `btakita/tsift@400c199` and pushed.
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #gpth
+Running preflight on the tsift session doc and exploring the current codebase in parallel.
+<!-- agent:boundary:1c395774 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

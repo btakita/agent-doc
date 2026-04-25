@@ -3,9 +3,53 @@
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::Path;
+use std::process::Command as ProcessCommand;
 
 fn agent_doc_cmd() -> Command {
     cargo_bin_cmd!("agent-doc")
+}
+
+fn init_git_repo(root: &Path, tracked: &Path) {
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["init"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "test@example.com"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test User"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "initial", "--no-verify"])
+        .status()
+        .unwrap();
+}
+
+fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
+    let canonical = doc.canonicalize().unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hex::encode(hasher.finalize());
+    let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
+    fs::write(snapshot, content).unwrap();
 }
 
 #[test]
@@ -118,6 +162,46 @@ fn test_cli_run_requires_file() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("run");
     cmd.assert().failure();
+}
+
+#[test]
+fn test_commit_explains_prior_patchback_without_new_response_body() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let committed = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior response — gpt-5\n\
+        Already committed.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, committed);
+
+    let working = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior response — gpt-5\n\
+        Already committed.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        ❯ write response back\n\
+        ❯ commit\n\
+        <!-- /agent:exchange -->\n";
+    fs::write(&doc, working).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args(["commit", doc.to_str().unwrap()]);
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "no new assistant response body was supplied",
+        ))
+        .stderr(predicate::str::contains(
+            "will not synthesize a second assistant patchback",
+        ));
 }
 
 #[test]

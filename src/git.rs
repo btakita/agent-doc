@@ -1009,11 +1009,25 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
 
     if snapshot_matches_head {
         if let Some(kind) = post_commit_local_drift {
-            eprintln!(
-                "[commit] detected post-commit local drift for {} — HEAD already contains the committed response; leaving {} uncommitted",
-                file.display(),
-                kind.describe()
-            );
+            if kind == PostCommitLocalDriftKind::UserFollowUp {
+                eprintln!(
+                    "[commit] prior response is already committed in HEAD for {} — no new assistant response body was supplied, so commit will not synthesize a second assistant patchback; leaving later local user follow-up edits uncommitted",
+                    file.display()
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "prior_patchback_without_response_body file={} basis=head",
+                        file.display()
+                    ),
+                );
+            } else {
+                eprintln!(
+                    "[commit] detected post-commit local drift for {} — HEAD already contains the committed response; leaving {} uncommitted",
+                    file.display(),
+                    kind.describe()
+                );
+            }
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -3394,6 +3408,10 @@ mod tests {
         assert!(
             log.contains("post_commit_local_drift file=") && log.contains("kind=user_follow_up"),
             "follow-up noop closeout should classify post-commit local drift:\n{log}"
+        );
+        assert!(
+            log.contains("prior_patchback_without_response_body file="),
+            "follow-up noop closeout should record the missing-second-patchback diagnostic:\n{log}"
         );
     }
 

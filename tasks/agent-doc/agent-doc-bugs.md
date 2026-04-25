@@ -362,7 +362,7 @@ Verification:
 Full-suite note:
 - `cargo test` still fails on existing tmux route tests: `route::tests::send_keys_delivers_claude_command_with_enter` and `route::tests::send_keys_delivers_codex_command_with_enter`
 - I reran those exact tests and they still fail in the send-keys / tmux echo path; the new pending-done guard tests and the rest of the changed surface passed
-<!-- agent:boundary:a678f0f7 -->
+<!-- agent:boundary:7521ea7a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -372,8 +372,6 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#pdng] [recommended] Add a closeout guard that warns or fails when a response completes an existing #id task but no matching --pending-done <id> mutation was recorded in the cycle
-- [x] [#pdsk] [recommended] Tighten the skill/runbook so do #id closeout explicitly decides whether the task gets --pending-done, --pending-gate, or remains open for a concrete reason
 - [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

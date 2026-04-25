@@ -152,7 +152,7 @@ Verification:
 - `agent-doc skill install --harness claude --reload compact`
 
 I marked `#1g42` done for this cycle. I left the pre-existing unstaged `src/agent-doc/Cargo.lock` change out of the commit.
-<!-- agent:boundary:bba7c50c -->
+<!-- agent:boundary:7fd994e8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -164,7 +164,6 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent. Plan: tasks/agent-doc/plan-post-preflight-dispatch-phase.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

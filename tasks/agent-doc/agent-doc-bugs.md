@@ -794,7 +794,18 @@ Good point. A few ways to lower the memory burden:
 4. **Snippet/template** — editor snippets (`aq` → expands to the queue block with one empty `~~~prompt` fence) eliminate recall entirely. The JetBrains and VS Code plugins could ship these.
 
 Option 3 (hybrid) is probably the best default — single-line prompts stay simple, and the `~~~prompt` fence only appears when you have a genuine multi-line prompt. The CLI scaffolding (option 1) would handle the rest.
-<!-- agent:boundary:cd912bea -->
+
+❯ I like Option 2 + 3. Please add to pending with a plan
+### Re: agent:queue pending + plan — opus-4-6
+
+Created `tasks/agent-doc/agent-queue-plan.md` with the full implementation plan covering:
+
+- **Hybrid syntax** — single-line prompts use `- ` list items, multi-line use `~~~prompt` or `---` fences
+- **`---` alias** — accepted only inside `&lt;!-- agent:queue --&gt;` boundaries to avoid collision with frontmatter/thematic breaks
+- **Four phases** — parser+model → preflight integration → consumption+dispatch → CLI scaffolding (`queue add/list/clear`)
+
+Added to pending as `#queue` with the plan path.
+<!-- agent:boundary:b9569599 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -804,6 +815,7 @@ We should support `/clear` or any other harness cli command. This will either us
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

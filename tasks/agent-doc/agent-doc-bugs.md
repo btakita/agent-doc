@@ -841,8 +841,24 @@ Implemented the queue harness command dispatch feature (`queue_dispatch.rs`):
 - `specs/07-commands.md` — documented classification and dispatch in orchestrate spec
 
 All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unrelated). Built release, installed both binaries. Committed as `7ecd99b` in agent-doc, pushed.
-****
-<!-- agent:boundary:9f78c0ee -->
+
+❯ Would #queue be exactly the same as a synchronous orchestra?
+### Re: #queue vs synchronous orchestrate — opus-4-6
+
+The execution core is the same — both use sequential task dispatch with command classification (`queue_dispatch.rs`), consuming items one-at-a-time through inject → preflight → agent → finalize → session-check.
+
+The differences are UX surface, not execution engine:
+
+| | `orchestrate --mode sequential` | `agent:queue` component |
+|---|---|---|
+| **Where tasks live** | CLI args, exchange tail, or `--from-file` | Persistent `&lt;!-- agent:queue --&gt;` block in the document |
+| **Lifecycle** | One binary invocation consumes all tasks | One task per harness cycle; re-invoked repeatedly |
+| **Editability** | Tasks fixed once run starts | User can add/remove/reorder items between cycles |
+| **Trigger** | Natural language or explicit command | Preflight detects non-empty queue |
+| **CLI scaffolding** | N/A | `queue add/list/clear` |
+
+Given the overlap, `#queue` should be a thin wrapper around the orchestrate sequential path — the component parser feeds items into the same dispatch chain, adding only the persistent in-document surface and the edit-while-running semantics. The execution core is already built.
+<!-- agent:boundary:6974c9ac -->
 <!-- /agent:exchange -->
 
 <!--

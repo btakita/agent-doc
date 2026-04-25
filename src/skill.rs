@@ -589,6 +589,11 @@ mod tests {
 
     #[test]
     fn detect_install_env_treats_codex_thread_id_as_codex() {
+        let _claude = EnvVarGuard::unset("CLAUDE_CODE");
+        let _claude_ep = EnvVarGuard::unset("CLAUDE_CODE_ENTRYPOINT");
+        let _opencode = EnvVarGuard::unset("OPENCODE");
+        let _cursor = EnvVarGuard::unset("CURSOR_SESSION_ID");
+        let _cursor2 = EnvVarGuard::unset("CURSOR");
         let _code = EnvVarGuard::unset("CODEX");
         let _code_cli = EnvVarGuard::unset("CODEX_CLI");
         let _thread = EnvVarGuard::set("CODEX_THREAD_ID", "thread-123");

@@ -1276,17 +1276,17 @@ fn dedup_exchange_adjacent_lines(doc: &str) -> String {
     let mut deduped = String::with_capacity(content.len());
     let mut prev_nonempty: Option<&str> = None;
     for line in content.lines() {
-        if !line.trim().is_empty() && prev_nonempty == Some(line) {
-            // Skip exact duplicate adjacent non-blank line
+        let trimmed = line.trim();
+        let is_fence = is_code_fence_delimiter(trimmed);
+        if !trimmed.is_empty() && !is_fence && prev_nonempty == Some(line) {
             continue;
         }
         deduped.push_str(line);
         deduped.push('\n');
-        if !line.trim().is_empty() {
+        if !trimmed.is_empty() {
             prev_nonempty = Some(line);
         }
     }
-    // Preserve original trailing-newline behaviour
     if !content.ends_with('\n') && deduped.ends_with('\n') {
         deduped.pop();
     }
@@ -1294,6 +1294,15 @@ fn dedup_exchange_adjacent_lines(doc: &str) -> String {
         return doc.to_string();
     }
     exchange.replace_content(doc, &deduped)
+}
+
+fn is_code_fence_delimiter(trimmed: &str) -> bool {
+    let fc = match trimmed.chars().next() {
+        Some(c) if c == '`' || c == '~' => c,
+        _ => return false,
+    };
+    let fence_len = trimmed.chars().take_while(|&c| c == fc).count();
+    fence_len >= 3
 }
 
 /// Apply mode logic (replace/append/prepend).
@@ -2604,6 +2613,40 @@ Previous response.
         );
         // Multiple blank lines should survive (dedup only targets non-blank)
         assert!(result.contains('\n'), "blank lines preserved");
+    }
+
+    #[test]
+    fn apply_patches_dedup_preserves_adjacent_code_fences() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+<!-- agent:exchange patch=append -->
+Some text.
+```
+code block 1
+```
+```
+code block 2
+```
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: test — opus-4-6\n\nResponse.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let fence_count = result.matches("```").count();
+        assert_eq!(
+            fence_count, 4,
+            "all four code fences must survive dedup, got:\n{result}"
+        );
+        assert!(
+            result.contains("```\n```"),
+            "adjacent code fences must be preserved"
+        );
     }
 
     #[test]

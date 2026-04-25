@@ -673,7 +673,27 @@ Verification:
 - `cargo test` — 1147 passed, 4 pre-existing failures (autoclaim tmux + route send_keys)
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:15c9a8d0 -->
+
+❯ I would like to have a way to run `/clear` and then the prompt(s) inside.
+❯ Perhaps an agent:deck as in on deck? Please come up with alternative names.
+### Re: clear-and-queue naming — opus-4-6
+
+The core concept is "prompts staged to survive a context clear." `agent:deck` works — "on deck" is intuitive and short. Alternatives:
+
+| Name | Metaphor | Notes |
+|------|----------|-------|
+| `agent:deck` | baseball on-deck circle | Clear, memorable, short. Best fit if only one prompt batch is staged at a time. |
+| `agent:queue` | task queue | Most self-explanatory. Better if multiple batches could stack. |
+| `agent:carry` | carry-forward | Emphasizes crossing the context boundary. |
+| `agent:next` | what runs next | Minimal, but might collide with future uses of "next." |
+| `agent:reload` | clear + reload | Implies the clear is part of the mechanism, not separate. |
+| `agent:runway` | lined up for takeoff | Evocative but slightly longer conceptual distance. |
+| `agent:handoff` | relay handoff | Good if framed as handing state to a fresh context. |
+
+My take: `agent:deck` or `agent:queue` are the strongest. `deck` is more evocative and fits the single-batch case (you're staging the next at-bat). `queue` is better if you foresee multiple ordered batches or FIFO semantics.
+
+One design question: does this component live in the document (like `agent:pending`) or is it a CLI-level mechanism (`agent-doc clear --with-prompts`)? Document-resident makes it visible and editable; CLI-level keeps it out of the document body.
+<!-- agent:boundary:d5718d68 -->
 <!-- /agent:exchange -->
 
 <!--

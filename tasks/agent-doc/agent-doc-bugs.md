@@ -362,7 +362,23 @@ Verification:
 Full-suite note:
 - `cargo test` still fails on existing tmux route tests: `route::tests::send_keys_delivers_claude_command_with_enter` and `route::tests::send_keys_delivers_codex_command_with_enter`
 - I reran those exact tests and they still fail in the send-keys / tmux echo path; the new pending-done guard tests and the rest of the changed surface passed
-<!-- agent:boundary:7521ea7a -->
+
+❯ Can #pdar broaden a bit to detect if the taskid was done or would this require the agent?
+### Re: #pdar broadening — gpt-5
+
+Yes, but only partway with the binary alone.
+
+Right now the guard in `src/agent-doc/src/session_check.rs` only has three hard signals: the committed response text, the set of still-open pending ids, and the cycle's recorded `pending_done_ids`. The actual completion heuristic is intentionally narrow: `response_clearly_completes_pending_id()` looks for a literal `#id` mention and then a nearby completion marker like `implemented`, `fixed`, `verification:`, `pushed`, or `outcome:`. `cycle_state.rs` does not currently persist "this cycle was triggered by do #id", so if the response omits the id, the binary has very little to stand on.
+
+So `#pdar` can broaden a bit without requiring the agent if we keep it deterministic. The clean binary-owned expansion would be:
+- persist prompted task ids in cycle state or capture metadata when preflight/diff sees `❯ do #id`
+- let `session-check` treat that stored id as a candidate completion target even when the final response text does not restate `#id`
+- keep the current lexical completion markers, so the binary is still checking explicit evidence rather than guessing intent
+
+What still requires the agent, or a new explicit binary signal, is semantic interpretation like "the work is mostly done but intentionally left open" or "this response answered the task but did not complete it." That distinction is not present in the current captured metadata.
+
+So my recommendation is: broaden `#pdar` to cover binary-owned prompt-id capture plus response-text completion detection. Beyond that, you are in agent-intent territory unless you add a stricter structured closeout signal.
+<!-- agent:boundary:ddd7c599 -->
 <!-- /agent:exchange -->
 
 <!--

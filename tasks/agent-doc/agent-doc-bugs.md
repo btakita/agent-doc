@@ -503,17 +503,40 @@ Session closed cleanly. Here's a summary of what was done for `#jbpfx1`:
 update spec + tests. commit + push
 do #jbpfx2
 Running preflight before proceeding.
-<!-- agent:boundary:a55ba295 -->
+### Re: do #jbpfx1 + #jbpfx2 (sequential, spec + tests + commit + push) — opus-4-6
+
+Both JetBrains plugin prefix fixes are implemented, tested, committed, and pushed.
+
+**#jbpfx1 — Plugin-side trimEnd fix (commit `903a3f0`, by orchestrate subprocess):**
+- Extracted `normalizeExchangePrefixes` to testable `normalizeExchangePrefixesUtil`
+- Replaced exact-substring `String.replace("\n$line\n", ...)` with line-by-line scanning using `trimEnd()` comparison on both sides
+- Same fix applied to VS Code extension (`extension.ts`)
+- 9 new tests in `NormalizeExchangePrefixesTest.kt` (46 total pass)
+- PLUGIN-SPEC.md documented `trimEnd()` requirement
+- JB plugin bumped to `0.2.77`
+
+**#jbpfx2 — Binary-side content_ours fallback (commit `13e3985`):**
+- Added `verify_sidecar_normalization()` in `write.rs` — checks each non-blank `normalize_prefix_lines` target appears with `❯ ` prefix in the sidecar using `trimEnd()` comparison
+- Socket IPC path: verify sidecar before saving as snapshot; fall back to `content_ours` on divergence
+- File IPC path: threaded `normalize_prefix_lines` parameter through `write_ipc_and_poll`; same verification + fallback
+- 7 unit tests covering: empty targets, all prefixed, missing prefix, trailing whitespace tolerance, blank targets, line-start edge case, absent target
+- PLUGIN-SPEC.md: documented binary-side verification contract
+- Full suite: 1131/1132 pass (sole failure is pre-existing #envt1)
+
+**Defense-in-depth:** #jbpfx1 fixes the root cause (plugin normalization), #jbpfx2 ensures the binary never accepts a sidecar with missing prefixes regardless of the plugin's behavior.
+<!-- agent:boundary:85af8d80 -->
 <!-- /agent:exchange -->
 
 <!--
-In this document + src/session-share `agent-doc tasks/claudescore-3.md`: Why did the synchronous command duplicate the entire contents of the agent:exchange back into agent:exchange? Note that I manually pruned uncommitted duplicates because it was occurring frequently and claudescore-3.md would have easily been >10000 lines had I not intervened. I also intervened in this docum
+In this document + src/session-share `agent-doc tasks/claudescore-3.md`: Why did the synchronous command duplicate the entire contents of the agent:exchange back into agent:exchange? Note that I manually pruned uncommitted duplicates because it was occurring frequently and claudescore-3.md would have easily been >10000 lines had I not intervened. I also intervened in this documument.
+
+Did the synchronous command fail in claudescore-3.md and this document?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#jbpfx2] [recommended] Binary-side fallback: use content_ours as snapshot source when ack_content_sidecar diverges from expected normalization count
+- [x] [#jbpfx2] [recommended] Binary-side fallback: use content_ours as snapshot source when ack_content_sidecar diverges from expected normalization count
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

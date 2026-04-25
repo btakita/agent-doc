@@ -97,7 +97,7 @@
 //!   returns `Some(path)` when `.agent-doc/` exists.
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
@@ -105,7 +105,7 @@ use std::process::Command;
 use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelatedDocChange {
     /// Path to the related document (as declared in frontmatter).
     pub path: String,
@@ -115,7 +115,7 @@ pub struct RelatedDocChange {
     pub exists: bool,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Tmux layout issues found (empty = healthy).
     pub layout_issues: Vec<String>,

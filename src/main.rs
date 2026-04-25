@@ -75,6 +75,7 @@ mod lib_gc;
 mod lib_install;
 mod mode;
 mod notify;
+mod orchestrate;
 mod outline;
 mod parallel;
 mod patch;
@@ -636,6 +637,41 @@ enum Commands {
         #[arg(long, default_value = "600")]
         timeout: u64,
         /// Show plan without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Orchestrate sequential or parallel task batches against one document
+    Orchestrate {
+        /// Path to the session document
+        file: PathBuf,
+        /// Orchestration mode
+        #[arg(long, value_enum, default_value_t = orchestrate::OrchestrateMode::Sequential)]
+        mode: orchestrate::OrchestrateMode,
+        /// Explicit task descriptions (repeatable)
+        #[arg(long = "task")]
+        tasks_explicit: Vec<String>,
+        /// Read task descriptions from a markdown/text file
+        #[arg(long = "from-file")]
+        from_file: Option<PathBuf>,
+        /// Extract the latest task list/code block from the document exchange
+        #[arg(long = "from-exchange")]
+        from_exchange: bool,
+        /// Agent backend override for sequential execution
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Skip git commits in worktrees (parallel mode only)
+        #[arg(long)]
+        no_git: bool,
+        /// Run without worktrees (parallel mode only)
+        #[arg(long)]
+        no_worktree: bool,
+        /// Per-task timeout in seconds (parallel mode only)
+        #[arg(long, default_value = "600")]
+        timeout: u64,
+        /// Show the resolved plan without executing
         #[arg(long)]
         dry_run: bool,
     },
@@ -1454,6 +1490,34 @@ fn main() -> anyhow::Result<()> {
                 timeout_secs: timeout,
                 dry_run,
             },
+        ),
+        Commands::Orchestrate {
+            file,
+            mode,
+            tasks_explicit,
+            from_file,
+            from_exchange,
+            agent,
+            model,
+            no_git,
+            no_worktree,
+            timeout,
+            dry_run,
+        } => orchestrate::run(
+            &file,
+            orchestrate::OrchestrateConfig {
+                mode,
+                tasks_explicit,
+                from_file,
+                from_exchange,
+                agent,
+                model,
+                no_git,
+                no_worktree,
+                timeout_secs: timeout,
+                dry_run,
+            },
+            &config,
         ),
         Commands::Notify {
             file,

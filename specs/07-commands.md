@@ -631,3 +631,43 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 Detects consecutive `### Re:` blocks with identical content (after stripping boundary markers) and removes the duplicate. Updates the snapshot after removal. Idempotent — running twice produces the same result.
 
 After removing duplicates and updating the snapshot, `dedupe` also deletes the corresponding stale patch file at `.agent-doc/patches/<hash>.json` (if present). Without this cleanup, `processPendingPatches()` on plugin restart would re-apply the removed content, creating another duplicate.
+
+## orchestrate
+
+`agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL]`
+
+Shared task-source resolution:
+
+1. Collect tasks from repeated `--task` flags, preserving order.
+2. If `--from-file` is provided, read the file and extract tasks from the last fenced code block or markdown list that contains list items; otherwise fall back to non-empty trimmed lines.
+3. If `--from-exchange` is provided, read the document's `agent:exchange` component and apply the same task extraction rule to the latest exchange content.
+4. Concatenate all resolved tasks in source order. Error if the final task list is empty.
+
+### `--mode sequential`
+
+Sequential orchestration runs one full fresh-agent lifecycle per task:
+
+1. Inject `❯ <task>` into `agent:exchange`, immediately before the current boundary marker when one exists.
+2. Run `agent-doc preflight <FILE>` and use its `baseline_file` for response persistence.
+3. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
+4. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
+5. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state.
+6. Persist the response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
+7. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
+
+Notes:
+
+- Sequential orchestration requires the normal git-backed finalize path; `--no-git` is rejected.
+- The imperative-response contract still applies because persistence flows through `finalize`.
+- The injected prompt becomes part of the document/system-of-record before the agent runs.
+
+### `--mode parallel`
+
+Parallel orchestration is a front-door wrapper over the existing `agent-doc parallel` worktree fan-out:
+
+- `--task` / `--from-file` / `--from-exchange` are resolved first.
+- The resolved tasks are then passed to the existing parallel engine with `--model`, `--no-git`, `--no-worktree`, and `--timeout`.
+
+### `--mode dag`
+
+Reserved for future dependency-graph orchestration. The command currently fails fast with a clear "not implemented yet" error instead of silently falling back to another mode.

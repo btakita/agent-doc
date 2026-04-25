@@ -122,7 +122,7 @@
 //!   section with explicit turn-completeness and edit/artifact instructions
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
@@ -188,7 +188,7 @@ pub struct DiffClassification {
 }
 
 /// Canonical classification for user-authored prompt-bearing changes in a diff.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptBearingChangeKind {
     PromptTarget,
@@ -198,7 +198,7 @@ pub enum PromptBearingChangeKind {
 }
 
 /// Ordered user-authored change that the harness should surface to the agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptBearingChange {
     pub kind: PromptBearingChangeKind,
     pub text: String,

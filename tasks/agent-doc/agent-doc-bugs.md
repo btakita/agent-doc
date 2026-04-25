@@ -169,8 +169,27 @@ So the practical answer is:
 - `parallel`: no equivalent shared task-prefix surface today
 
 If you want this as an explicit product feature, the right shape is probably something like `agent-doc orchestrate ... --shared-prompt-file <path>` or `--task-prefix <text>` so the behavior is binary-owned instead of relying on document placement.
-<!-- agent:boundary:673a2086 -->
+
+❯ Please create a dedicated plan and pending item.
+❯ Please create a dedicated plan and pending item for frontmatter prompt presets. Perhaps the prompt preset can be invoked using `preset #1` for the preset labeled `#1` in the frontmatter. The preflight and/or prepare prompt step should expand insert the actual preset text with a `(preset #1)` prefix.
+### Re: frontmatter prompt presets plan — gpt-5
+
+Created `tasks/agent-doc/plan-frontmatter-prompt-presets.md` and added a new open pending item `#fppr` pointing at that exact plan path in the same cycle.
+
+The draft treats this as a binary-owned feature rather than a skill-only convention:
+- define reusable `prompt_presets` in document frontmatter
+- allow exchange-side invocation like `preset #1`
+- have `preflight` detect and validate preset references as structured data
+- expand the selected preset during prompt preparation with a visible `(preset #1)` prefix
+- keep that expansion path consistent across `sequential`, `dag`, and `parallel`
+
+No code, tests, build, or install work was needed for this cycle because the requested change was the dedicated design artifact plus backlog capture.
+<!-- agent:boundary:4d34ec08 -->
 <!-- /agent:exchange -->
+
+<!--
+Why did the prompt "When I call an orchestrate, can I define a prompt that will be applied to every orchestrate task in one place?" not have a prepended `❯ ` in the patchback?
+-->
 
 <!--
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
@@ -179,6 +198,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#fppr] Add frontmatter prompt presets for orchestrated tasks; support exchange-side `preset #1` style references that expand into the prepared task prompt with a visible `(preset #1)` label. Plan: tasks/agent-doc/plan-frontmatter-prompt-presets.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

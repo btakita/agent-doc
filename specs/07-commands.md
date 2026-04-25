@@ -698,6 +698,12 @@ Orchestrate subprocesses inherit permission/sandbox settings from the document f
 
 When resolved args exist, the subprocess command is built from structural base args (Claude: `-p --output-format json`; Codex: `exec --json`) plus the resolved frontmatter/config args. When no args are resolved, default base args apply (Claude: `--permission-mode acceptEdits`; Codex: `-s workspace-write`).
 
+### Subprocess stderr surfacing
+
+Streaming agent subprocesses (`send_streaming` in both Claude and Codex backends) drain stderr in a background thread. When the subprocess exits non-zero, the iterator yields a final `Err` containing the exit status and stderr content — e.g. `"claude subprocess exited with exit status: 1: permission denied"`. This replaces the previous behavior where stderr was silently discarded and failures surfaced only as `"empty response from streaming orchestrate step"` with no diagnostics.
+
+When the subprocess exits successfully but stderr is non-empty (warnings, deprecation notices), the content is logged to the parent's stderr with an `[agent]` prefix and does not produce an error.
+
 ### `--mode sequential`
 
 Sequential orchestration runs one full fresh-agent lifecycle per task:

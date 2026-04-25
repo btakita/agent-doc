@@ -30,6 +30,9 @@
 //! - `session_id` on the returned `AgentResponse` is taken from `thread.started.thread_id`.
 //! - `StreamingAgent::send_streaming` returns an iterator immediately; JSONL lines are parsed
 //!   as they arrive. `turn.completed` produces the final chunk.
+//! - Stderr is drained in a background thread. On non-zero exit, the iterator yields a final
+//!   `Err` with the exit status and stderr content. On zero exit with non-empty stderr, the
+//!   content is logged to the parent's stderr with an `[agent]` prefix.
 //!
 //! ## Evals
 //! - parse_thread_started: extracts thread_id as session_id
@@ -46,6 +49,7 @@
 use anyhow::Result;
 use std::io::BufRead;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 use super::streaming::{StreamChunk, StreamingAgent};
 use super::{Agent, AgentResponse};
@@ -314,40 +318,75 @@ impl StreamingAgent for Codex {
             .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
         let reader = std::io::BufReader::new(stdout);
 
+        let stderr_buf = Arc::new(Mutex::new(String::new()));
+        let stderr_handle = if let Some(stderr) = child.stderr.take() {
+            let buf = Arc::clone(&stderr_buf);
+            Some(std::thread::spawn(move || {
+                use std::io::Read;
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut content = String::new();
+                let _ = reader.read_to_string(&mut content);
+                if let Ok(mut guard) = buf.lock() {
+                    *guard = content;
+                }
+            }))
+        } else {
+            None
+        };
+
         Ok(Box::new(CodexStreamIterator {
             lines: reader.lines(),
-            _child: child,
+            child,
+            stderr_handle,
+            stderr_buf,
             session_id: None,
+            done: false,
         }))
     }
 }
 
 struct CodexStreamIterator {
     lines: std::io::Lines<std::io::BufReader<std::process::ChildStdout>>,
-    _child: std::process::Child,
+    child: std::process::Child,
+    stderr_handle: Option<std::thread::JoinHandle<()>>,
+    stderr_buf: Arc<Mutex<String>>,
     session_id: Option<String>,
+    done: bool,
+}
+
+impl CodexStreamIterator {
+    fn collect_stderr(&mut self) -> String {
+        if let Some(handle) = self.stderr_handle.take() {
+            let _ = handle.join();
+        }
+        self.stderr_buf
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
 }
 
 impl Iterator for CodexStreamIterator {
     type Item = Result<StreamChunk>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
         loop {
-            match self.lines.next()? {
-                Ok(line) => {
+            match self.lines.next() {
+                Some(Ok(line)) => {
                     if line.trim().is_empty() {
                         continue;
                     }
                     match parse_codex_line(&line) {
                         Ok(mut chunk) => {
-                            // Capture session_id from thread.started, propagate on final chunk
                             if chunk.session_id.is_some() && !chunk.is_final {
                                 self.session_id = chunk.session_id.take();
                             }
                             if chunk.is_final {
                                 chunk.session_id = self.session_id.take();
                             }
-                            // Skip empty non-final chunks (turn.started, command_execution, etc.)
                             if !chunk.is_final
                                 && chunk.text.is_empty()
                                 && chunk.thinking.is_none()
@@ -360,7 +399,32 @@ impl Iterator for CodexStreamIterator {
                         Err(e) => return Some(Err(e)),
                     }
                 }
-                Err(e) => return Some(Err(e.into())),
+                Some(Err(e)) => {
+                    self.done = true;
+                    return Some(Err(e.into()));
+                }
+                None => {
+                    self.done = true;
+                    let stderr = self.collect_stderr();
+                    let exit_status = self.child.wait().ok();
+                    if let Some(status) = exit_status {
+                        if !status.success() {
+                            let msg = if stderr.trim().is_empty() {
+                                format!("codex subprocess exited with {status}")
+                            } else {
+                                format!(
+                                    "codex subprocess exited with {status}: {}",
+                                    stderr.trim()
+                                )
+                            };
+                            return Some(Err(anyhow::anyhow!(msg)));
+                        }
+                    }
+                    if !stderr.trim().is_empty() {
+                        eprintln!("[agent] codex subprocess stderr: {}", stderr.trim());
+                    }
+                    return None;
+                }
             }
         }
     }
@@ -370,6 +434,66 @@ impl Iterator for CodexStreamIterator {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+
+    #[test]
+    fn streaming_stderr_surfaced_on_nonzero_exit() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec![
+                "-c".into(),
+                "echo >&2 'sandbox violation'; exit 1".into(),
+            ]),
+        );
+        let iter = codex
+            .send_streaming("ignored", None, false, None)
+            .unwrap();
+        let chunks: Vec<_> = iter.collect();
+        assert_eq!(chunks.len(), 1);
+        let err = chunks[0].as_ref().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("sandbox violation"), "got: {msg}");
+        assert!(msg.contains("codex subprocess exited with"), "got: {msg}");
+    }
+
+    #[test]
+    fn streaming_stderr_logged_on_zero_exit() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec![
+                "-c".into(),
+                r#"echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.completed","usage":{}}'; echo >&2 'deprecation warning'"#
+                    .into(),
+            ]),
+        );
+        let iter = codex
+            .send_streaming("ignored", None, false, None)
+            .unwrap();
+        let chunks: Vec<Result<StreamChunk>> = iter.collect();
+        assert!(
+            chunks.iter().all(|c| c.is_ok()),
+            "expected no errors, got: {chunks:?}"
+        );
+        let final_chunk = chunks.iter().find(|c| {
+            c.as_ref().map(|sc| sc.is_final).unwrap_or(false)
+        });
+        assert!(final_chunk.is_some(), "expected final chunk");
+    }
+
+    #[test]
+    fn streaming_stderr_empty_on_nonzero_exit() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec!["-c".into(), "exit 42".into()]),
+        );
+        let iter = codex
+            .send_streaming("ignored", None, false, None)
+            .unwrap();
+        let chunks: Vec<_> = iter.collect();
+        assert_eq!(chunks.len(), 1);
+        let err = chunks[0].as_ref().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("codex subprocess exited with"), "got: {msg}");
+    }
 
     fn command_args(cmd: &Command) -> Vec<String> {
         cmd.get_args()

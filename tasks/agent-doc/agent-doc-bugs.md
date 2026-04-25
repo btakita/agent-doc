@@ -190,8 +190,21 @@ That keeps recovery and the `finalize -> session-check` boundary deterministic.
 
 So yes: `agent-doc` should help steer this, but the first fix should be “normalize compound intent into explicit orchestration” rather than “silently infer nested fan-out from arbitrary prose.” I added a recommended pending item for that steering layer.
 
-do #cmps. update spec + tests. build + install for local testing. commit + push
-<!-- agent:boundary:fc52c218 -->
+❯ do #cmps. update spec + tests. build + install for local testing. commit + push
+### Re: compound orchestration steering — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `50d01ff` (`docs: steer compound orchestration tasks`).
+
+This stays in the skill/runbook layer rather than the CLI parser:
+- added bundled `runbooks/compound-task-steering.md` so compound lines like `do #ntoc. Add to today's news. commit + push` get normalized into explicit sequential or dependency-ordered steps before execution
+- wired that guidance into `SKILL.md`, `specs/07-commands.md`, and the bundled runbook install path in `src/skill.rs`
+- added regression coverage for bundled-runbook presence/content plus installed-skill output in `src/skill.rs` and `tests/test_cli.rs`
+
+Verification in `src/agent-doc`:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:1f613dac -->
 <!-- /agent:exchange -->
 
 <!--
@@ -202,7 +215,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 
 <!-- agent:pending patch=replace -->
 - [ ] [#opcc] Orchestrate fails when skill preflight already opened a cycle — orchestrator should reuse existing cycle for task 1. Plan: tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md
-- [ ] [#cmps] [recommended] Add secondary orchestration steering for compound task lines (for example, "do #ntoc. Add to todays news. commit + push") by normalizing follow-up clauses into explicit orchestrate/notify steps before execution; defer binary-owned prose grammar until an explicit metadata syntax exists.
+- [x] [#cmps] [recommended] Add secondary orchestration steering for compound task lines (for example, "do #ntoc. Add to todays news. commit + push") by normalizing follow-up clauses into explicit orchestrate/notify steps before execution; defer binary-owned prose grammar until an explicit metadata syntax exists.
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

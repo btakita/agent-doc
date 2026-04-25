@@ -7,7 +7,6 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
   "#spec-test-commit-push": update spec + tests. commit + push
-
 ---
 
 ## Status
@@ -78,7 +77,28 @@ Fixed the `--from-exchange` stale-task parsing regression.
 **Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
 
 **Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
-<!-- agent:boundary:c7b9ce36 -->
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+<!-- agent:boundary:d77cac80 -->
 <!-- /agent:exchange -->
 
 <!--

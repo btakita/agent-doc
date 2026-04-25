@@ -268,13 +268,39 @@ Fixed the root cause: `run_ordered_task_step` parsed frontmatter but never resol
 **Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
 
 Committed as `b700caf` on `20260422/codex-agent-backend` and pushed.
-<!-- agent:boundary:8676d518 -->
+
+❯ do #orch2. preset #spec-test-commit-push
+### Re: do #orch2 — surface subprocess stderr in streaming iterators — opus-4-6
+
+Fixed stderr silently discarded in orchestrate subprocess streaming. Both `StreamIterator` (Claude) and `CodexStreamIterator` (Codex) now drain stderr in a background thread and surface it when the subprocess exits non-zero.
+
+**Changes in `src/agent-doc`:**
+
+- **`src/agent/claude.rs`** — `send_streaming` spawns a thread to read stderr into `Arc<Mutex<String>>`. `StreamIterator` holds the buffer and a `done` flag. When stdout is exhausted, it joins the stderr thread, checks exit status, and yields `Err("claude subprocess exited with {status}: {stderr}")` on non-zero exit. On zero exit with non-empty stderr, logs to parent stderr with `[agent]` prefix.
+- **`src/agent/codex.rs`** — identical pattern for `CodexStreamIterator`: stderr drainer thread, exit status check, diagnostic error on failure, warning log on success.
+- **`specs/07-commands.md`** — documented subprocess stderr surfacing contract in the orchestrate section.
+
+**Tests:** 6 new tests — 3 per backend:
+- `streaming_stderr_surfaced_on_nonzero_exit`: bash subprocess writes to stderr and exits 1 → iterator yields Err with stderr content
+- `streaming_stderr_logged_on_zero_exit`: bash subprocess writes valid stream-json to stdout plus stderr warning, exits 0 → all chunks Ok, no error
+- `streaming_stderr_empty_on_nonzero_exit`: bash subprocess exits 42 with no stderr → iterator yields Err with exit status only
+
+All 1114 tests pass (1 pre-existing failure in `detect_install_env_treats_codex_thread_id_as_codex`).
+
+**Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
+
+Committed as `5162269` on `20260422/codex-agent-backend` and pushed.
+<!-- agent:boundary:1eecbc12 -->
 <!-- /agent:exchange -->
+
+<!--
+The response patchback top headers once again lost the ` (HEAD)` suffix. This is a reoccurring regression after other fixes are made. How can we prevent this issue from reoccurring?
+-->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#orch2] Stderr silently discarded in orchestrate subprocess streaming — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
+- [x] [#orch2] Stderr silently discarded in orchestrate subprocess streaming — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

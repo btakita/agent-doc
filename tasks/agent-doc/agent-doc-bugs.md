@@ -211,11 +211,8 @@ Implemented strip-after-check for `<!-- no-pending-capture -->` and `<!-- no-pen
 **Verification:** `cargo test` (all pass except pre-existing `detect_install_env_treats_codex_thread_id_as_codex`), `cargo build --release`, `cargo install --path .`.
 
 Committed as `b1a4cb9` on `20260422/codex-agent-backend` and pushed.
-<!-- agent:boundary:c813cb03 -->
-<!-- /agent:exchange -->
 
-<!--
-Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
+❯ Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
 ```
 synchronous orchestra
 preset #spec-test-commit-push
@@ -232,7 +229,19 @@ preset #spec-test-commit-push
     this execution context. So the main agent is now falling back to executing the three tasks (#cenv2, #cenv3, #cenv4)
      manually in sequence — same work, just driven by the skill layer instead of the binary's orchestration loop.
 ```
--->
+### Re: orchestrate empty response in claudescore.md — opus-4-6
+
+Two compounding issues in the orchestrate pipeline:
+
+**1. Frontmatter args not forwarded to subprocesses.** `run_ordered_task_step` in `orchestrate.rs` spawns fresh Claude/Codex subprocesses via `CliAgentRunner::send_fresh_streaming`, which calls `agent::resolve_streaming_for_file` → `build_backend_command` → `default_base_args()`. Those default args include `--permission-mode acceptEdits`, not the `--dangerously-skip-permissions` specified in the document's frontmatter `claude_args`. The subprocess either stalls on a permission prompt or fails with insufficient permissions.
+
+**2. Stderr silently discarded.** `send_streaming` in `agent/claude.rs` pipes stderr (`Stdio::piped()`) but never reads it. `StreamIterator` only reads stdout. When the subprocess fails, the error message is lost. `stream_step_response` in `orchestrate.rs` accumulates stdout chunks and bails at line 724 with "empty response from streaming orchestrate step" when no text arrives — but the actual error (permission denied, subprocess crash, etc.) was on stderr.
+
+The skill fallback (`manually in sequence`) is correct behavior — the skill layer detected the orchestrate failure and drove the tasks sequentially itself. The binary orchestrate path needs both fixes before it can replace the skill-driven fallback.
+
+**Also fixed: adjacent code fence dedup bug.** While investigating this, I discovered that `dedup_exchange_adjacent_lines` in `template.rs` was removing the second of two adjacent code fence lines (`` ``` ``), breaking `component::parse` for documents with back-to-back fenced code blocks (like the pasted orchestrate output). Fixed in `src/agent-doc` commit `ee3a1a9` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:aad2973e -->
+<!-- /agent:exchange -->
 
 ## Pending / Not Built
 

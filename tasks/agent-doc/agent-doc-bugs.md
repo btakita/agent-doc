@@ -290,11 +290,40 @@ All 1114 tests pass (1 pre-existing failure in `detect_install_env_treats_codex_
 **Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
 
 Committed as `5162269` on `20260422/codex-agent-backend` and pushed.
-<!-- agent:boundary:bd83b412 -->
+
+❯ The response patchback top headers once again lost the ` (HEAD)` suffix. This is a reoccurring regression after other fixes are made. How can we prevent this issue from reoccurring?
+### Re: preventing (HEAD) suffix regression — opus-4-6
+
+Traced the full `(HEAD)` lifecycle through write, commit, and post-commit cleanup:
+
+**Root cause:** `(HEAD)` is correctly added during `apply_patches_with_overrides()` (template.rs:769) but then stripped by post-commit cleanup in ALL paths:
+
+- **Disk path:** `reposition_boundary_in_snapshot()` (git.rs:1263, 1298) calls `reposition_boundary_to_end_clean()` on both snapshot and working tree
+- **IPC path:** `try_ipc_reposition_boundary()` → editor plugin receives reposition signal → FFI `agent_doc_reposition_boundary_to_end_with_id` (ffi.rs:574) → also calls `_clean_with_id` variant
+
+Both paths use the `_clean` variant that strips `(HEAD)`. The CLAUDE.md convention explicitly mandates this: *"boundary cleanup must collapse the snapshot / user-facing document state back to the same clean shape as the committed blob."*
+
+**Why it recurs:** Every new post-commit code path follows the convention and uses `_clean`. The convention itself is the regression factory — it doesn't distinguish between committed blob cleanup (correct) and working tree cleanup (too aggressive).
+
+**Prevention: split the convention into two rules:**
+
+1. **Committed blob + snapshot:** strip `(HEAD)` (correct — don't pollute git history or diff baselines)
+2. **Working tree:** preserve `(HEAD)` as the visual head-of-exchange indicator
+
+This is safe because preflight already classifies `(HEAD)` differences as `boundary_artifact` (not user edits), so `(HEAD)` in the working tree won't cause false-positive change detection.
+
+**Concrete changes needed:**
+
+1. **`git.rs` `reposition_boundary_in_snapshot()`** — keep `_clean` for snapshot (line 1263), switch working tree (line 1298) to a new `reposition_boundary_to_end_with_head()` that repositions boundary but preserves `(HEAD)`
+2. **`ffi.rs`** — add `agent_doc_reposition_boundary_to_end_with_head_with_id()` for the IPC path, so the editor plugin preserves `(HEAD)` when processing the post-commit reposition signal
+3. **Integration test** — full write → commit → assert working tree retains `(HEAD)` on new headings while committed blob does not. This is the missing test the codebase never had
+4. **Update CLAUDE.md convention** — boundary markers collapse post-commit; `(HEAD)` markers persist in working tree only
+
+The integration test is the key anti-regression tool. Every time a new post-commit path is added, the test catches it if it strips `(HEAD)` from the working tree.
+<!-- agent:boundary:ae037405 -->
 <!-- /agent:exchange -->
 
 <!--
-The response patchback top headers once again lost the ` (HEAD)` suffix. This is a reoccurring regression after other fixes are made. How can we prevent this issue from reoccurring?
 -->
 
 ## Pending / Not Built

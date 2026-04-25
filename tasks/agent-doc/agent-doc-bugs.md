@@ -467,7 +467,24 @@ The Rust-side FFI exports already exist (`agent_doc_reposition_boundary_to_end_p
 4. **#hfix8 — Build + verify**: bump JB plugin version, build both zips, install, verify `(HEAD)` appears in a live session with the IPC listener active
 
 Added all four items to pending.
-<!-- agent:boundary:8b2b9264 -->
+
+❯ do #hfix5. preset #spec-test-commit-push
+### Re: do #hfix5 — opus-4-6
+
+Implemented the JB plugin preserve_head IPC path. Five files changed across the submodule:
+
+**NativeLib.kt** — Added FFI declarations for `agent_doc_reposition_boundary_to_end_preserve_head` and `_with_id`, plus a `NativePatching.repositionBoundaryToEndPreserveHead()` wrapper that mirrors the existing clean variant.
+
+**PatchWatcher.kt** — The `"reposition"` IPC handler now extracts `preserve_head` from the JSON payload (default false) and passes it to `repositionBoundaryViaDocument`. When true, the method calls the preserve_head FFI variant instead of the clean one. Added `extractBooleanField` helper (internal for test access).
+
+**Editor SPEC.md** — Updated the reposition behavior section (lines 64-72) to document `preserve_head` as a first-class IPC field, with a variant table showing all four FFI functions (clean/preserve x with/without explicit ID).
+
+**Tests** — Added `extractBooleanField` parsing test (true/false/absent) and a `clean reposition strips HEAD markers` test verifying the existing Kotlin fallback behavior.
+
+**Build** — Bumped plugin to 0.2.76, built both unsigned + signed zips. All Rust tests pass (337 lib + 1120 integration; the one pre-existing `detect_install_env_treats_codex_thread_id_as_codex` failure is unrelated). JB Gradle tests pass (15 tasks).
+
+Committed as `b5d162d` in agent-doc, submodule pointer updated + pushed in parent.
+<!-- agent:boundary:14f527d1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -476,7 +493,7 @@ Added all four items to pending.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hfix5] JB plugin: read preserve_head from IPC reposition JSON, call agent_doc_reposition_boundary_to_end_preserve_head[_with_id] FFI when true (PatchWatcher.kt + NativeLib.kt)
+- [x] [#hfix5] JB plugin: read preserve_head from IPC reposition JSON, call agent_doc_reposition_boundary_to_end_preserve_head[_with_id] FFI when true (PatchWatcher.kt + NativeLib.kt)
 - [ ] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
 - [ ] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
 - [ ] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

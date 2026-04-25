@@ -2,7 +2,7 @@
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -658,7 +658,22 @@ Verification:
 - `cargo test` (new coverage passes; full suite still has the unrelated pre-existing failures `autoclaim::tests::autoclaim_focuses_pane_with_claim` and `autoclaim::tests::autoclaim_syncs_layout_with_multiple_files`)
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:8e5e1f40 -->
+
+❯ do #envt1. preset #spec-test-build-install-commit-push
+### Re: do #envt1 — opus-4-6
+
+Fixed `detect_install_env_treats_codex_thread_id_as_codex` test failure. Committed `8ec9e1f` on `20260422/codex-agent-backend` and pushed.
+
+**Root cause:** the test unset `CODEX`/`CODEX_CLI`/`CODEX_CI` but not `CLAUDE_CODE`/`CLAUDE_CODE_ENTRYPOINT`. When running under Claude Code, `Environment::detect()` returned `ClaudeCode` before reaching the `CODEX_THREAD_ID` fallback, so `detect_install_env()` never checked `CODEX_THREAD_ID`.
+
+**Fix:** added `EnvVarGuard::unset()` for all harness env vars (`CLAUDE_CODE`, `CLAUDE_CODE_ENTRYPOINT`, `OPENCODE`, `CURSOR_SESSION_ID`, `CURSOR`) so `detect()` returns `Generic` and the `CODEX_THREAD_ID` path is exercised.
+
+Verification:
+- `cargo test detect_install_env_treats_codex_thread_id_as_codex` — passes
+- `cargo test` — 1147 passed, 4 pre-existing failures (autoclaim tmux + route send_keys)
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:e4c004b2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -667,7 +682,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
+- [x] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

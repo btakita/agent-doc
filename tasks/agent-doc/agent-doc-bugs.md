@@ -320,7 +320,19 @@ Push:
 `#4qja` stayed open because the previous `do #4qja ...` cycle implemented and committed the work, but that closeout did not record the matching `--pending-done 4qja` mutation. So `exchange` shows the completed implementation while `agent:pending` was left in its earlier recommended `[ ]` state.
 
 This was a response-lifecycle bookkeeping miss, not evidence that the implementation was still incomplete. I’m marking `#4qja` done in this cycle so preflight can reap it on the next turn.
-<!-- agent:boundary:8a812673 -->
+
+❯ What can we do to ensure this "bookkeeping miss" does not happen?
+### Re: preventing pending bookkeeping misses — gpt-5
+
+The right fix is a layered one, but the most important layer is binary-owned closeout checking rather than asking the skill to remember.
+
+What I’d do:
+1. Add a `session-check` guard symmetric to the existing pending-capture guard. If the committed response clearly completes or answers a `do #id` task, and the document still has an open pending item with that same `#id`, and the cycle recorded no matching `--pending-done <id>`, warn by default and allow a strict fail-closed mode.
+2. Tighten the skill/runbook so that when the user says `do #id ...`, the agent treats pending-state resolution as part of the same closeout plan: before `finalize`, decide whether that id should get `--pending-done`, `--pending-gate`, or stay open for a concrete reason.
+3. Only after that, consider optional auto-resolution in the binary for the narrow case where the prompt is explicitly `do #id` and there is exactly one matching open pending item. I would not start here, because silent mutation is harder to reason about than a deterministic guard.
+
+So the practical answer is: add a new closeout guard for missing `--pending-done`, then keep the skill guidance as the belt-and-suspenders layer. The current `pending_capture_guard` already proves the pattern: `session-check` is the right place to catch “response says the work happened, but the pending mutation never got recorded.”
+<!-- agent:boundary:472e581a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -330,6 +342,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#pdng] [recommended] Add a closeout guard that warns or fails when a response completes an existing #id task but no matching --pending-done <id> mutation was recorded in the cycle
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

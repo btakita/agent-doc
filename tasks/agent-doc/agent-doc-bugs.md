@@ -250,7 +250,25 @@ Added both to pending with a dedicated plan file at `tasks/agent-doc/plan-orches
 - **#orch2** — Stderr silently discarded in subprocess streaming. `send_streaming` pipes stderr but never reads it, so subprocess failures surface as "empty response" with no diagnostics.
 
 The plan covers both fixes with verification steps.
-<!-- agent:boundary:4a96658e -->
+
+❯ do #orch1. preset #spec-test-commit-push
+### Re: do #orch1 — forward frontmatter args to orchestrate subprocesses — opus-4-6
+
+Fixed the root cause: `run_ordered_task_step` parsed frontmatter but never resolved `claude_args`/`codex_args` into the subprocess command, so subprocesses always got `--permission-mode acceptEdits` regardless of the document's settings.
+
+**Changes in `src/agent-doc`:**
+
+- **`agent/claude.rs`** — added `structural_base_args()` returning `["-p", "--output-format", "json"]` (structural minimum without permission settings)
+- **`agent/codex.rs`** — added `structural_base_args()` returning `["exec", "--json"]` (structural minimum without sandbox settings)
+- **`orchestrate.rs`** — added `resolve_orchestrate_agent_args()` using the same precedence chain as `start.rs` (`fm.agent_args > fm.<harness>_args > config.agent_args > config.<harness>_args`), and `build_effective_agent_config()` that merges structural base args with resolved frontmatter/config args. `run_ordered_task_step` now passes the effective config to all runner calls instead of `global_config.agents.get(agent_name)`.
+- **`specs/07-commands.md`** — documented the frontmatter args forwarding contract in the orchestrate section
+
+**Tests:** 8 new tests — 5 for `resolve_orchestrate_agent_args` (Claude frontmatter, Codex frontmatter, agent_args precedence, config fallthrough, none case) and 3 for `build_effective_agent_config` (Claude with args, Codex with args, none without args). All 1108 tests pass (1 pre-existing failure in `detect_install_env_treats_codex_thread_id_as_codex`).
+
+**Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
+
+Committed as `b700caf` on `20260422/codex-agent-backend` and pushed.
+<!-- agent:boundary:e3ca313f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -689,6 +689,15 @@ Both flags exit without executing any agent tasks.
 
 `--plan` is the recommended harness verification step before issuing a live `orchestrate` call. It applies to all three modes (`sequential`, `parallel`, `dag`).
 
+### Frontmatter args forwarding
+
+Orchestrate subprocesses inherit permission/sandbox settings from the document frontmatter using the same precedence chain as `agent-doc start`:
+
+- **Claude:** `fm.agent_args` > `fm.claude_args` > `config.agent_args` > `config.claude_args`
+- **Codex:** `fm.agent_args` > `fm.codex_args` > `config.agent_args` > `config.codex_args`
+
+When resolved args exist, the subprocess command is built from structural base args (Claude: `-p --output-format json`; Codex: `exec --json`) plus the resolved frontmatter/config args. When no args are resolved, default base args apply (Claude: `--permission-mode acceptEdits`; Codex: `-s workspace-write`).
+
 ### `--mode sequential`
 
 Sequential orchestration runs one full fresh-agent lifecycle per task:

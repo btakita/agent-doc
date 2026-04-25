@@ -65,6 +65,13 @@ pub(crate) fn default_base_args() -> Vec<String> {
     ]
 }
 
+/// Structural minimum args required for non-interactive JSON communication.
+/// Sandbox settings are intentionally excluded — callers supply those
+/// from frontmatter or config.
+pub(crate) fn structural_base_args() -> Vec<String> {
+    vec!["exec".to_string(), "--json".to_string()]
+}
+
 impl Codex {
     pub fn new(command: Option<String>, base_args: Option<Vec<String>>) -> Self {
         Self {

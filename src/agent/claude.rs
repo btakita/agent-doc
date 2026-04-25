@@ -53,6 +53,17 @@ pub(crate) fn default_base_args() -> Vec<String> {
     ]
 }
 
+/// Structural minimum args required for non-interactive JSON communication.
+/// Permission settings are intentionally excluded — callers supply those
+/// from frontmatter or config.
+pub(crate) fn structural_base_args() -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+    ]
+}
+
 fn build_streaming_args(
     base_args: &[String],
     session_id: Option<&str>,

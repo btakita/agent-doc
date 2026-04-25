@@ -539,6 +539,64 @@ fn run_ordered_tasks_internal(
     Ok(())
 }
 
+/// Resolve frontmatter/config harness args using the same precedence as `start.rs`:
+/// `fm.agent_args > fm.<harness>_args > config.agent_args > config.<harness>_args`
+fn resolve_orchestrate_agent_args(
+    fm: &frontmatter::Frontmatter,
+    agent_name: &str,
+    global_config: &Config,
+) -> Option<String> {
+    match agent_name {
+        "claude" => fm
+            .agent_args
+            .clone()
+            .or_else(|| fm.claude_args.clone())
+            .or_else(|| global_config.agent_args.clone())
+            .or_else(|| global_config.claude_args.clone()),
+        "codex" => fm
+            .agent_args
+            .clone()
+            .or_else(|| fm.codex_args.clone())
+            .or_else(|| global_config.agent_args.clone())
+            .or_else(|| global_config.codex_args.clone()),
+        _ => fm
+            .agent_args
+            .clone()
+            .or_else(|| global_config.agent_args.clone()),
+    }
+}
+
+/// Build an effective `AgentConfig` that merges structural base args with
+/// resolved frontmatter/config harness args. Returns `None` when no
+/// frontmatter override exists and no global agent config is set (callers
+/// fall through to `default_base_args`).
+fn build_effective_agent_config(
+    agent_name: &str,
+    resolved_args: Option<&str>,
+    global_config: &Config,
+) -> Option<AgentConfig> {
+    let global_agent_config = global_config.agents.get(agent_name);
+    if let Some(args_str) = resolved_args {
+        let mut args = match agent_name {
+            "claude" => agent::claude::structural_base_args(),
+            "codex" => agent::codex::structural_base_args(),
+            _ => Vec::new(),
+        };
+        args.extend(args_str.split_whitespace().map(String::from));
+        Some(AgentConfig {
+            command: global_agent_config.map_or_else(
+                || agent_name.to_string(),
+                |c| c.command.clone(),
+            ),
+            args,
+            result_path: global_agent_config.and_then(|c| c.result_path.clone()),
+            session_path: global_agent_config.and_then(|c| c.session_path.clone()),
+        })
+    } else {
+        None
+    }
+}
+
 fn run_ordered_task_step(
     file: &Path,
     task: &str,
@@ -565,13 +623,21 @@ fn run_ordered_task_step(
     let model = model_override.or(fm.model.as_deref());
     let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
     let expanded_env = expand_frontmatter_env(&fm);
+
+    let resolved_harness_args = resolve_orchestrate_agent_args(&fm, agent_name, global_config);
+    let effective_config =
+        build_effective_agent_config(agent_name, resolved_harness_args.as_deref(), global_config);
+    let agent_config = effective_config
+        .as_ref()
+        .or_else(|| global_config.agents.get(agent_name));
+
     let (response, finalize_response) = if mode.is_crdt() {
         if let Some(seed) = exchange_stream_seed(&doc)? {
             if let Some(chunks) = agent_runner.send_fresh_streaming(
                 file,
                 &prompt,
                 agent_name,
-                global_config.agents.get(agent_name),
+                agent_config,
                 expanded_env.clone(),
                 model,
             )? {
@@ -582,7 +648,7 @@ fn run_ordered_task_step(
                     file,
                     &prompt,
                     agent_name,
-                    global_config.agents.get(agent_name),
+                    agent_config,
                     expanded_env,
                     model,
                 )?;
@@ -594,7 +660,7 @@ fn run_ordered_task_step(
                 file,
                 &prompt,
                 agent_name,
-                global_config.agents.get(agent_name),
+                agent_config,
                 expanded_env,
                 model,
             )?;
@@ -606,7 +672,7 @@ fn run_ordered_task_step(
             file,
             &prompt,
             agent_name,
-            global_config.agents.get(agent_name),
+            agent_config,
             expanded_env,
             model,
         )?;
@@ -2220,5 +2286,83 @@ mod tests {
         .unwrap();
 
         assert!(parallel_runner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_claude_frontmatter() {
+        let mut fm = frontmatter::Frontmatter::default();
+        fm.claude_args = Some("--dangerously-skip-permissions".into());
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_codex_frontmatter() {
+        let mut fm = frontmatter::Frontmatter::default();
+        fm.codex_args = Some("-s danger-full-access".into());
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "codex", &config);
+        assert_eq!(result.as_deref(), Some("-s danger-full-access"));
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_agent_args_beats_harness_specific() {
+        let mut fm = frontmatter::Frontmatter::default();
+        fm.agent_args = Some("--model sonnet".into());
+        fm.claude_args = Some("--dangerously-skip-permissions".into());
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--model sonnet"));
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_falls_through_to_config() {
+        let fm = frontmatter::Frontmatter::default();
+        let mut config = Config::default();
+        config.claude_args = Some("--from-config".into());
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--from-config"));
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_none_when_no_args() {
+        let fm = frontmatter::Frontmatter::default();
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn build_effective_config_claude_with_frontmatter_args() {
+        let config = Config::default();
+        let effective = build_effective_agent_config(
+            "claude",
+            Some("--dangerously-skip-permissions"),
+            &config,
+        );
+        let effective = effective.unwrap();
+        assert_eq!(effective.command, "claude");
+        assert_eq!(
+            effective.args,
+            vec!["-p", "--output-format", "json", "--dangerously-skip-permissions"]
+        );
+    }
+
+    #[test]
+    fn build_effective_config_codex_with_frontmatter_args() {
+        let config = Config::default();
+        let effective =
+            build_effective_agent_config("codex", Some("-s danger-full-access"), &config);
+        let effective = effective.unwrap();
+        assert_eq!(effective.command, "codex");
+        assert_eq!(effective.args, vec!["exec", "--json", "-s", "danger-full-access"]);
+    }
+
+    #[test]
+    fn build_effective_config_none_without_frontmatter_args() {
+        let config = Config::default();
+        let effective = build_effective_agent_config("claude", None, &config);
+        assert!(effective.is_none());
     }
 }

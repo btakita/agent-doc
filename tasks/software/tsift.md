@@ -6,6 +6,7 @@ agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
 
@@ -1508,13 +1509,41 @@ tsift explain main --json   # { symbol, definitions, callers, callees, community
 
 Closing #gpth (and #cdet already completed).
 Session is clean. `#gpth` is done — `tsift path` + `tsift explain` shipped at `btakita/tsift@6ad5983`, 153 tests passing, #gpth and #cdet marked done in pending.
-<!-- agent:boundary:16cd5ad1 -->
+
+❯ do #nkec. preset spec-test-build-install-commit-push
+### Re: do #nkec — skill drift detection — opus-4-6
+
+Implemented `tsift audit` for Claude Code skill health and drift detection.
+
+**New files:**
+- `src/audit.rs` — core scan + manifest comparison logic with 12 unit tests
+
+**Wired into CLI:**
+- `Audit` subcommand with `--skills-dir` (default `~/.claude/skills`), `--manifest`, `--json`
+- `cmd_audit()` handler with tilde expansion, human-readable + JSON output
+- Fixed pre-existing clippy `collapsible_if` warnings in `walk.rs`
+
+**Scan checks per skill:**
+- Directory exists and is readable
+- `SKILL.md` present, non-empty, has `description` in YAML frontmatter
+- Symlink target resolves (detects broken symlinks)
+
+**Manifest comparison** (`--manifest <file>`): cross-references installed vs expected skill list. Reports `missing` (expected but not installed) and `orphan` (installed but not in manifest).
+
+**Verification:**
+- 166 tests pass (was 153), clippy clean
+- Live smoke test against `~/.claude/skills/` — correctly identified 3 healthy skills (agent-doc symlink, graphify, tsift)
+- JSON output validated
+- Release binary built and installed
+
+**Committed:** `btakita/tsift@a4235b7` — pushed to origin.
+<!-- agent:boundary:bdca0d32 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
+- [x] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill

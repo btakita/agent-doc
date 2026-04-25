@@ -1012,7 +1012,31 @@ Tests: 12/12 reposition tests pass; 1120 Rust integration tests pass (1 pre-exis
 **#cenv2** — already completed (marked `[x]` in `src/session-share/tasks/claudescore.md`). No work needed.
 
 <!-- /patch:exchange -->
-<!-- agent:boundary:150045dc -->
+
+### Re: synchronous orchestra do #hfix6, #hfix7, #hfix8 — opus-4-6
+
+Binary orchestrate failed again (stale-task parsing regression — picked up `#cenv2-4` instead of `#hfix6-8`, then wrote 11K lines of wrong content). Reverted the damage (`1642aad` removes the bad commit), fell back to skill-driven verification.
+
+All three tasks are already implemented, tested, and pushed on `20260422/codex-agent-backend`:
+
+**#hfix6 — VS Code preserve_head IPC** (commit `8202f80`)
+- `extension.ts` extracts `preserve_head` from IPC JSON, passes to reposition
+- `native.ts` binds all 4 preserve_head FFI variants
+- `reposition.ts` adds TypeScript fallback `repositionBoundaryToEndPreserveHead()`
+- 3 tests in `reposition.test.ts` (preserve annotations, reuse ID, clean-vs-preserve comparison)
+- 18/18 VS Code tests pass
+
+**#hfix7 — Editor SPEC.md updated** (commit `b5d162d`, part of #hfix5)
+- Lines 64-88 document `preserve_head` field, both clean and preserve behaviors, all 4 FFI variant families in a table
+- Response heading visibility rules documented
+
+**#hfix8 — JB plugin 0.2.76 built** (commit `b5d162d`, part of #hfix5)
+- `gradle.properties` bumped to 0.2.76
+- Both zips built: `agent-doc-jetbrains-0.2.76.zip` (211 KB) / `agent-doc-jetbrains-0.2.76-signed.zip` (214 KB)
+- Gated pending user manual verification: install from disk and confirm `(HEAD)` appears after patchback with IPC listener active
+
+**Stale-task parsing regression:** The #orch3 fix (`45bce9b`, `❯ ` prefix stripping in `parse_list_item`) didn't prevent this recurrence. The orchestrate parser is still falling through to older exchange blocks. Root cause is likely that `--from-exchange` scans the full exchange for `- do` / `- ❯ - do` patterns and `.last()` picks the wrong block when multiple orchestra directives exist in the compacted+appended exchange history. This needs a separate fix — the parser should scope to the latest user-authored (non-`❯`-prefixed) orchestra block, not scan the entire exchange.
+<!-- agent:boundary:7d064b83 -->
 <!-- /agent:exchange -->
 
 <!--

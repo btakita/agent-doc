@@ -81,6 +81,7 @@ mod parallel;
 mod patch;
 mod pending;
 mod pending_cmd;
+mod plan;
 mod plugin;
 mod preflight;
 mod project_config;
@@ -677,6 +678,11 @@ enum Commands {
     },
     /// Re-establish claims after context compaction (SessionStart hook)
     Autoclaim,
+    /// Derive a structured post-preflight planning/dispatch record for a document
+    Plan {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
     /// Generate content-source annotation sidecar for a document
@@ -1403,6 +1409,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Preflight { file } => preflight::run(&file),
+        Commands::Plan { file } => plan::run(&file),
         Commands::SessionCheck { file } => session_check::run(&file),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::Compact {

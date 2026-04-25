@@ -623,6 +623,24 @@ fn test_skill_md_contains_required_steps() {
         "SKILL.md should point agents to the compound-task steering runbook"
     );
     assert!(
+        content.contains("orchestration_request"),
+        "SKILL.md should treat binary-owned orchestration requests as first-class preflight output"
+    );
+    assert!(
+        content.contains(
+            "agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange"
+        ),
+        "SKILL.md should require dispatching preflight orchestration requests through agent-doc orchestrate"
+    );
+    assert!(
+        content.contains("agent-doc plan <FILE>"),
+        "SKILL.md should require the binary-owned planning phase after preflight"
+    );
+    assert!(
+        content.contains("runbooks/planning-dispatch.md"),
+        "SKILL.md should point agents to the planning/dispatch runbook"
+    );
+    assert!(
         content.contains("create the plan file first"),
         "SKILL.md should require creating plan files before adding plan-backed pending items"
     );
@@ -635,6 +653,12 @@ fn test_skill_md_contains_required_steps() {
             .join(".claude/skills/agent-doc/runbooks/compound-task-steering.md")
             .exists(),
         "skill install should write the compound-task steering runbook"
+    );
+    assert!(
+        tmp.path()
+            .join(".claude/skills/agent-doc/runbooks/planning-dispatch.md")
+            .exists(),
+        "skill install should write the planning-dispatch runbook"
     );
     let pending_ops = std::fs::read_to_string(
         tmp.path()

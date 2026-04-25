@@ -770,6 +770,27 @@ pub struct ParsedSlashCommands {
     pub builtin_commands: Vec<String>,
 }
 
+/// Structured natural-language orchestration request detected from the diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OrchestrationRequest {
+    /// Resolved orchestration mode the skill should dispatch.
+    pub mode: OrchestrationRequestMode,
+    /// The triggering user-authored line or synthesized block summary.
+    pub trigger_text: String,
+    /// Number of task list items detected in the same added block.
+    pub task_count: usize,
+}
+
+/// Supported orchestration modes surfaced through preflight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestrationRequestMode {
+    Sequential,
+    Parallel,
+    Dag,
+}
+
 /// Like `parse_slash_commands` but classifies results into skill vs built-in commands.
 pub fn parse_slash_commands_classified(diff: &str) -> ParsedSlashCommands {
     let commands = parse_slash_commands(diff);
@@ -886,6 +907,46 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
     }
 
     commands
+}
+
+/// Detect a natural-language orchestration request from user-added diff lines.
+///
+/// This is the binary-owned counterpart to the skill-level command-synonym
+/// guidance: if the user adds a batch-oriented preamble plus a task list, the
+/// caller can route through `agent-doc orchestrate --from-exchange` instead of
+/// relying on the agent to remember that prose convention.
+pub fn detect_orchestration_request(diff: &str) -> Option<OrchestrationRequest> {
+    for block in collect_added_text_blocks(diff) {
+        let task_count = block
+            .iter()
+            .filter(|line| parse_markdown_list_item(line).is_some())
+            .count();
+        if task_count < 2 {
+            continue;
+        }
+
+        let trigger_lines: Vec<&str> = block
+            .iter()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && parse_markdown_list_item(line).is_none())
+            .collect();
+        let trigger_text = if trigger_lines.is_empty() {
+            block.join(" ")
+        } else {
+            trigger_lines.join(" ")
+        };
+        let Some(mode) = detect_orchestration_mode(&trigger_text) else {
+            continue;
+        };
+
+        return Some(OrchestrationRequest {
+            mode,
+            trigger_text,
+            task_count,
+        });
+    }
+
+    None
 }
 
 /// Build a unified diff directly from two content strings after comment stripping.
@@ -1095,6 +1156,148 @@ fn normalize_imperative_candidate(line: &str) -> Option<String> {
     } else {
         Some(normalized.to_string())
     }
+}
+
+fn collect_added_text_blocks(diff: &str) -> Vec<Vec<String>> {
+    let mut blocks = Vec::new();
+    let mut current = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            if !current.is_empty() {
+                blocks.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+        let trimmed = content.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+
+        if !line.starts_with('+') || line.starts_with("+++") {
+            if !current.is_empty() {
+                blocks.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+
+        if content.starts_with('>') {
+            continue;
+        }
+
+        current.push(content.trim_end().to_string());
+    }
+
+    if !current.is_empty() {
+        blocks.push(current);
+    }
+
+    blocks
+}
+
+fn parse_markdown_list_item(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    for prefix in ["- ", "* ", "+ "] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            let rest = rest.trim();
+            return (!rest.is_empty()).then_some(rest);
+        }
+    }
+
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 {
+        let rest = &trimmed[digits..];
+        if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            let rest = rest.trim();
+            return (!rest.is_empty()).then_some(rest);
+        }
+    }
+
+    None
+}
+
+fn detect_orchestration_mode(text: &str) -> Option<OrchestrationRequestMode> {
+    let lower = text.to_ascii_lowercase();
+
+    if contains_any(
+        &lower,
+        &[
+            "dependency graph",
+            "depends on",
+            "blocked by",
+            "prerequisite",
+            "then unblock",
+        ],
+    ) || lower.contains("after #")
+    {
+        return Some(OrchestrationRequestMode::Dag);
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "fan out",
+            "concurrent",
+            "at the same time",
+            "in parallel",
+            "simultaneously",
+            "parallelize",
+        ],
+    ) {
+        return Some(OrchestrationRequestMode::Parallel);
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "orchestra",
+            "orcestra",
+            "orchestrate",
+            "chain",
+            "in order",
+            "one by one",
+            "sequential",
+            "sequentially",
+            "synchronous",
+            "run these sequentially",
+        ],
+    ) {
+        return Some(OrchestrationRequestMode::Sequential);
+    }
+
+    None
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
 }
 
 fn strip_pending_checkbox_prefix(line: &str) -> &str {
@@ -2689,6 +2892,44 @@ Please fix the bug.\n\
         assert_eq!(
             cmds,
             vec!["/mcp:reload", "/agent-doc file.md", "/some_thing", "/v2"]
+        );
+    }
+
+    #[test]
+    fn detect_orchestration_request_for_synchronous_task_list() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,7 @@\n ctx\n\
++Today is 2026-04-25. Synchronous orcestra.\n\
++- do #ss01. Add tests. Run benchmarks.\n\
++- do #ss02. Add tests. Run benchmarks.\n\
++- do #ss03. Add tests. Run benchmarks.\n";
+        let request = detect_orchestration_request(diff).expect("expected orchestration request");
+        assert_eq!(request.mode, OrchestrationRequestMode::Sequential);
+        assert_eq!(request.task_count, 3);
+        assert_eq!(
+            request.trigger_text,
+            "Today is 2026-04-25. Synchronous orcestra."
+        );
+    }
+
+    #[test]
+    fn detect_orchestration_request_for_parallel_batch() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n\
++Fan out these benchmark tasks.\n\
++- do #a1\n\
++- do #a2\n";
+        let request = detect_orchestration_request(diff).expect("expected orchestration request");
+        assert_eq!(request.mode, OrchestrationRequestMode::Parallel);
+        assert_eq!(request.task_count, 2);
+    }
+
+    #[test]
+    fn detect_orchestration_request_requires_batch_shape() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n\
++Run these in order.\n\
++- do #a1\n";
+        assert!(
+            detect_orchestration_request(diff).is_none(),
+            "single-item lists should stay as ordinary work, not forced orchestration"
         );
     }
 

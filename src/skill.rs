@@ -106,6 +106,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/compound-task-steering.md"),
     ),
     (
+        "planning-dispatch.md",
+        include_str!("../runbooks/planning-dispatch.md"),
+    ),
+    (
         "streaming-checkpoints.md",
         include_str!("../runbooks/streaming-checkpoints.md"),
     ),
@@ -901,6 +905,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("runbooks/commit.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/command-synonyms.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/compound-task-steering.md"));
+        assert!(SKILL_TEMPLATE.contains("runbooks/planning-dispatch.md"));
     }
 
     #[test]
@@ -1047,6 +1052,12 @@ mod tests {
                 .any(|(name, _)| *name == "compound-task-steering.md"),
             "compound-task-steering.md should be in BUNDLED_RUNBOOKS"
         );
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "planning-dispatch.md"),
+            "planning-dispatch.md should be in BUNDLED_RUNBOOKS"
+        );
     }
 
     #[test]
@@ -1162,6 +1173,22 @@ mod tests {
         assert!(content.contains("Do not invent binary-owned prose grammar"));
         assert!(content.contains("commit + push"));
         assert!(content.contains("Preserve it. Do not rewrite explicit orchestration"));
+    }
+
+    #[test]
+    fn planning_dispatch_runbook_content_covers_plan_contract() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "planning-dispatch.md")
+            .expect("planning-dispatch.md not found");
+        assert!(content.contains("agent-doc plan <FILE>"));
+        assert!(content.contains("prompt_targets"));
+        assert!(content.contains("repo_actions"));
+        assert!(content.contains("required_commands"));
+        assert!(content.contains("pending_mutations"));
+        assert!(content.contains("handoff"));
+        assert!(content.contains("blockers"));
+        assert!(content.contains("handoff=orchestrate"));
     }
 
     #[test]

@@ -45,7 +45,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
-**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
+**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Print any `claims` to the console as a record.
@@ -61,20 +61,35 @@ If `slash_commands` or `builtin_commands` is non-empty, handle each **before** r
 
 Trust the preflight output — do not re-validate code fences or blockquotes.
 
+**Binary-owned orchestration request:** if `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before composing any manual response. Treat this as a blocking dispatch requirement, not advisory prose. If the orchestrate run completes the requested batch cleanly, stop instead of manually simulating the same work in a second response.
+
 ### 0c. Model tier gate
 
 Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. `required_tier` is the hard gate, `suggested_tier` is advisory, and `model_switch_tier` is the resolved tier for the user's inline `/model` request. Full gate behavior: [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
 
-**Orchestration intent:** if the user asks to coordinate multiple document tasks in natural language (for example `run these in order`, `chain these`, `fan out these tasks`, `after #a do #b`), route through `agent-doc orchestrate` instead of manually simulating the batch. Use [runbooks/command-synonyms.md](runbooks/command-synonyms.md) to map the phrasing to `--mode sequential|parallel|dag`.
+**Orchestration intent:** if the user asks to coordinate multiple document tasks in natural language (for example `run these in order`, `chain these`, `fan out these tasks`, `after #a do #b`), route through `agent-doc orchestrate` instead of manually simulating the batch. Prefer the binary-owned `orchestration_request` field from preflight when present; otherwise use [runbooks/command-synonyms.md](runbooks/command-synonyms.md) to map the phrasing to `--mode sequential|parallel|dag`.
 
 **Compound task steering:** if one directive mixes the primary task with clear follow-up clauses (for example `do #ntoc. Add to today's news. commit + push`), normalize it into explicit sequential or dependency-ordered steps before execution instead of treating the entire prose line as one opaque task. Use [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) for the normalization rules. Keep that steering in the skill/runbook layer unless the user already supplied explicit orchestration metadata.
+
+### 0d. Planning / dispatch
+
+After `preflight`, run `agent-doc plan <FILE>` and use the emitted planning record as the execution contract for the cycle. The planning record is binary-owned and includes:
+
+- `prompt_targets` — ordered prompts that still require a response
+- `repo_actions` — concrete repo work to finish before persistence
+- `required_commands` — binary/harness commands the cycle must run
+- `pending_mutations` — pending items that must be resolved this cycle
+- `handoff` — whether to continue in place or hand off to `orchestrate`, `compact`, `claim`, or another binary surface
+- `blockers` — concrete reasons to fail closed instead of improvising
+
+If `blockers` is non-empty, surface the blocker and stop rather than freelancing around it. If `handoff` is `orchestrate`, execute the corresponding `agent-doc orchestrate ...` command from `required_commands` before composing any manual response. Full contract: [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md).
 
 ### 1. Respond
 
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, prompt-bearing inline edits (blockquotes, comments, edits to previous responses), and structural changes.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; the turn is incomplete until each unresolved prompt in that tail is answered or explicitly grouped into one response. Concretely, each `prompt_target` must be answered or grouped, while `content_edit` items are user corrections to incorporate and `recovery_artifact` / `boundary_artifact` items are normalization signals instead of ordinary conversation.
-- If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
+- Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 
@@ -141,6 +156,7 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 - [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
 - [runbooks/command-synonyms.md](runbooks/command-synonyms.md) — natural-language dispatch to `orchestrate --mode ...`
 - [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) — normalize compound directives into explicit follow-up steps
+- [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md) — post-preflight planning record and handoff contract
 - [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
 - [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
 - [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions

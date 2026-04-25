@@ -636,6 +636,21 @@ Detects consecutive `### Re:` blocks with identical content (after stripping bou
 
 After removing duplicates and updating the snapshot, `dedupe` also deletes the corresponding stale patch file at `.agent-doc/patches/<hash>.json` (if present). Without this cleanup, `processPendingPatches()` on plugin restart would re-apply the removed content, creating another duplicate.
 
+## plan
+
+`agent-doc plan <FILE>` — derive a structured post-preflight planning/dispatch record for the current document.
+
+The command computes the current diff against the saved snapshot and emits JSON with:
+
+- `prompt_targets`
+- `repo_actions`
+- `required_commands`
+- `pending_mutations`
+- `handoff`
+- `blockers`
+
+The intent is to give the skill/orchestrator an explicit, binary-owned execution contract before repo work starts. The first implementation is deterministic and reuses the same diff classifiers that back preflight (`prompt_bearing_changes`, imperative directives, slash-command parsing, orchestration detection) rather than hiding planning in skill prose.
+
 ## orchestrate
 
 `agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL]`

@@ -9,6 +9,12 @@ The core workflow (preflight, respond, persist the response) is identical across
 - `do #qj5w now`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar document edits authorize the same underlying repo work they would authorize in chat.
 - The agent should either perform that work before `finalize` / `write --commit`, or stop on a concrete blocker. Do **not** emit status-only progress prose while doing neither.
 
+## Post-Preflight Planning
+
+- After `agent-doc preflight <FILE>`, the next dispatch step should consume a binary-owned planning record rather than improvise from raw prose alone.
+- Run `agent-doc plan <FILE>` and execute the cycle from its `prompt_targets`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers`.
+- If the plan says `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before attempting a manual response.
+
 ## Manual Repair Default
 
 - For both **Claude Code** and **Codex**, the default documented manual-repair path is `agent-doc write --commit <FILE>` once the user prompt is already present in the document.

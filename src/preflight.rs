@@ -154,6 +154,12 @@ pub struct PreflightOutput {
     /// These affect Claude Code session state and cannot be invoked via the Skill tool.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_commands: Vec<String>,
+    /// Natural-language orchestration request detected from the user diff.
+    ///
+    /// When present, the skill should dispatch `agent-doc orchestrate <FILE>
+    /// --mode <mode> --from-exchange` before attempting any manual response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration_request: Option<crate::diff::OrchestrationRequest>,
     /// Resolved model tier the skill should use to gate this cycle.
     /// Computed from (in precedence order): inline `/model` command,
     /// `<!-- agent:model -->` component, `agent_doc_model_tier` frontmatter,
@@ -508,8 +514,10 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     if let Some(after) = crate::cycle_state::load(file)?
         && after.is_open()
     {
-        let marker_note = if matches!(after.phase, crate::cycle_state::CyclePhase::PreflightStarted)
-        {
+        let marker_note = if matches!(
+            after.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        ) {
             crate::session_check::detect_bypassed_response_write(file)?
                 .map(|marker| format!("; found likely direct response patchback: {}", marker))
                 .unwrap_or_default()
@@ -925,6 +933,9 @@ pub fn run(file: &Path) -> Result<()> {
         });
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
+    let orchestration_request = diff_result
+        .as_ref()
+        .and_then(|d| diff::detect_orchestration_request(d));
 
     // Step 4e: Resolve model tier sources and compose effective_tier.
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
@@ -998,6 +1009,7 @@ pub fn run(file: &Path) -> Result<()> {
         inline_annotations,
         slash_commands,
         builtin_commands,
+        orchestration_request,
         effective_tier: Some(effective_tier_value.to_string()),
         required_tier: required_tier_value.map(|t| t.to_string()),
         suggested_tier: Some(suggested.to_string()),
@@ -1639,13 +1651,17 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         crate::git::commit(&doc).unwrap();
-        let prior = crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let prior =
+            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted);
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
         assert_ne!(
             state.cycle_id, prior.cycle_id,
             "rerun should close the old preflight and open a fresh one"
@@ -1791,6 +1807,42 @@ mod tests {
         assert!(
             parsed.get("document").is_none(),
             "document field must be absent"
+        );
+    }
+
+    #[test]
+    fn preflight_output_includes_orchestration_request() {
+        let output = PreflightOutput {
+            no_changes: false,
+            orchestration_request: Some(crate::diff::OrchestrationRequest {
+                mode: crate::diff::OrchestrationRequestMode::Sequential,
+                trigger_text: "Synchronous orcestra.".to_string(),
+                task_count: 5,
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["orchestration_request"]["mode"], "sequential");
+        assert_eq!(parsed["orchestration_request"]["task_count"], 5);
+        assert_eq!(
+            parsed["orchestration_request"]["trigger_text"],
+            "Synchronous orcestra."
+        );
+    }
+
+    #[test]
+    fn preflight_output_omits_orchestration_request_when_absent() {
+        let output = PreflightOutput {
+            no_changes: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("orchestration_request").is_none(),
+            "orchestration_request should be omitted when absent"
         );
     }
 

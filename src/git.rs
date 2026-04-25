@@ -1295,7 +1295,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let repositioned = crate::template::reposition_boundary_to_end_clean(&working);
+        let repositioned = crate::template::reposition_boundary_to_end_preserve_head(&working);
         if repositioned != working {
             match crate::write::atomic_write_pub(file, &repositioned) {
                 Ok(()) => {
@@ -2478,16 +2478,17 @@ mod tests {
             "committed blob should still contain the older heading; got:\n{blob}"
         );
 
-        // Post-commit cleanup now collapses the working tree back to the same
-        // clean shape as the committed blob.
+        // Post-commit cleanup preserves (HEAD) in the working tree so the user
+        // sees which headings are new, while committed blob + snapshot stay clean.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("### Re: newer\n"),
-            "working tree should keep the clean heading; got:\n{working}"
+            working.contains("### Re: newer (HEAD)"),
+            "working tree must preserve (HEAD) on newest heading; got:\n{working}"
         );
-        assert!(
-            working.matches("(HEAD)").count() == 0,
-            "working tree should not retain transient head markers; got:\n{working}"
+        assert_eq!(
+            working.matches("(HEAD)").count(),
+            1,
+            "working tree should retain exactly one (HEAD) marker; got:\n{working}"
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
@@ -4414,13 +4415,13 @@ mod tests {
             "working tree should be repositioned when only patches dir exists"
         );
         assert!(
-            working.contains("### Re: test — opus-4-6\n"),
-            "working tree should be normalized to the clean heading after boundary rewrite"
+            working.contains("### Re: test — opus-4-6 (HEAD)"),
+            "working tree must preserve (HEAD) annotations; got:\n{working}"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
-            0,
-            "working tree should not retain transient head markers after boundary rewrite"
+            1,
+            "working tree should retain exactly one (HEAD) marker; got:\n{working}"
         );
     }
 

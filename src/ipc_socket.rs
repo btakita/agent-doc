@@ -135,13 +135,26 @@ pub fn send_patch(
 }
 
 /// Send a reposition boundary message.
-pub fn send_reposition(project_root: &Path, file: &str, boundary_id: Option<&str>) -> Result<bool> {
+///
+/// When `preserve_head` is true, the plugin should use
+/// `agent_doc_reposition_boundary_to_end_preserve_head_with_id` (FFI) so
+/// `(HEAD)` annotations remain in the editor buffer. The committed blob and
+/// snapshot are already clean; only the working-tree / editor buffer keeps them.
+pub fn send_reposition(
+    project_root: &Path,
+    file: &str,
+    boundary_id: Option<&str>,
+    preserve_head: bool,
+) -> Result<bool> {
     let mut message = serde_json::json!({
         "type": "reposition",
         "file": file,
     });
     if let Some(boundary_id) = boundary_id {
         message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+    }
+    if preserve_head {
+        message["preserve_head"] = serde_json::Value::Bool(true);
     }
 
     send_message(project_root, &message).map(|_| true)

@@ -833,6 +833,34 @@ fn reposition_boundary_to_end_clean_internal(
     result
 }
 
+/// Reposition boundary to end of exchange WITHOUT stripping `(HEAD)` markers.
+///
+/// Used for post-commit working-tree cleanup where `(HEAD)` annotations should
+/// remain visible to the user while the committed blob stays clean.
+pub fn reposition_boundary_to_end_preserve_head(doc: &str) -> String {
+    reposition_boundary_to_end_preserve_head_with_id(doc, None)
+}
+
+/// Reposition boundary using an explicit ID, preserving `(HEAD)` markers.
+pub fn reposition_boundary_to_end_preserve_head_with_id(
+    doc: &str,
+    boundary_id: Option<&str>,
+) -> String {
+    let mut result = remove_all_boundaries(doc);
+    if let Ok(components) = component::parse(&result)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        let id = boundary_id
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(crate::new_boundary_id);
+        let marker = crate::format_boundary_marker(&id);
+        let content = exchange.content(&result).to_string();
+        let new_content = format!("{}\n{}\n", content.trim_end(), marker);
+        result = exchange.replace_content(&result, &new_content);
+    }
+    result
+}
+
 /// Strip transient ` (HEAD)` suffixes from markdown headings and bold-text
 /// pseudo-headers, skipping fenced code blocks.
 fn strip_transient_head_markers(content: &str) -> String {
@@ -2428,6 +2456,75 @@ c
         assert!(result.contains("### Re: three (HEAD)"));
         assert!(result.contains("### Re: one\n"));
         assert!(result.contains("### Re: two\n"));
+    }
+
+    #[test]
+    fn preserve_head_keeps_head_markers_on_reposition() {
+        let doc = "\
+<!-- agent:exchange -->
+### Re: older
+body a
+### Re: newer (HEAD)
+body b
+<!-- agent:boundary:old-id -->
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end_preserve_head(doc);
+        assert!(
+            result.contains("### Re: newer (HEAD)"),
+            "preserve_head must keep (HEAD) on newest heading; got:\n{result}"
+        );
+        assert!(
+            !result.contains("old-id"),
+            "old boundary should be removed; got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("<!-- agent:boundary:").count(),
+            1,
+            "exactly one fresh boundary; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn preserve_head_with_id_keeps_head_and_uses_explicit_id() {
+        let doc = "\
+<!-- agent:exchange -->
+### Re: topic (HEAD)
+body
+<!-- agent:boundary:old-id -->
+<!-- /agent:exchange -->";
+        let result =
+            reposition_boundary_to_end_preserve_head_with_id(doc, Some("explicit-id"));
+        assert!(
+            result.contains("### Re: topic (HEAD)"),
+            "preserve_head must keep (HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("<!-- agent:boundary:explicit-id -->"),
+            "explicit boundary id should be used; got:\n{result}"
+        );
+        assert!(!result.contains("old-id"), "old boundary gone; got:\n{result}");
+    }
+
+    #[test]
+    fn clean_strips_head_but_preserve_head_keeps_it() {
+        let doc = "\
+<!-- agent:exchange -->
+### Re: first
+body a
+### Re: second (HEAD)
+body b
+<!-- /agent:exchange -->";
+        let clean = reposition_boundary_to_end_clean(doc);
+        let preserved = reposition_boundary_to_end_preserve_head(doc);
+
+        assert!(
+            !clean.contains("(HEAD)"),
+            "clean variant must strip (HEAD); got:\n{clean}"
+        );
+        assert!(
+            preserved.contains("### Re: second (HEAD)"),
+            "preserve_head variant must keep (HEAD); got:\n{preserved}"
+        );
     }
 
     #[test]

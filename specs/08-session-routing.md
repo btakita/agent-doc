@@ -69,17 +69,19 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 
-**Commit write contract:** `commit()` always stages a clean snapshot copy and normalizes the boundary to end-of-exchange. The committed blob, snapshot, and post-commit document should converge back to the same clean shape. When a live editor IPC listener exists, that cleanup is delivered through the plugin Document API. Without a live listener, `commit()` rewrites the file directly so stale boundary / `(HEAD)` churn is removed instead of left as working-tree dirtiness.
+**Commit write contract:** `commit()` always stages a clean snapshot copy (no `(HEAD)`, no stale boundaries) and normalizes the boundary to end-of-exchange. The committed blob and snapshot converge to the same clean shape. The working tree and editor buffer preserve `(HEAD)` annotations so the user can see which response headings are new.
 
-**Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same clean post-commit shape as the user-facing document: ALL stale boundaries are stripped, heading-level transient ` (HEAD)` markers are removed, and a single fresh 8-char boundary is inserted at end-of-exchange.
+**Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same clean shape as the committed blob: ALL stale boundaries are stripped, heading-level transient ` (HEAD)` markers are removed, and a single fresh 8-char boundary is inserted at end-of-exchange.
 
-**Editor cleanup invariant:** The editor-side reposition helpers (JetBrains and VS Code) must collapse stale boundaries and strip transient heading-level ` (HEAD)` markers. Boundary-only cleanup must not create a follow-up diff that is only old boundary IDs or ` (HEAD)` churn.
+**Working-tree boundary cleanup:** The working tree uses `reposition_boundary_to_end_preserve_head()`, which removes stale boundaries and inserts a fresh one but keeps `(HEAD)` annotations. Preflight classifies `(HEAD)` differences as `boundary_artifact`, so they do not cause false-positive change detection.
+
+**Editor cleanup invariant:** The editor-side reposition helpers (JetBrains and VS Code) must collapse stale boundaries. When the IPC reposition signal includes `preserve_head: true`, the plugin should call `agent_doc_reposition_boundary_to_end_preserve_head_with_id()` to keep `(HEAD)` markers. Boundary-only cleanup must not create a follow-up diff that is only old boundary IDs.
 
 **Boundary reposition lifecycle:**
 1. **Before IPC patch JSON (clean boundary reposition):** All IPC write paths (`run_ipc`, `try_ipc`, IPC-timeout fallback) read the on-disk document and normalize boundaries in memory before extracting `boundary_id` values. This removes ALL stale boundaries and inserts a single fresh one. The repositioned document is used solely to extract `boundary_id` values — never written to disk. This ensures the `boundary_id` points to end-of-exchange (after the user's prompt), not the stale mid-exchange position.
 2. During `agent-doc write`: the `reposition_boundary: true` IPC flag tells the plugin to move the boundary after applying the response patch. The plugin should call `agent_doc_reposition_boundary_to_end()` via FFI to ensure identical cleanup logic.
-3. During `agent-doc commit`: (a) the snapshot is cleaned via the same clean reposition helper, and (b) a standalone IPC signal (`try_ipc_reposition_boundary`) is sent only when a live listener exists. This keeps the plugin buffer aligned with the committed file without introducing extra boundary-only diffs.
-4. If no plugin is active, the file is rewritten locally with the same clean boundary result, so the working tree still ends in the correct state.
+3. During `agent-doc commit`: (a) the snapshot is cleaned via the clean reposition helper, and (b) a standalone IPC signal with `preserve_head: true` is sent when a live listener exists so the plugin preserves `(HEAD)` in the editor buffer. Without a live listener, the working tree is rewritten with the preserve-head variant.
+4. If no plugin is active, the file is rewritten locally with `reposition_boundary_to_end_preserve_head()`, preserving `(HEAD)` annotations while removing stale boundaries.
 
 ## Pane Lifecycle — Binding Invariant
 

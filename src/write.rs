@@ -2876,6 +2876,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         &project_root,
         &canonical.to_string_lossy(),
         boundary_id.as_deref(),
+        true, // preserve (HEAD) in editor buffer
     ) {
         Ok(true) => {
             eprintln!("[commit] IPC reposition boundary signal sent");

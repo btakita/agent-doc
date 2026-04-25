@@ -578,6 +578,68 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_with_id(
     }
 }
 
+/// Reposition boundary marker to end of exchange, preserving `(HEAD)` markers.
+///
+/// Used for post-commit working-tree cleanup where `(HEAD)` annotations should
+/// remain visible to the user. The committed blob and snapshot use the `_clean`
+/// variant; the working tree and editor buffer use this variant.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head(
+    doc: *const c_char,
+) -> FfiPatchResult {
+    let make_err = |msg: &str| FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    };
+
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+    };
+
+    let result = template::reposition_boundary_to_end_preserve_head(doc_str);
+    FfiPatchResult {
+        text: CString::new(result).unwrap_or_default().into_raw(),
+        error: ptr::null_mut(),
+    }
+}
+
+/// Reposition boundary using an explicit ID, preserving `(HEAD)` markers.
+///
+/// # Safety
+///
+/// `doc` and `boundary_id` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head_with_id(
+    doc: *const c_char,
+    boundary_id: *const c_char,
+) -> FfiPatchResult {
+    let make_err = |msg: &str| FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    };
+
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+    };
+    let boundary_id_str = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return make_err(&format!("invalid boundary_id UTF-8: {e}")),
+    };
+
+    let result =
+        template::reposition_boundary_to_end_preserve_head_with_id(doc_str, Some(boundary_id_str));
+    FfiPatchResult {
+        text: CString::new(result).unwrap_or_default().into_raw(),
+        error: ptr::null_mut(),
+    }
+}
+
 /// Record a document change event for debounce tracking.
 ///
 /// Plugins call this on every document modification (typing, paste, undo).
@@ -1294,6 +1356,50 @@ mod tests {
         assert!(!result.text.is_null());
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
         assert!(text.contains("<!-- agent:boundary:keep-this-id -->"));
+        assert_eq!(text.matches("<!-- agent:boundary:").count(), 1);
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn reposition_preserve_head_keeps_head_markers() {
+        let doc = "<!-- agent:exchange patch=append -->\n### Re: topic (HEAD)\ntext\n<!-- agent:boundary:aaaa1111 -->\n<!-- /agent:exchange -->\n";
+        let c_doc = CString::new(doc).unwrap();
+        let result =
+            unsafe { agent_doc_reposition_boundary_to_end_preserve_head(c_doc.as_ptr()) };
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert!(
+            text.contains("### Re: topic (HEAD)"),
+            "preserve_head FFI must keep (HEAD); got:\n{text}"
+        );
+        assert!(!text.contains("aaaa1111"), "old boundary gone");
+        assert_eq!(text.matches("<!-- agent:boundary:").count(), 1);
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn reposition_preserve_head_with_id_keeps_head_and_id() {
+        let doc = "<!-- agent:exchange patch=append -->\n### Re: topic (HEAD)\ntext\n<!-- agent:boundary:aaaa1111 -->\n<!-- /agent:exchange -->\n";
+        let c_doc = CString::new(doc).unwrap();
+        let c_id = CString::new("my-id").unwrap();
+        let result = unsafe {
+            agent_doc_reposition_boundary_to_end_preserve_head_with_id(
+                c_doc.as_ptr(),
+                c_id.as_ptr(),
+            )
+        };
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert!(
+            text.contains("### Re: topic (HEAD)"),
+            "preserve_head FFI must keep (HEAD); got:\n{text}"
+        );
+        assert!(
+            text.contains("<!-- agent:boundary:my-id -->"),
+            "explicit id used; got:\n{text}"
+        );
         assert_eq!(text.matches("<!-- agent:boundary:").count(), 1);
         unsafe { agent_doc_free_string(result.text) };
     }

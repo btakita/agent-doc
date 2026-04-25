@@ -209,9 +209,13 @@ Exits with error if the pane is dead or no session is registered.
    - rewrite the working tree locally to that clean single-boundary shape when no live editor IPC listener exists, or
    - send reposition + VCS-refresh IPC signals so the plugin applies that same clean rewrite via the Document API
 
-**HEAD marker:** `(HEAD)` is transient with respect to the committed blob. `agent-doc commit` strips it before staging, and post-commit cleanup also strips any lingering heading-level ` (HEAD)` markers from the snapshot / user-facing document state.
+**HEAD marker:** `(HEAD)` is transient with respect to the committed blob and snapshot. `agent-doc commit` strips it before staging, and post-commit cleanup strips it from the snapshot. However, `(HEAD)` markers are **preserved in the working tree** (and editor buffer via IPC) so the user sees which response headings are new. Preflight classifies `(HEAD)` differences as `boundary_artifact`, so working-tree `(HEAD)` markers do not cause false-positive change detection.
 
-**Post-commit cleanup:** After a successful commit, the snapshot and user-facing document are normalized back to the same clean single-boundary shape as the committed blob. Post-success cleanup must not leave follow-up diffs that are only transient ` (HEAD)` or boundary-ID churn.
+**Post-commit cleanup:** After a successful commit, the **snapshot** is normalized to the same clean single-boundary shape as the committed blob (no `(HEAD)`, single boundary). The **working tree** is repositioned (stale boundaries removed, fresh boundary inserted) but retains `(HEAD)` annotations on response headings. The IPC reposition signal includes `preserve_head: true` so editor plugins use the `(HEAD)`-preserving FFI variant.
+
+**FFI variants:**
+- `agent_doc_reposition_boundary_to_end()` / `_with_id()` — clean variant (strips `(HEAD)`). Used for snapshot cleanup.
+- `agent_doc_reposition_boundary_to_end_preserve_head()` / `_with_id()` — preserves `(HEAD)`. Used for working-tree and editor-buffer cleanup.
 
 ## skill
 
@@ -366,7 +370,11 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **IPC boundary:** Before building the IPC patch JSON, all IPC write paths call the clean boundary reposition helper on the current document in memory. This removes stale boundaries and strips transient heading-level ` (HEAD)` markers before inserting a fresh boundary at the end of the exchange. The repositioned document is used only for `boundary_id` extraction (never written to disk by this step). Without this, the IPC path would read the old boundary position (above the user's new prompt), causing responses to be inserted before the prompt. When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically.
 
-**FFI export:** `agent_doc_reposition_boundary_to_end(doc)` — exposed via C ABI for editor plugins. Takes a document string, returns the clean post-reposition document state with all stale boundaries removed, heading-level transient ` (HEAD)` markers stripped, and a single fresh 8-char boundary at end-of-exchange. Plugins should call this via JNA/FFI rather than reimplementing boundary cleanup logic.
+**FFI exports:**
+- `agent_doc_reposition_boundary_to_end(doc)` — clean variant. Returns document with stale boundaries removed, `(HEAD)` markers stripped, and a single fresh boundary at end-of-exchange. Used for snapshot cleanup.
+- `agent_doc_reposition_boundary_to_end_with_id(doc, id)` — clean variant with explicit boundary ID. Used by post-commit editor refresh.
+- `agent_doc_reposition_boundary_to_end_preserve_head(doc)` — preserves `(HEAD)` annotations. Stale boundaries removed, fresh boundary inserted, but `(HEAD)` markers remain. Used for working-tree and editor-buffer post-commit cleanup.
+- `agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, id)` — preserve-head with explicit ID. Editor plugins should call this on post-commit reposition when the IPC signal has `preserve_head: true`.
 
 ## finalize
 

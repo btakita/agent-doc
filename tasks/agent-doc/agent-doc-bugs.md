@@ -687,7 +687,27 @@ So the answer is:
 - local testing/install: yes, rebuild/reinstall plugins
 - public release: yes, version and publish the plugins
 - this cycle: no commit or push performed, because only unrelated local edits remain in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
-<!-- agent:boundary:366f63bd -->
+
+❯ bump plugin versions and build so I can install.
+### Re: plugin version bump and local build — gpt-5
+
+Done.
+
+I bumped the local plugin package versions in `src/agent-doc`:
+- JetBrains: `0.2.74` -> `0.2.75`
+- VS Code: `0.2.7` -> `0.2.8`
+- also fixed the stale VS Code lockfile metadata so `editors/vscode/package-lock.json` now matches the packaged extension version
+
+Built artifacts:
+- JetBrains unsigned zip: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.75.zip`
+- JetBrains signed zip: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.75-signed.zip`
+- VS Code package: `src/agent-doc/editors/vscode/agent-doc-0.2.8.vsix`
+
+Notes:
+- VS Code packaging succeeded, with the existing warning that no `LICENSE` file is present in `editors/vscode`
+- I did not commit or push in `src/agent-doc` this cycle
+- I preserved the unrelated pre-existing local edits in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
+<!-- agent:boundary:c54de067 -->
 <!-- /agent:exchange -->
 
 <!--

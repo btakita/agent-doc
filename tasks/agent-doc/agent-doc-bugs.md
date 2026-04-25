@@ -91,7 +91,21 @@ presets #1, release-check
 ```
 
 `agent-doc orchestrate` expands those into each task prompt as labeled blocks like `(preset #1)` before the task text.
-<!-- agent:boundary:497d6f8d -->
+
+❯ Is this agent docs's pre-compact state, why did the prompt "When I call an orchestrate, can I define a prompt that will be applied to every orchestrate task in one place?" not have a prepended `❯ ` in the patchback?
+### Re: missing `❯` prefix on that orchestrate prompt — gpt-5
+
+No, that is not a special pre-compact state. It is the normal pre-`finalize` working-tree state for a user edit inside `agent:exchange`.
+
+`❯ ` is added by the binary write path, not at raw edit time. The relevant path is `write::normalize_user_prompts_in_exchange`, which derives prompt-prefix targets from the diff and prefixes them during write-back. In this cycle, `preflight` classified your added line as a `prompt_target` with no matching `recovery_artifact`, which means agent-doc sees it as plain user input that still needs the normal write/finalize pass.
+
+So the rule is:
+- a bare prompt before the next `finalize` can be normal
+- a bare prompt plus an already-inserted `### Re:` response is not normal; `session-check` treats that as a likely bypassed patchback and reports the missing `❯ ` target
+- `compact exchange` is separate; it summarizes/replaces exchange content, but it is not what owns prompt prefixing
+
+So the short answer is: this looks like pre-next-cycle / pre-finalize state, not specifically pre-compact state.
+<!-- agent:boundary:a80f00f7 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -240,7 +240,25 @@ Verification in `src/agent-doc`:
 
 Outcome:
 - The `preflight -> orchestrate -> preflight` conflict is fixed at the root preflight boundary instead of through a special orchestrate-only task-1 reuse path.
-<!-- agent:boundary:d63e21cd -->
+
+❯ do #gdir. update spec + tests. build + install for local testing. commit + push
+### Re: submodule gitdir access — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `fad7d54` (`fix: add submodule gitdir access for workspace sessions`).
+
+What changed:
+- `agent-doc` now detects when a session document lives in a submodule whose real git metadata is outside the working tree and automatically appends harness `--add-dir` access for the external gitdirs the lifecycle actually writes through: the submodule `.git/modules/...` gitdir and the superproject `.git` used for parent-pointer updates.
+- The same supplement now applies across the interactive supervisor path (`start`) and fresh-agent backend launches used by `run`, `stream`, and `orchestrate`, so workspace-write Claude/Codex sessions stop tripping permission failures in the middle of the normal git closeout path.
+- Claude streaming now preserves configured extra args like `--add-dir` when it switches from JSON to `stream-json`, instead of dropping them on the streaming path.
+- Updated the command/config/git specs plus `README.md` / `SPEC.md`, and added regression coverage for external-gitdir discovery and the Claude streaming arg-preservation case.
+
+Verification in `src/agent-doc`:
+- `cargo test external_git_dirs_for_submodule_include_submodule_and_parent_gitdirs`
+- `cargo test streaming_args_replace_output_format_and_preserve_add_dir`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:9cff0851 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -250,7 +268,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#gdir] Fix the submodule `.git/modules/...` permission issue so `agent-doc` handles parent-repo gitdirs correctly during submodule work. Plan: [plan-submodule-gitdir-permission-issue.md](plan-submodule-gitdir-permission-issue.md)
+- [x] [#gdir] Fix the submodule `.git/modules/...` permission issue so `agent-doc` handles parent-repo gitdirs correctly during submodule work. Plan: [plan-submodule-gitdir-permission-issue.md](plan-submodule-gitdir-permission-issue.md)
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

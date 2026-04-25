@@ -30,6 +30,11 @@
 //! - `strip_head_markers` (private): strips ` (HEAD)` suffix from markdown headings and bold-text
 //!   pseudo-headers in the commit-staging path.  `(HEAD)` is treated as a transient artifact and
 //!   must never appear in the committed blob.
+//! - `strip_guard_markers` (private): strips `<!-- no-pending-capture -->` and
+//!   `<!-- no-pending-done-guard -->` from the commit-staging path.  These are ephemeral
+//!   per-cycle signals for `session-check`; the check reads from the capture file, not
+//!   the committed document.  Post-commit cleanup also strips them from the snapshot and
+//!   working-tree file.
 //!
 //! ## Agentic Contracts
 //! - `commit` never modifies the working tree file directly; all staging is done through the git
@@ -51,6 +56,8 @@
 //! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
+//! - strip_guard_markers_removes_standalone_lines: lines containing only `<!-- no-pending-capture -->` or `<!-- no-pending-done-guard -->` → removed; surrounding content preserved
+//! - strip_guard_markers_preserves_inline_content: guard markers embedded in non-standalone lines → preserved verbatim
 //! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob and post-commit cleanup leaves the working tree/snapshot clean
 //! - commit_retries_full_transaction_when_stage_hits_index_lock: `update-index` index.lock contention retries the full stage+commit transaction until the lock clears
 //! - commit_serializes_closeout_per_git_root: two different docs in the same repo contend on one repo-scoped lock and both close out cleanly
@@ -439,7 +446,7 @@ fn strip_boundary_markers(content: &str) -> String {
 }
 
 pub(crate) fn normalize_transient_agent_doc_markers(content: &str) -> String {
-    strip_head_markers(&strip_boundary_markers(content))
+    strip_guard_markers(&strip_head_markers(&strip_boundary_markers(content)))
 }
 
 fn normalize_component_content_for_absorb(content: &str) -> String {
@@ -1151,9 +1158,9 @@ pub fn commit(file: &Path) -> Result<bool> {
     }
 
     // Post-commit housekeeping. The staged blob is already clean (commit
-    // staging strips `(HEAD)` from the snapshot before `git hash-object`),
-    // and post-commit cleanup keeps the snapshot / visible document in that
-    // same clean boundary shape.
+    // staging strips `(HEAD)` and guard markers from the snapshot before
+    // `git hash-object`), and post-commit cleanup keeps the snapshot /
+    // visible document in that same clean shape.
     if let Ok(ref s) = commit_status
         && s.success()
     {
@@ -1181,6 +1188,10 @@ pub fn commit(file: &Path) -> Result<bool> {
             }
         }
 
+        // Strip ephemeral guard markers from snapshot and working tree so they
+        // match the committed blob (which was already stripped during staging).
+        strip_guard_markers_from_disk(file);
+
         // Submodule pointer update: if we just committed inside a submodule,
         // stage the new submodule HEAD in the parent and partial-commit it.
         if in_submodule {
@@ -1194,6 +1205,29 @@ pub fn commit(file: &Path) -> Result<bool> {
     }
 
     Ok(did_commit)
+}
+
+/// Strip ephemeral guard markers from the snapshot and working-tree file on disk.
+/// Best-effort: logs warnings on failure but does not propagate errors.
+fn strip_guard_markers_from_disk(file: &Path) {
+    if let Ok(snap) = crate::snapshot::load(file) {
+        if let Some(ref content) = snap {
+            let cleaned = strip_guard_markers(content);
+            if cleaned != *content {
+                if let Err(e) = crate::snapshot::save(file, &cleaned) {
+                    eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
+                }
+            }
+        }
+    }
+    if let Ok(content) = std::fs::read_to_string(file) {
+        let cleaned = strip_guard_markers(&content);
+        if cleaned != content {
+            if let Err(e) = std::fs::write(file, &cleaned) {
+                eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
+            }
+        }
+    }
 }
 
 /// Reposition boundary in snapshot AND working tree deterministically.
@@ -1351,6 +1385,31 @@ fn strip_head_markers(content: &str) -> String {
     }
 }
 
+/// Strip guard suppression markers from content before committing.
+/// These markers (`<!-- no-pending-capture -->`, `<!-- no-pending-done-guard -->`)
+/// are ephemeral per-cycle signals for `session-check` and should not persist
+/// in committed blobs. The check reads from the capture file, not the document.
+fn strip_guard_markers(content: &str) -> String {
+    const MARKERS: &[&str] = &[
+        "<!-- no-pending-capture -->",
+        "<!-- no-pending-done-guard -->",
+    ];
+    let mut result_lines: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if MARKERS.contains(&trimmed) {
+            continue;
+        }
+        result_lines.push(line);
+    }
+    let result = result_lines.join("\n");
+    if content.ends_with('\n') {
+        format!("{}\n", result)
+    } else {
+        result
+    }
+}
+
 /// Write content to git's object database and return the blob hash.
 fn hash_object(git_root: &Path, content: &str) -> Result<String> {
     let output = Command::new("git")
@@ -1438,7 +1497,7 @@ fn stage_snapshot_for_commit(
         // collapses the working tree/snapshot back to the same clean shape, so
         // moving the boundary across cycles cannot produce phantom marker-only
         // diffs on previously committed headings.
-        let staged_content = strip_head_markers(snap);
+        let staged_content = strip_guard_markers(&strip_head_markers(snap));
         let rel_path = relative_to(resolved, git_root);
 
         if let Ok(hash) = hash_object(git_root, &staged_content) {
@@ -1792,6 +1851,26 @@ mod tests {
         assert_eq!(
             result, "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
             "fenced (HEAD) must be preserved, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn strip_guard_markers_removes_standalone_lines() {
+        let input = "### Re: topic\nResponse text.\n<!-- no-pending-capture -->\nMore text.\n<!-- no-pending-done-guard -->\nEnd.\n";
+        let result = strip_guard_markers(input);
+        assert_eq!(
+            result, "### Re: topic\nResponse text.\nMore text.\nEnd.\n",
+            "standalone guard markers should be removed:\n{result}"
+        );
+    }
+
+    #[test]
+    fn strip_guard_markers_preserves_inline_content() {
+        let input = "Text with <!-- no-pending-capture --> inline.\nNormal line.\n";
+        let result = strip_guard_markers(input);
+        assert_eq!(
+            result, input,
+            "inline guard markers should be preserved:\n{result}"
         );
     }
 

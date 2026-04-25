@@ -555,8 +555,8 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 - Default guard mode is `warn`: emits stderr warnings but still exits `0`
 - `pending_capture_guard: strict` in document frontmatter or `.agent-doc/config.toml` `[guards] pending_capture = "strict"` upgrades that condition to exit `1`
 - `pending_done_guard: strict` in document frontmatter or `.agent-doc/config.toml` `[guards] pending_done = "strict"` upgrades the missing-`--pending-done` condition to exit `1`
-- `pending_capture_guard: off` disables the guard; `<!-- no-pending-capture -->` in the response suppresses it for that cycle
-- `pending_done_guard: off` disables the missing-`--pending-done` guard; `<!-- no-pending-done-guard -->` in the response suppresses it for that cycle
+- `pending_capture_guard: off` disables the guard; `<!-- no-pending-capture -->` in the response suppresses it for that cycle (the marker is stripped from the committed blob and from the snapshot/working-tree file post-commit — it is ephemeral signaling only)
+- `pending_done_guard: off` disables the missing-`--pending-done` guard; `<!-- no-pending-done-guard -->` in the response suppresses it for that cycle (same strip-after-check behavior as `<!-- no-pending-capture -->`)
 - A cycle closed by `agent-doc commit` as `commit_already_current` counts as terminal / committed: it means the staged snapshot was already identical to `HEAD`, so no duplicate git commit was necessary
 - Exit `0` when the cycle state is committed or no state/log file exists
 - Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.

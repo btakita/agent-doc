@@ -562,7 +562,24 @@ Verification:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml`
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
 - `cargo install --path src/agent-doc`
-<!-- agent:boundary:ce54bd58 -->
+
+❯ do #stopr1. preset #spec-test-commit-push
+### Re: do #stopr1 — gpt-5
+
+Implemented `#stopr1` in `src/agent-doc` and pushed `fcb54e1` to `20260422/codex-agent-backend`.
+
+What changed:
+- Added a shared replay-payload guard so recovery only accepts one assistant closeout or a clean patch payload.
+- Codex Stop-hook auto-close now uses that guard and blocks transcript/full-document payloads before replay.
+- `agent-doc repair` now fails closed for transcript/full-document template payloads, captures diagnostics under `.agent-doc/repair-blocked/`, and leaves the document untouched.
+- Added regression coverage for the shared validator, Stop-hook rejection, and blocked repair replay.
+- Updated `README.md` and `specs/07-commands.md` to document the repair-side fail-closed behavior.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+<!-- agent:boundary:3320c96c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -571,7 +588,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#stopr1] [recommended] Stop-hook/repair replay hard fail: block transcript/full-exchange payloads and capture diagnostics only (plan: tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md)
+- [x] [#stopr1] [recommended] Stop-hook/repair replay hard fail: block transcript/full-exchange payloads and capture diagnostics only (plan: tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md)
 - [ ] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish

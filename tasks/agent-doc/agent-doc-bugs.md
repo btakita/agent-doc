@@ -1810,12 +1810,28 @@ What it does **not** guarantee:
 Fresh verification in `src/agent-doc`:
 - `cargo test stop_blocks_transcript_shaped_last_assistant_message`
 - `cargo test codex_hook_cli_blocks_transcript_shaped_last_assistant_message`
-<!-- agent:boundary:519fd9f0 -->
+❯ Is tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md implemented?
+### Re: cancelled Stop-hook replay plan status — gpt-5
+
+Yes.
+
+`tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md` was implemented for the scope it described:
+- the Codex `Stop` hook now validates `last_assistant_message` before replay
+- transcript-shaped payloads are blocked instead of being patched back into `exchange`
+- blocked payloads are captured only for diagnostics under `.agent-doc/codex-hooks/blocked-stop/`
+- regression coverage was added for both the unit path and the CLI integration path
+
+The corresponding `src/agent-doc` code was committed and pushed as `acc7478` on `20260422/codex-agent-backend` with commit message `fix: block transcript-shaped codex stop replay`.
+
+What is **not** implemented by that plan:
+- it did not claim to solve every patchback bug
+- it specifically covered the cancelled-run / Stop-hook replay path
+<!-- agent:boundary:dbaf5876 -->
 <!-- /agent:exchange -->
 
 <!--
 Why did the prompt "When I call an orchestrate, can I define a prompt that will be applied to every orchestrate task in one place?" not have a prepended `❯ ` in the patchback?
-
+ 
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 

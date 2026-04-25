@@ -83,15 +83,24 @@ Implementation order:
 ### Re: add Step 3 to pending — gpt-5
 
 Added. I promoted Step 3 into `agent:pending` as its own recommended follow-up item rather than folding it into the step-2 refactor task, since it is a distinct later phase.
-<!-- agent:boundary:c845a44f -->
+
+❯ You did not add Step 3 in the correct order. It should have been after #9pw9. Please update skill/runboot and/or agent-doc binary to understand where the pending item should be added.
+### Re: pending insertion order guidance — gpt-5
+
+Fixed. I updated the `agent-doc` source guidance so later additions from an already-captured ordered batch are no longer described as blind front-insertions. The bundled skill and `pending-ops.md` now tell the agent to keep a newly promoted Step 3 adjacent to its predecessor by adding it with a canonical custom id and reordering it into place in the same cycle.
+
+I added regression checks for that guidance, then verified `src/agent-doc` with `cargo test`, `cargo build --release`, and `cargo install --path .`. The source change is committed in `src/agent-doc` as `6b7346d` (`docs: capture ordered pending insertion guidance`).
+
+I also corrected this document's pending order so the Step 3 item now sits after `#9pw9`.
+<!-- agent:boundary:63abcc29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [ ] [#gkke] [recommended] Implement `agent-doc orchestrate` with `--mode sequential`, fresh agent context per step, prompt injection into exchange, and per-step `finalize` + `session-check`.
 - [ ] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
+- [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -320,7 +320,16 @@ This is safe because preflight already classifies `(HEAD)` differences as `bound
 4. **Update CLAUDE.md convention** — boundary markers collapse post-commit; `(HEAD)` markers persist in working tree only
 
 The integration test is the key anti-regression tool. Every time a new post-commit path is added, the test catches it if it strips `(HEAD)` from the working tree.
-<!-- agent:boundary:ae037405 -->
+
+❯ Add the tasks to pending. Why did you not add the tasks to pending in the previous response?
+### Re: adding (HEAD) fix tasks to pending — opus-4-6
+
+My mistake. The previous response listed 4 concrete recommendations as a numbered list — that triggers the pending capture rule, which says to promote them in the same cycle. I failed to include `--pending-add` flags on the finalize command.
+
+**Why it was missed:** the `session-check` closeout guard would normally catch this via the pending-capture backstop, but that cycle hit the `INTERRUPTED` error on a false-positive `(HEAD)` patchback detection first (the `(HEAD)` suffix on the new response heading was misread as a direct patchback). The pending-capture check never ran because the earlier guard tripped.
+
+Added all four tasks to pending now: #hfix1 through #hfix4.
+<!-- agent:boundary:80d67716 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -329,6 +338,10 @@ The integration test is the key anti-regression tool. Every time a new post-comm
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#hfix1] git.rs reposition_boundary_in_snapshot(): keep _clean for snapshot, switch working tree to new reposition_boundary_to_end_with_head() that preserves (HEAD) annotations
+- [ ] [#hfix2] ffi.rs: add agent_doc_reposition_boundary_to_end_with_head_with_id() for IPC path so editor plugin preserves (HEAD) on post-commit reposition
+- [ ] [#hfix3] Integration test: full write → commit → assert working tree retains (HEAD) on new headings while committed blob does not
+- [ ] [#hfix4] Update CLAUDE.md convention: boundary markers collapse post-commit; (HEAD) markers persist in working tree only
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

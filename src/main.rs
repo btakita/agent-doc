@@ -89,6 +89,7 @@ mod prompt;
 mod read;
 mod rename;
 mod repair;
+mod replay_guard;
 mod reset;
 mod resync;
 mod route;

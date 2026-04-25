@@ -408,6 +408,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - for template docs, that `AlreadyApplied` dedup path still runs transcript/tail canonicalization before cleanup, including restoring required `❯ ` prompt prefixes from the prompt-bearing classifier
    - respect safe manual removal of an escaped template conversation tail
    - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly
+   - fail closed before replay when a template-mode pending/captured payload looks like a transcript or full document dump rather than one assistant closeout; save the blocked payload under `.agent-doc/repair-blocked/` for diagnostics instead of appending it into `agent:exchange`
 2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`
 3. If no pending/captured repair path exists, print the usual "No pending response found" note and stop without committing
 

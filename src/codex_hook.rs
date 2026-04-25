@@ -90,12 +90,6 @@ enum StopCloseAttempt {
     NotPossible,
 }
 
-enum StopPayloadClassification<'a> {
-    Empty,
-    Replayable(&'a str),
-    TranscriptLike(&'static str),
-}
-
 #[derive(Debug, Serialize)]
 struct BlockedStopPayloadRecord<'a> {
     captured_at: u64,
@@ -237,14 +231,17 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
 }
 
 fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAttempt> {
-    let payload = classify_stop_payload(&input.last_assistant_message);
-    let has_response = matches!(payload, StopPayloadClassification::Replayable(_));
+    let payload = crate::replay_guard::classify_replay_payload(&input.last_assistant_message);
+    let has_response = matches!(
+        payload,
+        crate::replay_guard::ReplayPayloadClassification::Replayable(_)
+    );
     let has_bypassed_patchback =
         crate::session_check::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
-        if let StopPayloadClassification::TranscriptLike(reason) = payload {
+        if let crate::replay_guard::ReplayPayloadClassification::Blocked(reason) = payload {
             return Ok(StopCloseAttempt::StillOpen {
-                note: capture_blocked_stop_payload(file, &input.last_assistant_message, reason),
+                note: capture_blocked_stop_payload(file, &input.last_assistant_message, &reason),
             });
         }
         return Ok(StopCloseAttempt::NotPossible);
@@ -252,21 +249,21 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
 
     let mut note = String::new();
     match payload {
-        StopPayloadClassification::Replayable(response) => {
+        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
             crate::repair::save_pending(file, response)?;
             crate::ops_log::log_op(file, "codex_stop_capture_saved");
             note.push_str(
                 " The latest assistant text was captured into the pending/capture ledger before auto-close.",
             );
         }
-        StopPayloadClassification::TranscriptLike(reason) => {
+        crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             note.push_str(&capture_blocked_stop_payload(
                 file,
                 &input.last_assistant_message,
-                reason,
+                &reason,
             ));
         }
-        StopPayloadClassification::Empty => {}
+        crate::replay_guard::ReplayPayloadClassification::Empty => {}
     }
 
     let repair_outcome = crate::repair::run(file)?;
@@ -303,11 +300,11 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
 }
 
 fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
-    match classify_stop_payload(&input.last_assistant_message) {
-        StopPayloadClassification::Empty => {
+    match crate::replay_guard::classify_replay_payload(&input.last_assistant_message) {
+        crate::replay_guard::ReplayPayloadClassification::Empty => {
             " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string()
         }
-        StopPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response) {
+        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response) {
             Ok(()) => {
                 crate::ops_log::log_op(file, "codex_stop_capture_saved");
                 " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
@@ -316,89 +313,10 @@ fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
                 " The hook could not capture the final assistant text before blocking the turn: {err}."
             ),
         },
-        StopPayloadClassification::TranscriptLike(reason) => {
-            capture_blocked_stop_payload(file, &input.last_assistant_message, reason)
+        crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            capture_blocked_stop_payload(file, &input.last_assistant_message, &reason)
         }
     }
-}
-
-fn classify_stop_payload(message: &str) -> StopPayloadClassification<'_> {
-    let trimmed = message.trim();
-    if trimmed.is_empty() {
-        return StopPayloadClassification::Empty;
-    }
-
-    let patch_open = trimmed.matches("<!-- patch:exchange -->").count();
-    let patch_close = trimmed.matches("<!-- /patch:exchange -->").count();
-    if patch_open > 0 || patch_close > 0 {
-        if patch_open != 1 || patch_close != 1 {
-            return StopPayloadClassification::TranscriptLike(
-                "it contained repeated or unbalanced `patch:exchange` markers",
-            );
-        }
-        let open_marker = "<!-- patch:exchange -->";
-        let close_marker = "<!-- /patch:exchange -->";
-        let start = trimmed.find(open_marker).unwrap_or_default();
-        let end = trimmed.find(close_marker).unwrap_or(trimmed.len());
-        let close_end = end.saturating_add(close_marker.len());
-        if !trimmed[..start].trim().is_empty() || !trimmed[close_end..].trim().is_empty() {
-            return StopPayloadClassification::TranscriptLike(
-                "it contained extra transcript content around the exchange patch block",
-            );
-        }
-    }
-
-    if trimmed.contains("<!-- agent:exchange") {
-        return StopPayloadClassification::TranscriptLike(
-            "it contained an `agent:exchange` component dump",
-        );
-    }
-
-    let prompt_lines = trimmed
-        .lines()
-        .filter(|line| line.trim_start().starts_with('❯'))
-        .count();
-    if prompt_lines > 0 {
-        return StopPayloadClassification::TranscriptLike("it contained transcript prompt lines");
-    }
-
-    let user_headings = trimmed
-        .lines()
-        .filter(|line| {
-            let line = line.trim();
-            line == "## User" || line.starts_with("## User ")
-        })
-        .count();
-    if user_headings > 0 {
-        return StopPayloadClassification::TranscriptLike(
-            "it contained `## User` transcript headings",
-        );
-    }
-
-    let assistant_headings = trimmed
-        .lines()
-        .filter(|line| {
-            let line = line.trim();
-            line == "## Assistant" || line.starts_with("## Assistant ")
-        })
-        .count();
-    if assistant_headings > 0 {
-        return StopPayloadClassification::TranscriptLike(
-            "it contained `## Assistant` transcript headings",
-        );
-    }
-
-    let response_headings = trimmed
-        .lines()
-        .filter(|line| line.trim_start().starts_with("### Re:"))
-        .count();
-    if response_headings > 1 {
-        return StopPayloadClassification::TranscriptLike(
-            "it contained multiple assistant response headings",
-        );
-    }
-
-    StopPayloadClassification::Replayable(trimmed)
 }
 
 fn capture_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> String {

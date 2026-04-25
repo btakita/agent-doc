@@ -43,6 +43,7 @@
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use std::path::Path;
 
 use crate::{frontmatter, snapshot, write};
@@ -175,6 +176,89 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
 
 fn same_content_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
     left.trim_end_matches('\n') == right.trim_end_matches('\n')
+}
+
+#[derive(Debug, Serialize)]
+struct BlockedRepairPayloadRecord<'a> {
+    captured_at: u64,
+    file: String,
+    reason: &'a str,
+    payload_sha256: String,
+    response_body: &'a str,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn save_blocked_repair_payload(
+    file: &Path,
+    response: &str,
+    reason: &str,
+) -> Result<std::path::PathBuf> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = crate::snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(Path::to_path_buf))
+        .context("resolve project root for blocked repair payload")?;
+    let dir = root.join(".agent-doc/repair-blocked");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("create blocked repair dir {}", dir.display()))?;
+    let filename = format!(
+        "{}-{}.json",
+        crate::ops_log::content_hash(canonical.to_string_lossy().as_ref()),
+        now_millis()
+    );
+    let path = dir.join(filename);
+    let record = BlockedRepairPayloadRecord {
+        captured_at: now_secs(),
+        file: canonical.display().to_string(),
+        reason,
+        payload_sha256: crate::ops_log::content_hash(response),
+        response_body: response,
+    };
+    let json = serde_json::to_string_pretty(&record)?;
+    std::fs::write(&path, json)
+        .with_context(|| format!("write blocked repair payload {}", path.display()))?;
+    Ok(path)
+}
+
+fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &str) -> Result<()> {
+    match save_blocked_repair_payload(file, response, reason) {
+        Ok(path) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_blocked_replay path={} reason={}",
+                    path.display(),
+                    reason
+                ),
+            );
+            anyhow::bail!(
+                "refused to replay pending response for {} because {}; blocked payload captured at {}",
+                file.display(),
+                reason,
+                path.display()
+            );
+        }
+        Err(err) => {
+            anyhow::bail!(
+                "refused to replay pending response for {} because {}; additionally failed to save blocked payload: {}",
+                file.display(),
+                reason,
+                err
+            );
+        }
+    }
 }
 
 fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> Result<()> {
@@ -320,6 +404,13 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let (fm, _) = frontmatter::parse(&doc_content)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
     let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
+    if use_template_write {
+        if let crate::replay_guard::ReplayPayloadClassification::Blocked(reason) =
+            crate::replay_guard::classify_replay_payload(&response)
+        {
+            fail_closed_on_blocked_template_replay(file, &response, &reason)?;
+        }
+    }
     if use_template_write {
         write::apply_template_from_string(file, &response)?;
     } else {
@@ -844,6 +935,53 @@ mod tests {
             assistant < exchange_close,
             "escaped assistant block should move back inside exchange:\n{repaired}"
         );
+    }
+
+    #[test]
+    fn recover_fails_closed_on_transcript_shaped_template_replay() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let transcript_dump = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "### Re: topic — gpt-5\n",
+            "Body\n",
+            "<!-- agent:boundary:def456 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        save_pending(&doc, transcript_dump).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("refused to replay pending response"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "blocked replay must not mutate the document"
+        );
+
+        let blocked_dir = dir.path().join(".agent-doc/repair-blocked");
+        let captures: Vec<_> = std::fs::read_dir(&blocked_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .collect();
+        assert_eq!(captures.len(), 1, "expected one blocked repair capture");
+        let blocked_payload = std::fs::read_to_string(captures[0].path()).unwrap();
+        assert!(blocked_payload.contains("agent component markers"));
+        assert!(blocked_payload.contains("response_body"));
     }
 
     #[test]

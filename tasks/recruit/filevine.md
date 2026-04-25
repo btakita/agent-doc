@@ -2,6 +2,9 @@
 agent_doc_session: ce0b6a35-9b93-4f03-9c7f-2e2ffcc86a7e
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
 ---
 
 ## Status
@@ -191,7 +194,20 @@ Draft created and pushed to `btak.dev` Gmail Drafts. Properly threaded to Alexan
 - **Availability offered:** Tue Apr 21 or Wed Apr 22, 10am–4pm MT
 
 Open Gmail Drafts to review and send when ready.
-<!-- agent:boundary:3b31cb28 -->
+
+❯ compress [2026-04-22 14-01-24.mp4](../../../../../Videos/2026-04-22%2014-01-24.mp4)
+### Re: Compress video — gpt-5
+
+Video compressed and ready at `~/Videos/2026-04-22 14-01-24-compressed.mp4`
+
+- **Original:** 939 MB
+- **Compressed:** 56 MB
+- **Reduction:** 94%
+- **Duration:** 21m 15s
+- **Codec:** H.265 video + AAC audio
+
+Used `libx265` at CRF 28 with 128k AAC, so this keeps the full 1080p frame size while cutting the file down hard. If you want, I can also make a higher-quality variant at CRF 26-27.
+<!-- agent:boundary:9d252615 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

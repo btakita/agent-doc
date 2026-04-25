@@ -204,17 +204,36 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:53f143a7 -->
+
+❯ do #opcc. update spec + tests. build + install for local testing. commit + push
+### Re: orchestrate preflight cycle reuse — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `d4d3928` (`fix: reuse open preflight cycle in orchestrate`).
+
+What changed:
+- `src/orchestrate.rs` now lets sequential task 1 reuse a matching open `preflight_started` cycle instead of recursively calling `preflight`; it recomputes the current diff locally after prompt injection and reuses the existing baseline file.
+- `tests/run_integration.rs` adds a CLI regression that reproduces `preflight -> orchestrate` on the same document and verifies the first step succeeds.
+- `specs/07-commands.md` now documents the inherited-cycle behavior and its task-1-only scope.
+
+Verification:
+- `cargo test sequential_orchestration_reuses_matching_open_preflight_cycle_for_first_step`
+- `cargo test orchestrate_reuses_open_preflight_cycle_for_first_step`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:14a1dbff -->
 <!-- /agent:exchange -->
 
 <!--
+do Option B from tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md. update spec + tests. build + install for local testing. commit + push
+
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#opcc] Orchestrate fails when skill preflight already opened a cycle — orchestrator should reuse existing cycle for task 1. Plan: tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md
+- [x] [#opcc] Orchestrate fails when skill preflight already opened a cycle — orchestrator should reuse existing cycle for task 1. Plan: tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

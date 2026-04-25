@@ -111,10 +111,2292 @@ Added now:
 - **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
 
 Both marked `[recommended]` since you haven't accepted the fix approach yet.
-<!-- agent:boundary:4379565e -->
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+I'll run preflight and locate the relevant code simultaneously.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Let me find the actual source file and read the relevant section.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Let me read the full `normalizeExchangePrefixes` function context.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now let me look at the existing tests and spec files for context on what to update.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + a1ppended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Let me find how test utilities are exposed and look at the SPEC.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Let me look for any SPEC covering editor behavior and the relevant spec files.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Let me look at the VS Code implementation and the SPEC section for prefix normalization.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now let me look at what the SPEC.md says about editor IPC and find the editor-specific SPEC.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now I have everything I need. Let me implement the fix:
+1. Fix `normalizeExchangePrefixes` in Kotlin (line-by-line + trimEnd)
+2. Fix same in VS Code TypeScript
+3. Add test utility function + test file
+4. Update PLUGIN-SPEC.md
+
+Let me read the gradle.properties first.
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now I'll implement all changes. Starting with the Kotlin fix — extract to util function and fix the algorithm:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now add the `normalizeExchangePrefixesUtil` internal function at the bottom of PatchWatcher.kt:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now fix the VS Code TypeScript implementation:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now create the test file for `normalizeExchangePrefixesUtil`:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now update PLUGIN-SPEC.md to document the `normalize_prefix_lines` field and the trimEnd requirement:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now bump the JB plugin version and run the tests:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Now run the Gradle tests:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+The test I wrote has wrong boundary placement. Let me check what the actual expected semantics are, then fix the test:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+The failing test has incorrect boundary placement — "New user prompt." is after the last boundary (in agentRegion). The correct real-world structure has the fresh boundary at the very END, after the user prompt. Fixing the test:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+All 37+9=46 tests pass (9 new from `NormalizeExchangePrefixesTest`). Now build the plugin and commit:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Both zips built. Now commit and push in the agent-doc submodule:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+Done. Now finalize the session document:
+Compacted exchange. Key work completed: frontmatter prompt presets (#fppr) implemented with round-trip, validation, and orchestrate expansion; orchestrate --plan dry-run mode (#0z3v); guard marker strip-before-commit (Option B); orchestrate subprocess fixes — frontmatter args forwarding (#orch1), stderr surfacing (#orch2), prompt prefix stripping (#orch3), --verbose for streaming (#orch4); (HEAD) marker preservation in working tree (#hfix1-4) with split convention (snapshot strips, working tree preserves); JB plugin preserve_head IPC (#hfix5, v0.2.76); VS Code preserve_head IPC (#hfix6, v0.2.9, commit 8202f80); Editor SPEC.md documented preserve_head + FFI variant table (#hfix7); adjacent code fence dedup bug fixed. Discovery: orchestrate --from-exchange stale-task parsing regression persists after #orch3 — parser scans full exchange and .last() picks wrong block when multiple orchestra directives exist in compacted+appended history. Needs fix: scope to latest unprefixed orchestra block. Open: #hfix8 gated on user manual verify, #ha3h gated on multi-user prerequisite.
+
+❯ Can we confirm that the sessions are operating correctly with the `agent-doc orchestrate` command? Do we need more testing before we should release + publish?
+
+### Re: orchestrate readiness assessment — opus-4-6
+
+**Current state: mostly solid, one known regression.**
+
+Test suite: 38 orchestrate-specific tests pass. Full suite: 1120/1121 pass — the single failure is `detect_install_env_treats_codex_thread_id_as_codex` (env detection in skill installer, not orchestrate).
+
+Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.13):
+- **#orch1** frontmatter args forwarding to subprocesses
+- **#orch2** stderr surfacing in StreamIterator
+- **#orch3** prompt prefix stripping in `parse_list_item`
+- **#orch4** `--verbose` for Claude CLI streaming compatibility
+- **--plan** dry-run and **preset expansion** both working
+- **DAG mode** wired up
+
+**Known open regression:** `--from-exchange` stale-task parsing. `exchange_text()` returns the full exchange component (compacted + appended), and `extract_tasks_from_text()` takes `.last()` on code/list blocks. When compacted history contains old orchestration directives, `.last()` can pick a stale block instead of the latest one. Fix path is clear — scope to the latest unprefixed orchestra block — but not yet implemented.
+
+**Release recommendation:**
+
+1. **Fix the stale-task regression first** — it's the only known correctness bug and affects a common workflow (reusing `--from-exchange` on compacted docs). The fix is scoped: parse from the tail of the exchange rather than the full body.
+2. **Fix the env detection test** — minor but should be green before publish.
+3. **Manual test the orchestrate sequential + parallel + DAG flows** with a real session doc before publish.
+4. After those three, this is ready to release + publish.
+
+The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+
+❯ do #stale1. preset #spec-test-commit-push
+### Re: do #stale1 — opus-4-6
+
+Fixed the `--from-exchange` stale-task parsing regression.
+
+**Root cause:** `extract_tasks_from_text()` scanned the full exchange content and `.last()` picked list blocks from agent response content (e.g., recommendation lists) instead of the user's bare directive at the exchange tail.
+
+**Fix:** Added `scope_exchange_for_tasks()` in `orchestrate.rs` — compares the exchange text line-by-line against the snapshot, stripping `(HEAD)` markers and boundary comments during comparison. Only the newly-added tail (lines after the snapshot match) is passed to task extraction. Falls back to full exchange when no snapshot exists.
+
+**Tests added:**
+- `from_exchange_scopes_to_tail_bare_directive` — bare `do #id` after response with list blocks
+- `from_exchange_scopes_to_tail_list_directive` — new list items after old response lists
+- `from_exchange_falls_back_without_snapshot` — no snapshot → full exchange (preserves old behavior)
+- `from_exchange_multiple_responses_picks_latest_directive` — numbered list in response, bare directive at tail
+
+**Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
+
+**Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` response patchbacks are missing the `❯ ` prefix. Why?
+### Re: missing ❯ prefix on patchbacks — opus-4-6
+
+The binary-side normalization works correctly — `ops.log` confirms `applied=1` for each affected cycle. The prefix is lost in the **JetBrains plugin's IPC path**.
+
+**Root cause:** `PatchWatcher.kt:742` uses exact string matching:
+```kotlin
+userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+```
+
+The `$line` value comes from `normalize_prefix_lines` (binary-side, derived from the disk file). But the match runs against `document.text` (editor buffer). When the editor buffer diverges from the disk file — trailing whitespace stripped by IntelliJ's "strip trailing spaces on save," unsaved concurrent edits, or encoding normalization — the `replace` is a no-op and the prefix silently vanishes. The ack content sidecar is then written without the prefix, so the snapshot (and committed file) also lacks it.
+
+**Evidence chain:**
+1. `[1777144278] normalize_user_prompts ... applied=1` — binary DID add the prefix
+2. `snap_source=ack_content_sidecar` — snapshot came from the plugin, not from `content_ours`
+3. Committed file lacks `❯ ` — the sidecar content was missing it
+4. Line 210 in `claudescore-3.md` has a trailing space (`deterministic software. `) — if IntelliJ stripped it before the plugin processed the IPC payload, the `"\n$line\n"` match fails
+
+**Fix:** Make the plugin's `normalizeExchangePrefixes` trim trailing whitespace on both sides of the match, or use line-by-line scanning instead of substring replace. On the binary side, `content_ours` (which has the correct prefix) could be used as a fallback snapshot source when the sidecar diverges from the expected normalization count.
+
+❯ You should automatically add the fix, recommended actions, plans, and next steps to agent:pending. Why did you fail to add the **Fix:** into pending?
+### Re: missed pending capture — opus-4-6
+
+The prior cycle violated the pending capture rule. The skill contract is explicit: when a response identifies concrete follow-up work, add it to `agent:pending` in the same cycle. The previous response ended with a clear **Fix:** section containing two distinct actionable items, and neither was captured.
+
+The failure was a straightforward omission — the finalize command lacked `--pending-add` flags for the fix recommendations. There's no ambiguity exception here: the items were concrete, scoped, and actionable, not hypotheticals or options to choose between. The promotion heuristic should have fired.
+
+Added now:
+
+- **#jbpfx1** — Fix `normalizeExchangePrefixes` in `PatchWatcher.kt:742` to trim trailing whitespace or use line-by-line scanning
+- **#jbpfx2** — Binary-side fallback: use `content_ours` as snapshot source when sidecar diverges from expected normalization count
+
+Both marked `[recommended]` since you haven't accepted the fix approach yet.
+
+synchronous opera
+preset #spec-test-commit-push
+- do #jbpfx1
+- do #jbpfx2
+
+❯ (preset #spec-test-commit-push)
+update spec + tests. commit + push
+do #jbpfx1
+This is the wrong document. Let me find the correct one:
+<!-- agent:boundary:b5a3307e -->
 <!-- /agent:exchange -->
 
 <!--
+In this document + src/session-share `agent-doc tasks/claudescore-3.md`: Why did the synchronous command duplicate the entire contents of the agent:exchange back into agent:exchange? Note that I manually pruned uncommitted duplicates because it was occurring frequently and claudescore-3.md would have easily been >10000 lines.
 -->
 
 ## Pending / Not Built

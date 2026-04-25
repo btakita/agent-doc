@@ -186,3 +186,23 @@ export function repositionBoundaryToEnd(doc: string, component: string, boundary
 
     return doc.substring(0, range.contentStart) + newContent + doc.substring(range.closeIdx);
 }
+
+export function repositionBoundaryToEndPreserveHead(doc: string, component: string, boundaryId?: string): string | null {
+    const range = findComponentRange(doc, component);
+    if (!range) return null;
+
+    let content = doc.substring(range.contentStart, range.closeIdx);
+
+    if (!/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->/.test(content)) return null;
+
+    content = content.replace(/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g, '');
+
+    const id = boundaryId ?? Array.from({ length: 8 }, () =>
+        Math.floor(Math.random() * 16).toString(16)
+    ).join('');
+
+    const trimmed = content.trimEnd();
+    const newContent = `${trimmed}\n<!-- agent:boundary:${id} -->\n`;
+
+    return doc.substring(0, range.contentStart) + newContent + doc.substring(range.closeIdx);
+}

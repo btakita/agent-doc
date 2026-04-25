@@ -68,6 +68,8 @@ export function removePidLock(): void {
 
 function resetBindings(): void {
     _reposition_boundary_to_end = null;
+    _reposition_boundary_to_end_preserve_head = null;
+    _reposition_boundary_to_end_preserve_head_with_id = null;
     _is_idle = null;
     _await_idle = null;
     _document_changed = null;
@@ -160,6 +162,8 @@ function ensureLoaded(projectRoot?: string): boolean {
 // Lazy function bindings (resolved on first call)
 let _reposition_boundary_to_end: any = null;
 let _reposition_boundary_to_end_with_id: any = null;
+let _reposition_boundary_to_end_preserve_head: any = null;
+let _reposition_boundary_to_end_preserve_head_with_id: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
 let _document_changed: any = null;
@@ -185,6 +189,16 @@ function bindFunctions(): void {
     _reposition_boundary_to_end = lib.func('agent_doc_reposition_boundary_to_end', FfiPatchResultType, ['str']);
     _reposition_boundary_to_end_with_id = lib.func(
         'agent_doc_reposition_boundary_to_end_with_id',
+        FfiPatchResultType,
+        ['str', 'str'],
+    );
+    _reposition_boundary_to_end_preserve_head = lib.func(
+        'agent_doc_reposition_boundary_to_end_preserve_head',
+        FfiPatchResultType,
+        ['str'],
+    );
+    _reposition_boundary_to_end_preserve_head_with_id = lib.func(
+        'agent_doc_reposition_boundary_to_end_preserve_head_with_id',
         FfiPatchResultType,
         ['str', 'str'],
     );
@@ -228,6 +242,32 @@ export function repositionBoundaryToEnd(doc: string, projectRoot?: string, bound
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] reposition_boundary error: ${error}`);
+            _free_string(result.error);
+            return null;
+        }
+        if (!result.text) return null;
+        const text = koffi.decode(result.text, 'char', -1);
+        return text;
+    } finally {
+        if (result.text) _free_string(result.text);
+    }
+}
+
+/**
+ * Reposition boundary marker to end of exchange component, preserving (HEAD) annotations.
+ * Returns the updated document, or null if FFI is unavailable/errors.
+ */
+export function repositionBoundaryToEndPreserveHead(doc: string, projectRoot?: string, boundaryId?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+
+    const result = boundaryId
+        ? _reposition_boundary_to_end_preserve_head_with_id(doc, boundaryId)
+        : _reposition_boundary_to_end_preserve_head(doc);
+    try {
+        if (result.error) {
+            const error = koffi.decode(result.error, 'char', -1);
+            console.warn(`[agent-doc/native] reposition_boundary_preserve_head error: ${error}`);
             _free_string(result.error);
             return null;
         }

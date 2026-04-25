@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd } from './reposition';
+import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 
 describe('repositionBoundaryToEnd', () => {
     it('repositions boundary from middle to end', () => {
@@ -124,6 +124,65 @@ describe('repositionBoundaryToEnd', () => {
             1,
             'exactly one boundary marker',
         );
+    });
+});
+
+describe('repositionBoundaryToEndPreserveHead', () => {
+    it('keeps (HEAD) annotations while repositioning boundary', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: test — opus-4-6 (HEAD)',
+            'Response.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'User prompt.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = repositionBoundaryToEndPreserveHead(doc, 'exchange');
+        assert.ok(result, 'should return repositioned content');
+        assert.ok(result.includes('### Re: test — opus-4-6 (HEAD)\n'), '(HEAD) annotation preserved');
+        assert.ok(result.includes('User prompt.\n<!-- agent:boundary:'));
+        assert.ok(!result.includes('aaa11111'), 'old boundary removed');
+        assert.strictEqual(
+            (result.match(/<!-- agent:boundary:[a-f0-9]+ -->/g) || []).length,
+            1,
+            'exactly one boundary marker',
+        );
+    });
+
+    it('reuses the requested boundary id and keeps (HEAD)', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: test — opus-4-6 (HEAD)',
+            'Response.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'User prompt.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = repositionBoundaryToEndPreserveHead(doc, 'exchange', 'keep-this-id');
+        assert.ok(result, 'should return repositioned content');
+        assert.ok(result.includes('(HEAD)'), '(HEAD) preserved');
+        assert.ok(result.includes('<!-- agent:boundary:keep-this-id -->'));
+        assert.ok(!result.includes('aaa11111'));
+    });
+
+    it('clean variant strips HEAD but preserve variant keeps it', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: test — opus-4-6 (HEAD)',
+            'Response.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'User prompt.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const clean = repositionBoundaryToEnd(doc, 'exchange');
+        const preserve = repositionBoundaryToEndPreserveHead(doc, 'exchange');
+        assert.ok(clean, 'clean should return content');
+        assert.ok(preserve, 'preserve should return content');
+        assert.ok(!clean!.includes('(HEAD)'), 'clean strips (HEAD)');
+        assert.ok(preserve!.includes('(HEAD)'), 'preserve keeps (HEAD)');
     });
 });
 

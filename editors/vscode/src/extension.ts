@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
-import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd } from './reposition';
+import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -629,6 +629,7 @@ interface IpcPatch {
     fullContent?: string;
     reposition_boundary?: boolean;
     reposition_boundary_id?: string;
+    preserve_head?: boolean;
     normalize_prefix_lines?: string[];
 }
 
@@ -755,6 +756,8 @@ class PatchWatcher implements vscode.Disposable {
                     patch.file,
                     uri.fsPath,
                     patch.reposition_boundary_id,
+                    0,
+                    patch.preserve_head ?? false,
                 );
                 return;
             }
@@ -789,6 +792,7 @@ class PatchWatcher implements vscode.Disposable {
         patchFilePath: string,
         boundaryId?: string,
         elapsed = 0,
+        preserveHead = false,
     ): void {
         const debounceMs = 500;
         const timeoutMs = 5000;
@@ -803,7 +807,7 @@ class PatchWatcher implements vscode.Disposable {
 
         if (!idle && elapsed < timeoutMs) {
             setTimeout(() => {
-                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, elapsed + 500);
+                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, elapsed + 500, preserveHead);
             }, 500);
             return;
         }
@@ -813,8 +817,11 @@ class PatchWatcher implements vscode.Disposable {
         vscode.workspace.openTextDocument(fileUri).then(async (document) => {
             const content = document.getText();
             // Prefer FFI reposition, fall back to TS
-            const repositioned = native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
-                ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId);
+            const repositioned = preserveHead
+                ? (native.repositionBoundaryToEndPreserveHead(content, projectRoot, boundaryId)
+                    ?? this.repositionBoundaryToEndPreserveHeadTs(content, 'exchange', boundaryId))
+                : (native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
+                    ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId));
             if (repositioned && repositioned !== content && document.getText() === content) {
                 const fullRange = new vscode.Range(
                     document.positionAt(0),
@@ -835,6 +842,10 @@ class PatchWatcher implements vscode.Disposable {
 
     private repositionBoundaryToEndTs(doc: string, component: string, boundaryId?: string): string | null {
         return repositionBoundaryToEnd(doc, component, boundaryId);
+    }
+
+    private repositionBoundaryToEndPreserveHeadTs(doc: string, component: string, boundaryId?: string): string | null {
+        return repositionBoundaryToEndPreserveHead(doc, component, boundaryId);
     }
 
     private async applyPatch(patch: IpcPatch): Promise<boolean> {

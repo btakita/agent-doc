@@ -1398,7 +1398,7 @@ fn collect_added_text_blocks(diff: &str) -> Vec<Vec<String>> {
 }
 
 fn parse_markdown_list_item(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
+    let trimmed = strip_prompt_prefix(line.trim_start());
     for prefix in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(prefix) {
             let rest = rest.trim();
@@ -1416,6 +1416,13 @@ fn parse_markdown_list_item(line: &str) -> Option<&str> {
     }
 
     None
+}
+
+fn strip_prompt_prefix(line: &str) -> &str {
+    line.strip_prefix("❯ ")
+        .or_else(|| line.strip_prefix('❯'))
+        .map(str::trim_start)
+        .unwrap_or(line)
 }
 
 fn detect_orchestration_mode(text: &str) -> Option<OrchestrationRequestMode> {
@@ -3104,6 +3111,22 @@ Please fix the bug.\n\
         assert!(
             detect_orchestration_request(diff).is_none(),
             "single-item lists should stay as ordinary work, not forced orchestration"
+        );
+    }
+
+    #[test]
+    fn detect_orchestration_request_for_prefixed_synchronous_opera_batch() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,6 @@\n ctx\n\
++❯ synchronous opera\n\
++❯ preset #spec-test-build-install-commit-push\n\
++❯ - do #jbpfx1\n\
++❯ - do #jbpfx2\n";
+        let request = detect_orchestration_request(diff).expect("expected orchestration request");
+        assert_eq!(request.mode, OrchestrationRequestMode::Sequential);
+        assert_eq!(request.task_count, 2);
+        assert_eq!(
+            request.trigger_text,
+            "❯ synchronous opera ❯ preset #spec-test-build-install-commit-push"
         );
     }
 

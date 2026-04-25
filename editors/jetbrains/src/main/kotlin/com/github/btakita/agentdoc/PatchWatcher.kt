@@ -577,6 +577,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
                 ?: result
         }
+        result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
@@ -655,6 +656,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
                     ?: result
             }
+            result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
 
             if (result != content) {
                 ApplicationManager.getApplication().runWriteAction {
@@ -1186,6 +1188,50 @@ internal fun repositionBoundaryToEndUtil(doc: String, component: String, boundar
     return before + cleanContent + prefix + newBoundary + "\n" + after
 }
 
+internal fun annotateExchangeHeadingsAgainstBaselineUtil(doc: String, component: String, baselineDoc: String): String? {
+    val currentRange = findComponentRangeUtil(doc, component) ?: return null
+    val baselineRange = findComponentRangeUtil(baselineDoc, component)
+
+    val currentContent = doc.substring(currentRange.first, currentRange.second)
+    val baselineContent = baselineRange?.let { baselineDoc.substring(it.first, it.second) } ?: ""
+    fun normalizeForCompare(value: String): String =
+        stripTransientHeadMarkers(value)
+            .lines()
+            .filterNot { it.trim().startsWith("<!-- agent:boundary:") }
+            .joinToString("\n")
+    if (normalizeForCompare(currentContent) == normalizeForCompare(baselineContent)) {
+        return doc
+    }
+
+    val annotated = annotateReHeadingsWithHeadUtil(currentContent, collectReHeadingsUtil(baselineContent))
+    if (annotated == currentContent) {
+        return doc
+    }
+    return doc.substring(0, currentRange.first) + annotated + doc.substring(currentRange.second)
+}
+
+private fun findComponentRangeUtil(doc: String, component: String): Pair<Int, Int>? {
+    val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
+    val closeTag = "<!-- /agent:$component -->"
+    val codeRanges = findCodeBlockRangesUtil(doc)
+
+    val openMatch = openPattern.findAll(doc).firstOrNull { match ->
+        codeRanges.none { range -> match.range.first >= range.first && match.range.first < range.second }
+    } ?: return null
+
+    val contentStart = openMatch.range.last + 1
+    var searchFrom = contentStart
+    var closeIdx: Int
+    while (true) {
+        closeIdx = doc.indexOf(closeTag, searchFrom)
+        if (closeIdx < 0) return null
+        if (codeRanges.none { range -> closeIdx >= range.first && closeIdx < range.second }) break
+        searchFrom = closeIdx + closeTag.length
+    }
+
+    return Pair(contentStart, closeIdx)
+}
+
 private fun stripTransientHeadMarkers(content: String): String {
     val lines = content.split("\n")
     val result = mutableListOf<String>()
@@ -1221,6 +1267,58 @@ private fun stripTransientHeadMarkers(content: String): String {
     }
 
     return result.joinToString("\n")
+}
+
+private fun collectReHeadingsUtil(content: String): Set<String> {
+    val codeRanges = findCodeBlockRangesUtil(content)
+    val headings = linkedSetOf<String>()
+    var offset = 0
+
+    for (line in content.split("\n")) {
+        val inCode = codeRanges.any { range -> offset >= range.first && offset < range.second }
+        if (!inCode) {
+            val trimmed = line.trimStart()
+            val hashCount = trimmed.takeWhile { it == '#' }.length
+            val afterHash = trimmed.drop(hashCount)
+            if (hashCount in 1..6 && afterHash.startsWith(' ') && afterHash.trimStart().startsWith("Re:")) {
+                headings.add(line.trimStart().trimEnd().removeSuffix(" (HEAD)"))
+            }
+        }
+        offset += line.length + 1
+    }
+
+    return headings
+}
+
+private fun annotateReHeadingsWithHeadUtil(content: String, baseline: Set<String>): String {
+    val codeRanges = findCodeBlockRangesUtil(content)
+    val lines = content.split("\n").toMutableList()
+    val reIndices = mutableListOf<Int>()
+    var offset = 0
+
+    for ((idx, line) in lines.withIndex()) {
+        val inCode = codeRanges.any { range -> offset >= range.first && offset < range.second }
+        offset += line.length + 1
+        if (inCode) continue
+
+        val trimmed = line.trimStart()
+        val hashCount = trimmed.takeWhile { it == '#' }.length
+        val afterHash = trimmed.drop(hashCount)
+        if (hashCount !in 1..6 || !afterHash.startsWith(' ') || !afterHash.trimStart().startsWith("Re:")) {
+            continue
+        }
+
+        lines[idx] = line.trimEnd().removeSuffix(" (HEAD)")
+        reIndices.add(idx)
+    }
+
+    val markIndices = reIndices.filter { idx -> !baseline.contains(lines[idx].trimStart().trimEnd()) }
+    val finalIndices = if (markIndices.isNotEmpty()) markIndices else reIndices.takeLast(1)
+    for (idx in finalIndices) {
+        lines[idx] = lines[idx] + " (HEAD)"
+    }
+
+    return lines.joinToString("\n")
 }
 
 /**

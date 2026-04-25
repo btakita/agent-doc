@@ -766,6 +766,8 @@ pub fn apply_patches_with_overrides(
         }
     }
 
+    result = annotate_exchange_headings_against_baseline(&result, doc);
+
     Ok(result)
 }
 
@@ -910,6 +912,42 @@ pub fn exchange_baseline_headings(doc: &str) -> std::collections::HashSet<String
         return collect_re_headings(exchange.content(doc));
     }
     std::collections::HashSet::new()
+}
+
+pub(crate) fn annotate_exchange_headings_against_baseline(doc: &str, baseline_doc: &str) -> String {
+    let Ok(components) = component::parse(doc) else {
+        return doc.to_string();
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return doc.to_string();
+    };
+
+    let baseline_exchange = component::parse(baseline_doc)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|c| c.name == "exchange")
+                .map(|c| c.content(baseline_doc).to_string())
+        })
+        .unwrap_or_default();
+    let baseline_headings = exchange_baseline_headings(baseline_doc);
+    let content = exchange.content(doc);
+    let normalize_for_compare = |value: &str| {
+        strip_transient_head_markers(value)
+            .lines()
+            .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    if normalize_for_compare(content) == normalize_for_compare(&baseline_exchange) {
+        return doc.to_string();
+    }
+    let annotated = annotate_re_headings_with_head(content, Some(&baseline_headings));
+    if annotated == content {
+        return doc.to_string();
+    }
+    exchange.replace_content(doc, &annotated)
 }
 
 /// Collect normalized `### Re:` heading lines from a chunk of exchange content.
@@ -2566,6 +2604,43 @@ Previous response.
         );
         // Multiple blank lines should survive (dedup only targets non-blank)
         assert!(result.contains('\n'), "blank lines preserved");
+    }
+
+    #[test]
+    fn apply_patches_marks_new_exchange_headings_with_head() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+<!-- agent:exchange patch=append -->
+### Re: earlier — gpt-5
+
+Existing answer.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: latest — gpt-5\n\nFresh answer.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result =
+            apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+                .unwrap();
+
+        assert!(
+            result.contains("### Re: earlier — gpt-5\n"),
+            "existing response heading must stay clean; got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: latest — gpt-5 (HEAD)\n"),
+            "new response heading must surface as transient HEAD; got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one transient HEAD marker expected; got:\n{result}"
+        );
     }
 
     #[test]

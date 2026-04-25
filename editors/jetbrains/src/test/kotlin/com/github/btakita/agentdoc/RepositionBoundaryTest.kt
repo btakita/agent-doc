@@ -173,4 +173,32 @@ User prompt.
         assertFalse(result.contains("aaa11111"))
         assertEquals(1, Regex("""<!-- agent:boundary:[a-z0-9-]+ -->""").findAll(result).count())
     }
+
+    @Test
+    fun `annotates newly patched response headings against baseline`() {
+        val baseline = """
+<!-- agent:exchange patch=append -->
+### Re: earlier — gpt-5
+
+Existing answer.
+<!-- /agent:exchange -->
+""".trimStart()
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: earlier — gpt-5
+
+Existing answer.
+### Re: latest — gpt-5
+
+Fresh answer.
+<!-- agent:boundary:abc12345 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = annotateExchangeHeadingsAgainstBaselineUtil(doc, "exchange", baseline)
+        assertNotNull(result)
+        assertTrue(result!!.contains("### Re: earlier — gpt-5\n"))
+        assertTrue(result.contains("### Re: latest — gpt-5 (HEAD)\n"))
+        assertEquals(1, Regex("""\(HEAD\)""").findAll(result).count())
+    }
 }

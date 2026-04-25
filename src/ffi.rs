@@ -348,6 +348,11 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
         };
         if let Some(comp) = components.iter().find(|c| c.name == name) {
             let result = comp.append_with_boundary(doc_str, patch_content, bid);
+            let result = if name == "exchange" {
+                template::annotate_exchange_headings_against_baseline(&result, doc_str)
+            } else {
+                result
+            };
             return FfiPatchResult {
                 text: CString::new(result).unwrap_or_default().into_raw(),
                 error: ptr::null_mut(),
@@ -1212,6 +1217,32 @@ mod tests {
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
         assert!(text.contains("new content"));
         assert!(!text.contains("old"));
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn apply_patch_with_boundary_marks_new_exchange_heading_with_head() {
+        let doc = "<!-- agent:exchange patch=append -->\n### Re: earlier — gpt-5\nBody.\n<!-- agent:boundary:abc12345 -->\n<!-- /agent:exchange -->\n";
+        let c_doc = CString::new(doc).unwrap();
+        let c_name = CString::new("exchange").unwrap();
+        let c_content = CString::new("### Re: latest — gpt-5\nNew body.\n").unwrap();
+        let c_mode = CString::new("append").unwrap();
+        let c_boundary = CString::new("abc12345").unwrap();
+        let result = unsafe {
+            agent_doc_apply_patch_with_boundary(
+                c_doc.as_ptr(),
+                c_name.as_ptr(),
+                c_content.as_ptr(),
+                c_mode.as_ptr(),
+                c_boundary.as_ptr(),
+            )
+        };
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert!(text.contains("### Re: earlier — gpt-5\n"));
+        assert!(text.contains("### Re: latest — gpt-5 (HEAD)\n"));
+        assert_eq!(text.matches("(HEAD)").count(), 1, "got:\n{text}");
         unsafe { agent_doc_free_string(result.text) };
     }
 

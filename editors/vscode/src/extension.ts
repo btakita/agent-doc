@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
-import { repositionBoundaryToEnd } from './reposition';
+import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd } from './reposition';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -849,9 +849,10 @@ class PatchWatcher implements vscode.Disposable {
             return false;
         }
 
+        const baselineContent = document.getText();
         const fullRange = new vscode.Range(
             document.positionAt(0),
-            document.positionAt(document.getText().length),
+            document.positionAt(baselineContent.length),
         );
 
         // Full content replacement — only for append-mode documents without component patches.
@@ -859,7 +860,7 @@ class PatchWatcher implements vscode.Disposable {
         // is applied correctly. Applying fullContent alongside patches would replace the
         // document before patches run, causing the response to be lost or duplicated.
         if (patch.fullContent != null && patch.fullContent !== '' && patch.patches.length === 0) {
-            const content = document.getText();
+            const content = baselineContent;
             if (patch.fullContent !== content) {
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(fileUri, fullRange, patch.fullContent);
@@ -874,7 +875,7 @@ class PatchWatcher implements vscode.Disposable {
         }
 
         // Component-based patching (template/stream-mode documents)
-        let content = document.getText();
+        let content = baselineContent;
 
         // Apply frontmatter patch first
         if (patch.frontmatter) {
@@ -901,8 +902,10 @@ class PatchWatcher implements vscode.Disposable {
             content = this.normalizeExchangePrefixes(content, patch.normalize_prefix_lines);
         }
 
+        content = annotateExchangeHeadingsAgainstBaseline(content, 'exchange', baselineContent) ?? content;
+
         // Apply the combined edit
-        if (content !== document.getText()) {
+        if (content !== baselineContent) {
             const edit = new vscode.WorkspaceEdit();
             edit.replace(fileUri, fullRange, content);
             const ok = await vscode.workspace.applyEdit(edit);

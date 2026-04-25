@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { repositionBoundaryToEnd } from './reposition';
+import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd } from './reposition';
 
 describe('repositionBoundaryToEnd', () => {
     it('repositions boundary from middle to end', () => {
@@ -124,5 +124,48 @@ describe('repositionBoundaryToEnd', () => {
             1,
             'exactly one boundary marker',
         );
+    });
+});
+
+describe('annotateExchangeHeadingsAgainstBaseline', () => {
+    it('marks only newly patched response headings as transient HEAD', () => {
+        const baseline = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: earlier — gpt-5',
+            '',
+            'Existing answer.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: earlier — gpt-5',
+            '',
+            'Existing answer.',
+            '### Re: latest — gpt-5',
+            '',
+            'Fresh answer.',
+            '<!-- agent:boundary:abc12345 -->',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = annotateExchangeHeadingsAgainstBaseline(doc, 'exchange', baseline);
+        assert.ok(result, 'should return annotated content');
+        assert.ok(result!.includes('### Re: earlier — gpt-5\n'));
+        assert.ok(result!.includes('### Re: latest — gpt-5 (HEAD)\n'));
+        assert.strictEqual((result!.match(/\(HEAD\)/g) || []).length, 1);
+    });
+
+    it('does not add HEAD markers when exchange content is unchanged', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: earlier — gpt-5',
+            '',
+            'Existing answer.',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = annotateExchangeHeadingsAgainstBaseline(doc, 'exchange', doc);
+        assert.strictEqual(result, doc);
+        assert.strictEqual((result!.match(/\(HEAD\)/g) || []).length, 0);
     });
 });

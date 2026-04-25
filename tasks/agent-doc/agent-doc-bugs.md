@@ -125,12 +125,35 @@ Verification in `src/agent-doc`:
 - `cargo build --release`
 - `cargo install --path .`
 - `agent-doc orchestrate --help`
-<!-- agent:boundary:49b98534 -->
+
+do #d5xb. update spec + tests. build + install for local testing. commit + push 
+### Re: DAG orchestration implementation — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `f0c0afc` (`feat: execute dag orchestration batches`).
+
+`agent-doc orchestrate --mode dag` now accepts dependency-aware task entries such as:
+
+```md
+- do #prep. Prepare context
+- [after=#prep] do #bench. Run benchmarks
+- [id=report after=#prep,#bench] Summarize both results
+```
+
+The DAG path validates duplicate / missing / cyclic dependencies, derives ids from `id=...` or the first `#token` in the prompt, then executes the graph in deterministic topological order through the normal single-document lifecycle: inject prompt, `preflight`, fresh agent request, `finalize`, `session-check`. Because all nodes write back to the same session document, sibling nodes are still serialized; fan-in is implemented through multiple `after=` dependencies, while worktree fan-out remains `--mode parallel`.
+
+I updated the command spec, README, version notes, and CLI help text to match the shipped behavior.
+
+Verification in `src/agent-doc`:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc orchestrate --help`
+<!-- agent:boundary:65fb2d95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
+- [x] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

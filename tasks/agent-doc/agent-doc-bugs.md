@@ -181,7 +181,6 @@ Each `<!-- no-pending-capture -->` is a **per-cycle guard suppressor** — it te
 Each suppressor is scoped to exactly one response cycle — they don't carry forward. That's why you see multiples: every cycle where the author said "I know this looks like I should be adding pending items, but I'm deliberately not" needs its own annotation.
 
 ❯ These comments are noisy. How can we not have them in the committed response patchback?
-<!-- no-pending-capture -->
 ### Re: noisy `<!-- no-pending-capture -->` in committed documents — opus-4-6
 
 The noise happens because `session-check` scans the *committed response body* for the marker. Agents embed it in exchange content to suppress warnings, so it becomes permanent document clutter. Three options:
@@ -193,10 +192,46 @@ The noise happens because `session-check` scans the *committed response body* fo
 **Option C: Document-level `pending_capture_guard: off`** — already exists in frontmatter. Turns off the guard entirely. All-or-nothing, works today with zero code changes.
 
 **Recommendation:** Option A. It moves the suppression signal to the command boundary where it belongs — same surface as `--pending-add` and `--pending-done`. The inline `<!-- no-pending-capture -->` marker stays supported for backward compat but stops being the recommended path.
-<!-- agent:boundary:d461f14f -->
+
+❯ Do Option B. preset #spec-test-commit-push
+### Re: Option B — strip guard markers before commit — opus-4-6
+
+Implemented strip-after-check for `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->`.
+
+**What changed in `src/agent-doc/src/git.rs`:**
+
+- Added `strip_guard_markers()` — removes lines that are exclusively a guard marker. Inline occurrences (marker embedded in other text) are preserved.
+- `stage_snapshot_for_commit()` now calls `strip_guard_markers()` after `strip_head_markers()`, so the committed blob never contains the markers.
+- `strip_guard_markers_from_disk()` — post-commit cleanup strips markers from the snapshot and working-tree file so they match the committed blob.
+- `normalize_transient_agent_doc_markers()` now includes guard markers, so snapshot/file comparisons don't produce phantom diffs from guard markers alone.
+- Two new unit tests: standalone markers removed, inline markers preserved.
+
+**Spec updated** in `specs/07-commands.md` to document that guard markers are ephemeral signaling stripped before commit.
+
+**Verification:** `cargo test` (all pass except pre-existing `detect_install_env_treats_codex_thread_id_as_codex`), `cargo build --release`, `cargo install --path .`.
+
+Committed as `b1a4cb9` on `20260422/codex-agent-backend` and pushed.
+<!-- agent:boundary:acd26b72 -->
 <!-- /agent:exchange -->
 
 <!--
+Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
+```
+synchronous orchestra
+preset #spec-test-commit-push
+- do #cenv2
+- do #cenv3
+- do #cenv4
+```
+```
+  /btw Is this current agent-doc run using the orchestrate command?
+
+    Error: empty response from streaming orchestrate step
+
+    The orchestrate binary needs the harness to produce streamed responses for each step, but it couldn't get them in
+    this execution context. So the main agent is now falling back to executing the three tasks (#cenv2, #cenv3, #cenv4)
+     manually in sequence — same work, just driven by the skill layer instead of the binary's orchestration loop.
+```
 -->
 
 ## Pending / Not Built

@@ -929,13 +929,12 @@ Implemented `--prune` flag for `tsift index`. On large repos (100K+ files), this
 **Tradeoff:** In-place file content modifications don't update directory mtime, so `--prune` may miss them. Use periodic `--rebuild` for full accuracy.
 
 Committed and pushed to `btakita/tsift` + parent submodule pointer.
-<!-- agent:boundary:58458a76 -->
+<!-- agent:boundary:31215681 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
 - [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity

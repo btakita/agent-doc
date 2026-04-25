@@ -78,7 +78,7 @@ Fixed the `--from-exchange` stale-task parsing regression.
 **Spec updated:** `specs/07-commands.md` step 3 now documents the snapshot-scoped extraction.
 
 **Verification:** 1124/1125 tests pass (sole failure is pre-existing `detect_install_env_treats_codex_thread_id_as_codex` #envt1). `cargo build --release` + `cargo install --path .` done. Committed and pushed as `1936fc1`.
-<!-- agent:boundary:23d4b8ff -->
+<!-- agent:boundary:02753dd5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -87,7 +87,7 @@ Fixed the `--from-exchange` stale-task parsing regression.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#stale1] [recommended] Fix --from-exchange stale-task parsing regression (scope extract_tasks_from_text to latest unprefixed orchestra block)
+- [x] [#stale1] [recommended] Fix --from-exchange stale-task parsing regression (scope extract_tasks_from_text to latest unprefixed orchestra block)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

@@ -179,7 +179,21 @@ Each `<!-- no-pending-capture -->` is a **per-cycle guard suppressor** — it te
 3. **Line 616** — response listed 4 pre-deploy fixes. The user then explicitly wrote "Add next steps to pending" on the next line, meaning the promotion was intentionally deferred to the next cycle rather than done inline.
 
 Each suppressor is scoped to exactly one response cycle — they don't carry forward. That's why you see multiples: every cycle where the author said "I know this looks like I should be adding pending items, but I'm deliberately not" needs its own annotation.
-<!-- agent:boundary:9321f20f -->
+
+❯ These comments are noisy. How can we not have them in the committed response patchback?
+<!-- no-pending-capture -->
+### Re: noisy `<!-- no-pending-capture -->` in committed documents — opus-4-6
+
+The noise happens because `session-check` scans the *committed response body* for the marker. Agents embed it in exchange content to suppress warnings, so it becomes permanent document clutter. Three options:
+
+**Option A: `--no-pending-capture-guard` flag on `finalize`/`write`** — the agent passes it on the command line when it intentionally skips `--pending-add`. The binary checks the flag instead of scanning the response body. Nothing touches the document.
+
+**Option B: Strip-after-check** — the binary checks for the marker as today, but strips it before committing. The marker is ephemeral signaling, not persisted.
+
+**Option C: Document-level `pending_capture_guard: off`** — already exists in frontmatter. Turns off the guard entirely. All-or-nothing, works today with zero code changes.
+
+**Recommendation:** Option A. It moves the suppression signal to the command boundary where it belongs — same surface as `--pending-add` and `--pending-done`. The inline `<!-- no-pending-capture -->` marker stays supported for backward compat but stops being the recommended path.
+<!-- agent:boundary:d461f14f -->
 <!-- /agent:exchange -->
 
 <!--

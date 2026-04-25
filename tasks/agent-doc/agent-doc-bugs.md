@@ -109,13 +109,12 @@ Verification in `src/agent-doc`:
 - `agent-doc orchestrate --help`
 
 I also ran the full `cargo test`; the crate compiles, but the run is still blocked by existing unrelated failures in `autoclaim::tests::{autoclaim_focuses_pane_with_claim, autoclaim_syncs_layout_with_multiple_files, autoclaim_no_claim_skips_focus}`.
-<!-- agent:boundary:24159fec -->
+<!-- agent:boundary:eaf0dc60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#gkke] [recommended] Implement `agent-doc orchestrate` with `--mode sequential`, fresh agent context per step, prompt injection into exchange, and per-step `finalize` + `session-check`.
 - [ ] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
 - [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

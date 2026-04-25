@@ -890,13 +890,12 @@ Added deduplication in `extract_symbols` — when overlapping patterns capture t
 Fixed SPEC.md: grammar crate name corrected from `tree-sitter-kotlin` 0.3.8 to `tree-sitter-kotlin-ng` 1.1.0.
 
 122 tests pass. Committed + pushed both tsift and agent-loop.
-<!-- agent:boundary:0ad2de1c -->
+<!-- agent:boundary:ba1c3036 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#xksz] Write .scm query patterns for Kotlin (fun, class, interface, object, data class, sealed class, enum class)
 - [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
 - [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
 - [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)

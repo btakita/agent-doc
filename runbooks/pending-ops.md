@@ -63,6 +63,21 @@ New pending items go at the **beginning** of the list. When adding multiple new
 items in one cycle, preserve the order you presented them in so the first
 recommended next step stays first.
 
+Exception: if you are later adding a follow-on step from an ordered batch that
+is already partially represented in pending, place the new item next to its
+predecessor rather than prepending it above earlier steps. The practical pattern
+is:
+
+```bash
+agent-doc write plan.md \
+  --pending-add "id=step3 [recommended] Add step 3" \
+  --pending-reorder gkke,9pw9,step3
+```
+
+That keeps the ordered batch stable when Step 1 / Step 2 already exist and you
+are only promoting Step 3 in a later cycle. If the predecessor is not already in
+pending, fall back to the normal front-insertion rule.
+
 ## What to decide each cycle
 
 - Items completed during this response → `--pending-done <id>`

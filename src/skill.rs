@@ -875,6 +875,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("Pending capture rule"));
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
         assert!(SKILL_TEMPLATE.contains("beginning of `agent:pending`"));
+        assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
     }
 
     #[test]
@@ -1054,6 +1055,8 @@ mod tests {
         assert!(content.contains("beginning of the list"));
         assert!(content.contains("[recommended]"));
         assert!(content.contains("preserve the order you presented them in"));
+        assert!(content.contains("follow-on step from an ordered batch"));
+        assert!(content.contains("--pending-reorder gkke,9pw9,step3"));
     }
 
     #[test]

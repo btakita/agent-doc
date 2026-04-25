@@ -562,7 +562,7 @@ Verification:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml`
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
 - `cargo install --path src/agent-doc`
-<!-- agent:boundary:25987970 -->
+<!-- agent:boundary:ce54bd58 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -571,7 +571,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#orfmt1] [recommended] Orchestrate template-mode hard fail: reject child responses without <!-- patch:exchange -->; do not synthesize unmatched/raw transcript into exchange
 - [ ] [#stopr1] [recommended] Stop-hook/repair replay hard fail: block transcript/full-exchange payloads and capture diagnostics only (plan: tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md)
 - [ ] [#orsyn1] [recommended] Route or explicitly reject 'synchronous orchestra'/'synchronous opera' directives deterministically (plan: tasks/agent-doc/plan-orchestrate-synonyms.md)
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure

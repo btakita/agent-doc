@@ -623,10 +623,27 @@ fn test_skill_md_contains_required_steps() {
         "SKILL.md should point agents to the compound-task steering runbook"
     );
     assert!(
+        content.contains("create the plan file first"),
+        "SKILL.md should require creating plan files before adding plan-backed pending items"
+    );
+    assert!(
+        content.contains("include that exact plan file path"),
+        "SKILL.md should require plan-backed pending items to include the plan path"
+    );
+    assert!(
         tmp.path()
             .join(".claude/skills/agent-doc/runbooks/compound-task-steering.md")
             .exists(),
         "skill install should write the compound-task steering runbook"
+    );
+    let pending_ops = std::fs::read_to_string(
+        tmp.path()
+            .join(".claude/skills/agent-doc/runbooks/pending-ops.md"),
+    )
+    .unwrap();
+    assert!(
+        pending_ops.contains("plan-spec2-rollout.md"),
+        "installed pending-ops runbook should document plan-backed pending items"
     );
 }
 

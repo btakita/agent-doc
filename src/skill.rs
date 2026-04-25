@@ -703,6 +703,29 @@ mod tests {
     }
 
     #[test]
+    fn installed_harness_pending_ops_runbooks_cover_plan_backed_items() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+
+        let claude = std::fs::read_to_string(
+            dir.path()
+                .join(".claude/skills/agent-doc/runbooks/pending-ops.md"),
+        )
+        .unwrap();
+        let codex =
+            std::fs::read_to_string(dir.path().join(".codex/runbooks/pending-ops.md")).unwrap();
+
+        for content in [&claude, &codex] {
+            assert!(content.contains("create the plan file"));
+            assert!(content.contains("include that exact plan"));
+            assert!(content.contains("file path in the item text"));
+            assert!(content.contains("plan-spec2-rollout.md"));
+        }
+    }
+
+    #[test]
     fn installed_harness_runbooks_share_manual_repair_rule() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1099,6 +1122,18 @@ mod tests {
         assert!(content.contains("id=<custom>"));
         assert!(content.contains("id=#spec1"));
         assert!(content.contains("ASCII alphanumeric"));
+    }
+
+    #[test]
+    fn pending_ops_runbook_content_covers_plan_backed_items() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "pending-ops.md")
+            .expect("pending-ops.md not found");
+        assert!(content.contains("create the plan file"));
+        assert!(content.contains("include that exact plan"));
+        assert!(content.contains("file path in the item text"));
+        assert!(content.contains("plan-spec2-rollout.md"));
     }
 
     #[test]

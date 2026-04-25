@@ -78,6 +78,23 @@ That keeps the ordered batch stable when Step 1 / Step 2 already exist and you
 are only promoting Step 3 in a later cycle. If the predecessor is not already in
 pending, fall back to the normal front-insertion rule.
 
+## Plan-backed pending items
+
+If a pending item points at a dedicated plan document, create the plan file
+first, then add the pending item in the same cycle and include that exact plan
+file path in the item text. Do not create a vague pending bullet like "write
+the plan" and only later decide which file it refers to.
+
+Preferred shape:
+
+```bash
+agent-doc write plan.md \
+  --pending-add "id=spec2 [recommended] Draft follow-up rollout plan in tasks/agent-doc/plan-spec2-rollout.md"
+```
+
+That keeps the backlog self-describing: the pending line already tells the next
+cycle which concrete plan file exists and should be opened.
+
 ## What to decide each cycle
 
 - Items completed during this response → `--pending-done <id>`

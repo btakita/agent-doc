@@ -136,6 +136,12 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 | `--pending-clear` | Remove all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
 
+**Plan-backed item rule:** when a pending bullet depends on a dedicated plan
+document, the operator must create that plan file before adding the pending
+item, and the pending text must include the concrete plan-file path. The
+backlog entry is the durable pointer; it should not require later archaeology to
+discover which `plan-*.md` file was intended.
+
 **State transition matrix:**
 
 | From \ Op | `--pending-done` | `--pending-gate` | `--pending-ungate` |
@@ -207,6 +213,8 @@ After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls f
    - Document `--pending-gate` / `--pending-ungate` alongside existing granular flags.
    - Guidance: when agent lands code that cannot ship immediately (awaiting release, telemetry, field validation), call `--pending-gate <id>` instead of leaving `[ ]` with prose "awaiting X".
    - Respect `pending_reordered: true` — do not reorder this cycle.
+   - For plan-backed work, create the plan file first and include its path in
+     the pending item text in the same cycle.
 
 4. **Release discipline:**
    - `Gated` lifecycle ships in its own release (**v0.32.6**), NOT bundled with the `#eg0w` CommitLock release (v0.32.5). Reason: the CommitLock fix gets clean field validation first; mixing gated-state into the same release confuses the field-test signal.

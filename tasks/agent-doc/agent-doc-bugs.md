@@ -211,8 +211,11 @@ Implemented strip-after-check for `<!-- no-pending-capture -->` and `<!-- no-pen
 **Verification:** `cargo test` (all pass except pre-existing `detect_install_env_treats_codex_thread_id_as_codex`), `cargo build --release`, `cargo install --path .`.
 
 Committed as `b1a4cb9` on `20260422/codex-agent-backend` and pushed.
+<!-- agent:boundary:c813cb03 -->
+<!-- /agent:exchange -->
 
-❯ Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
+<!--
+Why is src/session-share `agent-doc tasks/claudescore.md` not using the orchestrate command?
 ```
 synchronous orchestra
 preset #spec-test-commit-push
@@ -229,14 +232,6 @@ preset #spec-test-commit-push
     this execution context. So the main agent is now falling back to executing the three tasks (#cenv2, #cenv3, #cenv4)
      manually in sequence — same work, just driven by the skill layer instead of the binary's orchestration loop.
 ```
-### Re: orchestrate empty response — opus-4-6
-
-Test response verifying fix.
-<!-- agent:boundary:440edf4a -->
-<!-- /agent:exchange -->
-
-<!--
-Why are the response patchback top headers not having ` (HEAD)` appended? This is a reoccurring issue. How can we make this feature less brittle? preset #spec-test-commit-push
 -->
 
 ## Pending / Not Built

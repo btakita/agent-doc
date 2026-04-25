@@ -57,6 +57,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Idempotent:** lines already starting with `❯ ` are left unchanged.
 - **Agent region excluded:** lines at or after the last boundary marker must not be prefixed.
 - **Blank target lines skipped:** entries in `normalize_prefix_lines` that are blank after trimming must be ignored.
+- **Binary-side verification:** The binary verifies the ack-content sidecar by checking that each non-blank `normalize_prefix_lines` target appears with a `❯ ` prefix (using `trimEnd()` comparison). If any target is missing its prefix, the binary falls back to `content_ours` as the snapshot source instead of the sidecar. This prevents normalization failures in the plugin from propagating into the committed snapshot.
 
 **ACK protocol:**
 - On successful application: delete the patch JSON file. This signals to the CLI that the patch was consumed.

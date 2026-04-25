@@ -1128,6 +1128,37 @@ pub fn normalize_user_prompts_in_exchange_safe(
     normalized
 }
 
+/// Verify that the sidecar content preserved the expected `❯ ` prefixes.
+///
+/// For each non-blank target in `normalize_prefix_lines`, checks whether a
+/// `trimEnd()`-matched prefixed line (`❯ <target>`) exists in the sidecar.
+/// Returns `true` when all expected prefixes are present (or when there are
+/// no targets to check).
+pub fn verify_sidecar_normalization(
+    sidecar: &str,
+    normalize_prefix_lines: &[String],
+) -> bool {
+    if normalize_prefix_lines.is_empty() {
+        return true;
+    }
+
+    let sidecar_lines: Vec<&str> = sidecar.lines().collect();
+    for target in normalize_prefix_lines {
+        let trimmed = target.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let expected = format!("❯ {}", trimmed);
+        if !sidecar_lines
+            .iter()
+            .any(|l| l.trim_end() == expected)
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Lift `agent:pending` out of `agent:exchange` if nested.
 ///
 /// After patch application, pending may end up nested inside exchange due to
@@ -2596,10 +2627,39 @@ pub fn try_ipc(
                     std::time::Duration::from_millis(25),
                 )?;
                 if let Some(snap_content) = sidecar {
-                    // Sidecar confirmed — plugin applied the content
+                    // Verify sidecar preserved normalize_prefix_lines targets.
+                    // If the plugin's normalization diverged, prefer content_ours.
+                    let (effective_snap, snap_source) = if let Some(lines) = normalize_prefix_lines
+                        && !lines.is_empty()
+                        && !verify_sidecar_normalization(&snap_content, lines)
+                    {
+                        if let Some(ours) = content_ours {
+                            eprintln!(
+                                "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
+                                ours.len()
+                            );
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
+                                    file.display()
+                                ),
+                            );
+                            (ours.to_string(), "content_ours")
+                        } else {
+                            eprintln!(
+                                "[write] sidecar normalization diverged but no content_ours available — using sidecar"
+                            );
+                            (snap_content, "ack_content_sidecar")
+                        }
+                    } else {
+                        (snap_content, "ack_content_sidecar")
+                    };
+
                     eprintln!(
-                        "[write] snapshot from ack-content sidecar ({} bytes)",
-                        snap_content.len()
+                        "[write] snapshot from {} ({} bytes)",
+                        snap_source,
+                        effective_snap.len()
                     );
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
@@ -2607,12 +2667,13 @@ pub fn try_ipc(
                     crate::ops_log::log_op(
                         file,
                         &format!(
-                            "ipc_socket_delivered file={} snap_source=ack_content_sidecar snap_len={}",
+                            "ipc_socket_delivered file={} snap_source={} snap_len={}",
                             file.display(),
-                            snap_content.len()
+                            snap_source,
+                            effective_snap.len()
                         ),
                     );
-                    if let Err(e) = snapshot::save(file, &snap_content) {
+                    if let Err(e) = snapshot::save(file, &effective_snap) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                              Commit will auto-recover via divergence detection.",
@@ -2632,10 +2693,10 @@ pub fn try_ipc(
                             &format!(
                                 "snapshot_saved_socket_ipc file={} snap_len={}",
                                 file.display(),
-                                snap_content.len()
+                                effective_snap.len()
                             ),
                         );
-                        let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                        let crdt_doc = crate::crdt::CrdtDoc::from_text(&effective_snap);
                         if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
                             eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                         }
@@ -2765,6 +2826,7 @@ pub fn try_ipc(
         file,
         ipc_patches.len(),
         content_ours,
+        normalize_prefix_lines,
         &project_root,
     )?;
     Ok(IpcResult { success, patch_id })
@@ -2837,6 +2899,7 @@ pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
         file,
         0,
         Some(content),
+        None,
         &project_root,
     )
 }
@@ -2901,7 +2964,8 @@ fn write_ipc_and_poll(
     payload: &serde_json::Value,
     doc_file: &Path,
     patch_count: usize,
-    _content_ours: Option<&str>,
+    content_ours: Option<&str>,
+    normalize_prefix_lines: Option<&[String]>,
     project_root: &Path,
 ) -> Result<bool> {
     // Atomic write of patch file
@@ -2934,11 +2998,38 @@ fn write_ipc_and_poll(
                     std::time::Duration::from_millis(25),
                 ) {
                     Ok(Some(content)) => {
-                        eprintln!(
-                            "[write] snapshot from ack-content sidecar ({} bytes)",
-                            content.len()
-                        );
-                        content
+                        // Verify sidecar preserved normalize_prefix_lines targets.
+                        if let Some(lines) = normalize_prefix_lines
+                            && !lines.is_empty()
+                            && !verify_sidecar_normalization(&content, lines)
+                        {
+                            if let Some(ours) = content_ours {
+                                eprintln!(
+                                    "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
+                                    ours.len()
+                                );
+                                crate::ops_log::log_op(
+                                    doc_file,
+                                    &format!(
+                                        "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
+                                        doc_file.display()
+                                    ),
+                                );
+                                ours.to_string()
+                            } else {
+                                eprintln!(
+                                    "[write] sidecar normalization diverged but no content_ours — using sidecar ({} bytes)",
+                                    content.len()
+                                );
+                                content
+                            }
+                        } else {
+                            eprintln!(
+                                "[write] snapshot from ack-content sidecar ({} bytes)",
+                                content.len()
+                            );
+                            content
+                        }
                     }
                     _ => {
                         eprintln!(
@@ -5632,5 +5723,61 @@ response here
         let footer = result.find("## Footer").unwrap();
         assert!(pend_open > ex_close, "pending after exchange close");
         assert!(footer > pend_open, "footer after pending");
+    }
+}
+
+#[cfg(test)]
+mod verify_sidecar_normalization_tests {
+    use super::verify_sidecar_normalization;
+
+    #[test]
+    fn empty_targets_always_passes() {
+        assert!(verify_sidecar_normalization("anything", &[]));
+    }
+
+    #[test]
+    fn all_targets_prefixed() {
+        let sidecar = "some line\n❯ do #task1\n❯ do #task2\nother line";
+        let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn missing_prefix_detected() {
+        let sidecar = "some line\n❯ do #task1\ndo #task2\nother line";
+        let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
+        assert!(!verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn trailing_whitespace_mismatch_tolerated() {
+        let sidecar = "❯ do #task1\n❯ do #task2  \n";
+        let targets = vec!["do #task1  ".to_string(), "do #task2".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn blank_targets_skipped() {
+        let sidecar = "❯ do #task1\nother";
+        let targets = vec![
+            "do #task1".to_string(),
+            "".to_string(),
+            "   ".to_string(),
+        ];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn target_at_start_of_sidecar() {
+        let sidecar = "❯ first line\nrest";
+        let targets = vec!["first line".to_string()];
+        assert!(verify_sidecar_normalization(sidecar, &targets));
+    }
+
+    #[test]
+    fn target_not_in_sidecar_at_all() {
+        let sidecar = "line one\nline two\n";
+        let targets = vec!["nonexistent line".to_string()];
+        assert!(!verify_sidecar_normalization(sidecar, &targets));
     }
 }

@@ -141,7 +141,7 @@ impl Drop for CommitLock {
     }
 }
 
-fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
+fn absolute_git_dir_at(git_root: &Path) -> Option<PathBuf> {
     let output = Command::new("git")
         .current_dir(git_root)
         .args(["rev-parse", "--absolute-git-dir"])
@@ -158,6 +158,10 @@ fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
     path.canonicalize().ok().or(Some(path))
 }
 
+fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
+    absolute_git_dir_at(git_root)
+}
+
 fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
     let scope_path = commit_lock_scope_path(git_root)
         .or_else(|| git_root.canonicalize().ok())
@@ -168,6 +172,35 @@ fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
             .join("agent-doc-locks")
             .join(format!("commit-repo-{}.lock", key)),
     )
+}
+
+fn push_external_git_dir(dirs: &mut Vec<PathBuf>, git_root: &Path, candidate: Option<PathBuf>) {
+    let Some(dir) = candidate else {
+        return;
+    };
+    if dir.starts_with(git_root) || dirs.contains(&dir) {
+        return;
+    }
+    dirs.push(dir);
+}
+
+/// Return external git metadata directories a workspace-scoped harness must be
+/// allowed to write when operating on `file`.
+///
+/// Ordinary repos return an empty list because `.git/` lives under the repo
+/// root. Submodules return the external `.git/modules/...` gitdir plus the
+/// superproject `.git` used by parent-pointer updates.
+pub(crate) fn external_git_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
+    let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
+        return Vec::new();
+    };
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    let mut dirs = Vec::new();
+    push_external_git_dir(&mut dirs, &git_root, absolute_git_dir_at(&git_root));
+    if in_submodule {
+        push_external_git_dir(&mut dirs, &git_root, absolute_git_dir_at(&super_root));
+    }
+    dirs
 }
 
 fn resolve_absolute_to_git_root(
@@ -3612,6 +3645,111 @@ mod tests {
         assert!(
             outer_log_str.contains("(submodule pointer)"),
             "parent git log should contain pointer-update commit, got:\n{outer_log_str}"
+        );
+    }
+
+    #[test]
+    fn external_git_dirs_for_submodule_include_submodule_and_parent_gitdirs() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = outer.join("src/sub/session.md");
+        fs::write(&doc, "test\n").unwrap();
+
+        let dirs = external_git_dirs_for_doc(&doc);
+        assert!(
+            dirs.contains(&outer.join(".git/modules/src/sub")),
+            "submodule gitdir should be exposed to workspace-write harnesses: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&outer.join(".git")),
+            "superproject gitdir should be exposed for pointer updates: {dirs:?}"
         );
     }
 

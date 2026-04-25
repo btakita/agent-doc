@@ -58,12 +58,13 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 
 ## start
 
-`agent-doc start <FILE>` — start Claude in a new tmux pane and register the session.
+`agent-doc start <FILE>` — start the configured harness in a new tmux pane and register the session.
 
 1. Ensure session UUID in frontmatter (generate if missing)
 2. Read `$TMUX_PANE` (must be inside tmux)
 3. Register session → pane in `sessions.json`
-4. Exec `claude` (replaces process)
+4. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append harness-native `--add-dir` entries for any external git metadata directories needed by submodule documents (`.git/modules/...` and the superproject `.git` when applicable)
+5. Exec the configured harness (replaces process)
 
 ## route
 
@@ -200,7 +201,7 @@ Exits with error if the pane is dead or no session is registered.
    g. Post-commit local drift classification: if the stripped snapshot already matches `HEAD` but the working tree still differs, `commit` must classify that state as later local drift on top of the committed document before closing as `commit_already_current`. Safe follow-up prompts and arbitrary later working-tree edits both stay uncommitted; the operator-facing explanation must say this is post-commit local drift, not a missed patchback.
    h. Extreme drift guard: when the file is vastly larger than the snapshot, `commit` may auto-resync only for bootstrap scaffold snapshots on files with no `HEAD` entry yet. Tracked documents still do NOT wholesale re-sync from the live file, because that would risk absorbing unanswered user prompts.
    i. Relative-path resolution must prefer an existing cwd-local document before falling back to a superproject root. This prevents submodule sessions like `src/boost-client` from accidentally staging an outer-repo shadow file that happens to share the same relative path (for example `tasks/monsterrodholders.md`).
-3. Acquire a blocking advisory commit lock keyed by the resolved git dir (`git rev-parse --absolute-git-dir`), so different docs in the same repo or submodule serialize the short staging+commit critical section instead of racing on one shared index.
+3. Acquire a blocking advisory commit lock keyed by the resolved git dir (`git rev-parse --absolute-git-dir`), so different docs in the same repo or submodule serialize the short staging+commit critical section instead of racing on one shared index. For submodule documents, workspace-write harness sessions rely on the auto-added external gitdir access from `start` / fresh-agent launch so this lock path and the parent-pointer update remain writable.
 4. If no snapshot: fall back to `git add -f <file>` (stages entire file)
 5. If the fully staged index already matches `HEAD`, close the cycle as `commit_already_current` and return success without creating a duplicate git commit
 6. Otherwise run the full staging+commit transaction. If git reports `index.lock` contention during `update-index`, `git add`, or `git commit`, retry the whole transaction with backoff instead of retrying only the final `git commit` call.

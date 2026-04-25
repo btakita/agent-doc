@@ -2,7 +2,7 @@
 
 # Git Integration
 
-- Commit: stage the snapshot-selected blob (fallback `git add -f {file}` when needed), hold a blocking advisory lock per resolved git dir / submodule git dir for the short closeout critical section, and retry the full stage+commit transaction when git reports `index.lock` contention
+- Commit: stage the snapshot-selected blob (fallback `git add -f {file}` when needed), hold a blocking advisory lock per resolved git dir / submodule git dir for the short closeout critical section, and retry the full stage+commit transaction when git reports `index.lock` contention. For submodule documents, harness launches must auto-grant access to any external git metadata directories that the lifecycle touches (`.git/modules/...` for the submodule repo and the superproject `.git` for pointer updates).
 - Branch: `git checkout -b agent-doc/{filestem}`
 - Squash: soft-reset to before first `agent-doc:` commit, recommit as one
 

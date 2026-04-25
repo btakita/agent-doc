@@ -56,18 +56,20 @@ pub struct Codex {
     env: Vec<(String, Option<String>)>,
 }
 
+pub(crate) fn default_base_args() -> Vec<String> {
+    vec![
+        "exec".to_string(),
+        "--json".to_string(),
+        "-s".to_string(),
+        "workspace-write".to_string(),
+    ]
+}
+
 impl Codex {
     pub fn new(command: Option<String>, base_args: Option<Vec<String>>) -> Self {
         Self {
             command: command.unwrap_or_else(|| "codex".to_string()),
-            base_args: base_args.unwrap_or_else(|| {
-                vec![
-                    "exec".to_string(),
-                    "--json".to_string(),
-                    "-s".to_string(),
-                    "workspace-write".to_string(),
-                ]
-            }),
+            base_args: base_args.unwrap_or_else(default_base_args),
             env: Vec::new(),
         }
     }

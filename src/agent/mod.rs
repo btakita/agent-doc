@@ -28,6 +28,8 @@ pub mod junie;
 pub mod streaming;
 
 use anyhow::Result;
+use std::collections::HashSet;
+use std::path::Path;
 
 use crate::config::AgentConfig;
 
@@ -50,15 +52,82 @@ pub trait Agent {
 
 /// Resolve an agent backend by name. `env` is applied to the spawned child process
 /// (currently only honored by the Claude backend).
+fn build_backend_command(
+    name: &str,
+    config: Option<&AgentConfig>,
+    file: Option<&Path>,
+) -> (Option<String>, Option<Vec<String>>) {
+    let command = config.map(|ac| ac.command.clone());
+    let mut args = config
+        .map(|ac| ac.args.clone())
+        .unwrap_or_else(|| match name {
+            "claude" => claude::default_base_args(),
+            "codex" => codex::default_base_args(),
+            _ => Vec::new(),
+        });
+    if let Some(file) = file {
+        append_workspace_access_args(name, &mut args, file);
+    }
+    let args = if args.is_empty() { None } else { Some(args) };
+    (command, args)
+}
+
+pub(crate) fn append_workspace_access_args(agent_name: &str, args: &mut Vec<String>, file: &Path) {
+    if !matches!(agent_name, "claude" | "codex") {
+        return;
+    }
+
+    let mut existing = HashSet::new();
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--add-dir" {
+            if let Some(dir) = iter.next() {
+                existing.insert(dir.clone());
+            }
+            continue;
+        }
+        if let Some(dir) = arg.strip_prefix("--add-dir=") {
+            existing.insert(dir.to_string());
+        }
+    }
+
+    for dir in crate::git::external_git_dirs_for_doc(file) {
+        let dir = dir.to_string_lossy().into_owned();
+        if existing.insert(dir.clone()) {
+            args.push("--add-dir".into());
+            args.push(dir);
+        }
+    }
+}
+
+#[allow(dead_code)]
 pub fn resolve(
     name: &str,
     config: Option<&AgentConfig>,
     env: Vec<(String, Option<String>)>,
 ) -> Result<Box<dyn Agent>> {
-    let (cmd, args) = match config {
-        Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),
-        None => (None, None),
-    };
+    let (cmd, args) = build_backend_command(name, config, None);
+    match name {
+        "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
+        "codex" => Ok(Box::new(codex::Codex::new(cmd, args).with_env(env))),
+        "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
+        other => {
+            if config.is_some() {
+                Ok(Box::new(claude::Claude::new(cmd, args).with_env(env)))
+            } else {
+                anyhow::bail!("Unknown agent backend: {}", other)
+            }
+        }
+    }
+}
+
+pub fn resolve_for_file(
+    name: &str,
+    config: Option<&AgentConfig>,
+    env: Vec<(String, Option<String>)>,
+    file: &Path,
+) -> Result<Box<dyn Agent>> {
+    let (cmd, args) = build_backend_command(name, config, Some(file));
     match name {
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
         "codex" => Ok(Box::new(codex::Codex::new(cmd, args).with_env(env))),

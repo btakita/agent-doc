@@ -118,6 +118,7 @@ trait LifecycleOps {
 trait FreshAgentRunner {
     fn send_fresh(
         &self,
+        file: &Path,
         prompt: &str,
         agent_name: &str,
         agent_config: Option<&AgentConfig>,
@@ -231,13 +232,14 @@ struct CliAgentRunner;
 impl FreshAgentRunner for CliAgentRunner {
     fn send_fresh(
         &self,
+        file: &Path,
         prompt: &str,
         agent_name: &str,
         agent_config: Option<&AgentConfig>,
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<String> {
-        let backend = agent::resolve(agent_name, agent_config, env)?;
+        let backend = agent::resolve_for_file(agent_name, agent_config, env, file)?;
         let response = send_fresh_response(backend.as_ref(), prompt, model)?;
         Ok(response.text)
     }
@@ -482,6 +484,7 @@ fn run_ordered_task_step(
     let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
     let expanded_env = expand_frontmatter_env(&fm);
     let response = agent_runner.send_fresh(
+        file,
         &prompt,
         agent_name,
         global_config.agents.get(agent_name),
@@ -988,6 +991,7 @@ mod tests {
     impl FreshAgentRunner for FakeAgentRunner {
         fn send_fresh(
             &self,
+            _file: &Path,
             prompt: &str,
             _agent_name: &str,
             _agent_config: Option<&AgentConfig>,

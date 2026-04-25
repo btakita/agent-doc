@@ -627,6 +627,7 @@ pub fn run(file: &Path) -> Result<()> {
     if let Some(ref args) = resolved_agent_args {
         base_args.extend(args.split_whitespace().map(String::from));
     }
+    crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, &canonical);
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
     }

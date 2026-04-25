@@ -43,19 +43,67 @@ pub struct Claude {
     env: Vec<(String, Option<String>)>,
 }
 
+pub(crate) fn default_base_args() -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+        "--permission-mode".to_string(),
+        "acceptEdits".to_string(),
+    ]
+}
+
+fn build_streaming_args(
+    base_args: &[String],
+    session_id: Option<&str>,
+    fork: bool,
+    model: Option<&str>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut iter = base_args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--output-format" {
+            iter.next();
+            continue;
+        }
+        if arg.starts_with("--output-format=") {
+            continue;
+        }
+        args.push(arg.clone());
+    }
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+
+    if let Some(sid) = session_id {
+        args.push("--resume".to_string());
+        args.push(sid.to_string());
+    } else if fork {
+        args.push("--continue".to_string());
+        args.push("--fork-session".to_string());
+    }
+
+    if let Some(m) = model {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+
+    args.push("--append-system-prompt".to_string());
+    args.push(
+        "You are responding inside an interactive session document. \
+         The user edits the document and submits diffs to you. \
+         Respond concisely in markdown. Classify prompt-bearing inline edits \
+         as prompt targets vs content edits, and address new ## User blocks \
+         as well as prompt-bearing changes inside prior responses."
+            .to_string(),
+    );
+    args
+}
+
 impl Claude {
     pub fn new(command: Option<String>, base_args: Option<Vec<String>>) -> Self {
         Self {
             command: command.unwrap_or_else(|| "claude".to_string()),
-            base_args: base_args.unwrap_or_else(|| {
-                vec![
-                    "-p".to_string(),
-                    "--output-format".to_string(),
-                    "json".to_string(),
-                    "--permission-mode".to_string(),
-                    "acceptEdits".to_string(),
-                ]
-            }),
+            base_args: base_args.unwrap_or_else(default_base_args),
             env: Vec::new(),
         }
     }
@@ -173,37 +221,7 @@ impl StreamingAgent for Claude {
         fork: bool,
         model: Option<&str>,
     ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>> {
-        // Build streaming args: replace json output with stream-json
-        let mut args: Vec<String> = vec![
-            "-p".to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--permission-mode".to_string(),
-            "acceptEdits".to_string(),
-        ];
-
-        if let Some(sid) = session_id {
-            args.push("--resume".to_string());
-            args.push(sid.to_string());
-        } else if fork {
-            args.push("--continue".to_string());
-            args.push("--fork-session".to_string());
-        }
-
-        if let Some(m) = model {
-            args.push("--model".to_string());
-            args.push(m.to_string());
-        }
-
-        args.push("--append-system-prompt".to_string());
-        args.push(
-            "You are responding inside an interactive session document. \
-             The user edits the document and submits diffs to you. \
-             Respond concisely in markdown. Classify prompt-bearing inline edits \
-             as prompt targets vs content edits, and address new ## User blocks \
-             as well as prompt-bearing changes inside prior responses."
-                .to_string(),
-        );
+        let args = build_streaming_args(&self.base_args, session_id, fork, model);
 
         let mut cmd = Command::new(&self.command);
         cmd.args(&args).env_remove("CLAUDECODE");
@@ -243,6 +261,35 @@ impl StreamingAgent for Claude {
             lines: reader.lines(),
             _child: child,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_args_replace_output_format_and_preserve_add_dir() {
+        let args = build_streaming_args(
+            &[
+                "-p".into(),
+                "--output-format".into(),
+                "json".into(),
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+                "--add-dir".into(),
+                "/tmp/gitdir".into(),
+            ],
+            None,
+            false,
+            None,
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--output-format", "stream-json"])
+        );
+        assert!(args.windows(2).any(|w| w == ["--add-dir", "/tmp/gitdir"]));
+        assert!(!args.windows(2).any(|w| w == ["--output-format", "json"]));
     }
 }
 

@@ -160,7 +160,7 @@ pub fn run(
     };
 
     // Resolve streaming agent
-    let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env)?;
+    let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env, file)?;
 
     // Build prompt
     let prompt = build_prompt(&fm, &the_diff, &content_original);
@@ -524,11 +524,14 @@ fn resolve_streaming(
     name: &str,
     config: Option<&crate::config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
+    file: &Path,
 ) -> Result<Box<dyn StreamingAgent>> {
-    let (cmd, args) = match config {
-        Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),
-        None => (None, None),
-    };
+    let cmd = config.map(|ac| ac.command.clone());
+    let mut args = config
+        .map(|ac| ac.args.clone())
+        .unwrap_or_else(agent::claude::default_base_args);
+    agent::append_workspace_access_args(name, &mut args, file);
+    let args = Some(args);
     match name {
         "claude" => Ok(Box::new(
             agent::claude::Claude::new(cmd, args).with_env(env),

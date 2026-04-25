@@ -47,7 +47,19 @@ Fixes shipped since last release (all in unreleased HEAD, 48 commits past v0.33.
 4. After those three, this is ready to release + publish.
 
 The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. The other 48 commits are fixes and features that have been exercised in live sessions already.
-<!-- agent:boundary:1ca19da3 -->
+
+❯ Plan + add recommendations to pending.
+
+### Re: plan + pending capture — opus-4-6
+
+Done. Added three recommended pending items from the previous release assessment:
+
+- **#stale1** — fix `--from-exchange` stale-task parsing (the release blocker)
+- **#envt1** — fix the env detection test failure
+- **#orch5** — manual test orchestrate flows before publish
+
+All marked `[recommended]` since you haven't accepted the release plan yet. When ready, `do #stale1` to start with the blocker.
+<!-- agent:boundary:eb60b3cf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -56,6 +68,9 @@ The `--from-exchange` stale-task bug is the only blocker I'd gate a release on. 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#stale1] [recommended] Fix --from-exchange stale-task parsing regression (scope extract_tasks_from_text to latest unprefixed orchestra block)
+- [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
+- [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

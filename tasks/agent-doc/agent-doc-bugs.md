@@ -237,15 +237,27 @@ Two compounding issues in the orchestrate pipeline:
 
 **2. Stderr silently discarded.** `send_streaming` in `agent/claude.rs` pipes stderr (`Stdio::piped()`) but never reads it. `StreamIterator` only reads stdout. When the subprocess fails, the error message is lost. `stream_step_response` in `orchestrate.rs` accumulates stdout chunks and bails at line 724 with "empty response from streaming orchestrate step" when no text arrives — but the actual error (permission denied, subprocess crash, etc.) was on stderr.
 
+❯ Please add both of the compounding issue fixes to pending. Create a dedicated plan file as needed.
+
 The skill fallback (`manually in sequence`) is correct behavior — the skill layer detected the orchestrate failure and drove the tasks sequentially itself. The binary orchestrate path needs both fixes before it can replace the skill-driven fallback.
 
 **Also fixed: adjacent code fence dedup bug.** While investigating this, I discovered that `dedup_exchange_adjacent_lines` in `template.rs` was removing the second of two adjacent code fence lines (`` ``` ``), breaking `component::parse` for documents with back-to-back fenced code blocks (like the pasted orchestrate output). Fixed in `src/agent-doc` commit `ee3a1a9` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:aad2973e -->
+### Re: adding orchestrate fixes to pending — opus-4-6
+
+Added both to pending with a dedicated plan file at `tasks/agent-doc/plan-orchestrate-subprocess-fixes.md`:
+
+- **#orch1** — Frontmatter args (`claude_args`/`codex_args`) not forwarded to orchestrate subprocesses. `build_backend_command` uses `default_base_args()` instead of the document's permission settings.
+- **#orch2** — Stderr silently discarded in subprocess streaming. `send_streaming` pipes stderr but never reads it, so subprocess failures surface as "empty response" with no diagnostics.
+
+The plan covers both fixes with verification steps.
+<!-- agent:boundary:4a96658e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#orch1] Frontmatter args (claude_args/codex_args) not forwarded to orchestrate subprocesses — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
+- [ ] [#orch2] Stderr silently discarded in orchestrate subprocess streaming — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

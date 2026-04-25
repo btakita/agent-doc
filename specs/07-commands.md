@@ -217,6 +217,16 @@ Exits with error if the pane is dead or no session is registered.
 - `agent_doc_reposition_boundary_to_end()` / `_with_id()` — clean variant (strips `(HEAD)`). Used for snapshot cleanup.
 - `agent_doc_reposition_boundary_to_end_preserve_head()` / `_with_id()` — preserves `(HEAD)`. Used for working-tree and editor-buffer cleanup.
 
+## compact
+
+`agent-doc compact <FILE>` — archive old exchange/component content and rewrite the document + snapshot atomically.
+
+- Default `template` target is `exchange`; `--component <name>` overrides it.
+- `--message <text>` replaces the default archive pointer text.
+- `--tag <name>` sets the pre-compact checkpoint tag; `--tag skip` disables tagging.
+- `--commit` closes out the compacted file through the same `agent-doc commit` path described above, rather than relying on an external raw `git commit`.
+- When `--commit` is used and the project exposes `.agent-doc/patches/vcs-refresh.signal`, the closeout must verify that the refresh signal write succeeded; a failed signal write is a hard closeout failure, not a warning.
+
 ## skill
 
 `agent-doc skill install` — write the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md` in the current project. Idempotent (skips if content matches).

@@ -18,10 +18,9 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
    - Discard verbose back-and-forth, code snippets already committed, exploratory dead-ends
 
-3. **Run `agent-doc compact <FILE>`**
+3. **Run `agent-doc compact <FILE> --component exchange --commit`**
    - Archives the original content to `.agent-doc/archives/`
    - Replaces exchange content with archive pointer (uses `replace_content()`, not the patch pipeline)
    - Updates snapshot atomically
+   - Closes out via the binary-owned `agent-doc commit` path and verifies the VCS refresh signal when available
    - Pass `--message "summary text"` to include a custom summary instead of the default archive pointer
-
-4. **Commit** via `agent-doc commit <FILE>`

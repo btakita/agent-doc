@@ -594,6 +594,9 @@ enum Commands {
         /// agent-doc/<doc-name>/pre-compact-N). Use "skip" to disable tagging.
         #[arg(long)]
         tag: Option<String>,
+        /// Close out compaction via the agent-doc commit path and verify VCS refresh when available
+        #[arg(long)]
+        commit: bool,
     },
     /// Convert a document between append and template modes
     Convert {
@@ -1422,12 +1425,14 @@ fn main() -> anyhow::Result<()> {
             component,
             message,
             tag,
+            commit,
         } => compact::run(
             &file,
             keep,
             component.as_deref(),
             message.as_deref(),
             tag.as_deref(),
+            commit,
         ),
         Commands::Convert {
             file,

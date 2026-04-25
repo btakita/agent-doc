@@ -21,6 +21,8 @@
 //!   a git commit was created and `false` when there was nothing new to commit.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
+//! - `commit_with_outcome(file)`: same as `commit`, but also reports whether the
+//!   VCS refresh signal was available and successfully written after the commit.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
 //!   file, or `None` if none exists.
 //! - `create_branch(file)`: creates and checks out `agent-doc/<stem>`, or switches to it if it
@@ -77,6 +79,12 @@ use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommitOutcome {
+    pub did_commit: bool,
+    pub vcs_refresh_signaled: Option<bool>,
+}
 
 /// RAII guard for an exclusive advisory lock serializing `git::commit()` runs
 /// per git repo / submodule across concurrent sessions. Protects the short
@@ -788,6 +796,16 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
 pub fn commit(file: &Path) -> Result<bool> {
+    Ok(commit_with_outcome(file)?.did_commit)
+}
+
+/// Commit a file and report whether the VCS refresh signal was written.
+///
+/// `vcs_refresh_signaled` is:
+/// - `Some(true)` when the commit path wrote `.agent-doc/patches/vcs-refresh.signal`
+/// - `Some(false)` when a refresh target was available but writing it failed
+/// - `None` when no refresh target was available or no new git commit was created
+pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     let t_total = std::time::Instant::now();
 
     let (super_root, resolved) = resolve_to_git_root(file)?;
@@ -1023,7 +1041,10 @@ pub fn commit(file: &Path) -> Result<bool> {
         if elapsed_total > 0 {
             eprintln!("[perf] commit total: {}ms", elapsed_total);
         }
-        return Ok(false);
+        return Ok(CommitOutcome {
+            did_commit: false,
+            vcs_refresh_signaled: None,
+        });
     }
 
     // Reposition boundary BEFORE staging so the commit captures the new
@@ -1161,6 +1182,7 @@ pub fn commit(file: &Path) -> Result<bool> {
     // staging strips `(HEAD)` and guard markers from the snapshot before
     // `git hash-object`), and post-commit cleanup keeps the snapshot /
     // visible document in that same clean shape.
+    let mut vcs_refresh_signaled = None;
     if let Ok(ref s) = commit_status
         && s.success()
     {
@@ -1176,14 +1198,15 @@ pub fn commit(file: &Path) -> Result<bool> {
         // Uses file-based signal (vcs-refresh.signal) since the socket listener
         // may not be active — the plugin watches .agent-doc/patches/ for both
         // patch files and signal files.
-        if let Ok(canonical) = file.canonicalize() {
-            let project_root = crate::snapshot::find_project_root(&canonical)
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-            let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
-            if signal_file.parent().is_some_and(|p| p.exists()) {
-                match std::fs::write(&signal_file, "") {
-                    Ok(()) => eprintln!("[commit] VCS refresh signal written"),
-                    Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
+        if let Some(signal_file) = vcs_refresh_signal_path(file) {
+            match std::fs::write(&signal_file, "") {
+                Ok(()) => {
+                    eprintln!("[commit] VCS refresh signal written");
+                    vcs_refresh_signaled = Some(true);
+                }
+                Err(e) => {
+                    eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e);
+                    vcs_refresh_signaled = Some(false);
                 }
             }
         }
@@ -1204,7 +1227,19 @@ pub fn commit(file: &Path) -> Result<bool> {
         eprintln!("[perf] commit total: {}ms", elapsed_total);
     }
 
-    Ok(did_commit)
+    Ok(CommitOutcome {
+        did_commit,
+        vcs_refresh_signaled,
+    })
+}
+
+fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
+    let canonical = file.canonicalize().ok()?;
+    let project_root = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
+    signal_file.parent().filter(|p| p.exists())?;
+    Some(signal_file)
 }
 
 /// Strip ephemeral guard markers from the snapshot and working-tree file on disk.

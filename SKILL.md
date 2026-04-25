@@ -40,7 +40,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 **Detect subcommands** before running the normal workflow:
 
 - `claim <FILE>` → run `agent-doc claim <FILE>` via Bash and stop.
-- `compact <FILE>` → run `agent-doc compact <FILE>` then `agent-doc commit <FILE>` and stop.
+- `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
 **Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.

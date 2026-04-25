@@ -667,6 +667,8 @@ mod tests {
         );
         let content = std::fs::read_to_string(&runbook_path).unwrap();
         assert!(content.contains("Compact Exchange"));
+        assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
+        assert!(content.contains("VCS refresh signal"));
     }
 
     #[test]
@@ -681,6 +683,9 @@ mod tests {
             "codex runbook not found at {}",
             runbook_path.display()
         );
+        let content = std::fs::read_to_string(&runbook_path).unwrap();
+        assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
+        assert!(content.contains("VCS refresh signal"));
     }
 
     #[test]
@@ -957,6 +962,12 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_compact_entry_uses_commit_closeout() {
+        assert!(SKILL_TEMPLATE.contains("agent-doc compact <FILE> --commit"));
+        assert!(SKILL_TEMPLATE.contains("compact exchange <FILE>"));
+    }
+
+    #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
         assert!(SKILL_TEMPLATE.contains("### Re: topic — gpt-5"));
         assert!(SKILL_TEMPLATE.contains("### Re: topic — opus-4-6"));
@@ -1107,6 +1118,17 @@ mod tests {
         assert!(content.contains("agent-doc finalize <FILE>"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));
+    }
+
+    #[test]
+    fn compact_exchange_runbook_content_uses_binary_owned_closeout() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "compact-exchange.md")
+            .expect("compact-exchange.md not found");
+        assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
+        assert!(content.contains("binary-owned `agent-doc commit` path"));
+        assert!(content.contains("VCS refresh signal"));
     }
 
     #[test]

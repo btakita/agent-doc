@@ -123,6 +123,14 @@ agent-doc commit <FILE>
 
 Git add + commit with an auto-generated `agent-doc: YYYY-MM-DD HH:MM:SS` timestamp message.
 
+## compact
+
+```
+agent-doc compact <FILE> [--component exchange] [--message TEXT] [--keep N] [--commit]
+```
+
+Archive old exchange/component content and rewrite the document atomically. Use `--commit` to close out through the binary-owned `agent-doc commit` path so editor VCS refresh signaling also runs.
+
 ## skill
 
 ```

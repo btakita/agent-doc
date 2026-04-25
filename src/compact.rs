@@ -21,10 +21,13 @@
 //! - Archive filenames are derived from the snapshot hash + a UTC timestamp computed without
 //!   the `chrono` crate.
 //! - All writes are atomic (temp file + rename); the snapshot is updated after each write.
+//! - `commit: true` closes out compaction through the binary-owned `agent-doc commit` path and
+//!   verifies the VCS refresh signal when that channel exists.
 //!
 //! ## Agentic Contracts
-//! - `run(file, keep, component_name, message, tag) -> Result<()>` — entry point; dispatches to
-//!   component compact (template/stream) or exchange compact (inline) based on frontmatter mode.
+//! - `run(file, keep, component_name, message, tag, commit) -> Result<()>` — entry point;
+//!   dispatches to component compact (template/stream) or exchange compact (inline) based on
+//!   frontmatter mode.
 //! - `keep: None` in template mode → full compact (archive all).
 //! - `keep: Some(N)` in template mode → partial compact (archive all but last N `### Re:` sections).
 //! - `keep: None` in inline mode → uses default of 2.
@@ -36,6 +39,9 @@
 //!   or any I/O operation fails.
 //! - `tag: Some(name)` creates a lightweight git tag at HEAD before compaction (pre-compact checkpoint).
 //!   `tag: None` auto-generates `agent-doc/<doc-name>/pre-compact-N` where N is the next ordinal.
+//! - `commit: true` uses `git::commit_with_outcome` after a successful mutation. If the commit
+//!   path reports that a VCS refresh signal target existed but writing it failed, compact fails
+//!   closed instead of silently accepting the closeout.
 //!
 //! ## Evals
 //! - parse_basic: two complete exchanges + trailing User → 2 exchanges parsed, trailing skipped
@@ -48,6 +54,8 @@
 //! - partial_compact_keep_threshold: sections ≤ keep → no-op
 //! - partial_compact_archive_format: archive contains preamble + archived sections
 //! - partial_compact_result_format: result has archive pointer + preamble (or message) + kept sections
+//! - compact_with_commit_writes_vcs_refresh_signal: `--commit` closeout creates an `agent-doc`
+//!   commit and updates `.agent-doc/patches/vcs-refresh.signal` when that refresh channel exists
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -79,6 +87,7 @@ pub fn run(
     component_name: Option<&str>,
     message: Option<&str>,
     tag: Option<&str>,
+    commit: bool,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -114,55 +123,74 @@ pub fn run(
 
         let target = component_name.unwrap_or("exchange");
         let is_crdt = resolved.is_crdt();
-        return match keep {
+        match keep {
             Some(n) => run_component_compact_partial(file, &content, target, n, message, is_crdt),
             None => run_component_compact(file, &content, target, message, is_crdt),
-        };
-    } // else: append mode — continue
+        }?;
+    } else {
+        let keep_n = keep.unwrap_or(2);
 
-    let keep_n = keep.unwrap_or(2);
+        // Parse exchanges from the body
+        let exchanges = parse_exchanges(body);
 
-    // Parse exchanges from the body
-    let exchanges = parse_exchanges(body);
+        if exchanges.len() <= keep_n {
+            eprintln!(
+                "[compact] Only {} exchange(s) found, keeping all (threshold: {})",
+                exchanges.len(),
+                keep_n
+            );
+            return Ok(());
+        }
 
-    if exchanges.len() <= keep_n {
+        let to_archive = &exchanges[..exchanges.len() - keep_n];
+        let to_keep = &exchanges[exchanges.len() - keep_n..];
+
+        // Build archive content
+        let archive_content = build_archive(&content, to_archive);
+
+        // Save archive
+        let archive_path = save_archive(file, &archive_content)?;
+
+        // Build compacted document
+        let compacted = build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
+
+        // Atomic write
+        crate::write::atomic_write_pub(file, &compacted)?;
+
+        // Update snapshot
+        snapshot::save(file, &compacted)?;
+
         eprintln!(
-            "[compact] Only {} exchange(s) found, keeping all (threshold: {})",
-            exchanges.len(),
-            keep_n
+            "[compact] Archived {} exchange(s) to {}",
+            to_archive.len(),
+            archive_path.display()
         );
-        return Ok(());
+        eprintln!(
+            "[compact] {} exchange(s) remain in {}",
+            to_keep.len(),
+            file.display()
+        );
     }
 
-    let to_archive = &exchanges[..exchanges.len() - keep_n];
-    let to_keep = &exchanges[exchanges.len() - keep_n..];
+    if commit {
+        let updated = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
+        if updated != content {
+            closeout_compact_with_commit(file)?;
+        }
+    }
 
-    // Build archive content
-    let archive_content = build_archive(&content, to_archive);
+    Ok(())
+}
 
-    // Save archive
-    let archive_path = save_archive(file, &archive_content)?;
-
-    // Build compacted document
-    let compacted = build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
-
-    // Atomic write
-    crate::write::atomic_write_pub(file, &compacted)?;
-
-    // Update snapshot
-    snapshot::save(file, &compacted)?;
-
-    eprintln!(
-        "[compact] Archived {} exchange(s) to {}",
-        to_archive.len(),
-        archive_path.display()
-    );
-    eprintln!(
-        "[compact] {} exchange(s) remain in {}",
-        to_keep.len(),
-        file.display()
-    );
-
+fn closeout_compact_with_commit(file: &Path) -> Result<()> {
+    let outcome = crate::git::commit_with_outcome(file)?;
+    if outcome.did_commit && outcome.vcs_refresh_signaled == Some(false) {
+        anyhow::bail!(
+            "compact closeout committed {} but failed to write vcs-refresh.signal",
+            file.display()
+        );
+    }
     Ok(())
 }
 
@@ -1063,5 +1091,96 @@ mod tests {
         // Verify the document was actually modified
         assert_ne!(file_before, file_after);
         assert!(file_after.contains("Summary."));
+    }
+
+    #[test]
+    fn compact_with_commit_writes_vcs_refresh_signal() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let file = root.join("session.md");
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&file, doc).unwrap();
+        snapshot::save(&file, doc).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            true,
+        )
+        .unwrap();
+
+        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
+        assert!(signal.exists(), "expected VCS refresh signal at {}", signal.display());
+
+        let log = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-n", "1", "--", "session.md"])
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log.contains("agent-doc(session):"),
+            "compact closeout should use agent-doc commit, got:\n{log}"
+        );
+
+        let committed = crate::git::show_head(&file).unwrap().unwrap();
+        assert!(committed.contains("Compacted summary."));
+        assert!(!committed.contains("### Re: topic one"));
     }
 }

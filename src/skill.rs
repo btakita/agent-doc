@@ -76,6 +76,12 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 "#;
 
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+
+const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+
+const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness codex --reload restart`; if output contains `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     (
@@ -116,7 +122,7 @@ const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit
 const CODEX_STOP_COMMAND: &str = "agent-doc hook codex-stop";
 
 fn config() -> SkillConfig {
-    let env = agent_kit::detect::Environment::detect();
+    let env = detect_install_env();
     config_for_env(env)
 }
 
@@ -130,14 +136,22 @@ fn content_for_env(env: agent_kit::detect::Environment) -> String {
         Environment::Codex => (CODEX_DESCRIPTION, CODEX_INVOCATION_SECTION),
         _ => (CLAUDE_DESCRIPTION, CLAUDE_INVOCATION_SECTION),
     };
-    render_skill(description, invocation_section)
+    render_skill(env, description, invocation_section)
 }
 
-fn render_skill(description: &str, invocation_section: &str) -> String {
+fn render_skill(
+    env: agent_kit::detect::Environment,
+    description: &str,
+    invocation_section: &str,
+) -> String {
     let rendered = replace_frontmatter_field(SKILL_TEMPLATE, "description", description)
         .expect("SKILL.md must contain a description field in frontmatter");
-    replace_markdown_section(&rendered, "## Invocation", invocation_section)
-        .expect("SKILL.md must contain an ## Invocation section")
+    let rendered = replace_frontmatter_field(&rendered, "agent-doc-version", VERSION)
+        .expect("SKILL.md must contain an agent-doc-version field in frontmatter");
+    let rendered = replace_markdown_section(&rendered, "## Invocation", invocation_section)
+        .expect("SKILL.md must contain an ## Invocation section");
+    replace_auto_update_line(&rendered, auto_update_line_for_env(env))
+        .expect("SKILL.md must contain the auto-update instructions")
 }
 
 fn replace_frontmatter_field(content: &str, field: &str, value: &str) -> Option<String> {
@@ -184,6 +198,35 @@ fn replace_markdown_section(content: &str, heading: &str, replacement: &str) -> 
     rendered.push('\n');
     rendered.push_str(&content[end..]);
     Some(rendered)
+}
+
+fn replace_auto_update_line(content: &str, replacement: &str) -> Option<String> {
+    content
+        .contains(AUTO_UPDATE_LINE)
+        .then(|| content.replacen(AUTO_UPDATE_LINE, replacement, 1))
+}
+
+fn auto_update_line_for_env(env: agent_kit::detect::Environment) -> &'static str {
+    use agent_kit::detect::Environment;
+    match env {
+        Environment::Codex => CODEX_AUTO_UPDATE_LINE,
+        _ => CLAUDE_AUTO_UPDATE_LINE,
+    }
+}
+
+fn detect_install_env() -> agent_kit::detect::Environment {
+    use agent_kit::detect::Environment;
+
+    let detected = Environment::detect();
+    if !matches!(detected, Environment::Generic) {
+        return detected;
+    }
+
+    if std::env::var_os("CODEX_THREAD_ID").is_some() || std::env::var_os("CODEX_CI").is_some() {
+        return Environment::Codex;
+    }
+
+    detected
 }
 
 #[cfg(test)]
@@ -235,7 +278,7 @@ fn resolve_root() -> Option<std::path::PathBuf> {
 
 /// Install bundled runbooks alongside the skill for the detected environment.
 fn install_runbooks(root: Option<&Path>) -> Result<()> {
-    let env = agent_kit::detect::Environment::detect();
+    let env = detect_install_env();
     install_runbooks_for(env, root)
 }
 
@@ -438,10 +481,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 
     cfg.install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
-    install_env_artifacts(
-        agent_kit::detect::Environment::detect(),
-        resolved.as_deref(),
-    )?;
+    install_env_artifacts(detect_install_env(), resolved.as_deref())?;
     Ok(!was_current)
 }
 
@@ -484,6 +524,42 @@ mod tests {
     use super::*;
     use agent_kit::detect::Environment;
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: test-only process-local env mutation, restored in Drop.
+            unsafe { std::env::set_var(key, value) };
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: test-only process-local env mutation, restored in Drop.
+            unsafe { std::env::remove_var(key) };
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => {
+                    // SAFETY: test-only process-local env mutation, restored to prior value.
+                    unsafe { std::env::set_var(self.key, value) };
+                }
+                None => {
+                    // SAFETY: test-only process-local env mutation, restored to prior absence.
+                    unsafe { std::env::remove_var(self.key) };
+                }
+            }
+        }
+    }
+
     #[test]
     fn bundled_skill_is_not_empty() {
         assert!(!SKILL_TEMPLATE.is_empty());
@@ -492,6 +568,21 @@ mod tests {
     #[test]
     fn bundled_skill_contains_agent_doc() {
         assert!(SKILL_TEMPLATE.contains("agent-doc"));
+    }
+
+    #[test]
+    fn bundled_skill_template_contains_auto_update_line() {
+        assert!(SKILL_TEMPLATE.contains(AUTO_UPDATE_LINE));
+    }
+
+    #[test]
+    fn detect_install_env_treats_codex_thread_id_as_codex() {
+        let _code = EnvVarGuard::unset("CODEX");
+        let _code_cli = EnvVarGuard::unset("CODEX_CLI");
+        let _thread = EnvVarGuard::set("CODEX_THREAD_ID", "thread-123");
+        let _ci = EnvVarGuard::unset("CODEX_CI");
+
+        assert_eq!(super::detect_install_env(), Environment::Codex);
     }
 
     /// Use an explicit ClaudeCode environment for deterministic test paths.
@@ -524,6 +615,7 @@ mod tests {
         assert!(path.exists(), "skill not found at {}", path.display());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, content_for_env(Environment::ClaudeCode));
+        assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
     }
 
     #[test]
@@ -642,6 +734,9 @@ mod tests {
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
+        assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
+        assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
     }
 
@@ -839,6 +934,8 @@ mod tests {
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
+        assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
+        assert!(content.contains("SKILL_RELOAD=restart"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(content.contains("agent-doc session-check <FILE>"));
         assert!(content.contains("final document-mutation boundary for the cycle"));
@@ -859,6 +956,8 @@ mod tests {
 
         assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
+        assert!(content.contains("SKILL_RELOAD=compact"));
     }
 
     #[test]
@@ -868,6 +967,8 @@ mod tests {
 
         let claude_shared = super::remove_markdown_section(&claude, "## Invocation");
         let codex_shared = super::remove_markdown_section(&codex, "## Invocation");
+        let claude_shared = claude_shared.replace(CLAUDE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
+        let codex_shared = codex_shared.replace(CODEX_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
 
         assert_eq!(
             claude_shared.replace(CLAUDE_DESCRIPTION, "<DESC>"),

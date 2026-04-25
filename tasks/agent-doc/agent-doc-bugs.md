@@ -221,18 +221,36 @@ Verification:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:c63d5633 -->
+
+❯ do Option A from tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md. update spec + tests. build + install for local testing. commit + push
+### Re: Option A from `plan-orchestrate-preflight-cycle-conflict.md` — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `68fcc0f` (`fix: make preflight reruns idempotent`).
+
+What changed:
+- `src/preflight.rs` now attempts the normal snapshot-only `git::commit` closeout for an open `preflight_started` cycle before failing, so a second `agent-doc preflight` can safely continue when the prior cycle is already durable and later edits are only working-tree drift.
+- `src/orchestrate.rs` no longer carries a task-1-only preflight reuse branch; sequential orchestration now always injects the prompt and reruns `preflight`, with the idempotency handled at the preflight boundary itself.
+- `specs/07-commands.md` now documents that `preflight` is the idempotent boundary and that sequential orchestration always uses the same preflight path for every task.
+- Updated coverage in `src/preflight.rs`, `src/orchestrate.rs`, and `tests/run_integration.rs` for rerunning preflight and for orchestrating with an already-open preflight cycle.
+
+Verification in `src/agent-doc`:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc`
+
+Outcome:
+- The `preflight -> orchestrate -> preflight` conflict is fixed at the root preflight boundary instead of through a special orchestrate-only task-1 reuse path.
+<!-- agent:boundary:d63e21cd -->
 <!-- /agent:exchange -->
 
 <!--
-do Option B from tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md. update spec + tests. build + install for local testing. commit + push
-
-Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
+Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#gdir] Fix the submodule `.git/modules/...` permission issue so `agent-doc` handles parent-repo gitdirs correctly during submodule work. Plan: [plan-submodule-gitdir-permission-issue.md](plan-submodule-gitdir-permission-issue.md)
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

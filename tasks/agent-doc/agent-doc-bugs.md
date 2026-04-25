@@ -166,13 +166,12 @@ Local install check:
 - `agent-doc skill install --harness claude`
 
 The regenerated `.codex/AGENTS.md`, `.codex/runbooks/command-synonyms.md`, `.claude/skills/agent-doc/SKILL.md`, and `.claude/skills/agent-doc/runbooks/command-synonyms.md` all contain the new orchestrate synonym guidance.
-<!-- agent:boundary:bfb07f38 -->
+<!-- agent:boundary:19e38574 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#osyn] Implement orchestrate command synonym recognition in skill/runbook — map natural-language triggers (orchestra, sequential, in order, chain, fan out, concurrent, etc.) to orchestrate subcommand modes. Plan: tasks/agent-doc/plan-orchestrate-synonyms.md
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

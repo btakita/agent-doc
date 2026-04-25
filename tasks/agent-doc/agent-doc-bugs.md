@@ -377,7 +377,22 @@ All 1114 tests pass (pre-existing failures in skill/route tests unchanged).
 2. Subprocess error: `--print` + `--output-format=stream-json` requires `--verbose`
 
 These are separate from the #orch1/#orch2 fixes already shipped — the stale-task parsing and the `--print`+stream-json incompatibility are new issues.
-<!-- agent:boundary:02feb458 -->
+
+Please plan and add pending item to fix why orchestrate failed on the last run. 
+### Re: orchestrate failure root causes + pending — opus-4-6
+
+Two distinct bugs, both in `src/agent-doc`:
+
+**Bug 1 — Stale task parsing (`#orch3`):** `orchestrate --from-exchange` extracts tasks via `extract_tasks_from_text()` → `collect_markdown_list_blocks()` → `parse_list_item()`. The parser strips whitespace then checks for `- ` prefix. But user-authored list items in the exchange carry the `❯ ` prompt prefix (added by the binary write path), so `❯ - do #hfix1` fails `strip_prefix("- ")`. The parser skips all four hfix items and falls back to `.last()` on the collected blocks — which is the older cenv block from earlier in the exchange.
+
+**Fix:** `parse_list_item()` (orchestrate.rs ~line 1110) should strip a leading `❯ ` before checking for the list marker.
+
+**Bug 2 — Missing `--verbose` (`#orch4`):** `build_streaming_args()` in claude.rs copies `-p` from base args and replaces `--output-format` with `stream-json`, but never adds `--verbose`. Claude CLI enforces the constraint that `-p` + `--output-format stream-json` requires `--verbose`.
+
+**Fix:** Add `args.push("--verbose".to_string())` in `build_streaming_args()` after the `--output-format stream-json` insertion.
+
+Both are narrow, well-scoped fixes.
+<!-- agent:boundary:5b1b7258 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -386,6 +401,8 @@ These are separate from the #orch1/#orch2 fixes already shipped — the stale-ta
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#orch3] orchestrate --from-exchange parses stale task block: parse_list_item() in orchestrate.rs doesn't strip ❯ prefix, so list items like '❯ - do #hfix1' are missed and the parser falls back to an older block
+- [ ] [#orch4] build_streaming_args() in claude.rs missing --verbose: Claude CLI requires --verbose when -p + --output-format stream-json are combined
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

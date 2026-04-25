@@ -119,7 +119,16 @@ Just handing the model raw preflight output is still mostly "the model noticed t
 - the skill/orchestrator can require specific outputs or actions from that step
 
 So `#1g42` gives you a more testable contract and a narrower place to harden dispatch logic. Raw preflight output alone is useful context, but it is weaker as an enforcement mechanism.
-<!-- agent:boundary:9590b132 -->
+
+❯ Create a dedicated plan file for #1g42.
+### Re: #1g42 plan file — gpt-5
+
+Created `tasks/agent-doc/plan-post-preflight-dispatch-phase.md` for `#1g42` and updated the pending item to point at that exact plan path in the same cycle.
+
+The plan turns the earlier recommendation into a concrete design artifact: it defines the problem, keeps `preflight` deterministic, compares a skill-side planning record against a future binary-owned `agent-doc plan` command, and lists the likely runbook/skill surfaces to change.
+
+No code/test/build work was needed for this cycle because the requested change was the dedicated plan document itself.
+<!-- agent:boundary:b957e450 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -129,7 +138,7 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent
+- [ ] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent. Plan: tasks/agent-doc/plan-post-preflight-dispatch-phase.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -19,7 +19,25 @@ codex_args: -s danger-full-access
 
 <!-- agent:exchange patch=append -->
 Compacted exchange. Key decisions: move orchestration and post-preflight dispatch toward binary-owned routing; shared orchestrate prompt is still not a first-class feature; frontmatter prompt presets were planned and #fppr Option A was implemented in src/agent-doc; the cancelled Codex Stop-hook replay plan is implemented in src/agent-doc as acc7478, which blocks transcript-shaped last_assistant_message payloads from being replayed and stores blocked payloads only for diagnostics. Open work remains #fppr and #ha3h.
-<!-- agent:boundary:aedf5148 -->
+
+❯ #fppr: If I change the frontmatter while a claude/codex session is active, will agent-doc pick up the changes?
+### Re: #fppr frontmatter changes in an active session — gpt-5
+
+Yes for the next `agent-doc` cycle, but not always immediately and not for every setting.
+
+What picks up frontmatter changes on the next cycle:
+- `agent-doc preflight` rereads the document each run, so frontmatter-driven routing like `prompt_presets`, `model`, `env`, and similar document-derived fields are picked up on the next preflight/respond cycle
+- `agent-doc plan` and `agent-doc orchestrate` also reread the current file, so `#fppr`-style preset changes are picked up the next time those commands run
+
+What does **not** hot-reload into an already-running harness process:
+- startup-time harness settings such as `agent_args`, `claude_args`, and `codex_args` are resolved once in `start` and then held for the lifetime of that running Claude/Codex process
+- anything already prepared/sent for an in-flight orchestrate step will keep using the prompt that was built at launch time
+
+So the practical answer for `#fppr` is:
+- if you edit `prompt_presets` in frontmatter and then trigger the next `preflight` / `orchestrate` cycle, `agent-doc` should use the updated presets
+- if you want changed harness startup args to apply, restart that active Claude/Codex session
+- if a task was already launched before the edit, that already-running task will not retroactively re-read the updated preset text
+<!-- agent:boundary:307493f3 -->
 <!-- /agent:exchange -->
 
 <!--

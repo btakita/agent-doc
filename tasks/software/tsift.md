@@ -890,15 +890,37 @@ Added deduplication in `extract_symbols` — when overlapping patterns capture t
 Fixed SPEC.md: grammar crate name corrected from `tree-sitter-kotlin` 0.3.8 to `tree-sitter-kotlin-ng` 1.1.0.
 
 122 tests pass. Committed + pushed both tsift and agent-loop.
-<!-- agent:boundary:ba1c3036 -->
+
+❯ synchronous orcestra
+❯ - do #881c. update spec + tests. build + install for local testing. commit + push
+❯ - do #ajg7. update spec + tests. build + install for local testing. commit + push
+❯ - do #hscz. update spec + tests. build + install for local testing. commit + push
+### Re: Zig + Bash + Markdown query patterns — opus-4-6
+
+All three done sequentially. 122 tests pass, committed + pushed both tsift and agent-loop.
+
+#### #881c Zig (fn, struct, enum, union, const)
+
+Added specific tree-sitter query patterns matching `struct_declaration`, `enum_declaration`, and `union_declaration` as RHS of `variable_declaration`. Generic `const` catch-all remains for plain constants.
+
+Fixed the dedup logic in `extract_symbols` — previously used kind name length to resolve overlaps, which broke for `enum` (4 chars) vs `const` (5 chars). Now explicitly prefers specific kinds over generic `const`/`variable`.
+
+#### #ajg7 Bash (function + alias)
+
+tree-sitter-bash 0.25 parses `alias` as a generic `command`, not a dedicated node. Added `extract_bash_aliases()` tree-walk that finds command nodes named "alias", extracts the argument word, and splits on `=` to get the alias name.
+
+#### #hscz Markdown (headings h1-h6 + fenced code blocks)
+
+Added `(fenced_code_block (info_string (language) @code_block.name))` to capture the language tag from fenced code blocks. Headings already worked.
+<!-- agent:boundary:a0570455 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
-- [ ] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
-- [ ] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
+- [x] [#881c] Write .scm query patterns for Zig (fn, struct, enum, union, const)
+- [x] [#ajg7] Write .scm query patterns for Bash (function definitions, alias)
+- [x] [#hscz] Write .scm query patterns for Markdown (headings h1-h6, fenced code blocks with language tag)
 - [ ] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)

@@ -1508,14 +1508,12 @@ tsift explain main --json   # { symbol, definitions, callers, callees, community
 
 Closing #gpth (and #cdet already completed).
 Session is clean. `#gpth` is done — `tsift path` + `tsift explain` shipped at `btakita/tsift@6ad5983`, 153 tests passing, #gpth and #cdet marked done in pending.
-<!-- agent:boundary:7d65e2bb -->
+<!-- agent:boundary:16cd5ad1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#cdet] Louvain community detection over call graph — cluster related modules into architectural subsystems (~200 lines, no new deps)
-- [x] [#gpth] tsift path <A> <B> + tsift explain <symbol> — graph query subcommands extending existing tsift graph
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills

@@ -90,6 +90,7 @@ fn build_streaming_args(
     }
     args.push("--output-format".to_string());
     args.push("stream-json".to_string());
+    args.push("--verbose".to_string());
 
     if let Some(sid) = session_id {
         args.push("--resume".to_string());
@@ -380,8 +381,32 @@ mod tests {
             args.windows(2)
                 .any(|w| w == ["--output-format", "stream-json"])
         );
+        assert!(args.contains(&"--verbose".to_string()));
         assert!(args.windows(2).any(|w| w == ["--add-dir", "/tmp/gitdir"]));
         assert!(!args.windows(2).any(|w| w == ["--output-format", "json"]));
+    }
+
+    #[test]
+    fn streaming_args_includes_verbose() {
+        let args = build_streaming_args(
+            &[
+                "-p".into(),
+                "--output-format".into(),
+                "json".into(),
+            ],
+            None,
+            false,
+            None,
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--output-format", "stream-json"]),
+            "expected --output-format stream-json in args: {args:?}"
+        );
+        assert!(
+            args.contains(&"--verbose".to_string()),
+            "expected --verbose in args (required by Claude CLI when -p + stream-json): {args:?}"
+        );
     }
 }
 

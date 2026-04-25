@@ -712,6 +712,10 @@ Streaming agent subprocesses (`send_streaming` in both Claude and Codex backends
 
 When the subprocess exits successfully but stderr is non-empty (warnings, deprecation notices), the content is logged to the parent's stderr with an `[agent]` prefix and does not produce an error.
 
+### Streaming args construction
+
+`build_streaming_args()` transforms the base args for streaming: it strips any existing `--output-format` value and replaces it with `--output-format stream-json`, then unconditionally adds `--verbose`. The `--verbose` flag is required by the Claude CLI when `-p` and `--output-format stream-json` are combined.
+
 ### `--mode sequential`
 
 Sequential orchestration runs one full fresh-agent lifecycle per task:

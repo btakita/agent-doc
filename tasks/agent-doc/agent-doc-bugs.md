@@ -423,7 +423,29 @@ Committed as `45bce9b` on `20260422/codex-agent-backend`.
 **Spec:** Updated `specs/07-commands.md` with streaming args construction subsection.
 
 Committed as `135ee1d` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:05646db2 -->
+
+❯ #hfix1-#hfix4 did not seem to work. I still don't see the ` (HEAD)` suffix in this document after a patchback nor in other agent-doc sessions.
+### Re: (HEAD) suffix still missing after #hfix1-#hfix4 — opus-4-6
+
+The Rust-side changes are correct — `(HEAD)` markers ARE being added during the write phase (`annotate_exchange_headings_against_baseline` at template.rs:769) and the non-IPC commit path correctly uses `reposition_boundary_to_end_preserve_head` (git.rs:1298). The bug is in the **editor plugin IPC path**.
+
+**Root cause:** When an IPC listener (JetBrains/VS Code plugin) is active, the binary sends a `reposition` signal with `preserve_head: true` (write.rs:2879, ipc_socket.rs:156). But the JetBrains plugin ignores `preserve_head`:
+
+- PatchWatcher.kt:323-326 — extracts `file` and `boundary_id` from IPC JSON, never reads `preserve_head`
+- PatchWatcher.kt:371 — calls `NativePatching.repositionBoundaryToEnd()` → FFI `agent_doc_reposition_boundary_to_end()` (the **clean** variant that strips all `(HEAD)` markers)
+- VS Code extension has the same gap
+- Editor SPEC.md line 69 actively says "Do not introduce any transient `(HEAD)` heading annotations" — the spec was never updated for #hfix2
+
+So the sequence is: write adds `(HEAD)` correctly → commit sends IPC with `preserve_head: true` → plugin repositions using the clean variant → `(HEAD)` stripped.
+
+**Fix (3 parts):**
+
+1. **JetBrains plugin** — `repositionBoundaryViaDocument()` needs a `preserveHead: Boolean` parameter. When true, call `agent_doc_reposition_boundary_to_end_preserve_head` / `_with_id` FFI instead of the clean variant. The IPC handler at line 323 must extract `preserve_head` from JSON and pass it through.
+
+2. **VS Code extension** — same: read `preserve_head` from IPC message, call the preserve variant.
+
+3. **Editor SPEC.md** — update the reposition behavior section (lines 64-72) to document `preserve_head` field and the two FFI variants.
+<!-- agent:boundary:9f519032 -->
 <!-- /agent:exchange -->
 
 <!--

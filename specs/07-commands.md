@@ -671,7 +671,7 @@ Shared task-source resolution:
 
 1. Collect tasks from repeated `--task` flags, preserving order.
 2. If `--from-file` is provided, read the file and extract tasks from the last fenced code block or markdown list that contains list items; otherwise fall back to non-empty trimmed lines.
-3. If `--from-exchange` is provided, read the document's `agent:exchange` component and apply the same task extraction rule to the latest exchange content.
+3. If `--from-exchange` is provided, read the document's `agent:exchange` component and apply the same task extraction rule to the latest exchange content. List items with the `❯ ` prompt prefix (added by the binary write path for user prompts) are normalized by stripping the prefix before parsing, so `❯ - do #task` is treated identically to `- do #task`.
 4. Independently scan `--from-file` / `--from-exchange` text for batch-level `preset <name>` or `presets <a>, <b>` directives. These are not tasks; they request frontmatter `prompt_presets` by name. Preserve request order and de-duplicate repeated names.
 5. Validate requested presets against the document frontmatter `prompt_presets` map. Missing preset references fail closed.
 6. Concatenate all resolved tasks in source order. Error if the final task list is empty.

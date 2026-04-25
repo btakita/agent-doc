@@ -1109,6 +1109,11 @@ fn collect_list_items(text: &str) -> Vec<String> {
 
 fn parse_list_item(line: &str) -> Option<String> {
     let trimmed = line.trim();
+    // Strip the binary-owned prompt prefix that write-back adds to user prompts
+    let trimmed = trimmed
+        .strip_prefix("❯ ")
+        .or_else(|| trimmed.strip_prefix("❯"))
+        .unwrap_or(trimmed);
     if let Some(rest) = trimmed
         .strip_prefix("- ")
         .or_else(|| trimmed.strip_prefix("* "))
@@ -2364,5 +2369,39 @@ mod tests {
         let config = Config::default();
         let effective = build_effective_agent_config("claude", None, &config);
         assert!(effective.is_none());
+    }
+
+    // --- parse_list_item prompt-prefix stripping (bug #orch3) ---
+
+    #[test]
+    fn parse_list_item_strips_prompt_prefix() {
+        let result = parse_list_item("❯ - do #task1");
+        assert_eq!(result, Some("do #task1".to_string()));
+    }
+
+    #[test]
+    fn parse_list_item_strips_prompt_prefix_with_star() {
+        let result = parse_list_item("❯ * do #task2");
+        assert_eq!(result, Some("do #task2".to_string()));
+    }
+
+    #[test]
+    fn parse_list_item_without_prefix_still_works() {
+        let result = parse_list_item("- do #task3");
+        assert_eq!(result, Some("do #task3".to_string()));
+    }
+
+    #[test]
+    fn parse_list_item_strips_prompt_prefix_numbered() {
+        let result = parse_list_item("❯ 1. do #task4");
+        assert_eq!(result, Some("do #task4".to_string()));
+    }
+
+    #[test]
+    fn collect_markdown_list_blocks_with_prompt_prefix() {
+        let text = "❯ - do #a\n❯ - do #b\n\nsome other text\n";
+        let blocks = collect_markdown_list_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], vec!["do #a".to_string(), "do #b".to_string()]);
     }
 }

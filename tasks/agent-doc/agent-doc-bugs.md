@@ -290,7 +290,7 @@ All 1114 tests pass (1 pre-existing failure in `detect_install_env_treats_codex_
 **Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
 
 Committed as `5162269` on `20260422/codex-agent-backend` and pushed.
-<!-- agent:boundary:1eecbc12 -->
+<!-- agent:boundary:bd83b412 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -300,7 +300,6 @@ The response patchback top headers once again lost the ` (HEAD)` suffix. This is
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#orch2] Stderr silently discarded in orchestrate subprocess streaming — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

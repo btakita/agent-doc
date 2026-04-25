@@ -758,10 +758,32 @@ It's the most natural to write and edit, consistent with `agent:pending`, and ma
 5. Consumed prompts are removed from the queue after successful commit (or marked with `[x]` if you prefer an audit trail)
 
 One open question: should `/clear` be implicit when `agent:queue` is non-empty (the queue *triggers* the clear), or should the user always run `/clear` manually and the queue is just what survives it? The implicit version is more ergonomic; the explicit version is safer.
-<!-- agent:boundary:7f291281 -->
+
+❯ How would Option A support multi-line prompts?
+### Re: multi-line prompts in Option A — opus-4-6
+
+Option A already supports them via standard markdown list continuation — the third item in the example demonstrates it:
+
+```markdown
+- Review the changes in src/agent-doc/src/frontmatter.rs
+  and check for edge cases with empty body content.
+  Then run cargo test.
+```
+
+The parser treats each top-level `- ` as the start of a new prompt. All subsequent lines indented to the content column (2 spaces past `- `) are continuation of that same prompt. This is the same rule markdown uses for multi-line list items and how `agent:pending` already parses its items.
+
+**Edge cases to watch:**
+
+1. **Embedded list markers** — if a continuation line starts with `- ` at the content indent level, it's ambiguous. The parser would need to require deeper indentation or treat only the top-level (`^- `) as a prompt boundary. Simplest rule: only lines at column 0 starting with `- ` split prompts.
+2. **Code blocks inside prompts** — a prompt like "run this script: \`\`\`bash ..." needs the fenced block to be continuation-indented too, which gets awkward. Option B handles this more cleanly.
+3. **Blank lines** — standard markdown list continuation allows a blank line within an item if the next non-blank line is indented. The parser should follow this: a blank line followed by an unindented `- ` starts a new prompt, but a blank line followed by indented content continues the current one.
+
+In practice, most prompts are 1-3 lines and don't contain embedded code fences, so Option A's continuation syntax works well. If a project routinely sends prompts with embedded markdown structure (fences, sub-lists, block quotes), Option B's explicit `~~~prompt` fencing eliminates all ambiguity at the cost of verbosity.
+<!-- agent:boundary:e4e33541 -->
 <!-- /agent:exchange -->
 
 <!--
+We should support `/clear` or any other harness cli command. This will either use the supervisor or directly send `tmux sent-keys`. 
 -->
 
 ## Pending / Not Built

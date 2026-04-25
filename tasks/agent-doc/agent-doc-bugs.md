@@ -152,12 +152,27 @@ Verification:
 - `agent-doc skill install --harness claude --reload compact`
 
 I marked `#1g42` done for this cycle. I left the pre-existing unstaged `src/agent-doc/Cargo.lock` change out of the commit.
-<!-- agent:boundary:7fd994e8 -->
+
+When I call an orchestrate, can I define a prompt that will be applied to every orchestrate task in one place?
+### Re: shared orchestrate prompt — gpt-5
+
+Not as a first-class `agent-doc orchestrate` option today.
+
+What exists now:
+- The CLI surface is only `--task`, `--from-file`, `--from-exchange`, `--agent`, and `--model` in addition to the mode flag; there is no `--shared-prompt` or prompt-prefix flag in the command contract.
+- Sequential and DAG orchestration do give every step the full current session document, because each step builds the agent prompt from the diff plus the entire `<document>`. So if you put batch-level guidance in the session doc, every sequential/DAG step will see it.
+- Parallel orchestration is different: it writes each task text directly to `.agent-doc-prompt.txt` and runs that task in isolation. There is no shared per-batch prompt layer there beyond the normal project instruction files / backend defaults.
+
+So the practical answer is:
+- `sequential` / `dag`: yes indirectly, by putting the shared instruction in the session document before running `orchestrate`
+- dedicated `orchestrate` prompt prefix: no, not currently
+- `parallel`: no equivalent shared task-prefix surface today
+
+If you want this as an explicit product feature, the right shape is probably something like `agent-doc orchestrate ... --shared-prompt-file <path>` or `--task-prefix <text>` so the behavior is binary-owned instead of relying on document placement.
+<!-- agent:boundary:673a2086 -->
 <!-- /agent:exchange -->
 
 <!--
-When I call an orcestrate, can I define a prompt that will be applied to every orcestrated task in one place?
-
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 

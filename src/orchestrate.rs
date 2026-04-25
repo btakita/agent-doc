@@ -11,7 +11,9 @@
 //! - `--mode parallel` reuses the existing `parallel` worktree fan-out path
 //!   after task resolution, and the legacy `agent-doc parallel` command routes
 //!   through this same orchestrate dispatch surface.
-//! - `--mode dag` is reserved for future work and currently errors.
+//! - `--mode dag` parses dependency annotations, validates the graph, then
+//!   executes tasks in deterministic topological order against the shared
+//!   document lifecycle.
 //! - `extract_tasks_from_text(text)` prefers the last fenced code block or
 //!   contiguous markdown list that contains task-like lines; falls back to
 //!   non-empty trimmed lines when no list structure exists.
@@ -26,6 +28,9 @@
 //! - Sequential orchestration uses the same document diff/full-doc prompt shape
 //!   as a normal edited session, so each fresh agent sees the current document
 //!   state and only the latest injected prompt as the new diff.
+//! - DAG orchestration keeps the same single-document write/commit guarantees as
+//!   sequential mode, so dependency ordering is respected without concurrent
+//!   writes to the shared session document.
 //! - `finalize` / `session-check` are the persistence boundary for each step;
 //!   if either fails, orchestration stops immediately.
 //! - Task resolution preserves source order.
@@ -33,12 +38,17 @@
 //! ## Evals
 //! - `extract_tasks_prefers_last_fenced_list`
 //! - `extract_tasks_uses_last_markdown_list`
+//! - `resolve_dag_tasks_supports_fan_in_dependencies`
+//! - `dag_schedule_rejects_unknown_dependency`
+//! - `dag_schedule_rejects_cycles`
 //! - `inject_prompt_inserts_before_boundary`
 //! - `send_fresh_response_uses_no_resume`
 //! - `sequential_orchestration_injects_prompt_and_finalizes`
+//! - `dag_orchestration_runs_topological_order`
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -72,6 +82,25 @@ pub struct OrchestrateConfig {
     pub no_worktree: bool,
     pub timeout_secs: u64,
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecutionTask {
+    label: String,
+    prompt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DagTask {
+    id: String,
+    prompt: String,
+    deps: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct DagMetadata {
+    id: Option<String>,
+    after: Vec<String>,
 }
 
 trait LifecycleOps {
@@ -288,23 +317,20 @@ fn run_with_dependencies(
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let tasks = resolve_tasks(file, &config)?;
-    if tasks.is_empty() && !(allow_empty_parallel_tasks && config.mode == OrchestrateMode::Parallel)
-    {
-        anyhow::bail!("no orchestration tasks found");
-    }
-
-    eprintln!(
-        "[orchestrate] mode: {}",
-        config.mode.to_possible_value().unwrap().get_name()
-    );
-    eprintln!("[orchestrate] tasks: {}", tasks.len());
-    for (idx, task) in tasks.iter().enumerate() {
-        eprintln!("[orchestrate]   {}: {}", idx + 1, task);
-    }
-
     match config.mode {
         OrchestrateMode::Sequential => {
+            let tasks = resolve_tasks(file, &config)?;
+            if tasks.is_empty() {
+                anyhow::bail!("no orchestration tasks found");
+            }
+            eprintln!(
+                "[orchestrate] mode: {}",
+                config.mode.to_possible_value().unwrap().get_name()
+            );
+            eprintln!("[orchestrate] tasks: {}", tasks.len());
+            for (idx, task) in tasks.iter().enumerate() {
+                eprintln!("[orchestrate]   {}: {}", idx + 1, task);
+            }
             if config.dry_run {
                 eprintln!("[orchestrate] dry run — exiting without executing tasks");
                 return Ok(());
@@ -314,9 +340,16 @@ fn run_with_dependencies(
                     "`agent-doc orchestrate --mode sequential` requires git-backed finalize"
                 );
             }
-            run_sequential_internal(
+            let execution_tasks = tasks
+                .into_iter()
+                .map(|task| ExecutionTask {
+                    label: task.clone(),
+                    prompt: task,
+                })
+                .collect::<Vec<_>>();
+            run_ordered_tasks_internal(
                 file,
-                &tasks,
+                &execution_tasks,
                 config.agent.as_deref(),
                 config.model.as_deref(),
                 global_config,
@@ -324,30 +357,78 @@ fn run_with_dependencies(
                 agent_runner,
             )
         }
-        OrchestrateMode::Parallel => parallel_runner.run(
-            file,
-            parallel::ParallelConfig {
-                tasks,
-                model: config.model,
-                no_git: config.no_git,
-                no_worktree: config.no_worktree,
-                timeout_secs: config.timeout_secs,
-                dry_run: config.dry_run,
-            },
-        ),
+        OrchestrateMode::Parallel => {
+            let tasks = resolve_tasks(file, &config)?;
+            if tasks.is_empty() && !allow_empty_parallel_tasks {
+                anyhow::bail!("no orchestration tasks found");
+            }
+            eprintln!(
+                "[orchestrate] mode: {}",
+                config.mode.to_possible_value().unwrap().get_name()
+            );
+            eprintln!("[orchestrate] tasks: {}", tasks.len());
+            for (idx, task) in tasks.iter().enumerate() {
+                eprintln!("[orchestrate]   {}: {}", idx + 1, task);
+            }
+            parallel_runner.run(
+                file,
+                parallel::ParallelConfig {
+                    tasks,
+                    model: config.model,
+                    no_git: config.no_git,
+                    no_worktree: config.no_worktree,
+                    timeout_secs: config.timeout_secs,
+                    dry_run: config.dry_run,
+                },
+            )
+        }
         OrchestrateMode::Dag => {
+            let dag_tasks = resolve_dag_tasks(file, &config)?;
+            if dag_tasks.is_empty() {
+                anyhow::bail!("no orchestration tasks found");
+            }
+            eprintln!(
+                "[orchestrate] mode: {}",
+                config.mode.to_possible_value().unwrap().get_name()
+            );
+            eprintln!("[orchestrate] tasks: {}", dag_tasks.len());
+            for (idx, task) in dag_tasks.iter().enumerate() {
+                if task.deps.is_empty() {
+                    eprintln!("[orchestrate]   {}: [{}] {}", idx + 1, task.id, task.prompt);
+                } else {
+                    eprintln!(
+                        "[orchestrate]   {}: [{}] {} (after: {})",
+                        idx + 1,
+                        task.id,
+                        task.prompt,
+                        task.deps.join(", ")
+                    );
+                }
+            }
             if config.dry_run {
                 eprintln!("[orchestrate] dry run — exiting without executing tasks");
                 return Ok(());
             }
-            anyhow::bail!("`agent-doc orchestrate --mode dag` is not implemented yet")
+            if config.no_git {
+                anyhow::bail!("`agent-doc orchestrate --mode dag` requires git-backed finalize");
+            }
+            let execution_tasks = plan_dag_execution(&dag_tasks)?;
+            run_ordered_tasks_internal(
+                file,
+                &execution_tasks,
+                config.agent.as_deref(),
+                config.model.as_deref(),
+                global_config,
+                lifecycle,
+                agent_runner,
+            )
         }
     }
 }
 
-fn run_sequential_internal(
+fn run_ordered_tasks_internal(
     file: &Path,
-    tasks: &[String],
+    tasks: &[ExecutionTask],
     agent_override: Option<&str>,
     model_override: Option<&str>,
     global_config: &Config,
@@ -355,53 +436,76 @@ fn run_sequential_internal(
     agent_runner: &impl FreshAgentRunner,
 ) -> Result<()> {
     for (idx, task) in tasks.iter().enumerate() {
-        eprintln!("[orchestrate] step {}/{}: {}", idx + 1, tasks.len(), task);
-        inject_prompt(file, task)?;
-
-        let preflight = lifecycle.preflight(file)?;
-        if preflight.no_changes {
-            anyhow::bail!(
-                "orchestration step {} did not produce a prompt-bearing diff after injection",
-                idx + 1
-            );
-        }
-
-        let doc = fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        let (fm, _) = frontmatter::parse(&doc)?;
-        let mode = fm.resolve_mode();
-        let agent_name = agent_override
-            .or(fm.agent.as_deref())
-            .or(global_config.default_agent.as_deref())
-            .unwrap_or("claude");
-        let model = model_override.or(fm.model.as_deref());
-        let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
-        let expanded_env = expand_frontmatter_env(&fm);
-        let response = agent_runner.send_fresh(
-            &prompt,
-            agent_name,
-            global_config.agents.get(agent_name),
-            expanded_env,
-            model,
-        )?;
-        let response_text = if mode.is_template() {
-            response
-        } else {
-            write::strip_assistant_heading(&response)
-        };
-
-        if let Some(diff_text) = preflight.diff.as_deref() {
-            write::enforce_imperative_response_contract_for_diff(file, diff_text, &response_text)?;
-        }
-
-        lifecycle.finalize(
+        eprintln!(
+            "[orchestrate] step {}/{}: {}",
+            idx + 1,
+            tasks.len(),
+            task.label
+        );
+        run_ordered_task_step(
             file,
-            preflight.baseline_file.as_deref(),
-            &response_text,
-            mode,
+            &task.prompt,
+            agent_override,
+            model_override,
+            global_config,
+            lifecycle,
+            agent_runner,
         )?;
-        lifecycle.session_check(file)?;
     }
+    Ok(())
+}
+
+fn run_ordered_task_step(
+    file: &Path,
+    task: &str,
+    agent_override: Option<&str>,
+    model_override: Option<&str>,
+    global_config: &Config,
+    lifecycle: &impl LifecycleOps,
+    agent_runner: &impl FreshAgentRunner,
+) -> Result<()> {
+    inject_prompt(file, task)?;
+
+    let preflight = lifecycle.preflight(file)?;
+    if preflight.no_changes {
+        anyhow::bail!("orchestration step did not produce a prompt-bearing diff after injection");
+    }
+
+    let doc =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse(&doc)?;
+    let mode = fm.resolve_mode();
+    let agent_name = agent_override
+        .or(fm.agent.as_deref())
+        .or(global_config.default_agent.as_deref())
+        .unwrap_or("claude");
+    let model = model_override.or(fm.model.as_deref());
+    let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
+    let expanded_env = expand_frontmatter_env(&fm);
+    let response = agent_runner.send_fresh(
+        &prompt,
+        agent_name,
+        global_config.agents.get(agent_name),
+        expanded_env,
+        model,
+    )?;
+    let response_text = if mode.is_template() {
+        response
+    } else {
+        write::strip_assistant_heading(&response)
+    };
+
+    if let Some(diff_text) = preflight.diff.as_deref() {
+        write::enforce_imperative_response_contract_for_diff(file, diff_text, &response_text)?;
+    }
+
+    lifecycle.finalize(
+        file,
+        preflight.baseline_file.as_deref(),
+        &response_text,
+        mode,
+    )?;
+    lifecycle.session_check(file)?;
     Ok(())
 }
 
@@ -455,14 +559,34 @@ fn build_agent_prompt(mode: ResolvedMode, diff_text: Option<&str>, doc: &str) ->
 }
 
 fn resolve_tasks(file: &Path, config: &OrchestrateConfig) -> Result<Vec<String>> {
+    Ok(resolve_task_lines(file, config)?
+        .into_iter()
+        .map(|task| normalize_task(&task))
+        .filter(|task| !task.is_empty())
+        .collect())
+}
+
+fn extract_tasks_from_exchange(doc: &str) -> Result<Vec<String>> {
+    let components = component::parse(doc).context("failed to parse document components")?;
+    let exchange = components
+        .iter()
+        .find(|comp| comp.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
+    Ok(extract_tasks_from_text(exchange.content(doc)))
+}
+
+fn resolve_dag_tasks(file: &Path, config: &OrchestrateConfig) -> Result<Vec<DagTask>> {
+    let task_lines = resolve_task_lines(file, config)?;
+    task_lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, line)| parse_dag_task_line(&line, idx))
+        .collect()
+}
+
+fn resolve_task_lines(file: &Path, config: &OrchestrateConfig) -> Result<Vec<String>> {
     let mut tasks = Vec::new();
-    tasks.extend(
-        config
-            .tasks_explicit
-            .iter()
-            .map(|task| normalize_task(task))
-            .filter(|task| !task.is_empty()),
-    );
+    tasks.extend(config.tasks_explicit.iter().cloned());
 
     if let Some(path) = &config.from_file {
         let text = fs::read_to_string(path)
@@ -477,15 +601,6 @@ fn resolve_tasks(file: &Path, config: &OrchestrateConfig) -> Result<Vec<String>>
     }
 
     Ok(tasks)
-}
-
-fn extract_tasks_from_exchange(doc: &str) -> Result<Vec<String>> {
-    let components = component::parse(doc).context("failed to parse document components")?;
-    let exchange = components
-        .iter()
-        .find(|comp| comp.name == "exchange")
-        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
-    Ok(extract_tasks_from_text(exchange.content(doc)))
 }
 
 fn extract_tasks_from_text(text: &str) -> Vec<String> {
@@ -611,6 +726,161 @@ fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
 
 fn normalize_task(task: &str) -> String {
     task.trim().trim_start_matches('❯').trim().to_string()
+}
+
+fn parse_dag_task_line(task: &str, index: usize) -> Result<DagTask> {
+    let normalized = normalize_task(task);
+    if normalized.is_empty() {
+        anyhow::bail!("dag task {} is empty", index + 1);
+    }
+
+    let (metadata, prompt) = split_dag_metadata(&normalized)?;
+    if prompt.is_empty() {
+        anyhow::bail!("dag task {} is missing a prompt", index + 1);
+    }
+
+    let prompt_id = extract_prompt_task_id(&prompt);
+    let id = metadata
+        .id
+        .or(prompt_id)
+        .unwrap_or_else(|| format!("step-{}", index + 1));
+
+    Ok(DagTask {
+        id,
+        prompt,
+        deps: metadata.after,
+    })
+}
+
+fn split_dag_metadata(task: &str) -> Result<(DagMetadata, String)> {
+    let trimmed = task.trim();
+    let Some(rest) = trimmed.strip_prefix('[') else {
+        return Ok((DagMetadata::default(), trimmed.to_string()));
+    };
+
+    let closing = rest
+        .find(']')
+        .ok_or_else(|| anyhow::anyhow!("dag task metadata is missing closing `]`"))?;
+    let metadata_text = &rest[..closing];
+    let prompt = rest[closing + 1..].trim().to_string();
+    let metadata = parse_dag_metadata(metadata_text)?;
+    Ok((metadata, prompt))
+}
+
+fn parse_dag_metadata(metadata: &str) -> Result<DagMetadata> {
+    let mut parsed = DagMetadata::default();
+    for token in metadata.split_whitespace() {
+        if let Some(value) = token.strip_prefix("after=") {
+            parsed.after = parse_dependency_list(value);
+            continue;
+        }
+        if let Some(value) = token.strip_prefix("deps=") {
+            parsed.after = parse_dependency_list(value);
+            continue;
+        }
+        if let Some(value) = token.strip_prefix("id=") {
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("dag task metadata has empty `id=`");
+            }
+            parsed.id = Some(value.to_string());
+            continue;
+        }
+        if parsed.id.is_none() {
+            parsed.id = Some(token.to_string());
+            continue;
+        }
+        anyhow::bail!("unsupported dag task metadata token `{}`", token);
+    }
+    Ok(parsed)
+}
+
+fn parse_dependency_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|dep| !dep.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn extract_prompt_task_id(prompt: &str) -> Option<String> {
+    let bytes = prompt.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] == b'#' {
+            let start = idx;
+            idx += 1;
+            while idx < bytes.len() {
+                let ch = bytes[idx] as char;
+                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                    idx += 1;
+                } else {
+                    break;
+                }
+            }
+            if idx > start + 1 {
+                return Some(prompt[start..idx].to_string());
+            }
+            continue;
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn plan_dag_execution(tasks: &[DagTask]) -> Result<Vec<ExecutionTask>> {
+    let mut ids = HashSet::new();
+    for task in tasks {
+        if !ids.insert(task.id.clone()) {
+            anyhow::bail!("duplicate dag task id `{}`", task.id);
+        }
+    }
+
+    for task in tasks {
+        for dep in &task.deps {
+            if !ids.contains(dep) {
+                anyhow::bail!("dag task `{}` depends on unknown task `{}`", task.id, dep);
+            }
+        }
+    }
+
+    let mut completed = HashSet::new();
+    let mut remaining = (0..tasks.len()).collect::<Vec<_>>();
+    let mut ordered = Vec::with_capacity(tasks.len());
+
+    while !remaining.is_empty() {
+        let mut advanced = false;
+        let mut cursor = 0usize;
+
+        while cursor < remaining.len() {
+            let idx = remaining[cursor];
+            let task = &tasks[idx];
+            if task.deps.iter().all(|dep| completed.contains(dep)) {
+                let task = tasks[idx].clone();
+                completed.insert(task.id.clone());
+                ordered.push(ExecutionTask {
+                    label: format!("[{}] {}", task.id, task.prompt),
+                    prompt: task.prompt,
+                });
+                remaining.remove(cursor);
+                advanced = true;
+            } else {
+                cursor += 1;
+            }
+        }
+
+        if !advanced {
+            let blocked = remaining
+                .iter()
+                .map(|idx| tasks[*idx].id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!("dag dependency cycle detected among: {}", blocked);
+        }
+    }
+
+    Ok(ordered)
 }
 
 fn inject_prompt(file: &Path, task: &str) -> Result<()> {
@@ -841,9 +1111,14 @@ mod tests {
                     .to_string(),
         };
 
-        run_sequential_internal(
+        let tasks = vec![ExecutionTask {
+            label: "do #gkke".to_string(),
+            prompt: "do #gkke".to_string(),
+        }];
+
+        run_ordered_tasks_internal(
             &doc,
-            &["do #gkke".to_string()],
+            &tasks,
             None,
             Some("gpt-5"),
             &Config::default(),
@@ -865,6 +1140,134 @@ mod tests {
             agent.prompts.borrow()[0].contains("❯ do #gkke"),
             "fresh agent prompt should include the injected task"
         );
+    }
+
+    #[test]
+    fn resolve_dag_tasks_supports_fan_in_dependencies() {
+        let tasks = [
+            "do #prep. Prepare context",
+            "[after=#prep] do #bench. Run benchmarks",
+            "[id=report after=#prep,#bench] Summarize both results",
+        ];
+
+        let parsed = tasks
+            .iter()
+            .enumerate()
+            .map(|(idx, task)| parse_dag_task_line(task, idx).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(parsed[0].id, "#prep");
+        assert!(parsed[0].deps.is_empty());
+        assert_eq!(parsed[1].id, "#bench");
+        assert_eq!(parsed[1].deps, vec!["#prep".to_string()]);
+        assert_eq!(parsed[2].id, "report");
+        assert_eq!(
+            parsed[2].deps,
+            vec!["#prep".to_string(), "#bench".to_string()]
+        );
+        assert_eq!(parsed[2].prompt, "Summarize both results");
+    }
+
+    #[test]
+    fn dag_schedule_rejects_unknown_dependency() {
+        let tasks = vec![DagTask {
+            id: "#prep".to_string(),
+            prompt: "do #prep".to_string(),
+            deps: vec!["#missing".to_string()],
+        }];
+
+        let err = plan_dag_execution(&tasks).unwrap_err().to_string();
+        assert!(
+            err.contains("unknown task `#missing`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dag_schedule_rejects_cycles() {
+        let tasks = vec![
+            DagTask {
+                id: "#a".to_string(),
+                prompt: "do #a".to_string(),
+                deps: vec!["#b".to_string()],
+            },
+            DagTask {
+                id: "#b".to_string(),
+                prompt: "do #b".to_string(),
+                deps: vec!["#a".to_string()],
+            },
+        ];
+
+        let err = plan_dag_execution(&tasks).unwrap_err().to_string();
+        assert!(
+            err.contains("dag dependency cycle detected"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dag_orchestration_runs_topological_order() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+        };
+        let dag_tasks = vec![
+            DagTask {
+                id: "#prep".to_string(),
+                prompt: "do #prep".to_string(),
+                deps: Vec::new(),
+            },
+            DagTask {
+                id: "#report".to_string(),
+                prompt: "do #report".to_string(),
+                deps: vec!["#prep".to_string(), "#bench".to_string()],
+            },
+            DagTask {
+                id: "#bench".to_string(),
+                prompt: "do #bench".to_string(),
+                deps: vec!["#prep".to_string()],
+            },
+        ];
+
+        let execution = plan_dag_execution(&dag_tasks).unwrap();
+        assert_eq!(
+            execution
+                .iter()
+                .map(|task| task.prompt.as_str())
+                .collect::<Vec<_>>(),
+            vec!["do #prep", "do #bench", "do #report"]
+        );
+
+        run_ordered_tasks_internal(
+            &doc,
+            &execution,
+            None,
+            Some("gpt-5"),
+            &Config::default(),
+            &lifecycle,
+            &agent,
+        )
+        .unwrap();
+
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 3);
+        assert_eq!(*lifecycle.session_checks.borrow(), 3);
+        let prompts = agent.prompts.borrow();
+        assert!(prompts[0].contains("❯ do #prep"));
+        assert!(prompts[1].contains("❯ do #bench"));
+        assert!(prompts[2].contains("❯ do #report"));
     }
 
     #[test]

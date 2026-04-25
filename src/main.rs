@@ -640,7 +640,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Orchestrate sequential or parallel task batches against one document
+    /// Orchestrate sequential, parallel, or dependency-aware task batches against one document
     Orchestrate {
         /// Path to the session document
         file: PathBuf,
@@ -656,13 +656,13 @@ enum Commands {
         /// Extract the latest task list/code block from the document exchange
         #[arg(long = "from-exchange")]
         from_exchange: bool,
-        /// Agent backend override for sequential execution
+        /// Agent backend override for sequential or DAG execution
         #[arg(long)]
         agent: Option<String>,
         /// Model override
         #[arg(long)]
         model: Option<String>,
-        /// Skip git commits in worktrees (parallel mode only)
+        /// Skip git commits in worktrees (parallel mode only; sequential/DAG require finalize)
         #[arg(long)]
         no_git: bool,
         /// Run without worktrees (parallel mode only)

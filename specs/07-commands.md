@@ -671,4 +671,27 @@ Parallel orchestration resolves tasks through the shared orchestrate surface, th
 
 ### `--mode dag`
 
-Reserved for future dependency-graph orchestration. The command currently fails fast with a clear "not implemented yet" error instead of silently falling back to another mode.
+Dependency-aware orchestration against the same shared document lifecycle.
+
+Task entries may include an optional metadata prefix before the real prompt:
+
+```md
+- do #prep. Prepare context
+- [after=#prep] do #bench. Run benchmarks
+- [id=report after=#prep,#bench] Summarize both results
+```
+
+Rules:
+
+1. If metadata provides `id=...`, that becomes the node id.
+2. Otherwise the first `#token` found in the prompt becomes the node id (for example `do #prep...` → `#prep`).
+3. If neither exists, the node gets an implicit `step-N` id.
+4. `after=` (alias `deps=`) lists comma-separated prerequisite ids.
+5. Unknown dependencies, duplicate ids, and dependency cycles fail fast before any task executes.
+
+Execution semantics:
+
+- The graph is topologically sorted in deterministic source order.
+- Each ready node still runs through the normal single-document lifecycle: inject prompt → `preflight` → fresh agent request → `finalize` → `session-check`.
+- Because every node writes back to the same session document, DAG mode does **not** run siblings concurrently. Fan-in is supported through multiple `after=` dependencies; fan-out across isolated worktrees remains `--mode parallel`.
+- `--no-git` is rejected for the same reason as sequential mode: persistence still flows through git-backed `finalize`.

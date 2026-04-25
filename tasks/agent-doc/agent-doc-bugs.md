@@ -1,8 +1,8 @@
 ---
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
-agent: codex
 agent_doc_format: template
 agent_doc_write: crdt
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 ---
@@ -105,18 +105,50 @@ So the rule is:
 - `compact exchange` is separate; it summarizes/replaces exchange content, but it is not what owns prompt prefixing
 
 So the short answer is: this looks like pre-next-cycle / pre-finalize state, not specifically pre-compact state.
-<!-- agent:boundary:a80f00f7 -->
+
+❯ Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
+### Re: binary-owned prose grammar + plan mode — sonnet-4-6
+
+**Division of responsibility (current):**
+
+Binary owns structure; harness owns strategy. The grammar already exists:
+- `sequential/parallel/dag orchestra` keywords declare execution mode
+- `preset <name>` expands labeled blocks into each task's prompt
+- Task bullets (`- do #id`) are the unit of dispatch
+- DAG edges via `depends: #a`
+
+The `#ntoc` result confirms harness-side strategy works — Claude Code reasoned about task boundaries and execution order without explicit direction. The binary grammar provides a machine-readable target the harness can route through `agent-doc orchestrate`.
+
+**The suboptimal-instructions risk:**
+
+When the user writes orchestration intent directly (e.g., `parallel orchestra` when tasks actually conflict), the binary executes as written. The harness can only catch this if it sees the expanded plan before spawning.
+
+**What's missing: `orchestrate --plan` (dry-run)**
+
+Adding `--plan` to `orchestrate` would:
+1. Parse the exchange directive (mode + presets + task list)
+2. Print the expanded task prompts in full
+3. Exit without spawning — lets harness or user inspect before committing
+
+This is the narrowest fix. It gives the harness a verification step without introducing a new concept.
+
+**On a full plan mode:**
+
+A dedicated `&lt;!-- agent:plan --&gt;` component is probably overkill for now. The exchange already serves as a discussion surface — the user can ask "should these be parallel?" and the agent responds before writing the `parallel orchestra` directive. Binary-owned plan mode only adds value if the binary could synthesize an `orchestra` block from prose intent, which requires task-semantic understanding the binary doesn't have. Harness reasoning + binary grammar is the right split.
+
+**Recommended next step:**
+
+Add `agent-doc orchestrate --plan` (dry-run) — concrete, low-effort, closes the verification gap without redesigning the orchestration model.
+<!-- agent:boundary:6d3903d8 -->
 <!-- /agent:exchange -->
 
 <!--
-Why did the prompt "When I call an orchestrate, can I define a prompt that will be applied to every orchestrate task in one place?" not have a prepended `❯ ` in the patchback?
- 
-Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#0z3v] recommended: add orchestrate --plan (dry-run) to preview expanded task prompts before spawning — closes verification gap without adding a plan-mode concept
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

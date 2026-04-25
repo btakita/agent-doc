@@ -640,7 +640,7 @@ Verification:
 - `cargo install --path .`
 
 `#pbdiag1` remains open in pending.
-<!-- agent:boundary:bf125dc1 -->
+<!-- agent:boundary:1aee3a10 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -649,7 +649,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#cmpcf1] Harden compact-exchange closeout so skill/harness paths cannot fall back to raw git commit; require and verify agent-doc commit plus VCS refresh behavior
 - [ ] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish

@@ -2,7 +2,7 @@
 description: "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.33.12"
+agent-doc-version: "0.33.13"
 ---
 
 # agent-doc
@@ -66,6 +66,8 @@ Trust the preflight output — do not re-validate code fences or blockquotes.
 Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`, frontmatter, and a diff heuristic. `required_tier` is the hard gate, `suggested_tier` is advisory, and `model_switch_tier` is the resolved tier for the user's inline `/model` request. Full gate behavior: [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md).
 
 **Orchestration intent:** if the user asks to coordinate multiple document tasks in natural language (for example `run these in order`, `chain these`, `fan out these tasks`, `after #a do #b`), route through `agent-doc orchestrate` instead of manually simulating the batch. Use [runbooks/command-synonyms.md](runbooks/command-synonyms.md) to map the phrasing to `--mode sequential|parallel|dag`.
+
+**Compound task steering:** if one directive mixes the primary task with clear follow-up clauses (for example `do #ntoc. Add to today's news. commit + push`), normalize it into explicit sequential or dependency-ordered steps before execution instead of treating the entire prose line as one opaque task. Use [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) for the normalization rules. Keep that steering in the skill/runbook layer unless the user already supplied explicit orchestration metadata.
 
 ### 1. Respond
 
@@ -134,6 +136,7 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 - [runbooks/pending-ops.md](runbooks/pending-ops.md) — pending mutation contract
 - [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
 - [runbooks/command-synonyms.md](runbooks/command-synonyms.md) — natural-language dispatch to `orchestrate --mode ...`
+- [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) — normalize compound directives into explicit follow-up steps
 - [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
 - [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
 - [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions

@@ -638,6 +638,8 @@ After removing duplicates and updating the snapshot, `dedupe` also deletes the c
 
 **Skill-side dispatch:** the bundled skill/runbook treats natural-language orchestration requests as aliases for this command. Ordered phrases like `run these in order`, `chain these`, `one by one`, and `orchestrate` map to `--mode sequential`; concurrency phrases like `fan out`, `concurrent`, and `simultaneously` map to `--mode parallel`; dependency phrases like `after #a do #b`, `depends on`, and `fan in` map to `--mode dag`.
 
+**Compound single-line directives:** the bundled skill/runbook may also normalize one prose task with distinct follow-up clauses into explicit orchestrate steps before invoking this command. Example: `do #ntoc. Add to today's news. commit + push` can be steered into primary work plus explicit follow-up news/update/push steps. This remains skill-side steering rather than binary-owned free-form parsing; the CLI still expects explicit `--task` entries or explicit DAG metadata.
+
 Shared task-source resolution:
 
 1. Collect tasks from repeated `--task` flags, preserving order.

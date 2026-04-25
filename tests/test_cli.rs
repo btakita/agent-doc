@@ -618,6 +618,16 @@ fn test_skill_md_contains_required_steps() {
         content.contains("runbooks/command-synonyms.md"),
         "SKILL.md should point agents to the orchestrate synonym runbook"
     );
+    assert!(
+        content.contains("runbooks/compound-task-steering.md"),
+        "SKILL.md should point agents to the compound-task steering runbook"
+    );
+    assert!(
+        tmp.path()
+            .join(".claude/skills/agent-doc/runbooks/compound-task-steering.md")
+            .exists(),
+        "skill install should write the compound-task steering runbook"
+    );
 }
 
 #[test]

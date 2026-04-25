@@ -102,6 +102,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/command-synonyms.md"),
     ),
     (
+        "compound-task-steering.md",
+        include_str!("../runbooks/compound-task-steering.md"),
+    ),
+    (
         "streaming-checkpoints.md",
         include_str!("../runbooks/streaming-checkpoints.md"),
     ),
@@ -873,6 +877,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("harness-invocation.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/commit.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/command-synonyms.md"));
+        assert!(SKILL_TEMPLATE.contains("runbooks/compound-task-steering.md"));
     }
 
     #[test]
@@ -1010,6 +1015,12 @@ mod tests {
                 .any(|(name, _)| *name == "command-synonyms.md"),
             "command-synonyms.md should be in BUNDLED_RUNBOOKS"
         );
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "compound-task-steering.md"),
+            "compound-task-steering.md should be in BUNDLED_RUNBOOKS"
+        );
     }
 
     #[test]
@@ -1098,6 +1109,19 @@ mod tests {
         assert!(content.contains("fan out"));
         assert!(content.contains("after X do Y"));
         assert!(content.contains("default to `--mode sequential`"));
+    }
+
+    #[test]
+    fn compound_task_steering_runbook_covers_explicit_normalization() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "compound-task-steering.md")
+            .expect("compound-task-steering.md not found");
+        assert!(content.contains("do #ntoc. Add to today's news. commit + push"));
+        assert!(content.contains("agent-doc orchestrate <FILE> --mode sequential"));
+        assert!(content.contains("Do not invent binary-owned prose grammar"));
+        assert!(content.contains("commit + push"));
+        assert!(content.contains("Preserve it. Do not rewrite explicit orchestration"));
     }
 
     #[test]

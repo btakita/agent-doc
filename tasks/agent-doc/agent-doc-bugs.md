@@ -818,7 +818,31 @@ Created `tasks/agent-doc/queue-harness-dispatch-plan.md` covering three dispatch
 Queue items starting with `/` are classified as commands; everything else is a prompt. Execution is strictly ordered — a command must complete before the next item starts, and failures halt the queue.
 
 Added to pending as `#qdisp` with the plan path.
-<!-- agent:boundary:cf5adeb8 -->
+
+❯ do #qdisp. #spec-test-build-install-commit-push
+### Re: do #qdisp — opus-4-6
+
+Implemented the queue harness command dispatch feature (`queue_dispatch.rs`):
+
+**Classification:** `classify(text)` parses items into `Prompt` or `Command` based on leading `/`. Commands get a parsed `command` name and `args`.
+
+**Three dispatch paths** (priority order):
+1. **Inline** — `/model <tier>` updates the orchestrate-local model override for subsequent prompts; `/compact [file]` runs `agent-doc compact` + `commit` as subprocesses
+2. **Supervisor IPC** — sends the command via `inject` to the harness pty stdin through the session's Unix domain socket
+3. **tmux send-keys** — sends to the registered pane with Enter-retry polling (30s timeout)
+
+**Integration:** `run_ordered_tasks_internal` in `orchestrate.rs` now classifies each task before execution. Commands route through the dispatch chain; prompts go through the existing agent lifecycle. `/model` updates carry forward to subsequent prompt items in the same batch.
+
+**Changes:**
+- `src/queue_dispatch.rs` — new module (300 lines) with classification, dispatch, and 10 unit tests
+- `src/orchestrate.rs` — integrated dispatch into sequential and DAG task loops
+- `src/main.rs` — wired module
+- `CLAUDE.md` — added to module layout
+- `specs/07-commands.md` — documented classification and dispatch in orchestrate spec
+
+All 1,600+ tests pass (the one pre-existing `codex_skill_install` failure is unrelated). Built release, installed both binaries. Committed as `7ecd99b` in agent-doc, pushed.
+****
+<!-- agent:boundary:14e2a0e2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -829,7 +853,7 @@ Added to pending as `#qdisp` with the plan path.
 <!-- agent:pending patch=replace -->
 - [ ] [#qdisp] Queue harness command dispatch — /clear, /compact, /model via supervisor IPC or tmux send-keys — tasks/agent-doc/queue-harness-dispatch-plan.md
 - [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
-- [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
+- [x] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

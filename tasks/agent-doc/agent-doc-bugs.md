@@ -204,7 +204,7 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:1f613dac -->
+<!-- agent:boundary:53f143a7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -215,7 +215,6 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 
 <!-- agent:pending patch=replace -->
 - [ ] [#opcc] Orchestrate fails when skill preflight already opened a cycle — orchestrator should reuse existing cycle for task 1. Plan: tasks/agent-doc/plan-orchestrate-preflight-cycle-conflict.md
-- [x] [#cmps] [recommended] Add secondary orchestration steering for compound task lines (for example, "do #ntoc. Add to todays news. commit + push") by normalizing follow-up clauses into explicit orchestrate/notify steps before execution; defer binary-owned prose grammar until an explicit metadata syntax exists.
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

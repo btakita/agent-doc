@@ -619,7 +619,28 @@ Added two open pending items at the front of `agent:pending`:
 - **#pbdiag1** — add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so the system explains that it will not synthesize a second assistant patchback
 
 That splits the follow-up cleanly across the two distinct failure modes we identified: compact closeout correctness vs. patchback-state/operator-feedback clarity.
-<!-- agent:boundary:4efa8596 -->
+
+❯ do #cmpcf1. preset #spec-test-build-install-commit-push
+### Re: do #cmpcf1 — gpt-5
+
+Implemented `#cmpcf1` in `src/agent-doc` and pushed `82c64f1` to `20260422/codex-agent-backend`.
+
+What changed:
+- Added `agent-doc compact --commit`, which closes compaction through the binary-owned `agent-doc commit` path instead of relying on a separate harness-level commit step.
+- `compact` now fails closed if that closeout path reports a writable VCS refresh channel but cannot write `vcs-refresh.signal`.
+- Updated the compact runbook, bundled skill instructions, and command/spec docs to use the new binary-owned closeout path.
+- Added regression coverage for the compact closeout signal path and for the installed/bundled skill and runbook content.
+
+Verification:
+- `cargo test --bin agent-doc compact_with_commit_writes_vcs_refresh_signal`
+- `cargo test --bin agent-doc compact_exchange_runbook_content_uses_binary_owned_closeout`
+- `cargo test --bin agent-doc bundled_skill_compact_entry_uses_commit_closeout`
+- `cargo test` (still fails only on the pre-existing unrelated `route::tests::send_keys_delivers_claude_command_with_enter` and `route::tests::send_keys_delivers_codex_command_with_enter`)
+- `cargo build --release`
+- `cargo install --path .`
+
+`#pbdiag1` remains open in pending.
+<!-- agent:boundary:bf125dc1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -628,7 +649,7 @@ That splits the follow-up cleanly across the two distinct failure modes we ident
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#cmpcf1] Harden compact-exchange closeout so skill/harness paths cannot fall back to raw git commit; require and verify agent-doc commit plus VCS refresh behavior
+- [x] [#cmpcf1] Harden compact-exchange closeout so skill/harness paths cannot fall back to raw git commit; require and verify agent-doc commit plus VCS refresh behavior
 - [ ] [#pbdiag1] Add an explicit diagnostic when a prior patchback already exists but the operator asks to write/commit without supplying a new response body, so no missing-second-patchback ambiguity remains
 - [ ] [#envt1] [recommended] Fix detect_install_env_treats_codex_thread_id_as_codex test failure
 - [ ] [#orch5] [recommended] Manual test orchestrate sequential + parallel + DAG flows before publish

@@ -105,7 +105,21 @@ So my recommendation is: no model-based planning/classification inside `agent-do
 ### Re: pending capture — gpt-5
 
 Added the recommendation to `agent:pending` as a `[recommended]` item rather than silently promoting it to accepted work.
-<!-- agent:boundary:a42362f8 -->
+
+❯ Will #1g42 be more effective than just having the model process the raw preflight output?
+### Re: #1g42 effectiveness — gpt-5
+
+Yes, if the goal is reliable behavior rather than best-effort behavior.
+
+Just handing the model raw preflight output is still mostly "the model noticed the right thing and chose the right action." That helps, but it preserves the same failure mode as the orchestration miss: the signal exists, yet dispatch still depends on prompt-following.
+
+`#1g42` is stronger because it creates an explicit phase boundary:
+- preflight produces structured facts
+- a dedicated planning/dispatch step consumes those facts
+- the skill/orchestrator can require specific outputs or actions from that step
+
+So `#1g42` gives you a more testable contract and a narrower place to harden dispatch logic. Raw preflight output alone is useful context, but it is weaker as an enforcement mechanism.
+<!-- agent:boundary:9590b132 -->
 <!-- /agent:exchange -->
 
 <!--

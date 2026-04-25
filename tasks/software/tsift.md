@@ -47,7 +47,7 @@ tsift already owns AST extraction, call graph, symbol table, and incremental ind
 **Boundary rule:** tsift owns deterministic, AST-derived graph operations. graphify owns LLM-derived semantic operations. Interop: `tsift graph --json` exports to graphify-compatible format for merging.
 
 Closing #bamc. Reclassified #jzm8 from "graphify integration" to tsift-native community detection. Added #cdet (Louvain) and #gpth (path/explain queries) to pending.
-<!-- agent:boundary:3e4dd974 -->
+<!-- agent:boundary:703302d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -55,7 +55,6 @@ Closing #bamc. Reclassified #jzm8 from "graphify integration" to tsift-native co
 <!-- agent:pending patch=replace -->
 - [ ] [#cdet] Louvain community detection over call graph — cluster related modules into architectural subsystems (~200 lines, no new deps)
 - [ ] [#gpth] tsift path <A> <B> + tsift explain <symbol> — graph query subcommands extending existing tsift graph
-- [x] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills

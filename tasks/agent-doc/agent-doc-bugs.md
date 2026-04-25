@@ -125,13 +125,12 @@ Verification in `src/agent-doc`:
 - `cargo build --release`
 - `cargo install --path .`
 - `agent-doc orchestrate --help`
-<!-- agent:boundary:09eb29c9 -->
+<!-- agent:boundary:49b98534 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#9pw9] [recommended] Refactor the existing `parallel` command behind the same orchestration engine before adding fan-in / DAG modes.
 - [ ] [#d5xb] [recommended] Add `fan-in` / DAG orchestration modes after step-state and recovery semantics are stable.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -19,17 +19,38 @@ codex_args: -s danger-full-access
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260425-042620.md`*
-<!-- agent:boundary:cacec2c6 -->
+
+❯ do #plnk. update spec + tests. build + install for local testing. commit + push
+### Re: #plnk pending plan-file guidance — gpt-5
+
+Implemented in `src/agent-doc` and pushed on `20260422/codex-agent-backend` as `6b7c7ec` (`docs: require plan paths in pending guidance`).
+
+What changed:
+- `runbooks/pending-ops.md` now requires plan-backed pending items to create the plan file first and include the exact plan-file path in the pending text, with a concrete example
+- `SKILL.md` now carries the same rule in the pending-mutation guidance so the agent applies it during normal response cycles
+- `specs/pending-system.md` now records the rule at the spec layer instead of leaving it as runbook-only guidance
+- added bundled-runbook/install assertions in `src/skill.rs` plus installed-skill coverage in `tests/test_cli.rs` so the rule is enforced in the shipped skill surface
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test plan_backed_items`
+- `cargo test test_skill_md_contains_required_steps`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+<!-- agent:boundary:e5dacc7c -->
 <!-- /agent:exchange -->
 
 <!--
+In src/session-share, `agent-doc tasks/claudescore-3.md` has as "Today is 2026-04-25. Synchronous orcestra." prompt. However, agent-doc orcestrate was not called. Why?
+
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
+- [x] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

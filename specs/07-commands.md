@@ -664,7 +664,9 @@ Shared task-source resolution:
 1. Collect tasks from repeated `--task` flags, preserving order.
 2. If `--from-file` is provided, read the file and extract tasks from the last fenced code block or markdown list that contains list items; otherwise fall back to non-empty trimmed lines.
 3. If `--from-exchange` is provided, read the document's `agent:exchange` component and apply the same task extraction rule to the latest exchange content.
-4. Concatenate all resolved tasks in source order. Error if the final task list is empty.
+4. Independently scan `--from-file` / `--from-exchange` text for batch-level `preset <name>` or `presets <a>, <b>` directives. These are not tasks; they request frontmatter `prompt_presets` by name. Preserve request order and de-duplicate repeated names.
+5. Validate requested presets against the document frontmatter `prompt_presets` map. Missing preset references fail closed.
+6. Concatenate all resolved tasks in source order. Error if the final task list is empty.
 
 ### `--mode sequential`
 
@@ -673,12 +675,22 @@ Sequential orchestration runs one full fresh-agent lifecycle per task:
 1. Inject `❯ <task>` into `agent:exchange`, immediately before the current boundary marker when one exists.
 2. Run `agent-doc preflight <FILE>` after each prompt injection and use its `baseline_file` for response persistence.
 3. If that preflight encounters an already-open `preflight_started` cycle from an outer skill/router pass, it first auto-attempts the safe snapshot-only `commit_already_current` closeout for that prior cycle, then continues into the new preflight. Sequential orchestration does not keep a bespoke task-1 reuse path anymore; `preflight` itself is the idempotent boundary.
-4. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
-5. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
-6. For CRDT session docs with an `agent:exchange` component, if the chosen backend supports streaming (`claude` or `codex`), stream the in-progress step response into `exchange` before the normal write boundary. The streamed buffer is "existing exchange through injected prompt" plus the child response so far, with the boundary marker kept at the end.
-7. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state. When streaming is unavailable, sequential mode falls back to the blocking request path.
-8. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
-9. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
+4. If batch-level prompt presets were requested, prefix the concrete task prompt with one labeled block per preset, for example:
+
+```text
+(preset #1)
+Today is 2026-04-25.
+Keep the work tree clean.
+
+do #prep
+```
+
+5. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
+6. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
+7. For CRDT session docs with an `agent:exchange` component, if the chosen backend supports streaming (`claude` or `codex`), stream the in-progress step response into `exchange` before the normal write boundary. The streamed buffer is "existing exchange through injected prompt" plus the child response so far, with the boundary marker kept at the end.
+8. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state. When streaming is unavailable, sequential mode falls back to the blocking request path.
+9. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
+10. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
 
 Notes:
 
@@ -693,6 +705,7 @@ Notes:
 Parallel orchestration resolves tasks through the shared orchestrate surface, then runs the existing worktree fan-out backend:
 
 - `--task` / `--from-file` / `--from-exchange` are resolved first.
+- Any requested prompt presets are expanded into the concrete per-task prompt before the parallel worker prompt file is written, while the user-facing task label stays unchanged.
 - The resolved tasks are then passed to the existing parallel engine with `--model`, `--no-git`, `--no-worktree`, and `--timeout`.
 - The legacy `agent-doc parallel` command is a compatibility wrapper over this same dispatch path with explicit `--task` entries only, so both surfaces share task normalization and mode routing.
 
@@ -720,5 +733,6 @@ Execution semantics:
 
 - The graph is topologically sorted in deterministic source order.
 - Each ready node still runs through the normal single-document lifecycle: inject prompt → `preflight` → fresh agent request → `finalize` → `session-check`.
+- Requested prompt presets are expanded into each DAG node's concrete prompt before dispatch, so `sequential`, `dag`, and `parallel` share the same labeled preset block behavior.
 - Because every node writes back to the same session document, DAG mode does **not** run siblings concurrently. Fan-in is supported through multiple `after=` dependencies; fan-out across isolated worktrees remains `--mode parallel`.
 - `--no-git` is rejected for the same reason as sequential mode: persistence still flows through git-backed `finalize`.

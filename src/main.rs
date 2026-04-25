@@ -1490,7 +1490,13 @@ fn main() -> anyhow::Result<()> {
         } => orchestrate::run_parallel_compat(
             &file,
             parallel::ParallelConfig {
-                tasks: tasks_explicit,
+                tasks: tasks_explicit
+                    .into_iter()
+                    .map(|task| parallel::ParallelTask {
+                        description: task.clone(),
+                        prompt: task,
+                    })
+                    .collect(),
                 model,
                 no_git,
                 no_worktree,

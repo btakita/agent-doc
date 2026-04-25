@@ -45,7 +45,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
-**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
+**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Print any `claims` to the console as a record.
@@ -62,6 +62,8 @@ If `slash_commands` or `builtin_commands` is non-empty, handle each **before** r
 Trust the preflight output — do not re-validate code fences or blockquotes.
 
 **Binary-owned orchestration request:** if `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before composing any manual response. Treat this as a blocking dispatch requirement, not advisory prose. If the orchestrate run completes the requested batch cleanly, stop instead of manually simulating the same work in a second response.
+
+**Prompt preset validation:** if `prompt_presets_requested` is non-empty, treat it as proof that preflight already validated the referenced frontmatter `prompt_presets`. Do not manually inline the preset text in the skill; let `agent-doc orchestrate` expand those presets into each task prompt so sequential, `dag`, and `parallel` stay consistent.
 
 ### 0c. Model tier gate
 
@@ -137,7 +139,7 @@ RESPONSE
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is minimal recovery if the binary-owned closeout guard failed, plus concise result reporting.
 
-**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file across nested `.agent-doc` roots in the same workspace. On `Stop`, the hook first tries to finish the response cycle deterministically from `last_assistant_message` by replaying the normal write/commit path, even if the `Stop` arrives on a later turn in the same Codex session; if the cycle still cannot be closed, it falls back to capture-and-block / fail-closed behavior instead of silently letting a bypassed patchback leave the harness. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit`.
+**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file across nested `.agent-doc` roots in the same workspace. On `Stop`, the hook first tries to finish the response cycle deterministically from `last_assistant_message`, but only when that payload validates as a single assistant closeout. If the payload looks like a transcript dump or full exchange patchback, the hook stores it only as diagnostics and blocks/fails closed instead of replaying it. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit`.
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 

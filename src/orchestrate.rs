@@ -107,6 +107,12 @@ struct DagMetadata {
     after: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct ResolvedTaskBatch {
+    tasks: Vec<String>,
+    requested_presets: Vec<String>,
+}
+
 trait LifecycleOps {
     fn preflight(&self, file: &Path) -> Result<PreflightOutput>;
     fn finalize(
@@ -320,7 +326,11 @@ pub fn run_parallel_compat(
         file,
         OrchestrateConfig {
             mode: OrchestrateMode::Parallel,
-            tasks_explicit: config.tasks,
+            tasks_explicit: config
+                .tasks
+                .into_iter()
+                .map(|task| task.description)
+                .collect(),
             from_file: None,
             from_exchange: false,
             agent: None,
@@ -353,16 +363,17 @@ fn run_with_dependencies(
 
     match config.mode {
         OrchestrateMode::Sequential => {
-            let tasks = resolve_tasks(file, &config)?;
-            if tasks.is_empty() {
+            let batch = resolve_task_batch(file, &config)?;
+            if batch.tasks.is_empty() {
                 anyhow::bail!("no orchestration tasks found");
             }
+            let prompt_preset_block = load_prompt_preset_block(file, &batch.requested_presets)?;
             eprintln!(
                 "[orchestrate] mode: {}",
                 config.mode.to_possible_value().unwrap().get_name()
             );
-            eprintln!("[orchestrate] tasks: {}", tasks.len());
-            for (idx, task) in tasks.iter().enumerate() {
+            eprintln!("[orchestrate] tasks: {}", batch.tasks.len());
+            for (idx, task) in batch.tasks.iter().enumerate() {
                 eprintln!("[orchestrate]   {}: {}", idx + 1, task);
             }
             if config.dry_run {
@@ -374,11 +385,12 @@ fn run_with_dependencies(
                     "`agent-doc orchestrate --mode sequential` requires git-backed finalize"
                 );
             }
-            let execution_tasks = tasks
+            let execution_tasks = batch
+                .tasks
                 .into_iter()
                 .map(|task| ExecutionTask {
                     label: task.clone(),
-                    prompt: task,
+                    prompt: apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
                 })
                 .collect::<Vec<_>>();
             run_ordered_tasks_internal(
@@ -392,22 +404,33 @@ fn run_with_dependencies(
             )
         }
         OrchestrateMode::Parallel => {
-            let tasks = resolve_tasks(file, &config)?;
-            if tasks.is_empty() && !allow_empty_parallel_tasks {
+            let batch = resolve_task_batch(file, &config)?;
+            if batch.tasks.is_empty() && !allow_empty_parallel_tasks {
                 anyhow::bail!("no orchestration tasks found");
             }
+            let prompt_preset_block = load_prompt_preset_block(file, &batch.requested_presets)?;
             eprintln!(
                 "[orchestrate] mode: {}",
                 config.mode.to_possible_value().unwrap().get_name()
             );
-            eprintln!("[orchestrate] tasks: {}", tasks.len());
-            for (idx, task) in tasks.iter().enumerate() {
+            eprintln!("[orchestrate] tasks: {}", batch.tasks.len());
+            for (idx, task) in batch.tasks.iter().enumerate() {
                 eprintln!("[orchestrate]   {}: {}", idx + 1, task);
             }
             parallel_runner.run(
                 file,
                 parallel::ParallelConfig {
-                    tasks,
+                    tasks: batch
+                        .tasks
+                        .into_iter()
+                        .map(|task| parallel::ParallelTask {
+                            description: task.clone(),
+                            prompt: apply_prompt_preset_block(
+                                &task,
+                                prompt_preset_block.as_deref(),
+                            ),
+                        })
+                        .collect(),
                     model: config.model,
                     no_git: config.no_git,
                     no_worktree: config.no_worktree,
@@ -417,7 +440,9 @@ fn run_with_dependencies(
             )
         }
         OrchestrateMode::Dag => {
-            let dag_tasks = resolve_dag_tasks(file, &config)?;
+            let batch = resolve_task_batch(file, &config)?;
+            let prompt_preset_block = load_prompt_preset_block(file, &batch.requested_presets)?;
+            let dag_tasks = resolve_dag_tasks(&batch)?;
             if dag_tasks.is_empty() {
                 anyhow::bail!("no orchestration tasks found");
             }
@@ -446,7 +471,13 @@ fn run_with_dependencies(
             if config.no_git {
                 anyhow::bail!("`agent-doc orchestrate --mode dag` requires git-backed finalize");
             }
-            let execution_tasks = plan_dag_execution(&dag_tasks)?;
+            let execution_tasks = plan_dag_execution(&dag_tasks)?
+                .into_iter()
+                .map(|task| ExecutionTask {
+                    label: task.label.clone(),
+                    prompt: apply_prompt_preset_block(&task.prompt, prompt_preset_block.as_deref()),
+                })
+                .collect::<Vec<_>>();
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
@@ -811,49 +842,93 @@ fn build_agent_prompt(mode: ResolvedMode, diff_text: Option<&str>, doc: &str) ->
     }
 }
 
-fn resolve_tasks(file: &Path, config: &OrchestrateConfig) -> Result<Vec<String>> {
-    Ok(resolve_task_lines(file, config)?
-        .into_iter()
-        .map(|task| normalize_task(&task))
-        .filter(|task| !task.is_empty())
-        .collect())
-}
-
-fn extract_tasks_from_exchange(doc: &str) -> Result<Vec<String>> {
-    let components = component::parse(doc).context("failed to parse document components")?;
-    let exchange = components
-        .iter()
-        .find(|comp| comp.name == "exchange")
-        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
-    Ok(extract_tasks_from_text(exchange.content(doc)))
-}
-
-fn resolve_dag_tasks(file: &Path, config: &OrchestrateConfig) -> Result<Vec<DagTask>> {
-    let task_lines = resolve_task_lines(file, config)?;
-    task_lines
-        .into_iter()
-        .enumerate()
-        .map(|(idx, line)| parse_dag_task_line(&line, idx))
-        .collect()
-}
-
-fn resolve_task_lines(file: &Path, config: &OrchestrateConfig) -> Result<Vec<String>> {
-    let mut tasks = Vec::new();
-    tasks.extend(config.tasks_explicit.iter().cloned());
+fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<ResolvedTaskBatch> {
+    let mut batch = ResolvedTaskBatch::default();
+    batch.tasks.extend(
+        config
+            .tasks_explicit
+            .iter()
+            .map(|task| normalize_task(task))
+            .filter(|task| !task.is_empty()),
+    );
 
     if let Some(path) = &config.from_file {
         let text = fs::read_to_string(path)
             .with_context(|| format!("failed to read task file {}", path.display()))?;
-        tasks.extend(extract_tasks_from_text(&text));
+        extend_task_batch_from_text(&mut batch, &text);
     }
 
     if config.from_exchange {
         let doc = fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        tasks.extend(extract_tasks_from_exchange(&doc)?);
+        extend_task_batch_from_text(&mut batch, exchange_text(&doc)?);
     }
 
-    Ok(tasks)
+    Ok(batch)
+}
+
+fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
+    batch.tasks.extend(extract_tasks_from_text(text));
+    for preset in diff::extract_prompt_preset_requests_from_text(text) {
+        if !batch
+            .requested_presets
+            .iter()
+            .any(|existing| existing == &preset)
+        {
+            batch.requested_presets.push(preset);
+        }
+    }
+}
+
+fn exchange_text(doc: &str) -> Result<&str> {
+    let components = component::parse(doc).context("failed to parse document components")?;
+    let exchange = components
+        .iter()
+        .find(|comp| comp.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
+    Ok(exchange.content(doc))
+}
+
+fn resolve_dag_tasks(batch: &ResolvedTaskBatch) -> Result<Vec<DagTask>> {
+    batch
+        .tasks
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| parse_dag_task_line(line, idx))
+        .collect()
+}
+
+fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result<Option<String>> {
+    if requested_presets.is_empty() {
+        return Ok(None);
+    }
+
+    let doc =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse(&doc)?;
+    let mut block = String::new();
+
+    for (idx, preset_name) in requested_presets.iter().enumerate() {
+        let preset_body = fm
+            .prompt_presets
+            .get(preset_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown prompt preset `{}`", preset_name))?;
+        if idx > 0 {
+            block.push('\n');
+        }
+        block.push_str(&format!("(preset {})\n", preset_name));
+        block.push_str(preset_body.trim_end());
+        block.push('\n');
+    }
+
+    Ok(Some(block))
+}
+
+fn apply_prompt_preset_block(task: &str, prompt_preset_block: Option<&str>) -> String {
+    match prompt_preset_block {
+        Some(block) if !block.trim().is_empty() => format!("{}\n{}", block.trim_end(), task),
+        _ => task.to_string(),
+    }
 }
 
 fn extract_tasks_from_text(text: &str) -> Vec<String> {
@@ -1283,7 +1358,17 @@ mod tests {
 
     #[derive(Default)]
     struct FakeParallelRunner {
-        calls: RefCell<Vec<(String, Vec<String>, Option<String>, bool, bool, u64, bool)>>,
+        calls: RefCell<
+            Vec<(
+                String,
+                Vec<parallel::ParallelTask>,
+                Option<String>,
+                bool,
+                bool,
+                u64,
+                bool,
+            )>,
+        >,
     }
 
     impl ParallelRunner for FakeParallelRunner {
@@ -1340,6 +1425,52 @@ mod tests {
         assert_eq!(
             extract_tasks_from_text(text),
             vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_task_batch_collects_exchange_prompt_presets() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            "---\nprompt_presets:\n  \"#1\": |\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n- do #report\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #prep".to_string(), "do #report".to_string()]
+        );
+        assert_eq!(batch.requested_presets, vec!["#1".to_string()]);
+    }
+
+    #[test]
+    fn apply_prompt_preset_block_prefixes_task_prompt() {
+        let rendered = apply_prompt_preset_block(
+            "do #prep",
+            Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
+        );
+        assert_eq!(
+            rendered,
+            "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
         );
     }
 
@@ -1478,6 +1609,58 @@ mod tests {
         assert_eq!(*lifecycle.session_checks.borrow(), 1);
         assert_eq!(*agent.fresh_calls.borrow(), 1);
         assert_eq!(*agent.streaming_calls.borrow(), 0);
+    }
+
+    #[test]
+    fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nprompt_presets:\n  \"#1\": |\n    Today is 2026-04-25.\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented.\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+            streaming_chunks: None,
+        };
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: Some("gpt-5".to_string()),
+                no_git: false,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
+
+        let prompt = agent.prompts.borrow()[0].clone();
+        assert!(prompt.contains("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean."));
+        assert!(prompt.contains("❯ (preset #1)\nToday is 2026-04-25."));
     }
 
     #[test]
@@ -1742,7 +1925,13 @@ mod tests {
 
         let calls = parallel_runner.calls.borrow();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1, vec!["do #9pw9".to_string()]);
+        assert_eq!(
+            calls[0].1,
+            vec![parallel::ParallelTask {
+                description: "do #9pw9".to_string(),
+                prompt: "do #9pw9".to_string(),
+            }]
+        );
         assert_eq!(calls[0].2.as_deref(), Some("gpt-5"));
         assert!(calls[0].3);
         assert!(calls[0].4);
@@ -1750,6 +1939,61 @@ mod tests {
         assert!(calls[0].6);
         assert!(lifecycle.finalize_calls.borrow().is_empty());
         assert!(agent.prompts.borrow().is_empty());
+    }
+
+    #[test]
+    fn parallel_mode_expands_prompt_presets_into_task_prompt_only() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            "---\nprompt_presets:\n  \"#1\": |\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
+
+        let call = &parallel_runner.calls.borrow()[0];
+        assert_eq!(call.1[0].description, "do #prep");
+        assert_eq!(
+            call.1[0].prompt,
+            "(preset #1)\nKeep the work tree clean.\ndo #prep"
+        );
     }
 
     #[test]

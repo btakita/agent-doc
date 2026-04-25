@@ -31,8 +31,8 @@ use crate::{frontmatter, snapshot};
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {
-    /// Task descriptions — one Claude session per task.
-    pub tasks: Vec<String>,
+    /// Task descriptions/prompts — one Claude session per task.
+    pub tasks: Vec<ParallelTask>,
     /// Model override (e.g., "opus", "sonnet").
     pub model: Option<String>,
     /// Skip git operations (reserved for future use).
@@ -44,6 +44,13 @@ pub struct ParallelConfig {
     pub timeout_secs: u64,
     /// Just print the plan and exit.
     pub dry_run: bool,
+}
+
+/// Parallel task descriptor with a user-facing label and concrete prompt text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParallelTask {
+    pub description: String,
+    pub prompt: String,
 }
 
 /// Tracks state for a single spawned task.
@@ -108,7 +115,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     eprintln!("[parallel] Tasks: {}", config.tasks.len());
 
     for (i, task) in config.tasks.iter().enumerate() {
-        eprintln!("[parallel]   {}: {}", i + 1, task);
+        eprintln!("[parallel]   {}: {}", i + 1, task.description);
     }
 
     // Dry run: print plan and exit
@@ -147,7 +154,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
 
         // Write prompt to file in task directory
         let prompt_path = task_cwd.join(PROMPT_FILENAME);
-        std::fs::write(&prompt_path, task)
+        std::fs::write(&prompt_path, &task.prompt)
             .with_context(|| format!("failed to write prompt to {}", prompt_path.display()))?;
 
         // Create tmux pane in the session
@@ -186,7 +193,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
 
         task_states.push(TaskState {
             index: i,
-            description: task.clone(),
+            description: task.description.clone(),
             worktree_path: task_cwd,
             pane_id,
             completed: false,

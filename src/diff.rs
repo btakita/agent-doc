@@ -92,6 +92,10 @@
 //! - `parse_slash_commands(diff)`: extracts slash commands from added lines in a unified diff
 //!   with guards against: code fences (``` / ~~~), blockquotes (`>`), HTML comments, and
 //!   non-added lines. Returns a vec of command strings (e.g. `["/clear", "/agent-doc foo.md"]`).
+//! - `detect_prompt_preset_requests(diff)`: extracts ordered `preset <name>` / `presets <a>, <b>`
+//!   directives from user-added diff lines, ignoring code fences and blockquotes.
+//! - `extract_prompt_preset_requests_from_text(text)`: text-mode companion used by orchestration
+//!   task extraction for batch-level preset directives outside unified diffs.
 //! - `parse_slash_commands_simple`: single added `/clear` line → `["/clear"]`
 //! - `parse_slash_commands_ignores_fenced`: `/cmd` inside a ``` block → empty
 //! - `parse_slash_commands_ignores_blockquote`: `> /cmd` → empty
@@ -99,6 +103,9 @@
 //! - `parse_slash_commands_ignores_removed_lines`: `/cmd` on removed line (`-`) → empty
 //! - `parse_slash_commands_with_args`: `/agent-doc foo.md` → `["/agent-doc foo.md"]`
 //! - `parse_slash_commands_requires_letter_after_slash`: `/ `, `//comment` → empty
+//! - `detect_prompt_preset_requests_from_diff`: added `preset #1` and `presets release-check, #2`
+//!   lines → ordered unique preset names returned
+//! - `extract_prompt_preset_requests_from_text_ignores_fences_and_blockquotes`
 //! - `extract_imperative_directives(diff)`: finds added user directive lines like `do #id`,
 //!   `run tests`, `build + install`, `commit + push`, or pending-item prose like
 //!   `[#id] Fix the cross-repo ...`, skipping code fences and blockquotes
@@ -789,6 +796,173 @@ pub enum OrchestrationRequestMode {
     Sequential,
     Parallel,
     Dag,
+}
+
+/// Extract ordered unique prompt preset references from user-added diff lines.
+pub fn detect_prompt_preset_requests(diff: &str) -> Vec<String> {
+    let mut requests = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+        let trimmed = content.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+
+        if !line.starts_with('+') || line.starts_with("+++") {
+            continue;
+        }
+        if content.starts_with('>') {
+            continue;
+        }
+
+        collect_prompt_preset_requests_from_line(content, &mut requests);
+    }
+
+    requests
+}
+
+/// Extract ordered unique prompt preset references from plain text.
+pub fn extract_prompt_preset_requests_from_text(text: &str) -> Vec<String> {
+    let mut requests = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+
+        if trimmed.starts_with('>') {
+            continue;
+        }
+
+        collect_prompt_preset_requests_from_line(line, &mut requests);
+    }
+
+    requests
+}
+
+fn collect_prompt_preset_requests_from_line(line: &str, requests: &mut Vec<String>) {
+    let Some(names) = parse_prompt_preset_directive(line) else {
+        return;
+    };
+    for name in names {
+        if !requests.iter().any(|existing| existing == &name) {
+            requests.push(name);
+        }
+    }
+}
+
+fn parse_prompt_preset_directive(line: &str) -> Option<Vec<String>> {
+    let mut trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix('❯') {
+        trimmed = rest.trim_start();
+    }
+
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        trimmed = rest.trim_start();
+    } else {
+        let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits > 0 {
+            let rest = &trimmed[digits..];
+            if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+                trimmed = rest.trim_start();
+            }
+        }
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let rest = if lower.starts_with("presets ") {
+        &trimmed["presets ".len()..]
+    } else if lower.starts_with("preset ") {
+        &trimmed["preset ".len()..]
+    } else {
+        return None;
+    };
+
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return None;
+    }
+
+    let mut names = Vec::new();
+    for segment in rest.split(',') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        for part in segment.split(" and ") {
+            let name = part
+                .trim()
+                .trim_end_matches(|c: char| matches!(c, '.' | ':' | ';'))
+                .trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+
+    (!names.is_empty()).then_some(names)
 }
 
 /// Like `parse_slash_commands` but classifies results into skill vs built-in commands.
@@ -2930,6 +3104,38 @@ Please fix the bug.\n\
         assert!(
             detect_orchestration_request(diff).is_none(),
             "single-item lists should stay as ordinary work, not forced orchestration"
+        );
+    }
+
+    #[test]
+    fn detect_prompt_preset_requests_from_diff() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,6 @@\n ctx\n\
++preset #1\n\
++presets release-check, #2\n\
++preset #1\n\
++> preset ignored\n\
++```md\n\
++preset fenced\n";
+        assert_eq!(
+            detect_prompt_preset_requests(diff),
+            vec![
+                "#1".to_string(),
+                "release-check".to_string(),
+                "#2".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_prompt_preset_requests_from_text_ignores_fences_and_blockquotes() {
+        let text = "synchronous orchestra\npreset #1\n> preset quoted\n\n```md\npreset fenced\n```\npresets release-check and #2\n";
+        assert_eq!(
+            extract_prompt_preset_requests_from_text(text),
+            vec![
+                "#1".to_string(),
+                "release-check".to_string(),
+                "#2".to_string()
+            ]
         );
     }
 

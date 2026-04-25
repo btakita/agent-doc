@@ -160,6 +160,13 @@ pub struct PreflightOutput {
     /// --mode <mode> --from-exchange` before attempting any manual response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestration_request: Option<crate::diff::OrchestrationRequest>,
+    /// Prompt preset references requested from the changed exchange content.
+    ///
+    /// Values are preset names such as `#1` or `release-check`, in request order
+    /// with duplicates removed. Preflight validates these against frontmatter
+    /// `prompt_presets` and fails closed if any requested preset is missing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_presets_requested: Vec<String>,
     /// Resolved model tier the skill should use to gate this cycle.
     /// Computed from (in precedence order): inline `/model` command,
     /// `<!-- agent:model -->` component, `agent_doc_model_tier` frontmatter,
@@ -940,21 +947,42 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4e: Resolve model tier sources and compose effective_tier.
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
     // agent_doc_model_tier frontmatter, diff heuristic.
-    let (frontmatter_tier, component_tier_value, frontmatter_env, frontmatter_model) =
-        match std::fs::read_to_string(file) {
-            Ok(content) => {
-                let (fm_tier, env_map, fm_model) = frontmatter::parse(&content)
-                    .ok()
-                    .map(|(fm, _)| (fm.model_tier, fm.env, fm.model))
-                    .unwrap_or_default();
-                let comp_value = agent_doc::model_tier::extract_model_component(&content);
-                (fm_tier, comp_value, env_map, fm_model)
-            }
-            Err(_) => (None, None, Default::default(), None),
-        };
+    let (
+        frontmatter_tier,
+        component_tier_value,
+        frontmatter_env,
+        frontmatter_model,
+        frontmatter_prompt_presets,
+    ) = match std::fs::read_to_string(file) {
+        Ok(content) => {
+            let (fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
+                .ok()
+                .map(|(fm, _)| (fm.model_tier, fm.env, fm.model, fm.prompt_presets))
+                .unwrap_or_default();
+            let comp_value = agent_doc::model_tier::extract_model_component(&content);
+            (fm_tier, comp_value, env_map, fm_model, prompt_presets)
+        }
+        Err(_) => (None, None, Default::default(), None, Default::default()),
+    };
     let component_tier = component_tier_value.as_deref().and_then(|v| {
         agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
+
+    let prompt_presets_requested = diff_result
+        .as_ref()
+        .map(|d| diff::detect_prompt_preset_requests(d))
+        .unwrap_or_default();
+    let missing_prompt_presets = prompt_presets_requested
+        .iter()
+        .filter(|name| !frontmatter_prompt_presets.contains_key(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_prompt_presets.is_empty() {
+        anyhow::bail!(
+            "document references missing prompt preset(s): {}",
+            missing_prompt_presets.join(", ")
+        );
+    }
 
     // Diff heuristic — counts user-added lines (excluding +++ headers).
     let lines_added = diff_result
@@ -1010,6 +1038,7 @@ pub fn run(file: &Path) -> Result<()> {
         slash_commands,
         builtin_commands,
         orchestration_request,
+        prompt_presets_requested,
         effective_tier: Some(effective_tier_value.to_string()),
         required_tier: required_tier_value.map(|t| t.to_string()),
         suggested_tier: Some(suggested.to_string()),
@@ -1843,6 +1872,34 @@ mod tests {
         assert!(
             parsed.get("orchestration_request").is_none(),
             "orchestration_request should be omitted when absent"
+        );
+    }
+
+    #[test]
+    fn preflight_output_includes_prompt_presets_requested() {
+        let output = PreflightOutput {
+            no_changes: false,
+            prompt_presets_requested: vec!["#1".to_string(), "release-check".to_string()],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["prompt_presets_requested"][0], "#1");
+        assert_eq!(parsed["prompt_presets_requested"][1], "release-check");
+    }
+
+    #[test]
+    fn preflight_output_omits_prompt_presets_requested_when_empty() {
+        let output = PreflightOutput {
+            no_changes: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("prompt_presets_requested").is_none(),
+            "prompt_presets_requested should be omitted when empty"
         );
     }
 

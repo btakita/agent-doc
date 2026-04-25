@@ -29,6 +29,8 @@
 //!   → format=Template; all keep write=Crdt.
 //! - `StreamConfig` carries optional CRDT stream parameters: write-back interval, ANSI stripping,
 //!   target component, and chain-of-thought routing.
+//! - `prompt_presets` stores reusable named prompt snippets for orchestrated tasks and round-trips
+//!   exact preset names/values, including symbolic keys such as `#1`.
 //! - Field renames and aliases ensure backward compatibility:
 //!   `session` / `agent_doc_session` → `session`;
 //!   `mode` / `response_mode` / `agent_doc_mode` → `mode`.
@@ -47,6 +49,8 @@
 //!   all other helpers are strictly additive.
 //! - `resolve_mode` is pure and total: it always returns a valid `ResolvedMode` regardless of
 //!   which combination of deprecated and current fields are populated.
+//! - `prompt_presets` is deterministic: parse/write preserves preset names and bodies exactly,
+//!   including multiline values and symbolic names like `#1`.
 //! - Serialised YAML always uses the canonical field names (`agent_doc_session`,
 //!   `agent_doc_mode`, `agent_doc_format`, `agent_doc_write`); legacy aliases are read-only.
 //!
@@ -73,6 +77,8 @@
 //! - set_format_and_write_clears_deprecated_mode: deprecated `mode` cleared after migration
 //! - merge_fields_adds_new_field: new key added without disturbing existing fields
 //! - merge_fields_ignores_unknown: unknown key logged to stderr, not stored
+//! - parse_prompt_presets_roundtrip: preset map with multiline values → parse/write preserves keys
+//!   and bodies exactly
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -351,6 +357,17 @@ pub struct Frontmatter {
     /// run.rs, stream.rs, parallel.rs, supervisor/env.rs).
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub env: indexmap::IndexMap<String, Option<String>>,
+    /// Reusable prompt snippets that can be expanded into orchestrated task prompts.
+    ///
+    /// Example:
+    /// ```yaml
+    /// prompt_presets:
+    ///   "#1": |
+    ///     Today is 2026-04-25.
+    ///     Keep the work tree clean.
+    /// ```
+    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
+    pub prompt_presets: indexmap::IndexMap<String, String>,
     /// Whether the supervisor starts from the parent process env before
     /// applying the `env:` overlay. Default `true` — the supervised claude
     /// child inherits PATH/HOME/TERM/TMUX/... from the shell that launched
@@ -524,6 +541,13 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                         serde_yaml::from_str::<PendingCaptureGuardMode>(&format!("\"{}\"", s))
                 {
                     fm.pending_done_guard = Some(mode);
+                }
+            }
+            "prompt_presets" => {
+                if let Ok(presets) =
+                    serde_yaml::from_value::<indexmap::IndexMap<String, String>>(value.clone())
+                {
+                    fm.prompt_presets = presets;
                 }
             }
             "agent_args" => fm.agent_args = val_str(),
@@ -750,6 +774,7 @@ mod tests {
             pending_done_guard: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
+            prompt_presets: indexmap::IndexMap::new(),
             agent_doc_env_inherit: None,
             cwd: None,
         };
@@ -947,6 +972,26 @@ mod tests {
             parsed.pending_done_guard,
             Some(PendingCaptureGuardMode::Strict)
         );
+    }
+
+    #[test]
+    fn parse_prompt_presets_roundtrip() {
+        let content = "---\nprompt_presets:\n  \"#1\": |\n    Today is 2026-04-25.\n    Keep the work tree clean.\n  release-check: |\n    Run cargo test.\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(body, "Body\n");
+        assert_eq!(
+            fm.prompt_presets.get("#1").map(String::as_str),
+            Some("Today is 2026-04-25.\nKeep the work tree clean.\n")
+        );
+        assert_eq!(
+            fm.prompt_presets.get("release-check").map(String::as_str),
+            Some("Run cargo test.")
+        );
+
+        let written = write(&fm, body).unwrap();
+        let (parsed, body2) = parse(&written).unwrap();
+        assert_eq!(body2, "Body\n");
+        assert_eq!(parsed.prompt_presets, fm.prompt_presets);
     }
 
     // --- resolve_mode tests ---

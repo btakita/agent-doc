@@ -166,12 +166,36 @@ Local install check:
 - `agent-doc skill install --harness claude`
 
 The regenerated `.codex/AGENTS.md`, `.codex/runbooks/command-synonyms.md`, `.claude/skills/agent-doc/SKILL.md`, and `.claude/skills/agent-doc/runbooks/command-synonyms.md` all contain the new orchestrate synonym guidance.
-<!-- agent:boundary:19e38574 -->
+
+❯ In src/session-share, `agent-doc tasks/docs.md` with "Synchronous orchestra:" uses orchestrate. The `- do #ntoc. Add to today's news. commit + push` would clearly benefit from a fan-out. Can we either have compound instructions or have agent-doc help steer the running session to also orchestrate?
+### Re: compound orchestration steering — gpt-5
+
+Yes, but I would split it into two layers.
+
+Right now the shipped surface only does outer-batch orchestration:
+- `runbooks/command-synonyms.md` maps phrases like `synchronous`, `fan out`, and `after X do Y` to `agent-doc orchestrate <FILE> --mode ...`.
+- `specs/07-commands.md` and `src/orchestrate.rs` then resolve explicit task lists from `--task`, `--from-file`, or `--from-exchange`.
+
+That means `do #ntoc. Add to today's news. commit + push` is still just one opaque task string once execution begins. There is no second-pass rule that says “after the main repo task, orchestrate a news update too”, and I would not make that an implicit free-form parser in the binary. It is too ambiguous about scope, target document, ordering, and where the commit boundary lives.
+
+What I'd do instead:
+1. Short term: teach the skill/runbook to steer compound prose into explicit orchestration before execution. In this example, `Synchronous orchestra:` should stay `--mode sequential`, but the task line should be normalized into primary work plus an explicit follow-up task for the news session.
+2. Long term: if you want binary-owned composition, use explicit metadata rather than sentence heuristics. Example:
+```md
+- [id=ntoc] do #ntoc
+- [id=news-ntoc after=ntoc] do "Add #ntoc result to today's news"
+- [id=push-ntoc after=ntoc,news-ntoc] do "commit + push"
+```
+That keeps recovery and the `finalize -> session-check` boundary deterministic.
+
+So yes: `agent-doc` should help steer this, but the first fix should be “normalize compound intent into explicit orchestration” rather than “silently infer nested fan-out from arbitrary prose.” I added a recommended pending item for that steering layer.
+<!-- agent:boundary:fc52c218 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#cmps] [recommended] Add secondary orchestration steering for compound task lines (for example, "do #ntoc. Add to todays news. commit + push") by normalizing follow-up clauses into explicit orchestrate/notify steps before execution; defer binary-owned prose grammar until an explicit metadata syntax exists.
 - [ ] [#plnk] When creating a pending task with a dedicated plan file, always include the plan file path in the pending item text. Create the plan file first, then add the pending item referencing it. Update skill/runbook to enforce this ordering.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

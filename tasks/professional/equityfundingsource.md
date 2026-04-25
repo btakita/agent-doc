@@ -352,7 +352,40 @@ Transcript transcribed, diarized, and saved:
 - AI-generated hero images
 
 **Robert's availability:** LA until Apr 29 → Vegas Apr 30–May 3 → back Texas May 4
-<!-- agent:boundary:8074d4f6 -->
+
+❯ There are large blocks of transcripts that are not properly diarized. Corky should have managed this. Why did corky fail to diarize the conversation in these large blocks?
+### Re: diarization failures in Robert Waldman call — opus-4-6
+
+Four blocks in the transcript are broken — entire multi-minute stretches attributed to a single speaker when clearly both people are talking:
+
+| Line | Speaker | Duration | Timestamp |
+|------|---------|----------|-----------|
+| 9 | Brian | **10 min** | 00:00–10:03 |
+| 306 | Robert | **30 min** | 19:48–50:15 |
+| 507 | Brian | **10 min** | 59:48–1:09:58 |
+| 510 | Robert | **10 min** | 1:09:58–1:19:59 |
+
+The 30-minute Robert block is the worst — it clearly contains Brian's responses ("Okay", "Mm-hmm", "Oh, nice", "Yeah") throughout, but they all got merged into Robert's attribution.
+
+#### Why corky failed
+
+Corky uses **pyannote-rs** (ONNX speaker segmentation + embedding models) for diarization. The pipeline: segment audio → extract speaker embeddings → match whisper transcript segments to speakers. Three things went wrong here:
+
+1. **Mono phone audio is the hardest case.** This is a phone recording (m4a from a cell call). Both speakers share the same audio channel. Stereo recordings (one speaker per channel) are trivially diarizable — mono phone calls are the worst case for any diarizer because the acoustic separation between speakers is minimal, especially when one person is just saying "okay" or "mm-hmm."
+
+2. **Adaptive chunking didn't rescue it.** Corky has a chunk cascade (full audio → 600s → 120s → 30s) that triggers when quality is poor. The quality gate checks if any single speaker exceeds 60% of the chunk (`MAX_SPAN_RATIO = 0.6`). In a two-person call, one speaker legitimately dominating 55-60% is normal — so the gate may not have triggered even though the diarization was clearly wrong. The quality check also fails if >30% of segments are "unknown", but if pyannote-rs confidently assigned the wrong speaker, it wouldn't flag as unknown.
+
+3. **Confidence overwrite.** After diarization, corky overwrites the speaker embedding confidence with whisper's token-level transcription confidence. This means even when pyannote-rs had low confidence in a speaker assignment, the downstream quality metrics don't see it — they see whisper's high confidence in the *text*, not the *speaker*.
+
+#### What would fix it
+
+- **Re-transcribe with `--no-adaptive-chunk`** to force smaller chunks (may help, but won't fix the core mono separation problem)
+- **Lower `MAX_SPAN_RATIO`** from 0.6 to something like 0.3 — would force chunk cascade earlier
+- **Don't overwrite diarization confidence with whisper confidence** — this is a bug; speaker assignment confidence and transcription confidence are independent signals
+- **Manual correction** is the most reliable fix for this specific transcript — the content is there, just misattributed
+
+Want me to manually re-diarize the transcript using the content cues (questions vs answers, "mm-hmm" interjections)?
+<!-- agent:boundary:f8fc17cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

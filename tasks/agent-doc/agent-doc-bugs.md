@@ -53,7 +53,7 @@ Verification:
 - `cargo install --path .`
 
 Committed and pushed in `src/agent-doc` as `ed38f01` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:0d6c0951 -->
+<!-- agent:boundary:82139425 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -65,7 +65,6 @@ Plan next steps with the "binary-owned prose grammar". Such as how subagents sho
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#fppr] Add frontmatter prompt presets for orchestrated tasks; support exchange-side `preset #1` style references that expand into the prepared task prompt with a visible `(preset #1)` label. Plan: tasks/agent-doc/plan-frontmatter-prompt-presets.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

@@ -175,6 +175,36 @@ User prompt.
     }
 
     @Test
+    fun `extractBooleanField parses preserve_head from IPC JSON`() {
+        val json = """{"type":"reposition","file":"/tmp/doc.md","boundary_id":"abc12345","preserve_head":true}"""
+        assertTrue(extractBooleanField(json, "preserve_head"))
+
+        val jsonFalse = """{"type":"reposition","file":"/tmp/doc.md","boundary_id":"abc12345","preserve_head":false}"""
+        assertFalse(extractBooleanField(jsonFalse, "preserve_head"))
+
+        val jsonMissing = """{"type":"reposition","file":"/tmp/doc.md","boundary_id":"abc12345"}"""
+        assertFalse(extractBooleanField(jsonMissing, "preserve_head"))
+    }
+
+    @Test
+    fun `clean reposition strips HEAD markers`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-6 (HEAD)
+Response content.
+<!-- agent:boundary:aaa11111 -->
+User prompt.
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        assertFalse(result!!.contains("(HEAD)"))
+        assertTrue(result.contains("### Re: topic — opus-4-6\n"))
+        assertTrue(result.contains("User prompt.\n<!-- agent:boundary:"))
+    }
+
+    @Test
     fun `annotates newly patched response headings against baseline`() {
         val baseline = """
 <!-- agent:exchange patch=append -->

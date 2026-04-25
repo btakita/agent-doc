@@ -99,13 +99,29 @@ interface AgentDocLib : Library {
     /**
      * Reposition boundary marker to end of exchange component.
      * Removes all stale boundaries and inserts a single fresh 8-char one.
+     * Strips transient (HEAD) markers.
      */
     fun agent_doc_reposition_boundary_to_end(doc: String): FfiPatchResult.ByValue
 
     /**
      * Reposition boundary marker to end of exchange component using an explicit ID.
+     * Strips transient (HEAD) markers.
      */
     fun agent_doc_reposition_boundary_to_end_with_id(
+        doc: String,
+        boundary_id: String,
+    ): FfiPatchResult.ByValue
+
+    /**
+     * Reposition boundary marker to end of exchange component, preserving (HEAD) markers.
+     */
+    fun agent_doc_reposition_boundary_to_end_preserve_head(doc: String): FfiPatchResult.ByValue
+
+    /**
+     * Reposition boundary marker to end of exchange component using an explicit ID,
+     * preserving (HEAD) markers.
+     */
+    fun agent_doc_reposition_boundary_to_end_preserve_head_with_id(
         doc: String,
         boundary_id: String,
     ): FfiPatchResult.ByValue
@@ -453,6 +469,33 @@ object NativePatching {
             if (result.error != null) {
                 val error = result.error!!.getString(0)
                 LOG.warn("[native] reposition_boundary error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            val text = result.text!!.getString(0)
+            return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Reposition boundary marker to end of exchange component via FFI,
+     * preserving transient (HEAD) markers on Re: headings.
+     * Returns the repositioned document, or null if FFI is unavailable/errors.
+     */
+    fun repositionBoundaryToEndPreserveHead(doc: String, boundaryId: String? = null): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = if (boundaryId.isNullOrBlank()) {
+            lib.agent_doc_reposition_boundary_to_end_preserve_head(doc)
+        } else {
+            lib.agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, boundaryId)
+        }
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] reposition_boundary_preserve_head error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }

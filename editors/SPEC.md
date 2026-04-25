@@ -61,15 +61,25 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **Boundary ID format:** 8-character hex string (e.g., `a0cfeb34`). Plugins generating boundary markers must use 8-char hex IDs, not full UUIDs.
 
-**Reposition behavior:** When the plugin receives a `reposition_boundary: true` IPC signal:
+**Reposition behavior:** When the plugin receives a `reposition` IPC signal (or `reposition_boundary: true` in a patch payload):
 1. Remove ALL `<!-- agent:boundary:... -->` lines from the exchange component (not just the last one)
 2. Insert a single boundary at the end of the exchange content.
    If the IPC payload includes `reposition_boundary_id` / `boundary_id`, reuse that exact ID.
    Otherwise generate a fresh 8-char hex ID.
-3. Do not introduce any transient ` (HEAD)` heading annotations during this cleanup
+3. Check the `preserve_head` field in the IPC JSON (default `false`):
+   - **`preserve_head: false`** (clean variant) — strip all transient ` (HEAD)` heading annotations during cleanup. Use `agent_doc_reposition_boundary_to_end()` / `_with_id()` FFI.
+   - **`preserve_head: true`** — keep ` (HEAD)` annotations on `### Re:` headings so the user sees which responses are new. Use `agent_doc_reposition_boundary_to_end_preserve_head()` / `_with_id()` FFI.
 4. Skip boundary markers inside fenced code blocks
 
-**Recommended implementation:** Call `agent_doc_reposition_boundary_to_end()` via FFI/JNA on the shared library (`libagent_doc.so` / `libagent_doc.dylib`). This ensures identical cleanup logic across all platforms and prevents divergence between plugin and binary behavior.
+**FFI variant families:**
+| Variant | FFI function | Behavior |
+|---------|-------------|----------|
+| Clean | `agent_doc_reposition_boundary_to_end()` | Strips `(HEAD)`, collapses boundaries |
+| Clean + ID | `agent_doc_reposition_boundary_to_end_with_id(doc, id)` | Same + reuses explicit boundary ID |
+| Preserve | `agent_doc_reposition_boundary_to_end_preserve_head()` | Keeps `(HEAD)`, collapses boundaries |
+| Preserve + ID | `agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, id)` | Same + reuses explicit boundary ID |
+
+**Recommended implementation:** Call the appropriate FFI variant via JNA on the shared library (`libagent_doc.so` / `libagent_doc.dylib`). This ensures identical cleanup logic across all platforms and prevents divergence between plugin and binary behavior.
 
 **When to reposition:**
 - After applying an IPC patch (when `reposition_boundary` flag is set)

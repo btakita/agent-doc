@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -100,6 +101,19 @@ fn read_cycle_phase(root: &Path) -> String {
     value["phase"].as_str().unwrap().to_string()
 }
 
+fn seed_snapshot(root: &Path, doc: &Path) {
+    let canonical = doc.canonicalize().unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hex::encode(hasher.finalize());
+    let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
+    fs::write(snapshot, fs::read_to_string(doc).unwrap()).unwrap();
+}
+
+fn template_doc_with_model() -> String {
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 #[test]
 fn run_template_mode_writes_inside_exchange_and_commits() {
     let tmp = TempDir::new().unwrap();
@@ -171,6 +185,56 @@ fn bare_path_alias_uses_same_template_safe_path() {
         response_pos < exchange_end,
         "bare path should stay inside exchange"
     );
+}
+
+#[test]
+fn orchestrate_reuses_open_preflight_cycle_for_first_step() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc_with_model()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let edited = fs::read_to_string(&doc).unwrap().replace(
+        "❯ Please reply\n",
+        "❯ Please reply\n\nSynchronous orchestra:\n",
+    );
+    fs::write(&doc, edited).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(read_cycle_phase(tmp.path()), "preflight_started");
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: orchestrate step — gpt-5\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args([
+            "orchestrate",
+            doc.to_str().unwrap(),
+            "--mode",
+            "sequential",
+            "--task",
+            "do #opcc. update spec + tests. build + install for local testing. commit + push",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains(
+        "❯ do #opcc. update spec + tests. build + install for local testing. commit + push"
+    ));
+    assert!(content.contains("### Re: orchestrate step — gpt-5"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
 }
 
 #[test]

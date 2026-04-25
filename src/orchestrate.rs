@@ -450,6 +450,7 @@ fn run_ordered_tasks_internal(
             global_config,
             lifecycle,
             agent_runner,
+            idx == 0,
         )?;
     }
     Ok(())
@@ -463,10 +464,17 @@ fn run_ordered_task_step(
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
+    allow_open_preflight_reuse: bool,
 ) -> Result<()> {
+    let reuse_open_preflight = allow_open_preflight_reuse && can_reuse_open_preflight_cycle(file)?;
     inject_prompt(file, task)?;
 
-    let preflight = lifecycle.preflight(file)?;
+    let preflight = if reuse_open_preflight {
+        eprintln!("[orchestrate] reusing existing preflight cycle for step 1");
+        build_reused_preflight_output(file)?
+    } else {
+        lifecycle.preflight(file)?
+    };
     if preflight.no_changes {
         anyhow::bail!("orchestration step did not produce a prompt-bearing diff after injection");
     }
@@ -507,6 +515,46 @@ fn run_ordered_task_step(
     )?;
     lifecycle.session_check(file)?;
     Ok(())
+}
+
+fn can_reuse_open_preflight_cycle(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
+        return Ok(false);
+    }
+
+    let current = fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for cycle reuse", file.display()))?;
+    let current_hash = crate::ops_log::content_hash(&current);
+    Ok(state.file_hash.as_deref() == Some(current_hash.as_str()))
+}
+
+fn build_reused_preflight_output(file: &Path) -> Result<PreflightOutput> {
+    let diff = diff::compute(file)?;
+    let no_changes = diff.is_none();
+    let baseline_file = baseline_file_path_for(file).filter(|path| Path::new(path).exists());
+    Ok(PreflightOutput {
+        diff,
+        no_changes,
+        baseline_file,
+        ..PreflightOutput::default()
+    })
+}
+
+fn baseline_file_path_for(file: &Path) -> Option<String> {
+    let canonical = file.canonicalize().ok()?;
+    let hash = crate::snapshot::doc_hash(&canonical).ok()?;
+    let baseline_dir = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
+        .join(".agent-doc/baselines");
+    Some(
+        baseline_dir
+            .join(format!("{}.md", hash))
+            .to_string_lossy()
+            .to_string(),
+    )
 }
 
 fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<String>)> {
@@ -944,12 +992,14 @@ mod tests {
 
     struct FakeLifecycleOps {
         baseline_file: String,
+        preflight_calls: RefCell<usize>,
         finalize_calls: RefCell<Vec<String>>,
         session_checks: RefCell<usize>,
     }
 
     impl LifecycleOps for FakeLifecycleOps {
         fn preflight(&self, file: &Path) -> Result<PreflightOutput> {
+            *self.preflight_calls.borrow_mut() += 1;
             let doc = fs::read_to_string(file)?;
             Ok(PreflightOutput {
                 diff: Some(format!(
@@ -1101,13 +1151,14 @@ mod tests {
 
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
             response:
-                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
                     .to_string(),
         };
 
@@ -1130,6 +1181,7 @@ mod tests {
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert!(final_doc.contains("❯ do #gkke"));
         assert!(final_doc.contains("### Re: task — gpt-5"));
+        assert_eq!(*lifecycle.preflight_calls.borrow(), 1);
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
         assert_eq!(*lifecycle.session_checks.borrow(), 1);
         assert!(
@@ -1140,6 +1192,63 @@ mod tests {
             agent.prompts.borrow()[0].contains("❯ do #gkke"),
             "fresh agent prompt should include the injected task"
         );
+    }
+
+    #[test]
+    fn sequential_orchestration_reuses_matching_open_preflight_cycle_for_first_step() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
+
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+        crate::snapshot::save(&doc, &template_doc()).unwrap();
+
+        let baseline = baseline_file_path_for(&doc).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(&template_doc()), Some(&template_doc()))
+            .unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.clone(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+        };
+
+        let tasks = vec![ExecutionTask {
+            label: "do #opcc".to_string(),
+            prompt: "do #opcc".to_string(),
+        }];
+
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            None,
+            Some("gpt-5"),
+            &Config::default(),
+            &lifecycle,
+            &agent,
+        )
+        .unwrap();
+
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            *lifecycle.preflight_calls.borrow(),
+            0,
+            "first step should reuse the already-open preflight cycle"
+        );
+        assert!(final_doc.contains("❯ do #opcc"));
+        assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
+        assert_eq!(*lifecycle.session_checks.borrow(), 1);
     }
 
     #[test]
@@ -1215,6 +1324,7 @@ mod tests {
 
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1278,6 +1388,7 @@ mod tests {
 
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1329,6 +1440,7 @@ mod tests {
 
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };

@@ -652,18 +652,20 @@ Shared task-source resolution:
 Sequential orchestration runs one full fresh-agent lifecycle per task:
 
 1. Inject `❯ <task>` into `agent:exchange`, immediately before the current boundary marker when one exists.
-2. Run `agent-doc preflight <FILE>` and use its `baseline_file` for response persistence.
-3. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
-4. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
-5. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state.
-6. Persist the response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
-7. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
+2. For task 1, if the caller already has a matching open `preflight_started` cycle for this document (the normal skill-routing case after `/agent-doc` ran preflight), reuse that cycle instead of calling `preflight` again. Recompute the current diff locally after prompt injection and reuse the existing baseline file for response persistence.
+3. Otherwise run `agent-doc preflight <FILE>` and use its `baseline_file` for response persistence.
+4. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
+5. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
+6. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state.
+7. Persist the response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
+8. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
 
 Notes:
 
 - Sequential orchestration requires the normal git-backed finalize path; `--no-git` is rejected.
 - The imperative-response contract still applies because persistence flows through `finalize`.
 - The injected prompt becomes part of the document/system-of-record before the agent runs.
+- Reuse is limited to the first task and only when the persisted open-cycle hash still matches the current document before injection; later tasks always open fresh cycles through normal `preflight`.
 
 ### `--mode parallel`
 

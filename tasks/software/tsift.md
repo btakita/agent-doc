@@ -1366,13 +1366,13 @@ do #cdet
 update spec + tests. commit + push
 do #gpth
 The response is committed. Now fix the pending using `--pending-done`.
-<!-- agent:boundary:119e2745 -->
+<!-- agent:boundary:c4bffeea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#cdet] Louvain community detection over call graph — cluster related modules into architectural subsystems (~200 lines, no new deps)
+- [x] [#cdet] Louvain community detection over call graph — cluster related modules into architectural subsystems (~200 lines, no new deps)
 - [x] [#gpth] tsift path <A> <B> + tsift explain <symbol> — graph query subcommands extending existing tsift graph
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity

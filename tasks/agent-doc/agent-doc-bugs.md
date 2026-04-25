@@ -377,7 +377,7 @@ All 1114 tests pass (pre-existing failures in skill/route tests unchanged).
 2. Subprocess error: `--print` + `--output-format=stream-json` requires `--verbose`
 
 These are separate from the #orch1/#orch2 fixes already shipped — the stale-task parsing and the `--print`+stream-json incompatibility are new issues.
-<!-- agent:boundary:848fdd07 -->
+<!-- agent:boundary:02feb458 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -386,10 +386,6 @@ These are separate from the #orch1/#orch2 fixes already shipped — the stale-ta
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#hfix1] git.rs reposition_boundary_in_snapshot(): keep _clean for snapshot, switch working tree to new reposition_boundary_to_end_with_head() that preserves (HEAD) annotations
-- [x] [#hfix2] ffi.rs: add agent_doc_reposition_boundary_to_end_with_head_with_id() for IPC path so editor plugin preserves (HEAD) on post-commit reposition
-- [x] [#hfix3] Integration test: full write → commit → assert working tree retains (HEAD) on new headings while committed blob does not
-- [x] [#hfix4] Update CLAUDE.md convention: boundary markers collapse post-commit; (HEAD) markers persist in working tree only
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

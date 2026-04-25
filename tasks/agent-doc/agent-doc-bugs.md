@@ -639,7 +639,36 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I left the pre-existing unrelated local edits in `src/agent-doc` (`VERSIONS.md`, `src/skill.rs`, and other unstaged changes in `specs/07-commands.md`) out of this commit.
-<!-- agent:boundary:3f2ca49e -->
+
+❯ The response patchback does not have the usability uncommitted ` (HEAD)` suffix. Please address the cause of this regression. update spec + tests. build + install for local testing. commit + push
+### Re: transient `(HEAD)` patchback suffix — gpt-5
+
+Fixed in `src/agent-doc`.
+
+Root cause:
+- the binary/template patch path inserted response content and boundaries, but it did not re-annotate newly added `### Re:` headings against the pre-patch exchange baseline, so fresh response headings could land without the transient ` (HEAD)` usability marker
+- the editor patchback paths had the same gap: VS Code never re-applied the marker after IPC patch assembly, and JetBrains could additionally strip it again during requested boundary reposition
+
+What changed:
+- `src/template.rs` now re-annotates exchange `### Re:` headings against the baseline only when the exchange actually changed that cycle
+- `src/ffi.rs` applies the same baseline-aware annotation for boundary-aware FFI patch insertion
+- VS Code and JetBrains patchback helpers now restore the transient marker against the original exchange baseline before saving
+- updated `SPEC.md` and `editors/SPEC.md`, plus added Rust / VS Code / JetBrains regressions for this exact shape
+
+Verification:
+- `make check`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc lib-install`
+
+Commit / push:
+- committed in `src/agent-doc` as `401519a`
+- pushed to `origin/20260422/codex-agent-backend`
+
+I left the pre-existing unrelated local edits in `src/agent-doc` (`VERSIONS.md`, `src/skill.rs`, and `specs/07-commands.md`) out of this commit.
+<!-- agent:boundary:e99c46f7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -647,14 +676,15 @@ Please plan a command for agent-doc to orchestrate sequential tasks. It could be
 
 See src/session-share/tasks/claudescore-3.md
 
+Here is the prompt I used:
 ```
-❯ Please run the following prompt chain sequentially in a claude-opus-4-6 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
-❯ - do #bt0q. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
-❯ - do #keab. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
-❯ - do #1vqr. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
-❯ - do #t107. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
-❯ - do #09wc. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
-❯ - do #18nq. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+Please run the following prompt chain sequentially in a claude-opus-4-6 subagent. I don't want to accumulate context and I want to avoid compaction so please follow the instructions. Inject each prompt into the document. Follow the full agent-doc lifecycle for each chained task. e.g. Write the patchback into this document after each task completes.
+- do #bt0q. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+- do #keab. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+- do #1vqr. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+- do #t107. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+- do #09wc. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
+- do #18nq. Add tests. Run benchmarks. Add to standing today's news. Use Line Graphs. Include runs from previous 2 days + today. commit + push
 
 ```
 -->

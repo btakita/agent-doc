@@ -290,7 +290,30 @@ The important detail is step 3: you cannot reuse `stream.rs` unchanged by flushi
 So the missing behavior is in the binary, not in `tasks/docs.md`. That document only showed the summary because the current orchestrate lifecycle has no per-step streaming write path.
 
 If you want the smallest MVP, I would ship this first as `agent-doc orchestrate --stream-steps` for sequential mode and make it Claude-only initially, since Claude already has `stream-json` support. Once that is stable, make it the default sequential behavior and add Codex parity later.
-<!-- agent:boundary:645ef5a1 -->
+
+❯ do #4qja. update spec + tests. build + install for local testing. commit + push
+### Re: #4qja streaming orchestrate patchback — gpt-5
+
+Implemented the sequential orchestration streaming path for CRDT docs and updated the spec/tests around it.
+
+What changed:
+- `src/orchestrate.rs`: streams step responses into `exchange` for built-in streaming backends, keeps `finalize` as the authoritative closeout, and trims the finalize payload to the unseen suffix so streamed headings are not duplicated.
+- `src/agent/mod.rs`: only resolves streaming backends for built-in `claude`/`codex`; skips `junie` and custom non-streaming agents.
+- `tests/run_integration.rs`: adds streaming orchestration coverage and separates streaming vs non-streaming mock config helpers.
+- `specs/07-commands.md` and `README.md`: document sequential CRDT step streaming.
+
+Verification:
+- `cargo fmt --manifest-path Cargo.toml`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commit:
+- `6f4e3cf` — `feat: stream orchestrate step patchback`
+
+Push:
+- `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:d337bda9 -->
 <!-- /agent:exchange -->
 
 <!--

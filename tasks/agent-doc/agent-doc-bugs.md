@@ -128,17 +128,43 @@ Created `tasks/agent-doc/plan-post-preflight-dispatch-phase.md` for `#1g42` and 
 The plan turns the earlier recommendation into a concrete design artifact: it defines the problem, keeps `preflight` deterministic, compares a skill-side planning record against a future binary-owned `agent-doc plan` command, and lists the likely runbook/skill surfaces to change.
 
 No code/test/build work was needed for this cycle because the requested change was the dedicated plan document itself.
-<!-- agent:boundary:b957e450 -->
+
+❯ synchronous orcestra
+❯ - do #1g42 Option A. update spec + tests. build + install for local testing. commit + push
+❯ - do #1g42 Option B. update spec + tests. build + install for local testing. commit + push
+### Re: #1g42 Option A + Option B — gpt-5
+
+Implemented `#1g42` in `src/agent-doc` and pushed `7dcae48` on `20260422/codex-agent-backend` (`feat: add post-preflight planning command`).
+
+I landed Option A and Option B together as one atomic change because the skill contract and the binary command need to ship in sync.
+
+What changed:
+- added `agent-doc plan <FILE>` in `src/plan.rs` and wired it through `src/main.rs`; it emits a structured planning record with `prompt_targets`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers`
+- updated the bundled skill, runbooks, and `specs/07-commands.md` so post-preflight dispatch now runs through that planning record instead of raw diff/prose improvisation
+- kept orchestration routing binary-owned: the planner consumes the orchestration signal and emits an explicit `agent-doc orchestrate ... --from-exchange` handoff when needed
+- added planner tests plus skill-install/runbook assertions
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness codex --reload restart`
+- `agent-doc skill install --harness claude --reload compact`
+
+I marked `#1g42` done for this cycle. I left the pre-existing unstaged `src/agent-doc/Cargo.lock` change out of the commit.
+<!-- agent:boundary:bba7c50c -->
 <!-- /agent:exchange -->
 
 <!--
+When I call an orcestrate, can I define a prompt that will be applied to every orcestrated task in one place?
+
 Plan next steps with the "binary-owned prose grammar". Such as how subagents should orchestrate their subtasks. However, src/claudescore tasks/docs.md did finish #ntoc in <10m, so Claude Code figured out how to execute the tasks quickly. The user may instruct suboptimal instructions. Perhaps we could have a plan mode as well to discuss how to orchestrate? Or maybe we should just rely on the agent harness to orchestrate?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent. Plan: tasks/agent-doc/plan-post-preflight-dispatch-phase.md
+- [x] [#1g42] [recommended] Add a separate post-preflight model-driven planning/dispatch phase that consumes structured preflight output instead of making preflight itself model-dependent. Plan: tasks/agent-doc/plan-post-preflight-dispatch-phase.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

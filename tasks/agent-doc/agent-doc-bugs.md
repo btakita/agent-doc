@@ -168,7 +168,7 @@ Implemented `agent-doc orchestrate --plan` in `src/agent-doc` at commit `5547909
 **Spec:** `specs/07-commands.md` updated with `--dry-run` / `--plan` section and example output.
 
 **Verification:** `cargo test orchestrate` (25 passed), `cargo build --release`, `cargo install --path .`.
-<!-- agent:boundary:94c56933 -->
+<!-- agent:boundary:98b31e7b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -177,7 +177,6 @@ Implemented `agent-doc orchestrate --plan` in `src/agent-doc` at commit `5547909
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#0z3v] recommended: add orchestrate --plan (dry-run) to preview expanded task prompts before spawning — closes verification gap without adding a plan-mode concept
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 

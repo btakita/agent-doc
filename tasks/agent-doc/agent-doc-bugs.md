@@ -1036,7 +1036,7 @@ All three tasks are already implemented, tested, and pushed on `20260422/codex-a
 - Gated pending user manual verification: install from disk and confirm `(HEAD)` appears after patchback with IPC listener active
 
 **Stale-task parsing regression:** The #orch3 fix (`45bce9b`, `❯ ` prefix stripping in `parse_list_item`) didn't prevent this recurrence. The orchestrate parser is still falling through to older exchange blocks. Root cause is likely that `--from-exchange` scans the full exchange for `- do` / `- ❯ - do` patterns and `.last()` picks the wrong block when multiple orchestra directives exist in the compacted+appended exchange history. This needs a separate fix — the parser should scope to the latest user-authored (non-`❯`-prefixed) orchestra block, not scan the entire exchange.
-<!-- agent:boundary:7d064b83 -->
+<!-- agent:boundary:4effbba1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -1045,8 +1045,6 @@ All three tasks are already implemented, tested, and pushed on `20260422/codex-a
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#hfix6] VS Code extension: read preserve_head from IPC reposition message, call preserve_head FFI variant
-- [x] [#hfix7] Editor SPEC.md: update reposition behavior section to document preserve_head field and the two FFI variant families (clean vs preserve)
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

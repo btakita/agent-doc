@@ -38,7 +38,43 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path .`
-<!-- agent:boundary:9a85bcce -->
+
+❯ In src/session-share, `agent-doc tasks/claudescore-3.md` has as "Today is 2026-04-25. Synchronous orcestra." prompt. However, agent-doc orcestrate was not called. Why?
+
+❯ I asked `/btw` in the running claudescore-3.md session:
+```
+  /btw Did the "Today is 2026-04-25. Synchronous orcestra." task run /agent-doc orcestrate?
+  /btw How should agent-doc fix this issue?
+
+    file instead of using agent-doc write.
+
+    The pattern matches how other invariants migrated from "agent should do X" to "binary enforces X" — preflight
+    detects it, emits a structured field, and the skill instruction makes it a blocking requirement rather than a
+    suggestion.
+```
+### Re: orchestration miss — gpt-5
+
+Why `agent-doc orchestrate` did not run:
+
+- The prompt in `src/session-share/tasks/claudescore-3.md` was plain natural-language text plus a list, not a slash command.
+- Preflight only emitted `slash_commands` / `builtin_commands` and prompt-bearing prose. It had no binary-owned field saying "this diff is a batch orchestration request."
+- The installed skill already had advisory guidance to map phrases like `synchronous` / `chain` / `orchestrate` to `agent-doc orchestrate --mode sequential`, but that translation still depended on the model following prose instructions. Claude missed it.
+
+I fixed the enforcement gap in `src/agent-doc`:
+
+- `src/diff.rs` now detects natural-language orchestration requests when the user adds a batch-style preamble plus a multi-item task list and resolves `sequential` / `parallel` / `dag`
+- `src/preflight.rs` now emits `orchestration_request` in the JSON output
+- `SKILL.md` now treats `orchestration_request` as a blocking dispatch: run `agent-doc orchestrate <FILE> --mode <mode> --from-exchange` before any manual response, and stop if that batch completed the turn
+- added regression coverage for the exact `Today is 2026-04-25. Synchronous orcestra.` shape plus preflight/skill-install assertions
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc skill install --harness claude --reload compact`
+
+The short answer is: it missed because orchestration intent lived only in skill prose. The fix is to move detection into preflight so the agent gets a structured, non-optional dispatch signal.
+<!-- agent:boundary:c07af115 -->
 <!-- /agent:exchange -->
 
 <!--

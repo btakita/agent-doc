@@ -268,13 +268,12 @@ Fixed the root cause: `run_ordered_task_step` parsed frontmatter but never resol
 **Verification:** `cargo test`, `cargo build --release`, `cargo install --path .`
 
 Committed as `b700caf` on `20260422/codex-agent-backend` and pushed.
-<!-- agent:boundary:2a0c149d -->
+<!-- agent:boundary:8676d518 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#orch1] Frontmatter args (claude_args/codex_args) not forwarded to orchestrate subprocesses — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
 - [ ] [#orch2] Stderr silently discarded in orchestrate subprocess streaming — plan: tasks/agent-doc/plan-orchestrate-subprocess-fixes.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

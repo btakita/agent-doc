@@ -9,8 +9,9 @@
 //!   tracked document with `session_check::inspect()`, and only intervenes when
 //!   the cycle is still open.
 //! - On the first intercepted stop, the hook first tries to finish the response
-//!   cycle deterministically: save/capture `last_assistant_message`, replay it
-//!   through `repair`, and run the normal `git::commit()` boundary.
+//!   cycle deterministically: validate `last_assistant_message`, replay only a
+//!   single-response closeout through `repair`, and run the normal
+//!   `git::commit()` boundary.
 //! - If the cycle still cannot be closed automatically, the hook falls back to
 //!   blocking the turn with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
@@ -27,6 +28,7 @@
 //! ## Evals
 //! - `user_prompt_submit_tracks_agent_doc_file`
 //! - `stop_auto_closes_open_cycle_from_last_assistant_message`
+//! - `stop_blocks_transcript_shaped_last_assistant_message`
 //! - `stop_passes_through_committed_cycle`
 //! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
@@ -86,6 +88,21 @@ enum StopCloseAttempt {
     Closed,
     StillOpen { note: String },
     NotPossible,
+}
+
+enum StopPayloadClassification<'a> {
+    Empty,
+    Replayable(&'a str),
+    TranscriptLike(&'static str),
+}
+
+#[derive(Debug, Serialize)]
+struct BlockedStopPayloadRecord<'a> {
+    captured_at: u64,
+    file: String,
+    reason: &'a str,
+    payload_sha256: String,
+    last_assistant_message: &'a str,
 }
 
 pub fn handle_user_prompt_submit() -> Result<()> {
@@ -220,20 +237,36 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
 }
 
 fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAttempt> {
-    let has_response = !input.last_assistant_message.trim().is_empty();
+    let payload = classify_stop_payload(&input.last_assistant_message);
+    let has_response = matches!(payload, StopPayloadClassification::Replayable(_));
     let has_bypassed_patchback =
         crate::session_check::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
+        if let StopPayloadClassification::TranscriptLike(reason) = payload {
+            return Ok(StopCloseAttempt::StillOpen {
+                note: capture_blocked_stop_payload(file, &input.last_assistant_message, reason),
+            });
+        }
         return Ok(StopCloseAttempt::NotPossible);
     }
 
     let mut note = String::new();
-    if has_response {
-        crate::repair::save_pending(file, &input.last_assistant_message)?;
-        crate::ops_log::log_op(file, "codex_stop_capture_saved");
-        note.push_str(
-            " The latest assistant text was captured into the pending/capture ledger before auto-close.",
-        );
+    match payload {
+        StopPayloadClassification::Replayable(response) => {
+            crate::repair::save_pending(file, response)?;
+            crate::ops_log::log_op(file, "codex_stop_capture_saved");
+            note.push_str(
+                " The latest assistant text was captured into the pending/capture ledger before auto-close.",
+            );
+        }
+        StopPayloadClassification::TranscriptLike(reason) => {
+            note.push_str(&capture_blocked_stop_payload(
+                file,
+                &input.last_assistant_message,
+                reason,
+            ));
+        }
+        StopPayloadClassification::Empty => {}
     }
 
     let repair_outcome = crate::repair::run(file)?;
@@ -270,18 +303,153 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
 }
 
 fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
-    if input.last_assistant_message.trim().is_empty() {
-        return " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string();
+    match classify_stop_payload(&input.last_assistant_message) {
+        StopPayloadClassification::Empty => {
+            " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string()
+        }
+        StopPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response) {
+            Ok(()) => {
+                crate::ops_log::log_op(file, "codex_stop_capture_saved");
+                " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
+            }
+            Err(err) => format!(
+                " The hook could not capture the final assistant text before blocking the turn: {err}."
+            ),
+        },
+        StopPayloadClassification::TranscriptLike(reason) => {
+            capture_blocked_stop_payload(file, &input.last_assistant_message, reason)
+        }
     }
-    match crate::repair::save_pending(file, &input.last_assistant_message) {
-        Ok(()) => {
-            crate::ops_log::log_op(file, "codex_stop_capture_saved");
-            " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
+}
+
+fn classify_stop_payload(message: &str) -> StopPayloadClassification<'_> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return StopPayloadClassification::Empty;
+    }
+
+    let patch_open = trimmed.matches("<!-- patch:exchange -->").count();
+    let patch_close = trimmed.matches("<!-- /patch:exchange -->").count();
+    if patch_open > 0 || patch_close > 0 {
+        if patch_open != 1 || patch_close != 1 {
+            return StopPayloadClassification::TranscriptLike(
+                "it contained repeated or unbalanced `patch:exchange` markers",
+            );
+        }
+        let open_marker = "<!-- patch:exchange -->";
+        let close_marker = "<!-- /patch:exchange -->";
+        let start = trimmed.find(open_marker).unwrap_or_default();
+        let end = trimmed.find(close_marker).unwrap_or(trimmed.len());
+        let close_end = end.saturating_add(close_marker.len());
+        if !trimmed[..start].trim().is_empty() || !trimmed[close_end..].trim().is_empty() {
+            return StopPayloadClassification::TranscriptLike(
+                "it contained extra transcript content around the exchange patch block",
+            );
+        }
+    }
+
+    if trimmed.contains("<!-- agent:exchange") {
+        return StopPayloadClassification::TranscriptLike(
+            "it contained an `agent:exchange` component dump",
+        );
+    }
+
+    let prompt_lines = trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with('❯'))
+        .count();
+    if prompt_lines > 0 {
+        return StopPayloadClassification::TranscriptLike("it contained transcript prompt lines");
+    }
+
+    let user_headings = trimmed
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line == "## User" || line.starts_with("## User ")
+        })
+        .count();
+    if user_headings > 0 {
+        return StopPayloadClassification::TranscriptLike(
+            "it contained `## User` transcript headings",
+        );
+    }
+
+    let assistant_headings = trimmed
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line == "## Assistant" || line.starts_with("## Assistant ")
+        })
+        .count();
+    if assistant_headings > 0 {
+        return StopPayloadClassification::TranscriptLike(
+            "it contained `## Assistant` transcript headings",
+        );
+    }
+
+    let response_headings = trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with("### Re:"))
+        .count();
+    if response_headings > 1 {
+        return StopPayloadClassification::TranscriptLike(
+            "it contained multiple assistant response headings",
+        );
+    }
+
+    StopPayloadClassification::Replayable(trimmed)
+}
+
+fn capture_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> String {
+    match save_blocked_stop_payload(file, payload, reason) {
+        Ok(path) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "codex_stop_capture_blocked path={} reason={}",
+                    path.display(),
+                    reason
+                ),
+            );
+            format!(
+                " The hook captured the blocked `last_assistant_message` for diagnostics at `{}` and refused to replay it because {}.",
+                path.display(),
+                reason
+            )
         }
         Err(err) => format!(
-            " The hook could not capture the final assistant text before blocking the turn: {err}."
+            " The hook refused to replay `last_assistant_message` because {} and could not save the blocked payload for diagnostics: {err}.",
+            reason
         ),
     }
+}
+
+fn save_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> Result<PathBuf> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = crate::snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(Path::to_path_buf))
+        .context("resolve project root for blocked stop payload")?;
+    let dir = root.join(".agent-doc/codex-hooks/blocked-stop");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("create blocked-stop dir {}", dir.display()))?;
+    let filename = format!(
+        "{}-{}.json",
+        crate::ops_log::content_hash(canonical.to_string_lossy().as_ref()),
+        now_millis()
+    );
+    let path = dir.join(filename);
+    let record = BlockedStopPayloadRecord {
+        captured_at: now_secs(),
+        file: canonical.display().to_string(),
+        reason,
+        payload_sha256: crate::ops_log::content_hash(payload),
+        last_assistant_message: payload,
+    };
+    let json = serde_json::to_string_pretty(&record)?;
+    std::fs::write(&path, json)
+        .with_context(|| format!("write blocked stop payload {}", path.display()))?;
+    Ok(path)
 }
 
 fn read_stdin_payload() -> Result<String> {
@@ -414,6 +582,13 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 #[cfg(test)]
@@ -620,6 +795,59 @@ mod tests {
             }
             other => panic!("expected block response, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stop_blocks_transcript_shaped_last_assistant_message() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let transcript_dump = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: hook proof — gpt-5\n",
+            "Hook closeout body.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: transcript_dump.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("unfinished document cycle"));
+                assert!(reason.contains("refused to replay"));
+                assert!(reason.contains("blocked-stop"));
+            }
+            other => panic!("expected block response, got {other:?}"),
+        }
+
+        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        assert!(
+            !pending.exists(),
+            "transcript-shaped payload should not be stored as replayable pending content"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content, original, "document should remain unchanged");
+
+        let blocked_dir = dir.path().join(".agent-doc/codex-hooks/blocked-stop");
+        let captures: Vec<_> = fs::read_dir(&blocked_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .collect();
+        assert_eq!(captures.len(), 1, "expected one blocked-stop capture");
+        let blocked_payload = fs::read_to_string(captures[0].path()).unwrap();
+        assert!(blocked_payload.contains("agent:exchange"));
+        assert!(blocked_payload.contains("component dump"));
     }
 
     #[test]

@@ -131,3 +131,81 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         );
     }
 }
+
+#[test]
+fn codex_hook_cli_blocks_transcript_shaped_last_assistant_message() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let submit_payload = json!({
+        "session_id": "codex-session",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", doc.display()),
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+
+    let transcript_payload = concat!(
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Please reply\n",
+        "### Re: hook proof — gpt-5\n",
+        "Hook closeout body.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    let stop_payload = json!({
+        "session_id": "codex-session",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "last_assistant_message": transcript_payload,
+        "stop_hook_active": false,
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-stop"])
+        .write_stdin(stop_payload.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"decision\":\"block\""))
+        .stdout(predicate::str::contains("refused to replay"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("### Re: hook proof — gpt-5"),
+        "transcript-shaped payload should not be replayed into the document"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("INTERRUPTED"));
+
+    let blocked_dir = tmp.path().join(".agent-doc/codex-hooks/blocked-stop");
+    let blocked: Vec<_> = fs::read_dir(&blocked_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .collect();
+    assert_eq!(
+        blocked.len(),
+        1,
+        "expected one blocked-stop diagnostic capture"
+    );
+    let blocked_payload = fs::read_to_string(blocked[0].path()).unwrap();
+    assert!(blocked_payload.contains("agent:exchange"));
+    assert!(blocked_payload.contains("Hook closeout body."));
+}

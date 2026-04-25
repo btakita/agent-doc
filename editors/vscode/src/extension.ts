@@ -962,15 +962,17 @@ class PatchWatcher implements vscode.Disposable {
         let userRegion = exchangeContent.substring(0, userRegionEnd);
         const agentRegion = exchangeContent.substring(userRegionEnd);
 
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            // Replace exact line (with newline boundaries) — idempotent if already prefixed
-            userRegion = userRegion.replace(`\n${line}\n`, `\n❯ ${line}\n`);
-            // Handle line at very start of user region
-            if (userRegion.startsWith(`${line}\n`)) {
-                userRegion = `❯ ${line}\n` + userRegion.substring(line.length + 1);
-            }
-        }
+        // Build normalized target set once — trimEnd() absorbs trailing-whitespace
+        // divergence between binary disk-side payload and editor buffer.
+        const targetLines = new Set(lines.filter(l => l.trim()).map(l => l.trimEnd()));
+
+        const normalizedLines = userRegion.split('\n').map(docLine => {
+            const normalized = docLine.trimEnd();
+            if (normalized.startsWith('❯ ')) return docLine;       // already prefixed
+            if (targetLines.has(normalized)) return `❯ ${docLine}`; // match — add prefix
+            return docLine;
+        });
+        userRegion = normalizedLines.join('\n');
 
         return beforeExchange + userRegion + agentRegion + afterExchange;
     }

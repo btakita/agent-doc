@@ -707,47 +707,10 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * Add `❯ ` prefix to specific lines within the exchange component.
-     *
-     * For each line in [lines], replaces the first occurrence of that exact
-     * line text (without `❯ ` prefix) with `❯ <line>` within the region of
-     * the exchange component that falls before the boundary marker. Lines
-     * that already have the prefix or do not appear in the component are
-     * left unchanged.
+     * Delegates to [normalizeExchangePrefixesUtil] for testability.
      */
-    private fun normalizeExchangePrefixes(doc: String, lines: List<String>): String {
-        if (lines.isEmpty()) return doc
-        val openTag = Regex("""<!-- agent:exchange(\s[^>]*)? -->""")
-        val closeTag = "<!-- /agent:exchange -->"
-        val boundaryTag = Regex("""<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->""")
-
-        val openMatch = openTag.find(doc) ?: return doc
-        val closeIdx = doc.indexOf(closeTag, openMatch.range.last)
-        if (closeIdx < 0) return doc
-
-        val beforeExchange = doc.substring(0, openMatch.range.last + 1)
-        val exchangeContent = doc.substring(openMatch.range.last + 1, closeIdx)
-        val afterExchange = doc.substring(closeIdx)
-
-        // Only normalize the user-input region (before the LAST boundary marker).
-        // Must use the last boundary — historical cycles each leave a marker, so stopping
-        // at the first one misclassifies later user-input lines as agent region.
-        val boundaryMatch = boundaryTag.findAll(exchangeContent).lastOrNull()
-        val userRegionEnd = boundaryMatch?.range?.first ?: exchangeContent.length
-        var userRegion = exchangeContent.substring(0, userRegionEnd)
-        val agentRegion = exchangeContent.substring(userRegionEnd)
-
-        for (line in lines) {
-            if (line.isBlank()) continue
-            // Replace exact line (with newline boundaries) — idempotent if already prefixed
-            userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
-            // Handle line at very start of user region
-            if (userRegion.startsWith("$line\n")) {
-                userRegion = "❯ $line\n" + userRegion.substring(line.length + 1)
-            }
-        }
-
-        return beforeExchange + userRegion + agentRegion + afterExchange
-    }
+    private fun normalizeExchangePrefixes(doc: String, lines: List<String>): String =
+        normalizeExchangePrefixesUtil(doc, lines)
 
     /**
      * Find a boundary marker UUID inside a component's content.
@@ -1378,6 +1341,53 @@ private fun extractStringField(json: String, field: String): String? {
     } catch (e: Exception) {
         null
     }
+}
+
+/**
+ * Add `❯ ` prefix to specific lines within the exchange component's user region.
+ *
+ * Uses line-by-line scanning with [String.trimEnd] comparison so trailing whitespace
+ * differences between the binary's disk-side payload and IntelliJ's editor buffer
+ * (which strips trailing spaces on save) do not silently lose the prefix.
+ *
+ * Only the region before the LAST boundary marker is normalised; the agent region is left
+ * unchanged.  Lines already starting with `❯ ` are left unchanged (idempotent).
+ */
+internal fun normalizeExchangePrefixesUtil(doc: String, lines: List<String>): String {
+    if (lines.isEmpty()) return doc
+    val openTag = Regex("""<!-- agent:exchange(\s[^>]*)? -->""")
+    val closeTag = "<!-- /agent:exchange -->"
+    val boundaryTag = Regex("""<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->""")
+
+    val openMatch = openTag.find(doc) ?: return doc
+    val closeIdx = doc.indexOf(closeTag, openMatch.range.last)
+    if (closeIdx < 0) return doc
+
+    val beforeExchange = doc.substring(0, openMatch.range.last + 1)
+    val exchangeContent = doc.substring(openMatch.range.last + 1, closeIdx)
+    val afterExchange = doc.substring(closeIdx)
+
+    // Only normalize the user-input region (before the LAST boundary marker).
+    // Must use the last boundary — historical cycles each leave a marker, so stopping
+    // at the first one misclassifies later user-input lines as agent region.
+    val boundaryMatch = boundaryTag.findAll(exchangeContent).lastOrNull()
+    val userRegionEnd = boundaryMatch?.range?.first ?: exchangeContent.length
+    val userRegion = exchangeContent.substring(0, userRegionEnd)
+    val agentRegion = exchangeContent.substring(userRegionEnd)
+
+    // Build normalized target set once — trimEnd() absorbs trailing-whitespace divergence.
+    val targetLines = lines.filter { it.isNotBlank() }.map { it.trimEnd() }.toSet()
+
+    val normalizedUserRegion = userRegion.split("\n").joinToString("\n") { docLine ->
+        val normalized = docLine.trimEnd()
+        when {
+            normalized.startsWith("❯ ") -> docLine   // already prefixed — idempotent
+            normalized in targetLines -> "❯ $docLine" // match — add prefix
+            else -> docLine
+        }
+    }
+
+    return beforeExchange + normalizedUserRegion + agentRegion + afterExchange
 }
 
 /**

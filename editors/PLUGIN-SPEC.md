@@ -50,6 +50,14 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
   - `append`: preserve existing content, append `\n` + trimmed content + `\n` before close tag
   - `prepend`: insert `\n` + trimmed content before existing content (after open tag)
 
+**Exchange prompt prefix normalization (`normalize_prefix_lines`):**
+- After applying component patches, if the patch JSON contains a non-empty `normalize_prefix_lines` array, the plugin must add a `❯ ` prefix to each matching line in the `agent:exchange` user region (the region before the LAST `<!-- agent:boundary:... -->` marker).
+- **Algorithm:** scan the user region line-by-line. For each document line, compare `docLine.trimEnd()` against the set of `targetLine.trimEnd()` values from `normalize_prefix_lines`. If the trimmed document line matches a trimmed target line and does not already start with `❯ `, prepend `❯ ` to the original (un-trimmed) document line.
+- **Trailing whitespace resilience:** comparison must use `trimEnd()` on both sides. Editors such as IntelliJ strip trailing whitespace from the buffer on save, so exact string matching against the binary's disk-side payload would silently fail when the line ends with a space.
+- **Idempotent:** lines already starting with `❯ ` are left unchanged.
+- **Agent region excluded:** lines at or after the last boundary marker must not be prefixed.
+- **Blank target lines skipped:** entries in `normalize_prefix_lines` that are blank after trimming must be ignored.
+
 **ACK protocol:**
 - On successful application: delete the patch JSON file. This signals to the CLI that the patch was consumed.
 - On failure: leave the file in place and log a warning. The CLI will time out and exit with code 75 (`EX_TEMPFAIL`).

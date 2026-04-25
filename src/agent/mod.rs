@@ -31,6 +31,7 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
 
+use self::streaming::StreamingAgent;
 use crate::config::AgentConfig;
 
 /// Response from an agent backend.
@@ -142,6 +143,27 @@ pub fn resolve_for_file(
     }
 }
 
+pub fn resolve_streaming_for_file(
+    name: &str,
+    config: Option<&AgentConfig>,
+    env: Vec<(String, Option<String>)>,
+    file: &Path,
+) -> Result<Option<Box<dyn StreamingAgent>>> {
+    let (cmd, args) = build_backend_command(name, config, Some(file));
+    match name {
+        "claude" => Ok(Some(Box::new(claude::Claude::new(cmd, args).with_env(env)))),
+        "codex" => Ok(Some(Box::new(codex::Codex::new(cmd, args).with_env(env)))),
+        "junie" => Ok(None),
+        other => {
+            if config.is_some() {
+                Ok(None)
+            } else {
+                anyhow::bail!("Unknown agent backend: {}", other)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +224,12 @@ mod tests {
         let codex = resolve("codex", None, codex_env);
         assert!(claude.is_ok());
         assert!(codex.is_ok());
+    }
+
+    #[test]
+    fn resolve_streaming_skips_non_streaming_backend() {
+        let streaming = resolve_streaming_for_file("junie", None, vec![], Path::new("doc.md"));
+        assert!(streaming.is_ok());
+        assert!(streaming.unwrap().is_none());
     }
 }

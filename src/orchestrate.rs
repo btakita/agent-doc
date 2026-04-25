@@ -6,8 +6,9 @@
 //!   `OrchestrateMode`.
 //! - `--mode sequential` injects each task into the document exchange as a
 //!   fresh prompt, runs `preflight`, sends one fresh agent request with no
-//!   resume/session reuse, then persists the response through `finalize`
-//!   followed by `session-check`.
+//!   resume/session reuse, streams step responses into `exchange` for CRDT docs
+//!   when the backend supports streaming, then persists the response through
+//!   `finalize` followed by `session-check`.
 //! - `--mode parallel` reuses the existing `parallel` worktree fan-out path
 //!   after task resolution, and the legacy `agent-doc parallel` command routes
 //!   through this same orchestrate dispatch surface.
@@ -44,6 +45,7 @@
 //! - `inject_prompt_inserts_before_boundary`
 //! - `send_fresh_response_uses_no_resume`
 //! - `sequential_orchestration_injects_prompt_and_finalizes`
+//! - `sequential_orchestration_uses_streaming_backend_for_crdt_docs`
 //! - `dag_orchestration_runs_topological_order`
 
 use anyhow::{Context, Result};
@@ -54,7 +56,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::{
-    agent, component,
+    agent,
+    agent::streaming::StreamChunk,
+    component,
     config::{AgentConfig, Config},
     diff,
     frontmatter::{self, ResolvedMode},
@@ -125,6 +129,18 @@ trait FreshAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<String>;
+
+    fn send_fresh_streaming(
+        &self,
+        _file: &Path,
+        _prompt: &str,
+        _agent_name: &str,
+        _agent_config: Option<&AgentConfig>,
+        _env: Vec<(String, Option<String>)>,
+        _model: Option<&str>,
+    ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
+        Ok(None)
+    }
 }
 
 trait ParallelRunner {
@@ -242,6 +258,22 @@ impl FreshAgentRunner for CliAgentRunner {
         let backend = agent::resolve_for_file(agent_name, agent_config, env, file)?;
         let response = send_fresh_response(backend.as_ref(), prompt, model)?;
         Ok(response.text)
+    }
+
+    fn send_fresh_streaming(
+        &self,
+        file: &Path,
+        prompt: &str,
+        agent_name: &str,
+        agent_config: Option<&AgentConfig>,
+        env: Vec<(String, Option<String>)>,
+        model: Option<&str>,
+    ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
+        let Some(backend) = agent::resolve_streaming_for_file(agent_name, agent_config, env, file)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(backend.send_streaming(prompt, None, false, model)?))
     }
 }
 
@@ -483,18 +515,63 @@ fn run_ordered_task_step(
     let model = model_override.or(fm.model.as_deref());
     let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
     let expanded_env = expand_frontmatter_env(&fm);
-    let response = agent_runner.send_fresh(
-        file,
-        &prompt,
-        agent_name,
-        global_config.agents.get(agent_name),
-        expanded_env,
-        model,
-    )?;
+    let (response, finalize_response) = if mode.is_crdt() {
+        if let Some(seed) = exchange_stream_seed(&doc)? {
+            if let Some(chunks) = agent_runner.send_fresh_streaming(
+                file,
+                &prompt,
+                agent_name,
+                global_config.agents.get(agent_name),
+                expanded_env.clone(),
+                model,
+            )? {
+                let streamed = stream_step_response(file, &seed, chunks)?;
+                (streamed.full_response, streamed.finalize_response)
+            } else {
+                let response = agent_runner.send_fresh(
+                    file,
+                    &prompt,
+                    agent_name,
+                    global_config.agents.get(agent_name),
+                    expanded_env,
+                    model,
+                )?;
+                let finalize = response.clone();
+                (response, finalize)
+            }
+        } else {
+            let response = agent_runner.send_fresh(
+                file,
+                &prompt,
+                agent_name,
+                global_config.agents.get(agent_name),
+                expanded_env,
+                model,
+            )?;
+            let finalize = response.clone();
+            (response, finalize)
+        }
+    } else {
+        let response = agent_runner.send_fresh(
+            file,
+            &prompt,
+            agent_name,
+            global_config.agents.get(agent_name),
+            expanded_env,
+            model,
+        )?;
+        let finalize = response.clone();
+        (response, finalize)
+    };
     let response_text = if mode.is_template() {
         response
     } else {
         write::strip_assistant_heading(&response)
+    };
+    let finalize_text = if mode.is_template() {
+        finalize_response
+    } else {
+        write::strip_assistant_heading(&finalize_response)
     };
 
     if let Some(diff_text) = preflight.diff.as_deref() {
@@ -504,11 +581,185 @@ fn run_ordered_task_step(
     lifecycle.finalize(
         file,
         preflight.baseline_file.as_deref(),
-        &response_text,
+        &finalize_text,
         mode,
     )?;
     lifecycle.session_check(file)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeStreamSeed {
+    prefix: String,
+    suffix: String,
+}
+
+#[derive(Debug, Clone)]
+struct StreamStepResult {
+    full_response: String,
+    finalize_response: String,
+}
+
+fn exchange_stream_seed(doc: &str) -> Result<Option<ExchangeStreamSeed>> {
+    let components = component::parse(doc).context("failed to parse document components")?;
+    let Some(exchange) = components.iter().find(|comp| comp.name == "exchange") else {
+        return Ok(None);
+    };
+    let content = exchange.content(doc);
+    let boundary_prefix = "<!-- agent:boundary:";
+    let relative_boundary = content
+        .lines()
+        .scan(0usize, |offset, line| {
+            let start = *offset;
+            *offset += line.len() + 1;
+            Some((start, line))
+        })
+        .filter_map(|(start, line)| line.trim().starts_with(boundary_prefix).then_some(start))
+        .last();
+    if let Some(boundary_start) = relative_boundary {
+        return Ok(Some(ExchangeStreamSeed {
+            prefix: content[..boundary_start].to_string(),
+            suffix: content[boundary_start..].to_string(),
+        }));
+    }
+
+    let boundary = agent_doc::format_boundary_marker(&agent_doc::new_boundary_id());
+    Ok(Some(ExchangeStreamSeed {
+        prefix: content.to_string(),
+        suffix: format!("{boundary}\n"),
+    }))
+}
+
+fn render_streamed_exchange(seed: &ExchangeStreamSeed, response: &str) -> String {
+    let trimmed = response.trim_end();
+    if trimmed.is_empty() {
+        return format!("{}{}", seed.prefix, seed.suffix);
+    }
+
+    let mut rendered =
+        String::with_capacity(seed.prefix.len() + trimmed.len() + seed.suffix.len() + 2);
+    rendered.push_str(&seed.prefix);
+    if !rendered.is_empty() && !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered.push_str(trimmed);
+    rendered.push('\n');
+    rendered.push_str(&seed.suffix);
+    rendered
+}
+
+fn stream_step_response(
+    file: &Path,
+    seed: &ExchangeStreamSeed,
+    chunks: Box<dyn Iterator<Item = Result<StreamChunk>>>,
+) -> Result<StreamStepResult> {
+    let mut response = String::new();
+    let mut last_streamed_response = None;
+
+    for chunk_result in chunks {
+        let chunk = chunk_result.context("stream chunk error")?;
+        if !chunk.text.is_empty() {
+            response = chunk.text;
+            if !chunk.is_final {
+                let exchange = render_streamed_exchange(seed, &response);
+                crate::stream::flush_to_document(file, &exchange, "exchange", "")?;
+                last_streamed_response = Some(response.clone());
+            }
+        }
+        if chunk.is_final {
+            break;
+        }
+    }
+
+    if response.trim().is_empty() {
+        anyhow::bail!("empty response from streaming orchestrate step");
+    }
+
+    let finalize_response = last_streamed_response
+        .as_deref()
+        .and_then(|streamed| finalize_suffix_from_streamed_prefix(streamed, &response))
+        .unwrap_or_else(|| response.clone());
+
+    Ok(StreamStepResult {
+        full_response: response,
+        finalize_response,
+    })
+}
+
+fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<String> {
+    if let Some(delta) = finalize_suffix_from_open_patch_prefix(streamed, full) {
+        return Some(delta);
+    }
+
+    if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) = (
+        crate::template::parse_patches(full),
+        crate::template::parse_patches(streamed),
+    ) {
+        if full_unmatched.trim().is_empty()
+            && streamed_unmatched.trim().is_empty()
+            && full_patches.len() == streamed_patches.len()
+        {
+            let mut delta = String::new();
+            for (full_patch, streamed_patch) in full_patches.iter().zip(streamed_patches.iter()) {
+                if full_patch.name != streamed_patch.name
+                    || !full_patch.content.starts_with(&streamed_patch.content)
+                {
+                    return None;
+                }
+                let suffix = &full_patch.content[streamed_patch.content.len()..];
+                if suffix.is_empty() {
+                    continue;
+                }
+                delta.push_str(&format!(
+                    "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
+                    full_patch.name, suffix, full_patch.name
+                ));
+            }
+
+            if !delta.trim().is_empty() {
+                return Some(delta);
+            }
+        }
+    }
+    None
+}
+
+fn finalize_suffix_from_open_patch_prefix(streamed: &str, full: &str) -> Option<String> {
+    if !full.starts_with(streamed) {
+        return None;
+    }
+
+    let open_start = streamed.find("<!-- patch:")?;
+    let open_end = streamed[open_start..].find("-->")? + open_start + 3;
+    let open_marker = &streamed[open_start..open_end];
+    let patch_name = open_marker
+        .strip_prefix("<!-- patch:")?
+        .strip_suffix(" -->")?
+        .trim();
+    if patch_name.is_empty() {
+        return None;
+    }
+
+    let mut content_start = open_end;
+    if streamed.as_bytes().get(content_start) == Some(&b'\n') {
+        content_start += 1;
+    }
+    let close_marker = format!("<!-- /patch:{} -->", patch_name);
+    let close_pos = full[content_start..].find(&close_marker)? + content_start;
+    let full_content = &full[content_start..close_pos];
+    let streamed_content = &streamed[content_start..];
+    if !full_content.starts_with(streamed_content) {
+        return None;
+    }
+    let suffix = &full_content[streamed_content.len()..];
+    if suffix.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
+        patch_name, suffix, patch_name
+    ))
 }
 
 fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<String>)> {
@@ -985,7 +1236,10 @@ mod tests {
 
     struct FakeAgentRunner {
         prompts: RefCell<Vec<String>>,
+        fresh_calls: RefCell<usize>,
+        streaming_calls: RefCell<usize>,
         response: String,
+        streaming_chunks: Option<Vec<StreamChunk>>,
     }
 
     impl FreshAgentRunner for FakeAgentRunner {
@@ -998,8 +1252,26 @@ mod tests {
             _env: Vec<(String, Option<String>)>,
             _model: Option<&str>,
         ) -> Result<String> {
+            *self.fresh_calls.borrow_mut() += 1;
             self.prompts.borrow_mut().push(prompt.to_string());
             Ok(self.response.clone())
+        }
+
+        fn send_fresh_streaming(
+            &self,
+            _file: &Path,
+            prompt: &str,
+            _agent_name: &str,
+            _agent_config: Option<&AgentConfig>,
+            _env: Vec<(String, Option<String>)>,
+            _model: Option<&str>,
+        ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
+            let Some(chunks) = &self.streaming_chunks else {
+                return Ok(None);
+            };
+            *self.streaming_calls.borrow_mut() += 1;
+            self.prompts.borrow_mut().push(prompt.to_string());
+            Ok(Some(Box::new(chunks.clone().into_iter().map(Ok))))
         }
     }
 
@@ -1112,9 +1384,12 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
             response:
                 "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
                     .to_string(),
+            streaming_chunks: None,
         };
 
         let tasks = vec![ExecutionTask {
@@ -1147,6 +1422,8 @@ mod tests {
             agent.prompts.borrow()[0].contains("❯ do #gkke"),
             "fresh agent prompt should include the injected task"
         );
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 0);
     }
 
     #[test]
@@ -1165,9 +1442,12 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
             response:
                 "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n"
                     .to_string(),
+            streaming_chunks: None,
         };
 
         let tasks = vec![ExecutionTask {
@@ -1196,6 +1476,93 @@ mod tests {
         assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
         assert_eq!(*lifecycle.session_checks.borrow(), 1);
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 0);
+    }
+
+    #[test]
+    fn render_streamed_exchange_inserts_response_before_boundary() {
+        let seed = ExchangeStreamSeed {
+            prefix: "❯ do #4qja\n".to_string(),
+            suffix: "<!-- agent:boundary:keep -->\n".to_string(),
+        };
+
+        let rendered = render_streamed_exchange(
+            &seed,
+            "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n<!-- /patch:exchange -->\n",
+        );
+        let response_pos = rendered.find("### Re: streamed — gpt-5").unwrap();
+        let boundary_pos = rendered.find("<!-- agent:boundary:keep -->").unwrap();
+        assert!(response_pos < boundary_pos);
+    }
+
+    #[test]
+    fn finalize_suffix_uses_only_unseen_stream_tail() {
+        let streamed = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n";
+        let full = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->\n";
+        let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
+        assert!(!delta.contains("### Re: streamed — gpt-5"));
+        assert!(delta.contains("Implemented and verified."));
+    }
+
+    #[test]
+    fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: String::new(),
+            streaming_chunks: Some(vec![
+                StreamChunk {
+                    text: "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n".to_string(),
+                    thinking: None,
+                    is_final: false,
+                    session_id: None,
+                },
+                StreamChunk {
+                    text: "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n".to_string(),
+                    thinking: None,
+                    is_final: true,
+                    session_id: Some("sess-stream".to_string()),
+                },
+            ]),
+        };
+
+        let tasks = vec![ExecutionTask {
+            label: "do #4qja".to_string(),
+            prompt: "do #4qja".to_string(),
+        }];
+
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            None,
+            Some("gpt-5"),
+            &Config::default(),
+            &lifecycle,
+            &agent,
+        )
+        .unwrap();
+
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("❯ do #4qja"));
+        assert!(final_doc.contains("### Re: streamed — gpt-5"));
+        assert_eq!(final_doc.matches("### Re: streamed — gpt-5").count(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 1);
+        assert_eq!(*agent.fresh_calls.borrow(), 0);
     }
 
     #[test]
@@ -1277,9 +1644,12 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
             response:
                 "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
                     .to_string(),
+            streaming_chunks: None,
         };
         let dag_tasks = vec![
             DagTask {
@@ -1341,7 +1711,10 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
+            streaming_chunks: None,
         };
         let parallel_runner = FakeParallelRunner::default();
 
@@ -1393,7 +1766,10 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
+            streaming_chunks: None,
         };
         let parallel_runner = FakeParallelRunner::default();
 

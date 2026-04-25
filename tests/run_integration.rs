@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
@@ -67,6 +68,23 @@ fn write_mock_agent(root: &Path, response: &str) -> PathBuf {
     script
 }
 
+fn write_mock_streaming_agent(root: &Path) -> PathBuf {
+    let script = root.join("mock-streaming-agent.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\"}]}}'\nsleep 1\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"<!-- patch:exchange -->\\n### Re: orchestrate streaming — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n\",\"session_id\":\"sess-stream\"}'\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    script
+}
+
 fn write_config(root: &Path, script: &Path) -> PathBuf {
     let config_root = root.join("config");
     let agent_doc_dir = config_root.join("agent-doc");
@@ -75,6 +93,21 @@ fn write_config(root: &Path, script: &Path) -> PathBuf {
         agent_doc_dir.join("config.toml"),
         format!(
             "default_agent = \"mock\"\n\n[agents.mock]\ncommand = \"{}\"\nargs = []\n",
+            script.display()
+        ),
+    )
+    .unwrap();
+    config_root
+}
+
+fn write_claude_config(root: &Path, script: &Path) -> PathBuf {
+    let config_root = root.join("config");
+    let agent_doc_dir = config_root.join("agent-doc");
+    fs::create_dir_all(&agent_doc_dir).unwrap();
+    fs::write(
+        agent_doc_dir.join("config.toml"),
+        format!(
+            "default_agent = \"claude\"\n\n[agents.claude]\ncommand = \"{}\"\nargs = []\n",
             script.display()
         ),
     )
@@ -235,6 +268,70 @@ fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
     ));
     assert!(content.contains("### Re: orchestrate step — gpt-5"));
     assert_eq!(read_cycle_phase(tmp.path()), "committed");
+}
+
+#[test]
+fn orchestrate_streams_step_patchback_before_finalize() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc_with_model()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let script = write_mock_streaming_agent(tmp.path());
+    let config_root = write_claude_config(tmp.path(), &script);
+    let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
+
+    let mut child = ProcessCommand::new(bin)
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args([
+            "orchestrate",
+            doc.to_str().unwrap(),
+            "--mode",
+            "sequential",
+            "--task",
+            "do #4qja. update spec + tests. build + install for local testing. commit + push",
+        ])
+        .spawn()
+        .unwrap();
+
+    let mut saw_partial = false;
+    for _ in 0..60 {
+        std::thread::sleep(Duration::from_millis(100));
+        let content = fs::read_to_string(&doc).unwrap();
+        let has_heading = content.contains("### Re: orchestrate streaming — gpt-5");
+        let has_full_body = content.contains("Implemented and verified.");
+        if has_heading && !has_full_body {
+            saw_partial = true;
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "partial streamed patchback should land before orchestrate exits"
+            );
+            break;
+        }
+    }
+
+    let status = child.wait().unwrap();
+    assert!(status.success());
+    assert!(
+        saw_partial,
+        "expected partial streamed patchback before finalize"
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains(
+        "❯ do #4qja. update spec + tests. build + install for local testing. commit + push"
+    ));
+    assert!(content.contains("### Re: orchestrate streaming — gpt-5"));
+    assert!(content.contains("Implemented and verified."));
+    assert_eq!(
+        content
+            .matches("### Re: orchestrate streaming — gpt-5")
+            .count(),
+        1,
+        "streamed step response should not be duplicated by finalize"
+    );
 }
 
 #[test]

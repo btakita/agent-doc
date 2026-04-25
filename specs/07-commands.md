@@ -657,9 +657,10 @@ Sequential orchestration runs one full fresh-agent lifecycle per task:
 3. If that preflight encounters an already-open `preflight_started` cycle from an outer skill/router pass, it first auto-attempts the safe snapshot-only `commit_already_current` closeout for that prior cycle, then continues into the new preflight. Sequential orchestration does not keep a bespoke task-1 reuse path anymore; `preflight` itself is the idempotent boundary.
 4. Build the normal edited-document prompt shape (`<diff>` + full `<document>`) from the current document state.
 5. Resolve the agent backend from `--agent` → frontmatter `agent` → global config `default_agent` → `"claude"`.
-6. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state.
-7. Persist the response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
-8. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
+6. For CRDT session docs with an `agent:exchange` component, if the chosen backend supports streaming (`claude` or `codex`), stream the in-progress step response into `exchange` before the normal write boundary. The streamed buffer is "existing exchange through injected prompt" plus the child response so far, with the boundary marker kept at the end.
+7. Send exactly one fresh backend request with **no resume** (`session_id=None`, `fork=false`) so steps do not accumulate agent conversation state. When streaming is unavailable, sequential mode falls back to the blocking request path.
+8. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...` using the document's resolved write mode (`--stream` for CRDT docs, `--template` for merge/template docs, inline for append docs).
+9. Run `agent-doc session-check <FILE>` immediately after finalize. Stop on the first failure.
 
 Notes:
 
@@ -667,6 +668,7 @@ Notes:
 - The imperative-response contract still applies because persistence flows through `finalize`.
 - The injected prompt becomes part of the document/system-of-record before the agent runs.
 - The same `preflight` call shape is used for every task. Any inherited open-cycle cleanup happens inside `preflight` before the new diff is emitted.
+- Streamed step patchback is provisional until the final `finalize -> session-check` closeout succeeds. The stream path improves document visibility; the binary-owned commit boundary is still the authoritative persistence step.
 
 ### `--mode parallel`
 

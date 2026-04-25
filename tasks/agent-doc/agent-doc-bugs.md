@@ -668,7 +668,26 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I left the pre-existing unrelated local edits in `src/agent-doc` (`VERSIONS.md`, `src/skill.rs`, and `specs/07-commands.md`) out of this commit.
-<!-- agent:boundary:e99c46f7 -->
+
+❯ commit + push
+❯ Do we need to build a new version of the plugins?
+### Re: plugin rebuild after patchback fix — gpt-5
+
+For local use: yes, rebuild or reinstall the plugins if you want the editor-side fix from `401519a`, because that change touched both editor integrations, not just the Rust binary.
+
+Concretely:
+- JetBrains changed in `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- VS Code changed in `editors/vscode/src/extension.ts` and `editors/vscode/src/reposition.ts`
+
+For publishing: not in this cycle, because there is nothing new to commit or push in `src/agent-doc` and `HEAD` already matches `origin/20260422/codex-agent-backend`. But if you want to ship those editor changes as plugin releases, then yes, new plugin builds/versions are needed:
+- JetBrains should get a plugin version bump before packaging/publishing; the repo's own `plugin-version-check` requires that when `.kt` files change.
+- VS Code should also get an extension version bump/package publish if you want users to receive the fix through the extension channel.
+
+So the answer is:
+- local testing/install: yes, rebuild/reinstall plugins
+- public release: yes, version and publish the plugins
+- this cycle: no commit or push performed, because only unrelated local edits remain in `src/agent-doc` (`VERSIONS.md`, `specs/07-commands.md`, `src/skill.rs`)
+<!-- agent:boundary:366f63bd -->
 <!-- /agent:exchange -->
 
 <!--

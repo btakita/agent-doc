@@ -779,7 +779,22 @@ The parser treats each top-level `- ` as the start of a new prompt. All subseque
 3. **Blank lines** — standard markdown list continuation allows a blank line within an item if the next non-blank line is indented. The parser should follow this: a blank line followed by an unindented `- ` starts a new prompt, but a blank line followed by indented content continues the current one.
 
 In practice, most prompts are 1-3 lines and don't contain embedded code fences, so Option A's continuation syntax works well. If a project routinely sends prompts with embedded markdown structure (fences, sub-lists, block quotes), Option B's explicit `~~~prompt` fencing eliminates all ambiguity at the cost of verbosity.
-<!-- agent:boundary:e4e33541 -->
+
+❯ I like Option B. It may be difficult to remember though.
+### Re: Option B memorability — opus-4-6
+
+Good point. A few ways to lower the memory burden:
+
+1. **Autocomplete from `/queue`** — `agent-doc queue add` could scaffold the fences for you. You type your prompt text, the CLI wraps it in `~~~prompt ... ~~~` automatically. You'd never hand-write the fence markers.
+
+2. **Accept `---` as an alias** — triple-dash prompt separators are more intuitive than `~~~prompt`. The parser could accept both, with `~~~prompt` as the canonical form in docs and `---` as the shorthand. Risk: `---` collides with YAML frontmatter and horizontal rules, so it'd need to be scoped to inside `&lt;!-- agent:queue --&gt;` only.
+
+3. **Single-line prompts skip fencing** — if a prompt is one line, bare `- ` list syntax works (Option A style). Fencing is only required for multi-line prompts. This hybrid approach means you only remember the fencing syntax when you actually need it.
+
+4. **Snippet/template** — editor snippets (`aq` → expands to the queue block with one empty `~~~prompt` fence) eliminate recall entirely. The JetBrains and VS Code plugins could ship these.
+
+Option 3 (hybrid) is probably the best default — single-line prompts stay simple, and the `~~~prompt` fence only appears when you have a genuine multi-line prompt. The CLI scaffolding (option 1) would handle the rest.
+<!-- agent:boundary:cd912bea -->
 <!-- /agent:exchange -->
 
 <!--

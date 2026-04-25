@@ -912,13 +912,30 @@ tree-sitter-bash 0.25 parses `alias` as a generic `command`, not a dedicated nod
 #### #hscz Markdown (headings h1-h6 + fenced code blocks)
 
 Added `(fenced_code_block (info_string (language) @code_block.name))` to capture the language tag from fenced code blocks. Headings already worked.
-<!-- agent:boundary:40ce7e6a -->
+
+❯ do #g32d. update spec + tests. commit + push
+### Re: #g32d directory mtime pruning — opus-4-6
+
+Implemented `--prune` flag for `tsift index`. On large repos (100K+ files), this skips unchanged directory subtrees during the file walk by comparing stored directory mtimes.
+
+**What was added:**
+
+- **walk.rs**: `walk_files_pruned()` — walks the directory tree and skips directories whose mtime matches stored state. Files under pruned directories are not stat'd or parsed. Returns `WalkResult` with entries, dir mtimes, pruned dir set, and `PruneStats`.
+- **index.rs**: `dir_state` SQLite table stores directory mtimes. `compute_changes_pruned()` / `apply_changes_pruned()` use the pruned walk and treat files in pruned dirs as unchanged rather than deleted. Dir state is saved after each pruned apply and cleared on `--rebuild`.
+- **main.rs**: `--prune` CLI flag wired through for both single-path and workspace modes. Output shows pruning stats: dirs pruned, dirs walked, files skipped.
+- **SPEC.md**: Documented the `dir_state` schema, pruning algorithm, tradeoffs, and output format.
+- **9 new tests** (131 total): pruned walk with no stored dirs, pruned walk skipping unchanged subdirs, pruned walk walking changed subdirs, dir mtime collection, pruned first/second index, new file detection in changed dirs, no false deletions for pruned files, rebuild clearing dir_state.
+
+**Tradeoff:** In-place file content modifications don't update directory mtime, so `--prune` may miss them. Use periodic `--rebuild` for full accuracy.
+
+Committed and pushed to `btakita/tsift` + parent submodule pointer.
+<!-- agent:boundary:58458a76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
+- [x] [#g32d] Large repo optimization: directory mtime pruning to skip unchanged subtrees during file walk (100K+ file repos)
 - [ ] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
@@ -931,3 +948,7 @@ Added `(fenced_code_block (info_string (language) @code_block.name))` to capture
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:pending -->
+
+<!--
+- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
+-->

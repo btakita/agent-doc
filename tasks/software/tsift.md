@@ -1537,13 +1537,12 @@ Implemented `tsift audit` for Claude Code skill health and drift detection.
 - Release binary built and installed
 
 **Committed:** `btakita/tsift@a4235b7` — pushed to origin.
-<!-- agent:boundary:bdca0d32 -->
+<!-- agent:boundary:42b4d892 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill

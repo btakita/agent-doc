@@ -219,8 +219,33 @@ Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_d
 - `editors/vscode/agent-doc-0.2.7.vsix`
 
 Ready for live session test. Install JB plugin from disk when ready: IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.67-signed.zip`.
-<!-- agent:boundary:befca977 -->
-<!-- agent:boundary:fa69c4f1 -->
+❯ Transfer snapshot GC feature from `tasks/software/agent-loop.md`. Make the baseline reap cycle configurable.
+❯ ### Re: configurable baseline snapshot GC — gpt-5.4
+
+This should be a first-class `agent-doc` feature, not a one-off manual cleanup task. The concrete problem is baseline accumulation in `.agent-doc/baselines/`: even when there is nothing older than the current threshold today, snapshots will continue to grow across active documents and inflate repo noise over time.
+
+**Recommended shape:**
+- Add `agent-doc gc baselines` to reap stale baseline snapshots.
+- Support `--older-than <duration>` for explicit one-shot cleanup, for example `30d`.
+- Add config for the default reap policy so the cycle is configurable without passing flags every time.
+- Keep safety conservative: never delete the current baseline for an active document, and always keep the newest baseline per document even if older than the threshold.
+
+**Config direction:**
+```toml
+[gc.baselines]
+enabled = true
+older_than = "30d"
+run_every = "7d"
+```
+
+`older_than` is the retention window. `run_every` is the reap cadence for opportunistic background cleanup, for example after successful write/commit hooks or an explicit `agent-doc gc` sweep.
+
+**Implementation notes:**
+- Scope the feature to `.agent-doc/baselines/` only; do not mix this with capture replay artifacts or CRDT state.
+- Parse age from file mtime, not filename heuristics.
+- Log kept vs deleted files so the cleanup is auditable.
+- Add tests for threshold handling, newest-baseline preservation, and active-document safety.
+<!-- agent:boundary:47ef7021 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -230,4 +255,5 @@ Ready for live session test. Install JB plugin from disk when ready: IDEA → Se
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit
 - [ ] [#f8a4] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
+- [ ] [#bgc1] Baseline snapshot GC: add `agent-doc gc baselines` with configurable reap policy (`--older-than` + config default), preserving newest/current baselines and logging deletions
 <!-- /agent:pending -->

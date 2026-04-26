@@ -1044,7 +1044,47 @@ The requirement is a polling mechanism. Two natural fits:
 2. Claude Code's `/schedule` or cron trigger — schedule an invocation at (or near) the target time
 
 A past-time `--- start at` would activate immediately (treat as "the time has already arrived"). Added open questions about datetime format support (natural language vs ISO 8601 only).
-<!-- agent:boundary:25add60f -->
+
+❯ Could `--- start 17:00 ET` also schedule the item at 17:00 ET? Could I also have queue items after the first item be scheduled for later? If I were to then add an item before the delayed item, can it before the scheduled item?
+### Re: per-item scheduling and insertion order — opus-4-6
+
+Yes to all three.
+
+**Dropping `at`:** `--- start 17:00 ET` works fine — the presence of a time argument after `start` is sufficient. Accept both forms: `--- start at 17:00 ET` and `--- start 17:00 ET`.
+
+**Per-item time gates:** a `--- start <time>` fence anywhere in the queue acts as a time gate. The queue processes items sequentially until it hits the fence, then pauses until the time arrives. Multiple time gates create a scheduled pipeline:
+
+```markdown
+&lt;!-- agent:queue auto --&gt;
+- do #fix1
+- do #fix2
+--- start 17:00 ET
+- run nightly tests
+--- start 18:00 ET
+- generate coverage report
+&lt;!-- /agent:queue --&gt;
+```
+
+Execution: `#fix1` and `#fix2` run immediately. Queue pauses at the 17:00 fence. At 17:00, resumes with nightly tests. Pauses again at the 18:00 fence. At 18:00, runs the report.
+
+Semantically, `--- start <time>` mid-queue is "stop, then resume at `<time>`" — it combines `--- stop` and `--- start` into one fence.
+
+**Inserting before a time gate:** yes. The queue is sequential and position-based. If you add an item before a `--- start 17:00 ET` fence, it runs before the time gate:
+
+```markdown
+&lt;!-- agent:queue auto --&gt;
+- do #fix1
+- do #fix2
+- do #fix3          ← newly added
+--- start 17:00 ET
+- run nightly tests
+&lt;!-- /agent:queue --&gt;
+```
+
+`#fix3` runs after `#fix2`, before the 17:00 pause. Items after the time fence are unaffected. This follows naturally from sequential consumption — no special ordering logic needed.
+
+Want me to update the plan with per-item time gates?
+<!-- agent:boundary:8aaeae0c -->
 <!-- /agent:exchange -->
 
 <!--

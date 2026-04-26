@@ -701,6 +701,16 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 
 **Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) context_session from sync --window, (2) config.toml if alive, (3) fallback to current session. Config is auto-updated only when the configured session is dead.
 
+## migrate
+
+`agent-doc migrate [FILES...] [--all] [--dry-run]` — migrate documents from deprecated component names and attributes to canonical forms.
+
+Renames `<!-- agent:pending ... -->` to `<!-- agent:backlog ... -->` (both open and close tags) and strips deprecated `patch=`/`mode=` attributes from backlog component tags. Skips files already using canonical markers. Updates the snapshot after each successful migration.
+
+`--all` scans the project root for `.md` files containing deprecated `agent:pending` markers. `--dry-run` previews which files would be migrated without writing. Idempotent — running twice produces the same output.
+
+Markers inside fenced code blocks or inline code spans are not transformed.
+
 ## dedupe
 
 `agent-doc dedupe <FILE>` — remove consecutive duplicate response blocks.

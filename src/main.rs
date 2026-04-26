@@ -73,6 +73,7 @@ mod install;
 mod layout;
 mod lib_gc;
 mod lib_install;
+mod migrate;
 mod mode;
 mod notify;
 mod orchestrate;
@@ -744,6 +745,17 @@ enum Commands {
         old_path: PathBuf,
         /// New document path (must exist)
         new_path: PathBuf,
+    },
+    /// Migrate documents: rename deprecated components and strip deprecated attributes
+    Migrate {
+        /// Session documents to migrate
+        files: Vec<PathBuf>,
+        /// Scan project root for all documents with deprecated markers
+        #[arg(long)]
+        all: bool,
+        /// Preview changes without writing
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Open an external terminal with tmux attached to the session
     Terminal {
@@ -1477,6 +1489,11 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
+        Commands::Migrate {
+            files,
+            all,
+            dry_run,
+        } => migrate::run(&files, all, dry_run),
         Commands::Claims => {
             let cwd = std::env::current_dir()?;
             if let Some(root) = snapshot::find_project_root(&cwd) {

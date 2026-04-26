@@ -249,6 +249,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "<FILE> [<OPS>]",
         "Create IPC callback request",
     ));
+    cmds.push(cmd(
+        "/agent-doc migrate",
+        "[FILES...] [--all] [--dry-run]",
+        "Migrate deprecated component names and attributes to canonical forms",
+    ));
 
     // --- Claude Code built-in commands ---
     cmds.push(cmd("/help", "", "Show help and available commands"));

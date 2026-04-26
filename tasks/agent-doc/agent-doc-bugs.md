@@ -990,7 +990,28 @@ For the manual case, there's a design option: the commit/finalize step could det
 The implementation would be: after `session-check` passes, do a lightweight queue scan. If `auto` queue is non-empty and `queue_active` is not yet set, emit the signal. The harness decides whether to honor it (Claude Code could auto-loop; Codex might not).
 
 This is worth adding to the plan as an optional Phase 5 enhancement — the core queue works without it, and `/loop` users already get the behavior for free.
-<!-- agent:boundary:653c2969 -->
+
+❯ Similar to `--- trigger`, can we also have `--- stop`?
+### Re: inline stop fence — opus-4-6
+
+Yes — added `--- stop` / `~~~stop` as a queue control fence. It acts as a breakpoint:
+
+```markdown
+&lt;!-- agent:queue auto --&gt;
+- do #fix1
+- do #fix2
+--- stop
+- do #fix3
+- run full test suite
+&lt;!-- /agent:queue --&gt;
+```
+
+Queue processes `#fix1` and `#fix2`, then hits `--- stop` and halts (strips `auto`, clears `queue_active`). The stop fence is consumed (removed from the block) so it doesn't block on restart. Items after it remain queued — re-add `auto` or `do queue` to continue.
+
+This gives you review gates between batches of work. You can place multiple stop fences to create a multi-stage pipeline where you review after each stage before proceeding.
+
+`trigger` and `stop` are now symmetric control fences in the parser. Updated parsing rules to include both as recognized fence types alongside prompt fences.
+<!-- agent:boundary:8e572c1d -->
 <!-- /agent:exchange -->
 
 <!--

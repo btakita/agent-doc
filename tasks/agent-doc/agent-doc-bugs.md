@@ -20,7 +20,7 @@ prompt_presets:
 
 <!-- agent:exchange patch=append -->
 -
-❯ When I did ran `compact exchange`, it has a list that is empty. Why?
+❯ When I ran `compact exchange`, it has a list that is empty. Why?
 ### Re: empty list after compact exchange — opus-4-6
 
 My invocation error. When I ran the compact, I used `--message -` expecting the Unix convention where `-` means "read from stdin." But `agent-doc compact --message` treats its argument as a literal string, so the exchange was replaced with the character `-` (an empty markdown list item) and the piped summary was discarded.
@@ -33,7 +33,19 @@ The original exchange is safely archived (1,335 lines in `.agent-doc/archives/..
 2. **Skill-side:** pass the summary inline as `--message "text..."` instead of piping
 
 Both are worth doing — the first prevents this class of error for any caller, the second is the immediate workaround.
-<!-- agent:boundary:92606ef1 -->
+
+Do option 1. #spec-test-commit-push
+### Re: do option 1 — opus-4-6
+
+Implemented `--message -` stdin support in `compact::run()`. When the message argument is `"-"`, the binary reads the full message body from stdin before passing it to the compact pipeline.
+
+**Changes** (`ae58945` on `20260422/codex-agent-backend`):
+- `src/compact.rs` — resolve `--message -` to `std::io::stdin().read_to_string()` at the top of `run()`, before any downstream consumption. Added module doc entry and eval line.
+- `specs/07-commands.md` — documented the convention in the compact section.
+- `tests/test_cli.rs` — CLI integration test (`test_compact_message_dash_reads_stdin`) pipes content via `write_stdin` and asserts it appears in the compacted document.
+
+Verified end-to-end: `echo "Summary piped from stdin." | agent-doc compact session.md --message - --tag skip` produces the piped text in the exchange component.
+<!-- agent:boundary:49d84d87 -->
 <!-- /agent:exchange -->
 <!--
 -->

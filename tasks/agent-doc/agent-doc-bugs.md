@@ -580,7 +580,34 @@ Added both to pending:
 - **#hicebox** — New `agent:icebox` component for parking items outside the active backlog. Placed after `agent:backlog` in the template. Needs scaffold, spec, parser, and component handling support.
 
 Also noted the `claude_model: claude-opus-4-6` frontmatter addition.
-<!-- agent:boundary:df7d2cef -->
+
+❯ do #hbacklog. #spec-test-build-install-commit-push
+### Re: do #hbacklog — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`58f0fcb` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+**`component.rs`** — new public helper `is_backlog_component(name)` that returns true for both `"backlog"` (canonical) and `"pending"` (legacy alias). Also exports `BACKLOG_COMPONENT` and `BACKLOG_ALIAS` constants.
+
+**15 source files updated** — all component lookups (`c.name == "pending"`) replaced with `is_backlog_component(&c.name)` across compact.rs, extract.rs, git.rs, main.rs, notify.rs, pending_cmd.rs, plan.rs, preflight.rs, session_check.rs, template.rs, write.rs.
+
+**Scaffolds** — claim.rs, sync.rs, notify.rs now emit `<!-- agent:backlog patch=replace -->` / `<!-- /agent:backlog -->` with a `## Backlog` heading for new documents.
+
+**Backward compatibility** — existing documents with `<!-- agent:pending -->` markers continue to work unchanged. The parser still extracts `"pending"` as the component name; all runtime lookups accept both names. Test fixtures retained `agent:pending` markers to verify this.
+
+**Specs/docs** — SKILL.md (both source and installed), document-format.md, pending-ops.md, pending-system.md, 07-commands.md, PLUGIN-SPEC.md, examples/README.md all updated to reference `agent:backlog` as canonical with `agent:pending` as legacy alias.
+
+#### Tests
+
+3 new tests in component.rs (`is_backlog_component_accepts_both_names`, `backlog_component_parsed_from_new_marker`, `legacy_pending_marker_still_parsed`). 1 test added in write.rs (`!is_append_mode_component("backlog")`). 3 test assertions updated for changed error messages/scaffolds.
+
+Full suite: 1241 unit tests pass (1 pre-existing codex hook flake).
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+<!-- agent:boundary:0652a3a0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -589,7 +616,7 @@ Also noted the `claude_model: claude-opus-4-6` frontmatter addition.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hbacklog] Rename agent:pending → agent:backlog. agent:pending remains as alias. Update template scaffolds (claim.rs, sync.rs) and document-format spec to use agent:backlog as canonical name
+- [x] [#hbacklog] Rename agent:pending → agent:backlog. agent:pending remains as alias. Update template scaffolds (claim.rs, sync.rs) and document-format spec to use agent:backlog as canonical name
 - [ ] [#hicebox] Add agent:icebox component. Sits after agent:pending/agent:backlog in the template. Represents project icebox (items not in active backlog). Update scaffolds, spec, parser, and component handling
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

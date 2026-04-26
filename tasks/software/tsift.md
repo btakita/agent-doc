@@ -86,7 +86,19 @@ New subcommand. Detects unannotated concepts in markdown by cross-referencing pl
 - `SPEC.md` + `CLAUDE.md` updated with all new commands and test count
 
 **Tests:** 166 → 197 (+31). `btakita/tsift@056dbac`. Pushed.
-<!-- agent:boundary:7c662f61 -->
+
+❯ #spec-test-build-install-commit-push
+### Re: #spec-test-build-install-commit-push — opus-4-6
+
+Already complete from previous cycle. Verified:
+
+- **Spec:** SPEC.md updated with all 5 features (usage tracking, cleanup, report, lint)
+- **Tests:** 197 pass (31 new)
+- **Build + install:** release binary at `~/.cargo/bin/tsift` includes `--usage`, `--cleanup`, `--report`, and `lint` subcommand
+- **Commit + push:** `btakita/tsift@056dbac` on main, pushed
+
+No new changes needed — all artifacts are in sync.
+<!-- agent:boundary:20cd9e23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

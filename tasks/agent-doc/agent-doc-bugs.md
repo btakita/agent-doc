@@ -933,7 +933,30 @@ Yes to both. Updated the plan:
 **Adding tasks while running:** yes. The queue lives in the document, and preflight re-reads it on each cycle. Between cycles (after one item commits, before the next preflight), you can freely add, remove, or reorder items. The only constraint is not editing the first item in the list while it's being consumed — everything else is fair game. New items appended to the bottom will be reached when the queue gets to them.
 
 This gives you a live work queue: populate it, trigger with `auto` or `do queue`, watch items disappear as they complete, and inject new work mid-run.
-<!-- agent:boundary:6a63f878 -->
+
+❯ Can we have reliable detection if the user is still typing when the queue gets to the item that the user is still working on?
+### Re: typing detection for queue items — opus-4-6
+
+Partially — with two tiers of reliability:
+
+#### Tier 1: File-level debounce (no editor cooperation)
+
+Before consuming the next item, preflight re-reads the file after a short delay (e.g., 3 seconds). If the queue block changed between reads, the user is still editing — skip this cycle and retry on the next loop. This catches active typing but can't distinguish "paused for 3 seconds between edits" from "finished editing."
+
+Implementation: `agent-doc queue consume` does two reads of the `agent:queue` region separated by a configurable debounce (default 3s). If the region is stable, consume. If not, emit `queue_debounce: true` in the preflight JSON and let the harness retry next cycle.
+
+#### Tier 2: Editor IPC signal (plugin cooperation)
+
+The JetBrains and VS Code plugins already have IPC connections to agent-doc. They could send a `typing_active` / `typing_idle` signal scoped to the queue region. Preflight checks the signal before consuming — if the editor reports active typing in the queue block, skip the cycle.
+
+This is more reliable because editors know the actual cursor position and keystroke timing. The debounce window can be much tighter (500ms idle = safe to consume).
+
+#### Practical recommendation
+
+Ship tier 1 first — it's self-contained and works without plugin updates. Add tier 2 as an enhancement when the plugins already report region-level activity. The debounce approach is good enough for the common case (user adds a few items, pauses, queue picks up). Edge case where the user types exactly one item boundary during the debounce window is unlikely and recoverable (just re-add the partially consumed item).
+
+A third option that sidesteps detection entirely: items in the queue that start with `[ ] ` (unchecked checkbox) are treated as "not ready" and skipped. The user checks them (`[x] ` or removes the checkbox) when ready. This gives explicit user control at the cost of one extra gesture per item.
+<!-- agent:boundary:1da3bc02 -->
 <!-- /agent:exchange -->
 
 <!--

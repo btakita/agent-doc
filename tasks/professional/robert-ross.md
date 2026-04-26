@@ -1024,7 +1024,7 @@ All 18 are in the Dreamable, Inc. org. Each is a standalone FigJam file with pro
 **Re: agent-doc-bugs.md backlog item** — Added `#4wa1` to `tasks/agent-doc/agent-doc-bugs.md` pending:
 
 > Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
-<!-- agent:boundary:27f57e5d -->
+<!-- agent:boundary:9a7d3d5a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -1034,6 +1034,5 @@ All 18 are in the Dreamable, Inc. org. Each is a standalone FigJam file with pro
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#figma] Transfer mermaid diagrams to FigJam — 20/20 complete
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:backlog -->

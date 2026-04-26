@@ -447,7 +447,32 @@ The Quick Reference is for Rob, not Claude. The setup file opens with "Claude Co
 2. **Copy the guide to Rob's workspace during setup.** New step copies `robert-ross-workspace-guide.md` into `~/Documents/Code/`. Now it's a living document Claude can read and update via the existing regeneration prompt.
 3. **No separate spec file needed.** The guide-on-disk *is* the spec — Claude reads it, compares against the filesystem, rewrites stale sections. `CLAUDE.md` stays focused on rules/preferences; the guide tracks state + reference.
 4. **Update README.md** to point to the guide's Quick Reference instead of the setup plan's.
-<!-- agent:boundary:edc1d51b -->
+
+❯ Even if a SPEC.md + specs/* is not needed for robert-ross to immediately set up his environment, would a SPEC.md + specs/*.md be helpful for maintenance and to ensure robert-ross's harness does not drift from intended configuration? Would it be helpful to have an explicit spec that robert-ross can reference how each part of his harness works?
+### Re: SPEC.md for drift detection — opus-4-6
+
+Yes — a spec adds real value. The guide teaches Rob how to use things; a spec declares what his environment *should* look like. Different audiences (Rob vs Claude), different purposes (learning vs verification).
+
+**Primary use case: drift detection.** Rob installs a plugin and it breaks something, or Brian ships a new hook config but Rob's machine is stale. Claude reads the spec, compares against reality, flags the mismatch. Without a spec, Claude infers "correct" from narrative prose — less reliable.
+
+**Recommended shape: single `SPEC.md`**, not `specs/*.md`. Rob's setup has ~5 components — a directory tree is overkill. Sections:
+
+| Section | Declares | Check command |
+|---------|----------|---------------|
+| Workspace layout | Expected directory tree | `ls ~/Documents/Code/src/` |
+| CLAUDE.md rules | Canonical rule set | `cat ~/Documents/Code/CLAUDE.md` |
+| Hooks | Expected `.claude/settings.json` entries | `jq .hooks ~/.claude/settings.json` |
+| MCP Plugins | Expected servers | `jq .mcpServers ~/.claude/settings.json` |
+| Skills | Expected skills | `ls ~/.claude/skills/` |
+
+Each section: **expected state** + **check command** + **fix command**. Rob reads it for a setup overview; Claude runs health checks on demand ("Read SPEC.md and verify my environment matches").
+
+**Complements the guide:** guide says *how to use*, spec says *what should be true*. Guide is narrative, spec is declarative. Both live on Rob's machine after setup.
+
+**When it earns its keep:** Brian updates the spec in the kit, ships to Rob, Rob says "check my environment against the spec" — instant drift report.
+
+**Tradeoff:** one more file to maintain. But it's small, changes rarely, and maintenance cost is low relative to the debugging time it saves.
+<!-- agent:boundary:b672dec2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

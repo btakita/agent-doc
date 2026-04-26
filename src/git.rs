@@ -277,6 +277,26 @@ fn resolve_relative_to_git_root_from(
     Ok((cwd.to_path_buf(), file.to_path_buf()))
 }
 
+/// Resolve a file path to absolute form, preferring the CWD's git root when
+/// the same relative path exists in both the main repo and a submodule.
+///
+/// When route.rs sends trigger commands to tmux panes, relative paths resolve
+/// against the pane's CWD — which may be narrowed to a submodule root. This
+/// function canonicalizes relative paths against the process CWD so the trigger
+/// always targets the correct file.
+pub fn resolve_absolute_file_path(file: &Path) -> PathBuf {
+    if file.is_absolute() {
+        return file.to_path_buf();
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let candidate = cwd.join(file);
+    if candidate.exists() {
+        candidate.canonicalize().unwrap_or(candidate)
+    } else {
+        file.to_path_buf()
+    }
+}
+
 /// Resolve a relative path against the git root (superproject root if in a submodule).
 /// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
 pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
@@ -4296,6 +4316,44 @@ mod tests {
                 .unwrap(),
             "relative path should resolve to the existing submodule file, not the outer shadow file"
         );
+    }
+
+    #[test]
+    fn resolve_absolute_file_path_returns_absolute_for_existing_relative() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let tasks = root.join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let doc = tasks.join("plan.md");
+        std::fs::write(&doc, "# Plan\n").unwrap();
+
+        // Temporarily set CWD to root
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+
+        let resolved = resolve_absolute_file_path(Path::new("tasks/plan.md"));
+        assert!(resolved.is_absolute(), "resolved path must be absolute");
+        assert_eq!(resolved, doc, "must resolve to the CWD-relative file");
+
+        std::env::set_current_dir(prev_cwd).unwrap();
+    }
+
+    #[test]
+    fn resolve_absolute_file_path_preserves_absolute_input() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let doc = root.join("test.md");
+        std::fs::write(&doc, "test\n").unwrap();
+
+        let resolved = resolve_absolute_file_path(&doc);
+        assert_eq!(resolved, doc, "absolute paths must be returned as-is");
+    }
+
+    #[test]
+    fn resolve_absolute_file_path_returns_relative_when_not_found() {
+        let rel = Path::new("nonexistent/path.md");
+        let resolved = resolve_absolute_file_path(rel);
+        assert_eq!(resolved, rel, "missing files should return the original path");
     }
 
     #[test]

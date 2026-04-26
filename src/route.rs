@@ -186,7 +186,13 @@ pub fn run_with_tmux(
     let target_session = resolve_target_session(tmux, None, &harness);
     eprintln!("[route] target tmux session: {}", target_session);
 
-    let file_path = file.to_string_lossy();
+    // Use absolute path for trigger commands to avoid CWD-dependent resolution
+    // when the pane's CWD differs from the invoker's (e.g., narrowed to a
+    // submodule root). Relative paths would resolve to the submodule's version
+    // of the file when the same relative path exists in both locations.
+    let file_path = crate::git::resolve_absolute_file_path(file)
+        .to_string_lossy()
+        .into_owned();
 
     // === SINGLE EXIT POINT PATTERN ===
     // All paths resolve to a pane_id, then ONE sync call handles layout.
@@ -2674,5 +2680,35 @@ history line
             new_pane[0],
             "right-column file should produce rightmost pane even after rearrangement"
         );
+    }
+
+    #[test]
+    fn run_with_tmux_resolves_file_path_to_absolute() {
+        // Verify that resolve_absolute_file_path turns a relative path into an
+        // absolute one when the file exists. This is the guard against submodule
+        // CWD-dependent resolution (#route1).
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let tasks = root.join("tasks");
+        fs::create_dir_all(&tasks).unwrap();
+        let doc = tasks.join("bugs.md");
+        fs::write(&doc, "# Bugs\n").unwrap();
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+
+        let resolved = crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
+        assert!(
+            resolved.is_absolute(),
+            "route must send absolute paths to avoid submodule CWD misrouting"
+        );
+        assert_eq!(
+            resolved, doc,
+            "resolved path must point to the CWD-relative file, not a submodule shadow"
+        );
+
+        std::env::set_current_dir(prev_cwd).unwrap();
     }
 }

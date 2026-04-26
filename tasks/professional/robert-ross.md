@@ -234,7 +234,32 @@ Claude moves everything, updates `.gitmodules` if there are submodules, commits,
 The guide also has a note: **do this before adding new projects** so he doesn't end up with a mixed layout. That's the main risk of keeping it flat — every new project following the `src/` rules widens the inconsistency with the old ones.
 
 No additional markdown needed — the section already covers it.
-<!-- agent:boundary:0f3ac137 -->
+
+❯ From what we know about robert-ross's environment, is this plan complete and ready to run from robert-ross's Claude Code session. What model should he use? opus-4-6?
+### Re: is the plan ready for Rob's session? — opus-4-6
+
+Almost. The migration prompt itself works — Rob opens Claude Code and says "Organize my workspace." But two prep steps should happen first:
+
+**1. Update his CLAUDE.md with scaffolding rules (Phase 1).** The guide has recommended contents under Section 6. If Rob migrates *before* those rules are in his CLAUDE.md, future projects won't automatically go to `src/`. Do Phase 1 first so the convention sticks after migration.
+
+**2. Inventory first.** We don't know exactly what's in Rob's `~/Documents/Code` beyond the CLAUDE.md. If there are non-project files, config dirs, or dotfiles in the root, Claude needs to know what to move vs. leave. Suggest Rob starts with:
+
+> "Show me what's in my Code directory."
+
+Then:
+
+> "Organize my workspace. Move all project folders into src/ and create a tasks/ folder."
+
+**Model:** Sonnet is fine. This is file organization — `mkdir`, `mv`, `git commit`. No complex reasoning needed. Save Opus for when Rob is doing architecture decisions or debugging.
+
+**Sequence for Rob's session:**
+1. `"Update my CLAUDE.md with these workspace rules..."` (paste the Phase 1 block from the guide, or Brian pre-populates it)
+2. `"Show me what's in my Code directory."`
+3. `"Organize my workspace. Move all project folders into src/ and create a tasks/ folder."`
+4. Verify: `"Show me the new layout."`
+
+One unknown: is `~/Documents/Code` already a git repo? If not, the migration prompt should also init git. The guide assumes it is.
+<!-- agent:boundary:395ac6d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

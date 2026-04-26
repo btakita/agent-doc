@@ -50,7 +50,26 @@ Verified end-to-end: `echo "Summary piped from stdin." | agent-doc compact sessi
 ### Re: agent:queue in template — opus-4-6
 
 Added to Phase 1 of the #queue plan: `&lt;!-- agent:queue --&gt;...&lt;!-- /agent:queue --&gt;` goes into the default template scaffold, placed between `agent:exchange` and `agent:pending`. This covers all three scaffold sites (`claim.rs` empty-file scaffold, `claim.rs` component scaffold, and `sync.rs` scaffold).
-<!-- agent:boundary:d19a35cc -->
+
+❯ do #queue using a sync orchestra
+❯ #spec-test-commit-push after each task
+❯ #spec-test-build-install-commit-push after the entire run
+### Re: do #queue — opus-4-6
+
+Orchestrate subprocess spawning failed (Claude CLI nested sessions hit a hang after diff computation). Proceeding with manual phase-by-phase execution.
+
+**Phase 1 complete** (`e13d833` on `20260422/codex-agent-backend`):
+
+- **`queue.rs`** — new module with hybrid syntax parser: single-line prompts (`- text`), multi-line fences (`~~~prompt`/`---`), control fences (`--- start [at <time>]`, `--- stop`), `~~~start`/`~~~stop` aliases, `auto` attribute detection. Utility functions: `parse()`, `render()`, `prompts()`, `first_prompt()`, `remove_first_prompt()`.
+- **`claim.rs` + `sync.rs`** — updated all 3 template scaffold sites to include `&lt;!-- agent:queue --&gt;...&lt;!-- /agent:queue --&gt;` between exchange and pending.
+- **`git.rs`** — fixed `redact_component_contents_for_absorb` slice bounds panic when component markers appear as literal text inside other components (nested component handling). Added `queue` to the empty-scaffold component whitelist.
+- **`specs/02-document-format.md`** — added §2.5 Queue Component with syntax table and parsing rules.
+- **30 unit tests** — all syntax variants, roundtrip preservation, control fences, time gates, error cases, utility functions.
+
+Also fixed a pre-existing bug: `redact_component_contents_for_absorb` panicked when the exchange component contained literal `&lt;!-- agent:queue --&gt;` markers (as happens when orchestrate injects task descriptions that reference component markers). The fix skips nested components during redaction.
+
+Phases 2-4 remain.
+<!-- agent:boundary:de1292ee -->
 <!-- /agent:exchange -->
 <!--
 -->

@@ -6,6 +6,9 @@
 //!   durable response captures for hash-keyed files/directories.
 //! - Cross-references hashes against existing documents in the project.
 //! - Removes files whose corresponding document no longer exists.
+//! - Scans `.agent-doc/supervisor/*.sock` for orphaned sockets: checks
+//!   sessions.json PID liveness, then tries socket connect as fallback.
+//!   Removes dead sockets and prunes stale sessions.json entries.
 //! - `--dry-run` flag shows what would be deleted without deleting.
 //!
 //! ## Agentic Contracts
@@ -13,13 +16,17 @@
 //!   Returns `Ok(GcResult)` with counts of deleted/skipped files.
 //! - Never deletes files or capture ledgers for documents that still exist on disk.
 //! - Stale lock files (>1 hour old) are always cleaned regardless of document existence.
+//! - `clean_orphaned_sockets` acquires `RegistryLock` when pruning sessions.json
+//!   entries; read-only callers do not hold the lock.
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::sessions::{self, RegistryLock};
 use crate::snapshot;
+use crate::supervisor::ipc;
 
 pub struct GcResult {
     pub deleted: usize,
@@ -103,6 +110,17 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     }
     total_deleted += hook_deleted;
     total_skipped += hook_kept;
+
+    // Clean orphaned supervisor sockets + stale sessions.json entries
+    let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
+    if sock_deleted > 0 {
+        eprintln!(
+            "[gc] sockets: {} dead removed, {} alive kept",
+            sock_deleted, sock_kept
+        );
+    }
+    total_deleted += sock_deleted;
+    total_skipped += sock_kept;
 
     eprintln!(
         "[gc] Total: {} deleted, {} kept",
@@ -319,6 +337,116 @@ fn clean_old_hooks(agent_doc_dir: &Path, dry_run: bool) -> Result<(usize, usize)
     Ok((deleted, kept))
 }
 
+/// Check if a process with the given PID is alive.
+fn pid_alive(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Clean orphaned supervisor sockets and stale sessions.json entries.
+///
+/// For each `.sock` file in `.agent-doc/supervisor/`:
+/// 1. Extract session UUID from filename
+/// 2. Look up PID in sessions.json — if PID is alive, keep socket
+/// 3. If PID is dead or no sessions.json entry, try connecting to socket
+/// 4. If connect fails: remove socket file + prune sessions.json entry
+///
+/// Also prunes sessions.json entries whose PID is dead and socket is gone.
+fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, usize)> {
+    let supervisor_dir = project_root.join(".agent-doc/supervisor");
+    if !supervisor_dir.is_dir() {
+        return Ok((0, 0));
+    }
+
+    let registry = sessions::load_in(project_root).unwrap_or_default();
+    let mut deleted = 0;
+    let mut kept = 0;
+    let mut uuids_to_prune: Vec<String> = Vec::new();
+
+    // Phase 1: scan socket files
+    for entry in std::fs::read_dir(&supervisor_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path
+            .extension()
+            .is_some_and(|e| e == "sock")
+        {
+            continue;
+        }
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        let uuid = match file_name.strip_suffix(".sock") {
+            Some(u) => u.to_string(),
+            None => continue,
+        };
+
+        // Check if the session has a live PID in the registry
+        let pid_is_alive = registry
+            .get(&uuid)
+            .map(|e| pid_alive(e.pid))
+            .unwrap_or(false);
+
+        if pid_is_alive {
+            kept += 1;
+            continue;
+        }
+
+        // PID is dead or not in registry — try connecting as fallback
+        let socket_responds = ipc::is_active(project_root, &uuid);
+        if socket_responds {
+            kept += 1;
+            continue;
+        }
+
+        // Socket is dead — remove it
+        if dry_run {
+            eprintln!("[gc] would delete orphaned socket: {}", path.display());
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+        deleted += 1;
+
+        // Mark for sessions.json pruning if entry exists
+        if registry.contains_key(&uuid) {
+            uuids_to_prune.push(uuid);
+        }
+    }
+
+    // Phase 2: prune sessions.json entries for dead sockets
+    // Also find entries whose PID is dead and socket doesn't exist
+    for (uuid, entry) in &registry {
+        if uuids_to_prune.contains(uuid) {
+            continue; // already marked
+        }
+        let sock_path = ipc::socket_path(project_root, uuid);
+        if !sock_path.exists() && !pid_alive(entry.pid) {
+            uuids_to_prune.push(uuid.clone());
+            deleted += 1;
+            if dry_run {
+                eprintln!(
+                    "[gc] would prune stale session entry: {} (pid {} dead, no socket)",
+                    uuid, entry.pid
+                );
+            }
+        }
+    }
+
+    // Apply registry pruning
+    if !uuids_to_prune.is_empty() && !dry_run {
+        let registry_path = sessions::registry_path_in(project_root);
+        if let Ok(_lock) = RegistryLock::acquire(&registry_path) {
+            // Reload under lock to avoid stale reads
+            if let Ok(mut reg) = sessions::load_in(project_root) {
+                for uuid in &uuids_to_prune {
+                    eprintln!("[gc] pruning stale session: {}", uuid);
+                    reg.remove(uuid);
+                }
+                let _ = sessions::save_in(project_root, &reg);
+            }
+        }
+    }
+
+    Ok((deleted, kept))
+}
+
 fn find_project_root_from_cwd() -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to get CWD")?;
     let mut dir = cwd.as_path();
@@ -336,6 +464,7 @@ fn find_project_root_from_cwd() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::{SessionEntry, SessionRegistry};
     use tempfile::TempDir;
 
     #[test]
@@ -367,5 +496,175 @@ mod tests {
         let result = run(Some(root), false).unwrap();
         assert!(result.deleted >= 1, "should delete orphaned snapshot");
         assert!(result.skipped >= 1, "should keep valid snapshot");
+    }
+
+    fn make_session_entry(pid: u32) -> SessionEntry {
+        SessionEntry {
+            pane: "%99999".to_string(),
+            pid,
+            cwd: "/tmp".to_string(),
+            started: "2026-01-01T00:00:00Z".to_string(),
+            file: "test.md".to_string(),
+            window: String::new(),
+        }
+    }
+
+    #[test]
+    fn gc_removes_orphaned_socket_with_dead_pid() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let supervisor_dir = root.join(".agent-doc/supervisor");
+        std::fs::create_dir_all(&supervisor_dir).unwrap();
+
+        // Create a fake socket file for a dead session
+        let uuid = "dead-session-uuid";
+        std::fs::write(supervisor_dir.join(format!("{uuid}.sock")), "").unwrap();
+
+        // Register in sessions.json with a dead PID
+        let mut reg = SessionRegistry::new();
+        reg.insert(uuid.to_string(), make_session_entry(999999));
+        sessions::save_in(root, &reg).unwrap();
+
+        let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 1, "should remove orphaned socket");
+        assert_eq!(kept, 0);
+
+        // Socket file should be gone
+        assert!(!supervisor_dir.join(format!("{uuid}.sock")).exists());
+
+        // sessions.json entry should be pruned
+        let loaded = sessions::load_in(root).unwrap();
+        assert!(!loaded.contains_key(uuid));
+    }
+
+    #[test]
+    fn gc_keeps_socket_with_live_pid() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let supervisor_dir = root.join(".agent-doc/supervisor");
+        std::fs::create_dir_all(&supervisor_dir).unwrap();
+
+        let uuid = "live-session-uuid";
+        std::fs::write(supervisor_dir.join(format!("{uuid}.sock")), "").unwrap();
+
+        // Register with current PID (alive)
+        let mut reg = SessionRegistry::new();
+        reg.insert(uuid.to_string(), make_session_entry(std::process::id()));
+        sessions::save_in(root, &reg).unwrap();
+
+        let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(kept, 1, "should keep socket with live PID");
+
+        // Socket file should still exist
+        assert!(supervisor_dir.join(format!("{uuid}.sock")).exists());
+    }
+
+    #[test]
+    fn gc_removes_socket_without_session_entry() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let supervisor_dir = root.join(".agent-doc/supervisor");
+        std::fs::create_dir_all(&supervisor_dir).unwrap();
+
+        // Socket with no sessions.json entry and no live listener
+        let uuid = "leaked-socket";
+        std::fs::write(supervisor_dir.join(format!("{uuid}.sock")), "").unwrap();
+
+        let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 1, "should remove leaked socket");
+        assert_eq!(kept, 0);
+        assert!(!supervisor_dir.join(format!("{uuid}.sock")).exists());
+    }
+
+    #[test]
+    fn gc_prunes_session_entry_with_dead_pid_and_no_socket() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/supervisor")).unwrap();
+
+        // sessions.json entry with dead PID, no socket file
+        let uuid = "ghost-session";
+        let mut reg = SessionRegistry::new();
+        reg.insert(uuid.to_string(), make_session_entry(999999));
+        sessions::save_in(root, &reg).unwrap();
+
+        let (deleted, _kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 1, "should count pruned entry");
+
+        let loaded = sessions::load_in(root).unwrap();
+        assert!(!loaded.contains_key(uuid));
+    }
+
+    #[test]
+    fn gc_dry_run_does_not_delete_sockets() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let supervisor_dir = root.join(".agent-doc/supervisor");
+        std::fs::create_dir_all(&supervisor_dir).unwrap();
+
+        let uuid = "dry-run-test";
+        let sock_path = supervisor_dir.join(format!("{uuid}.sock"));
+        std::fs::write(&sock_path, "").unwrap();
+
+        let mut reg = SessionRegistry::new();
+        reg.insert(uuid.to_string(), make_session_entry(999999));
+        sessions::save_in(root, &reg).unwrap();
+
+        let (deleted, kept) = clean_orphaned_sockets(root, true).unwrap();
+        assert_eq!(deleted, 1, "should report would-delete count");
+        assert_eq!(kept, 0);
+
+        // But file should still exist
+        assert!(sock_path.exists());
+
+        // And sessions.json should be unmodified
+        let loaded = sessions::load_in(root).unwrap();
+        assert!(loaded.contains_key(uuid));
+    }
+
+    #[test]
+    fn gc_no_supervisor_dir_returns_zero() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        // No supervisor/ dir
+
+        let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(kept, 0);
+    }
+
+    #[test]
+    fn gc_mixed_live_and_dead_sockets() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let supervisor_dir = root.join(".agent-doc/supervisor");
+        std::fs::create_dir_all(&supervisor_dir).unwrap();
+
+        let live_uuid = "live-session";
+        let dead_uuid = "dead-session";
+
+        std::fs::write(supervisor_dir.join(format!("{live_uuid}.sock")), "").unwrap();
+        std::fs::write(supervisor_dir.join(format!("{dead_uuid}.sock")), "").unwrap();
+
+        let mut reg = SessionRegistry::new();
+        reg.insert(
+            live_uuid.to_string(),
+            make_session_entry(std::process::id()),
+        );
+        reg.insert(dead_uuid.to_string(), make_session_entry(999999));
+        sessions::save_in(root, &reg).unwrap();
+
+        let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
+        assert_eq!(deleted, 1, "dead socket removed");
+        assert_eq!(kept, 1, "live socket kept");
+
+        assert!(supervisor_dir.join(format!("{live_uuid}.sock")).exists());
+        assert!(!supervisor_dir.join(format!("{dead_uuid}.sock")).exists());
+
+        let loaded = sessions::load_in(root).unwrap();
+        assert!(loaded.contains_key(live_uuid));
+        assert!(!loaded.contains_key(dead_uuid));
     }
 }

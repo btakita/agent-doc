@@ -48,6 +48,37 @@ Two modes:
 
 `agent-doc clean <FILE>` — squashes all `agent-doc:` commits for file into one via `git reset --soft`.
 
+## gc
+
+`agent-doc gc [--root DIR] [--dry-run]` — garbage-collect orphaned files in `.agent-doc/`.
+
+**What gets cleaned:**
+
+| Category | Criteria | Artifact |
+|----------|----------|----------|
+| Snapshots, CRDT, pre-response, baselines, annotations | Hash doesn't match any existing `.md` document | File removed |
+| Capture ledgers | Hash directory doesn't match any existing document | Directory removed |
+| Lock files | Modified >1 hour ago | File removed |
+| Hook events | Modified >24 hours ago | File removed |
+| Supervisor sockets | PID dead + socket won't connect | `.sock` file removed |
+| Session entries | PID dead + no socket file | Pruned from `sessions.json` |
+
+**Orphaned socket GC algorithm:**
+
+1. Scan `.agent-doc/supervisor/*.sock` files
+2. For each socket, extract the session UUID from the filename
+3. Look up the UUID in `sessions.json` — if the registered PID is alive, keep the socket
+4. If PID is dead or no registry entry, try connecting to the socket as fallback
+5. If connect succeeds, keep the socket (process is alive but re-registered or PID changed)
+6. If connect fails, remove the socket file and mark the sessions.json entry for pruning
+7. Also scan sessions.json for entries whose PID is dead and socket file doesn't exist — prune those entries
+
+Registry pruning acquires `RegistryLock` before modifying `sessions.json`.
+
+**Preflight integration:** `preflight` step 0a runs `gc::run()` automatically at most once per day (controlled by `.agent-doc/gc.stamp`). Orphaned socket cleanup is included in this daily GC pass.
+
+`--dry-run` shows what would be deleted without deleting. `--root DIR` overrides project root auto-detection.
+
 ## audit-docs
 
 `agent-doc audit-docs [--root DIR]` — checks CLAUDE.md/AGENTS.md/README.md/SKILL.md for tree path accuracy, line budget (1000), staleness, and actionable content. Exit 1 on issues.

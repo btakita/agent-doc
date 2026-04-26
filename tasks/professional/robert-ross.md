@@ -408,7 +408,26 @@ Claude reads the guide, compares it to Rob's actual `~/.claude/` configuration a
 Added **Step 8** (optional, self-serve) covering skills/plugins exploration. Quick-reference table expanded with 4 new entries: create a skill, install a plugin, check setup, update guide.
 
 Zip rebuilt.
-<!-- agent:boundary:e886eae8 -->
+
+❯ `"Set up a hook that runs my linter after every file edit"`: robert-ross is not a developer and does not have full understanding of developer lingo. He will understand terms such as "linter", but a 1 sentence reminder will be helpful. Perhaps a fuller list of examples would also be helpful.
+### Re: hook examples for non-developers — opus-4-6
+
+Updated the hooks section in the guide. Changes:
+
+**Replaced jargon with plain language.** The intro now says "if this, then that" rules, and the linter example includes a parenthetical: *"A linter is a tool that scans code for mistakes and style issues — like spell-check for code."*
+
+**Expanded from 2 examples to 5:**
+
+1. "After every file edit, automatically check for code errors" (was the linter one)
+2. "Automatically save a snapshot of my work every time I say 'done'" (was the commit one)
+3. "When I start a new Claude session, show me a summary of what I was working on last" — new
+4. "After Claude finishes writing code, run the project to make sure it still works" — new
+5. "When Claude creates a new file, automatically add it to version control" — new
+
+Also added "Explain what each of my hooks does" under viewing hooks, so Rob can self-diagnose what's configured.
+
+Mermaid diagram updated to say "check for errors" instead of "runs tests." Zip rebuilt.
+<!-- agent:boundary:73fa3d9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

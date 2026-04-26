@@ -550,7 +550,24 @@ Three options, simplest first:
 **`cc` collision:** On macOS, `cc` is a symlink to `clang` (Apple's C compiler). Rob will never invoke it directly. The workflows that use it — Homebrew compiling packages from source, `node-gyp` building native Node.js modules, Python C extensions (`pip install` with native deps) — all call `cc` through their build systems, not from the user's command line. The alias shadows the binary only in interactive shells, so even if a build tool runs during compilation, it invokes `/usr/bin/cc` via `$PATH` in the non-interactive subshell, not the alias.
 
 **Bottom line:** `cc` is safe for Rob. But if you'd prefer zero ambiguity, `ccode` or `cclaude` work just as well. I'd stick with `cc` for brevity — two keystrokes is hard to beat for something he'll type daily.
-<!-- agent:boundary:dfbba457 -->
+
+❯ robert-ross may also want to use Codex terminal. Is now a good time to ensure the setup will be Codex-friendly or should we have a separate migration step?
+### Re: Codex terminal compatibility — opus-4-6
+
+Separate step, not now. Two reasons:
+
+1. **The workspace setup plan is Claude Code-scoped.** It's already 10 steps. Adding Codex concerns (different binary, different config directory, different auth flow) dilutes the setup Rob needs to get productive today. Ship the Claude Code setup, let Rob use it, then layer on Codex once he has a working baseline.
+
+2. **The alias pattern generalizes trivially.** If Rob later wants Codex, the migration is one line:
+   ```bash
+   alias cx='cd ~/Documents/Code && codex'
+   ```
+   Same pattern, no conflict. The `~/.zshrc`, directory structure, and CLAUDE.md files all carry over — Codex reads `AGENTS.md` (which we already symlink from `CLAUDE.md`), so the workspace spec works for both tools without changes.
+
+**What would need a migration step:** if Rob wants Codex and Claude Code to share hooks, skills, or MCP server configs. Those live in different dotfile trees (`.claude/` vs `.codex/`). But that's a power-user concern — cross that bridge when Rob actually has opinions about tool integration.
+
+Recommend adding a single pending item for future Codex setup rather than baking it into the current plan.
+<!-- agent:boundary:8abd0bd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

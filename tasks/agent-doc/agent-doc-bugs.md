@@ -607,10 +607,32 @@ Full suite: 1241 unit tests pass (1 pre-existing codex hook flake).
 #### Build
 
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
-<!-- agent:boundary:a24ca86a -->
+
+❯ `patch=replace` is redundant in `agent:backlog` since the agent-doc binary has a subcommand and essentially owns how agent:backlog is managed. Please deprecate the patch attribute. #spec-test-build-install-commit-push
+### Re: deprecate patch=replace on agent:backlog — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`731992a` on `20260422/codex-agent-backend`).
+
+#### What changed
+
+`strip_backlog_patch_attr()` in `component.rs` strips `patch=...` and `mode=...` from `agent:backlog` / `agent:pending` opening tags with a deprecation warning to stderr. Applied automatically via `normalize_template_structure_or_fail()` in the write path so all template writes strip the attribute.
+
+- **Scaffolding** (`claim.rs`, `sync.rs`, `notify.rs`): new documents emit `&lt;!-- agent:backlog --&gt;` without the attribute
+- **git.rs**: component comparisons tolerate patch attr mismatch on backlog during the transition (old snapshots with `patch=replace`, new files without)
+- **Specs/runbooks**: `pending-system.md` and `document-format.md` updated with deprecation note and cleaned examples
+
+#### Tests
+
+6 new unit tests for the stripping function (strips `patch=replace`, `mode=replace`, preserves other attrs, no-ops on exchange/no-attr). Full suite: 1241 unit tests pass (1 pre-existing codex hook flake).
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+<!-- agent:boundary:49faec81 -->
 <!-- /agent:exchange -->
 
 <!--
+Sanity check: `agent:exchange` `patch` attribute is still active. Make sure `patch` is not also deprecated on `agent:exchange`.
 -->
 
 ## Pending / Not Built

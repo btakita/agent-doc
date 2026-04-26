@@ -801,7 +801,45 @@ Generated `robert-ross-claude-code-kit.zip` (24.7 KB). Contains all 7 kit files:
 | `codex-setup-plan.md` | 2.1 KB |
 
 Path: `file:///home/brian/work/btakita/agent-loop/tasks/dreamable/robert-ross-claude-code-kit.zip`
-<!-- agent:boundary:2c318d25 -->
+
+Draft a brief slack message with numbered instructions on opening the zip file, reading the README.md, and running his Claude Code session on setting up the harness. robert-ross is running OSX. Please make the instructions simple and explicit.  
+### Re: Slack message for Rob — opus-4-6
+
+Draft Slack message:
+
+---
+
+Hey Rob! I put together a Claude Code kit to get your workspace set up. Here's how to get started:
+
+1. Download the zip: `robert-ross-claude-code-kit.zip` (I'll send it here or via email — let me know which you prefer)
+
+2. Unzip it — double-click the file in Finder, or in Terminal:
+   ```
+   cd ~/Downloads
+   unzip robert-ross-claude-code-kit.zip -d ~/Documents/Code/claude-code-kit
+   ```
+
+3. Read through `README.md` in the unzipped folder — it's a short table of contents explaining what each file does
+
+4. Open Terminal, then start Claude Code pointed at your workspace:
+   ```
+   cd ~/Documents/Code
+   claude
+   ```
+
+5. Once Claude Code is running, paste this prompt:
+   ```
+   Read ~/Documents/Code/claude-code-kit/robert-ross-workspace-setup.md and run it step by step.
+   ```
+
+6. Claude will walk through each setup step and pause for your confirmation before moving on. If anything is unclear or you hit a snag, just ping me.
+
+The whole setup takes about 10-15 minutes. The kit also has a reference guide and example session you can check out later.
+
+---
+
+Let me know if you want to adjust the tone or add/remove anything before sending.
+<!-- agent:boundary:6118252f -->
 <!-- /agent:exchange -->
 
 <!--

@@ -700,7 +700,22 @@ Updated Step 8 in workspace-setup.md to install this as `tasks/README.md`. Added
 Covered in the new Section 13. Also added a callout in Section 1 ("each session starts fresh") so Rob doesn't hit this as a surprise. Tips include: updating plans at end of session, reading plans at start of next session, and using git history as session memory.
 
 Quick Reference table updated with new entries: check settings.json, pick up where you left off, optimize workflow, clean up tasks.
-<!-- agent:boundary:067a6f56 -->
+
+❯ Are there any other gaps for a smooth Claude Code experience?
+### Re: Remaining gaps — opus-4-6
+
+The kit is substantively complete (994-line guide, setup plan, spec, tasks README, codex plan). Three experience-level gaps remain:
+
+1. **Permission prompts** — Claude Code asks "Allow Claude to run X?" before shell commands, file edits, etc. Rob will see these on day one and won't know what they mean or when to say yes/no. A short section explaining the permission model (what's safe to allow, what to read carefully, how to pre-approve common commands) would prevent confusion.
+
+2. **Example session transcript** — despite all the prompts in the guide, Rob has never seen what the actual back-and-forth looks like in the terminal. A short annotated example (5-10 exchanges) showing: open Claude Code → ask for something → see Claude work → result. Could be a separate `example-session.md` or a section in the guide.
+
+3. **Reading path for the guide** — the guide is now 994 lines / 15 sections. For a new user, that's overwhelming. A "start here" callout at the top pointing to the 3-4 sections Rob should read first (1, 3, 11, 12) would prevent him from bouncing off the length.
+
+Beyond those three, the functional coverage is solid. The remaining pending item (Codex CLI) is explicitly deferred. Everything else Rob needs is either in the guide, the setup plan, or SPEC.md.
+
+Want me to address any or all of these?
+<!-- agent:boundary:76339280 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -710,6 +725,5 @@ Quick Reference table updated with new entries: check settings.json, pick up whe
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:pending -->

@@ -636,7 +636,25 @@ Confirmed safe. `strip_backlog_patch_attr()` iterates only over `BACKLOG_COMPONE
 
 `agent:exchange patch=append` remains active and meaningful: `template::default_mode("exchange")` returns `"append"` (the built-in default), and the template engine uses it to decide append-vs-replace behavior in `apply_patches_with_overrides()`. The attribute is also explicitly documented in `specs/02-document-format.md` as part of the inline-attr precedence chain.
 
-<!-- agent:boundary:b14726ba -->
+❯ do #hicebox. #spec-test-build-install-commit-push
+### Re: do #hicebox — opus-4-6
+
+Added `agent:icebox` component to the template system.
+
+#### Changes
+
+**component.rs** — `ICEBOX_COMPONENT = "icebox"` constant, `is_icebox_component()` helper, plus two unit tests (name detection + parser roundtrip).
+
+**Scaffolds** — claim.rs (both empty-file and component scaffold), sync.rs now emit `## Icebox` / `&lt;!-- agent:icebox --&gt;` / `&lt;!-- /agent:icebox --&gt;` after backlog. Test assertions updated from four to five components.
+
+**Specs/docs** — `02-document-format.md` standard component table includes icebox (`replace` default). `runbooks/document-format.md` example block and conventional-names list updated.
+
+**No special handling needed** — icebox is a simple content component. It doesn't need `strip_backlog_patch_attr` equivalent, template.rs rejection logic, or `--pending-*` CLI flags. Users manage icebox content by editing the document directly.
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14. Committed and pushed as `69843ee` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:4bdec7c5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -645,7 +663,7 @@ Confirmed safe. `strip_backlog_patch_attr()` iterates only over `BACKLOG_COMPONE
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hicebox] Add agent:icebox component. Sits after agent:pending/agent:backlog in the template. Represents project icebox (items not in active backlog). Update scaffolds, spec, parser, and component handling
+- [x] [#hicebox] Add agent:icebox component. Sits after agent:pending/agent:backlog in the template. Represents project icebox (items not in active backlog). Update scaffolds, spec, parser, and component handling
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

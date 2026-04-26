@@ -472,7 +472,25 @@ Each section: **expected state** + **check command** + **fix command**. Rob read
 **When it earns its keep:** Brian updates the spec in the kit, ships to Rob, Rob says "check my environment against the spec" — instant drift report.
 
 **Tradeoff:** one more file to maintain. But it's small, changes rarely, and maintenance cost is low relative to the debugging time it saves.
-<!-- agent:boundary:b672dec2 -->
+
+❯ The spec should have a clause to break out into specs/*.md if the content becomes expansive. Please also generate a SPEC.md for robert-ross's environment migration. No need to mermaid diagrams.
+### Re: SPEC.md created + kit restructured — opus-4-6
+
+Created `SPEC.md` and restructured the kit. Here's what changed:
+
+#### SPEC.md (new file)
+
+Single-file declarative spec with sections for: workspace layout, CLAUDE.md rules, hooks, MCP plugins, skills, git configuration, and guide presence. Each section has expected state, check command, and fix command. Includes the scaling clause — break out to `specs/*.md` when any section exceeds ~50 lines.
+
+#### Kit restructuring (all agreed-upon changes)
+
+1. **Quick Reference moved from setup plan → guide Section 7.** Added "Environment health check" row pointing to SPEC.md. Setup plan no longer has a Quick Reference section.
+2. **New Step 8 in setup plan:** copies `robert-ross-workspace-guide.md` and `SPEC.md` to `~/Documents/Code/`. Skills/plugins exploration moved to Step 9.
+3. **README.md updated:** file table now includes SPEC.md, "After setup" section points to the guide's Quick Reference (Section 7) instead of the setup plan, and mentions the health check prompt.
+4. **Guide sections renumbered:** Automation Setup Plan is now Section 8, Next Steps is Section 9.
+
+Zip rebuilt with all four files.
+<!-- agent:boundary:203c7875 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

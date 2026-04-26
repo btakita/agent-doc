@@ -82,7 +82,25 @@ Transcribed & diarized — 43:36 call between you and Robert covering documentat
 - **Rubric work deferred:** Don't build GitHub→Google Docs sync yet; focus on the conceptual doc taxonomy first (what goes public, why, how to mark it)
 - **Personal/budget:** Rob walked Brian through expense breakdown; highlighted rent ($1,800) + groceries (~$400–500/week) = ~$4k/month baseline; Brian committed to filling out budget spreadsheet
 - **Two action items:** (1) fill out budget tonight, (2) think through how Claude Code becomes part of the documentation decision-making process
-<!-- agent:boundary:d0c29a9d -->
+
+❯ How can robert-ross add me as an Admin to the Open Router workspace?
+❯ See https://openrouter.ai/docs/guides/features/workspaces
+### Re: OpenRouter workspace admin invite — sonnet-4-6
+
+The [OpenRouter workspace docs](https://openrouter.ai/docs/guides/features/workspaces) don't publish a step-by-step UI walkthrough, but the flow based on the documented permission model:
+
+**Robert's steps (he must be an Org Admin):**
+
+1. Go to **openrouter.ai** → top-right account menu → **Organization Settings** (or **Settings → Members**)
+2. Find the **Workspaces** or **Members** tab
+3. Click **Invite member** / **Add member**
+4. Enter your email (`brian.takita@gmail.com`)
+5. Set role to **Admin** before sending (or promote after accepting)
+
+**Role note:** "Org Admin" grants access to all workspaces plus manage members, API keys, guardrails, billing. If Robert only wants you scoped to a specific workspace (not org-wide), he'd add you as a workspace member instead — but that gives member-level permissions only; workspace-scoped Admin is controlled at the org level.
+
+If Robert doesn't see a Members/Invite option, he may not have Org Admin himself — he'd need to ask whoever created the org to promote him first.
+<!-- agent:boundary:2e50302b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -655,16 +655,52 @@ Found and fixed one concrete bug, added a missing section, and identified remain
 
 1. **No example session transcript** — Rob has never seen a real Claude Code back-and-forth. A short annotated example showing "user says X → Claude does Y → result" would demystify the interaction faster than diagrams alone. Could be a new section or a separate `example-session.md` file.
 
+❯ Can we have a task to review sessions and use Claude Code to optimize the harness according to his usage?
+
 2. **No settings.json template for hooks** — SPEC.md says "Brian installs these during Zoom" for hooks, but there's no pre-built JSON template for what those hooks actually look like. If Brian can't make the Zoom, Rob has no fallback.
+
+❯ robert-ross already has a settings.json file. Please add instructions on how robert-ross has ensure his settings.json is up to date with this harness addition.
 
 3. **CLAUDE.md doesn't reference SPEC.md** — The workspace CLAUDE.md template doesn't tell Claude "when verifying my environment, read SPEC.md." Adding one line would make the health-check flow discoverable without Rob remembering the exact prompt.
 
+❯ Make CLAUDE.md reference SPEC.md
+
 4. **No seed content in tasks/** — The setup creates `tasks/` but it starts empty. A starter `tasks/README.md` or example planning doc would show Rob the pattern by example rather than just describing it.
+
+❯ Add an example task. Is tasks/ only for plans and generated artifacts from running a plan? Are there other artifacts that would be created in tasks/. We should also have instructions + prompts to clean up tasks/ to remove stale content.
 
 5. **Session continuity isn't in the guide's mental model section** — Section 12 (troubleshooting) now mentions it, but it might deserve a callout in Section 1 or 3 so Rob doesn't hit it as a surprise.
 
+❯ Provide some tips on how to reference other sessions. Add skills/runbooks as needed.
+
 Items 1-5 are all quick fixes. Want me to address any or all of them?
-<!-- agent:boundary:b2965eb3 -->
+### Re: Addressing all five gaps — opus-4-6
+
+Addressed all five items:
+
+#### 1. Session review + harness optimization
+Added **Section 13: Working Across Sessions** to the guide. Covers picking up where you left off, referencing prior work, cross-project context, and a periodic "session review" workflow where Claude analyzes usage patterns and suggests skills/hooks/rules to automate repetitive work. Includes a monthly optimization check prompt.
+
+#### 2. Settings.json maintenance
+Added a **"Keeping settings.json current"** subsection to Section 6. Covers verifying settings, reconciling manual additions, and the 3-step flow Claude follows when adding a new harness component (add to settings → verify → update SPEC.md).
+
+#### 3. CLAUDE.md references SPEC.md
+Updated the CLAUDE.md template in `robert-ross-workspace-setup.md` Step 1 — added an "Environment Verification" section with two rules: "read SPEC.md when verifying" and "suggest the SPEC.md health check when something seems off."
+
+#### 4. Example task + tasks/ purpose
+Created `example-tasks-readme.md` — a README for Rob's `tasks/` folder that explains:
+- What goes there (plans, session notes, research, meeting notes, checklists)
+- What does NOT go there (code, generated artifacts, permanent docs)
+- How to organize it (by project)
+- How to clean it up (archive completed, delete stale, update drifted)
+
+Updated Step 8 in workspace-setup.md to install this as `tasks/README.md`. Added to kit README.
+
+#### 5. Cross-session referencing
+Covered in the new Section 13. Also added a callout in Section 1 ("each session starts fresh") so Rob doesn't hit this as a surprise. Tips include: updating plans at end of session, reading plans at start of next session, and using git history as session memory.
+
+Quick Reference table updated with new entries: check settings.json, pick up where you left off, optimize workflow, clean up tasks.
+<!-- agent:boundary:067a6f56 -->
 <!-- /agent:exchange -->
 
 <!--

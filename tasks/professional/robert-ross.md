@@ -297,7 +297,21 @@ Created [`tasks/dreamable/robert-ross-claude-code-kit/`](../dreamable/robert-ros
 **README flow:** Open setup plan first, follow steps in order. Steps 1-4 and 6 are solo; Steps 5 and 7 need Zoom with Brian. Guide is for reference when Rob has questions.
 
 Zipped to [`tasks/dreamable/robert-ross-claude-code-kit.zip`](../dreamable/robert-ross-claude-code-kit.zip) (7.3 KB) — ready to send via Slack.
-<!-- agent:boundary:ae811376 -->
+
+❯ Can we delete:
+❯ [robert-ross-workspace-setup.md](../dreamable/robert-ross-workspace-setup.md)
+❯ [robert-ross-claude-code-guide.md](../dreamable/robert-ross-claude-code-guide.md)
+### Re: delete originals — opus-4-6
+
+Done. Deleted both:
+
+- `tasks/dreamable/robert-ross-workspace-setup.md`
+- `tasks/dreamable/robert-ross-claude-code-guide.md`
+
+The canonical copies now live in `tasks/dreamable/robert-ross-claude-code-kit/`. The zip is already built from those copies, so no rebuild needed.
+
+Note: earlier exchange responses link to the old paths — those links are now broken in the document history, but the kit directory has the same files with the same names, so Rob's zip is unaffected.
+<!-- agent:boundary:4c8aeada -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

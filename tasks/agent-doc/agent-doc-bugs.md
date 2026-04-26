@@ -328,6 +328,8 @@ The oscillation (strip → re-add with prefixes) is the write pipeline fighting 
 
 **Fix:** agent-doc should detect file renames via the session UUID in frontmatter. When preflight finds no snapshot for the current path but the frontmatter UUID matches a snapshot at a different path, it should migrate the snapshot to the new path hash before computing the diff. Alternatively, an explicit `agent-doc move <old> <new>` command could relocate the snapshot + baseline + pre-response artifacts in one step.
 
+❯ Add the Fix into pending.
+
 **Workaround for now:** after moving a session document, run `agent-doc claim <new-path>` to force a fresh snapshot from the committed state before resuming the session.
 
 ### Re: IDEA lag — opus-4-6
@@ -340,7 +342,11 @@ Common causes given the agent-doc JB plugin context:
 - The `ActionPromoter` issue from the memory notes — though that manifests as broken intentions, not lag
 
 If you restart IDEA and the lag returns, I can check plugin logs, thread dumps (`jstack`), or the IDE's built-in freeze reporter. Let me know.
-<!-- agent:boundary:5f886522 -->
+
+### Re: add fix to pending — opus-4-6
+
+Added `#mvsnap` to pending — covers both the preflight auto-migration path and the explicit `agent-doc move` command as a fallback.
+<!-- agent:boundary:07dbdda2 -->
 <!-- /agent:exchange -->
 <!--
 -->
@@ -348,6 +354,7 @@ If you restart IDEA and the lag returns, I can check plugin logs, thread dumps (
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

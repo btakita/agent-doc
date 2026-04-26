@@ -1011,7 +1011,18 @@ Queue processes `#fix1` and `#fix2`, then hits `--- stop` and halts (strips `aut
 This gives you review gates between batches of work. You can place multiple stop fences to create a multi-stage pipeline where you review after each stage before proceeding.
 
 `trigger` and `stop` are now symmetric control fences in the parser. Updated parsing rules to include both as recognized fence types alongside prompt fences.
-<!-- agent:boundary:8e572c1d -->
+
+❯ Should we use `--- start` instead of `--- trigger`, or would `--- start` be too ambiguous?
+### Re: start vs trigger naming — opus-4-6
+
+`--- start` is better. The `start`/`stop` pair is immediately obvious — symmetric naming means less to remember. `trigger` carries a "one-shot event" connotation that's accurate but unnecessary when the design already documents the one-shot behavior.
+
+Ambiguity risk is low: these control fences only have meaning inside `&lt;!-- agent:queue --&gt;` boundaries, so there's no collision with `---` as a thematic break or frontmatter delimiter elsewhere. And someone writing "start" as a queue prompt would use `- start something` (list item syntax), not `--- start` on its own line.
+
+I'd go with `--- start` as the canonical name. Since nothing is implemented yet, there's no migration cost — just update the plan and parsing rules to use `start` everywhere.
+
+Want me to update the plan to use `--- start` / `~~~start`?
+<!-- agent:boundary:b0b8dc0d -->
 <!-- /agent:exchange -->
 
 <!--

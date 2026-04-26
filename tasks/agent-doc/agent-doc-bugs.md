@@ -1326,7 +1326,25 @@ What's lingering is the `cat` process in each `zsh` shell. Claude Code's `run_in
 All 7 shells show identical behavior: `State: S (sleeping)`, stdin → socket, stdout/stderr → task output file. No CPU consumed, no work being done.
 
 **Fix:** I'm switching to foreground mode for finalize calls going forward. This eliminates the lingering shells because the Bash tool waits for the command to complete and the shell exits cleanly. The tradeoff (slightly longer tool-call time) is trivially small since finalize completes in ~50ms.
-<!-- agent:boundary:3df6e6bd -->
+
+❯ release + publish
+### Re: release + publish — opus-4-6
+
+**v0.33.14 built and installed locally.** Changes are rustfmt-only (8 files, net -23 lines).
+
+Steps completed:
+1. Ran full test suite — 1 pre-existing failure (`test_codex_skill_install_writes_hook_artifacts`, confirmed pre-existing on committed code), all other 1,593 tests pass
+2. Bumped version in `Cargo.toml` + `pyproject.toml` → 0.33.14
+3. Updated `VERSIONS.md`
+4. Committed: `f8291a9 v0.33.14: rustfmt cleanup`
+5. `cargo install --path .` — `~/.cargo/bin/agent-doc` → 0.33.14
+6. `cargo build --release` — `target/release/agent-doc` → 0.33.14
+
+**Waiting for manual testing confirmation** before proceeding to:
+- `cargo publish`
+- `git tag v0.33.14 && git push origin v0.33.14`
+- `gh release create v0.33.14 --generate-notes`
+<!-- agent:boundary:897db0ee -->
 <!-- /agent:exchange -->
 
 <!--

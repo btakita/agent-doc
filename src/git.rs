@@ -80,6 +80,8 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::component::is_backlog_component;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
     pub did_commit: bool,
@@ -577,16 +579,17 @@ fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
 
     let has_status = components.iter().any(|c| c.name == "status");
     let has_exchange = components.iter().any(|c| c.name == "exchange");
-    let has_pending = components.iter().any(|c| c.name == "pending");
+    let has_pending = components.iter().any(|c| is_backlog_component(&c.name));
     if !(has_status && has_exchange && has_pending) {
         return false;
     }
 
     components.iter().all(|component| {
-        matches!(
+        (matches!(
             component.name.as_str(),
-            "status" | "exchange" | "queue" | "pending"
-        ) && normalize_component_content_for_absorb(component.content(body)).is_empty()
+            "status" | "exchange" | "queue"
+        ) || is_backlog_component(&component.name))
+            && normalize_component_content_for_absorb(component.content(body)).is_empty()
     })
 }
 
@@ -644,7 +647,7 @@ fn classify_safe_agent_doc_mutation(
                 }
                 saw_exchange = true;
             }
-            "pending" => {
+            name if is_backlog_component(name) => {
                 if !is_safe_out_of_band_pending_mutation(&snap_content, &file_content) {
                     return None;
                 }

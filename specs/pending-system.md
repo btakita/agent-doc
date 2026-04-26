@@ -12,7 +12,7 @@ owner: btakita
 
 ## Problem
 
-The `agent:pending` component drifts between cycles. Current enforcement requires a full `patch:pending` block on every response — when the skill forgets, or rewrites the wrong item, or reorders the list, downstream cycles can't tell which item was "the same bullet as last time." Full-replace is lossy: text drift and reorder both destroy identity, so `--pending-done 3` (numeric index) is unsafe and `--pending-done "text"` (exact match) is fragile.
+The `agent:backlog` component drifts between cycles. Current enforcement requires a full `patch:pending` block on every response — when the skill forgets, or rewrites the wrong item, or reorders the list, downstream cycles can't tell which item was "the same bullet as last time." Full-replace is lossy: text drift and reorder both destroy identity, so `--pending-done 3` (numeric index) is unsafe and `--pending-done "text"` (exact match) is fragile.
 
 Three symptoms observed in practice:
 
@@ -26,7 +26,7 @@ Four cooperating primitives. Each solves one of the symptoms above.
 
 ### 1. Stable hash IDs
 
-Every bullet in `agent:pending` carries a 4-char base32 hash as a visible prefix:
+Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix:
 
 ```
 - [ ] [#a3f2] refactor preflight commit path
@@ -106,14 +106,14 @@ Preflight is the single upgrade path. No separate `agent-doc migrate` command.
 
 On every preflight run:
 
-1. Scan the `agent:pending` component for list items.
+1. Scan the `agent:backlog` component for list items.
 2. For each bullet:
    - No hash prefix → generate and insert a hash.
    - No checkbox → insert `- [ ] ` before the hash.
 3. Reap `- [x]` bullets **only**:
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
-   - (Optional, deferred) Append an archive entry to `agent:pending-done` if the component exists.
+   - (Optional, deferred) Append an archive entry to `agent:backlog-done` if the component exists.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
 **Migration of existing items:** No auto-migration. Existing `[ ]` items with "✅ landed" / "shipped" / "awaiting release" prose stay as-is until touched manually. Auto-classifying prose is fuzzy (what counts?); blast radius is unclear. With only a handful of real gated items in-tree, retagging by hand via `--pending-gate` is faster and safer than writing a heuristic.
@@ -176,13 +176,13 @@ Invert the current rule:
 ## Schema — fully-migrated example
 
 ```markdown
-<!-- agent:pending patch=append -->
+<!-- agent:backlog patch=append -->
 - [ ] [#a3f2] implement --pending-reorder
 - [ ] [#b1c4] rewrite runbook to forbid replace:pending
 - [/] [#eg0w] per-file CommitLock + freshness gate — gate: v0.32.5 release
 - [/] [#a002] normalize_user_prompts safety rail — awaiting large-drift telemetry trip
 - [x] [#c9e0] fix boundary repositioning
-<!-- /agent:pending -->
+<!-- /agent:backlog -->
 ```
 
 After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls forward. `#eg0w` and `#a002` remain untouched — they stay `[/]` until an operator explicitly promotes them to `[x]`.

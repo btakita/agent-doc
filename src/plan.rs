@@ -32,7 +32,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::{component, diff, frontmatter, pending};
+use crate::{component, component::is_backlog_component, diff, frontmatter, pending};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -199,7 +199,7 @@ fn pending_mutations_for_doc(
     let components = component::parse(content).context("failed to parse document components")?;
     let Some(pending_component) = components
         .iter()
-        .find(|component| component.name == "pending")
+        .find(|component| is_backlog_component(&component.name))
     else {
         return Ok(Vec::new());
     };

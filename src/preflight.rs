@@ -102,6 +102,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
+use crate::component::is_backlog_component;
 use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
@@ -1116,7 +1117,7 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         Ok(cs) => cs,
         Err(_) => return Ok((false, 0)),
     };
-    let comp = match components.into_iter().find(|c| c.name == "pending") {
+    let comp = match components.into_iter().find(|c| is_backlog_component(&c.name)) {
         Some(c) => c,
         None => return Ok((false, 0)),
     };
@@ -1175,7 +1176,7 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         if let Ok(Some(snap_content)) = snapshot::load(file) {
             let snap_comps = crate::component::parse(&snap_content).ok();
             if let Some(snap_pending) =
-                snap_comps.and_then(|cs| cs.into_iter().find(|c| c.name == "pending"))
+                snap_comps.and_then(|cs| cs.into_iter().find(|c| is_backlog_component(&c.name)))
             {
                 let mut new_snap = snap_pending.replace_content(&snap_content, &current_body);
                 if !removed_items.is_empty()
@@ -1195,7 +1196,7 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         Some(snap) => {
             let snap_comp = crate::component::parse(&snap)
                 .ok()
-                .and_then(|comps| comps.into_iter().find(|c| c.name == "pending"));
+                .and_then(|comps| comps.into_iter().find(|c| is_backlog_component(&c.name)));
             if let Some(sc) = snap_comp {
                 let snap_body = &snap[sc.open_end..sc.close_start];
                 crate::pending::detect_reorder(snap_body, &current_body).is_some()

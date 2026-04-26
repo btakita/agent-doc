@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component;
+use crate::component::is_backlog_component;
 use crate::pending;
 use crate::snapshot;
 
@@ -22,7 +23,7 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
     let components = component::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
-        .find(|c| c.name == "pending")
+        .find(|c| is_backlog_component(&c.name))
         .context("document has no pending component")?;
     Ok((content, comp))
 }
@@ -306,7 +307,7 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let comp = match components.into_iter().find(|c| c.name == "pending") {
+            let comp = match components.into_iter().find(|c| is_backlog_component(&c.name)) {
                 Some(c) => c,
                 None => continue,
             };

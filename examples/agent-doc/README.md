@@ -12,7 +12,7 @@ This is a real task document used to develop agent-doc itself. The document serv
 - **`agent:lessons`** — 16 hard-won lessons discovered during development
 - **`agent:history`** — compacted session summaries (each represents hundreds of lines of conversation)
 - **`agent:exchange`** — the active conversation surface (compacted after each major milestone)
-- **`agent:pending`** — roadmap items with GitHub issue links
+- **`agent:backlog`** — roadmap items with GitHub issue links (legacy alias: `agent:pending`)
 
 ## How it works
 

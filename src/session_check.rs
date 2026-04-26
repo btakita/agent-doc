@@ -46,6 +46,8 @@
 use anyhow::Result;
 use std::path::Path;
 
+use crate::component::is_backlog_component;
+
 /// Event name prefix emitted by `preflight::run` that indicates a cycle
 /// started but may have been abandoned. If this is the final entry in
 /// ops.log, the previous cycle did not complete.
@@ -399,7 +401,7 @@ fn response_text_for_guards(response: &str) -> String {
 
     let fallback: Vec<String> = patches
         .iter()
-        .filter(|patch| patch.name != "pending")
+        .filter(|patch| !is_backlog_component(&patch.name))
         .map(|patch| patch.content.trim().to_string())
         .filter(|text| !text.is_empty())
         .collect();
@@ -417,7 +419,7 @@ fn open_pending_ids(file: &Path) -> Result<Vec<String>> {
     };
     let Some(pending) = components
         .into_iter()
-        .find(|component| component.name == "pending")
+        .find(|component| is_backlog_component(&component.name))
     else {
         return Ok(Vec::new());
     };

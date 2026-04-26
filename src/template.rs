@@ -80,7 +80,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::component::{self, Component, find_comment_end};
+use crate::component::{self, Component, find_comment_end, is_backlog_component};
 use crate::project_config;
 
 /// A parsed patch directive from an agent response.
@@ -189,7 +189,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
             let name_end = rest_trim
                 .find(|c: char| c.is_whitespace())
                 .unwrap_or(rest_trim.len());
-            if &rest_trim[..name_end] == "pending" {
+            if is_backlog_component(&rest_trim[..name_end]) {
                 Some(("replace", rest))
             } else {
                 None
@@ -216,9 +216,10 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 
             // Deprecation warning: `patch:pending` is deprecated in favor of
             // `replace:pending`. Warn once per parse call on first occurrence.
-            if prefix_kind == "patch" && name == "pending" {
+            if prefix_kind == "patch" && is_backlog_component(name) {
                 eprintln!(
-                    "warning: `<!-- patch:pending -->` is deprecated — use `<!-- replace:pending -->` instead (see #25ag)"
+                    "warning: `<!-- patch:{} -->` is deprecated — use `<!-- replace:{} -->` instead (see #25ag)",
+                    name, name
                 );
             }
 

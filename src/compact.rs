@@ -750,6 +750,7 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::is_backlog_component;
 
     #[test]
     fn parse_exchanges_basic() {
@@ -901,7 +902,7 @@ mod tests {
         let components_before = component::parse(doc).unwrap();
         let pending_before = components_before
             .iter()
-            .find(|c| c.name == "pending")
+            .find(|c| is_backlog_component(&c.name))
             .unwrap()
             .content(doc)
             .to_string();
@@ -920,7 +921,7 @@ mod tests {
         let components_after = component::parse(&result).unwrap();
         let pending_after = components_after
             .iter()
-            .find(|c| c.name == "pending")
+            .find(|c| is_backlog_component(&c.name))
             .unwrap()
             .content(&result)
             .to_string();
@@ -989,7 +990,7 @@ mod tests {
         let components_before = component::parse(doc).unwrap();
         let pending_before = components_before
             .iter()
-            .find(|c| c.name == "pending")
+            .find(|c| is_backlog_component(&c.name))
             .unwrap()
             .content(doc)
             .to_string();
@@ -1002,7 +1003,7 @@ mod tests {
         let components_after = component::parse(&result).unwrap();
         let pending_after = components_after
             .iter()
-            .find(|c| c.name == "pending")
+            .find(|c| is_backlog_component(&c.name))
             .unwrap()
             .content(&result)
             .to_string();

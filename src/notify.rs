@@ -43,7 +43,7 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, pending, pending_cmd, snapshot};
+use crate::{component, component::is_backlog_component, pending, pending_cmd, snapshot};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -106,7 +106,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     let components = component::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
-    if components.iter().any(|c| c.name == "pending") {
+    if components.iter().any(|c| is_backlog_component(&c.name)) {
         return Ok(false);
     }
 
@@ -118,7 +118,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     // Prefer inserting before the exchange close tag if it exists, otherwise at end.
     let insert_pos = find_pending_insert_position(&doc, &components);
 
-    let pending_block = "\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n";
+    let pending_block = "\n<!-- agent:backlog patch=replace -->\n<!-- /agent:backlog -->\n";
     let mut new_doc = String::with_capacity(doc.len() + pending_block.len());
     new_doc.push_str(&doc[..insert_pos]);
     new_doc.push_str(pending_block);
@@ -288,8 +288,8 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
     let components = component::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
-        .find(|c| c.name == "pending")
-        .context("document has no pending component")?;
+        .find(|c| is_backlog_component(&c.name))
+        .context("document has no backlog/pending component")?;
     let existing = &content[comp.open_end..comp.close_start];
     let (new_content, id) = pending::op_add(existing, item, doc_id, gated)?;
     let new_doc = comp.replace_content(&content, &new_content);
@@ -557,8 +557,8 @@ mod tests {
         run(&doc, None, None, None, false, &items, &[], false).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("<!-- agent:pending"));
-        assert!(result.contains("<!-- /agent:pending -->"));
+        assert!(result.contains("<!-- agent:backlog"));
+        assert!(result.contains("<!-- /agent:backlog -->"));
         assert!(result.contains("implement feature X"));
         assert!(result.contains("[ ]"));
         assert!(result.contains("[#"));
@@ -730,10 +730,10 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
-        let pending_open = result.find("<!-- agent:pending").unwrap();
+        let backlog_open = result.find("<!-- agent:backlog").unwrap();
         assert!(
-            pending_open > exchange_close,
-            "pending should be after exchange close"
+            backlog_open > exchange_close,
+            "backlog should be after exchange close"
         );
     }
 

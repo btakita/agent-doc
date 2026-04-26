@@ -33,7 +33,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{component, frontmatter, snapshot, write};
+use crate::{component, component::is_backlog_component, frontmatter, snapshot, write};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim
@@ -235,8 +235,8 @@ pub fn transfer(
     referral: bool,
 ) -> Result<()> {
     // Validate --items usage before any filesystem operations
-    if items.is_some() && component_name != "pending" {
-        anyhow::bail!("--items flag is only supported for the 'pending' component");
+    if items.is_some() && !is_backlog_component(component_name) {
+        anyhow::bail!("--items flag is only supported for the 'pending'/'backlog' component");
     }
     if referral && items.is_some() {
         anyhow::bail!("--referral and --items cannot be used together");
@@ -348,17 +348,17 @@ pub fn transfer(
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
-    // Also transfer the "pending" component if it exists in both source and target
-    // and the transferred component is not "pending" itself.
-    if component_name != "pending" {
+    // Also transfer the backlog component if it exists in both source and target
+    // and the transferred component is not the backlog itself.
+    if !is_backlog_component(component_name) {
         let source_refreshed = std::fs::read_to_string(source)?;
         let target_refreshed = std::fs::read_to_string(target)?;
 
         let source_comps = component::parse(&source_refreshed).unwrap_or_default();
         let target_comps = component::parse(&target_refreshed).unwrap_or_default();
 
-        if let Some(source_pending) = source_comps.iter().find(|c| c.name == "pending")
-            && let Some(target_pending) = target_comps.iter().find(|c| c.name == "pending")
+        if let Some(source_pending) = source_comps.iter().find(|c| is_backlog_component(&c.name))
+            && let Some(target_pending) = target_comps.iter().find(|c| is_backlog_component(&c.name))
         {
             let pending_content = source_pending.content(&source_refreshed);
             if !pending_content.trim().is_empty() {
@@ -421,9 +421,9 @@ fn transfer_pending_items(
     let target_comps =
         component::parse(&target_content).context("failed to parse components in target")?;
 
-    let source_pending = source_comps.iter().find(|c| c.name == "pending");
+    let source_pending = source_comps.iter().find(|c| is_backlog_component(&c.name));
     let Some(source_pending) = source_pending else {
-        anyhow::bail!("component 'pending' not found in {}", source.display());
+        anyhow::bail!("component 'pending'/'backlog' not found in {}", source.display());
     };
 
     let pending_content = source_pending.content(&source_content);
@@ -468,7 +468,7 @@ fn transfer_pending_items(
     snapshot::save(source, &new_source)?;
 
     // Append matched items to target pending
-    let target_pending = target_comps.iter().find(|c| c.name == "pending");
+    let target_pending = target_comps.iter().find(|c| is_backlog_component(&c.name));
     let new_target = if let Some(tp) = target_pending {
         let existing = tp.content(&target_content);
         let appended = format!("{}{}\n", existing, matched_lines.join("\n"));
@@ -730,7 +730,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("only supported for the 'pending' component")
+                .contains("only supported for the 'pending'/'backlog' component")
         );
     }
 

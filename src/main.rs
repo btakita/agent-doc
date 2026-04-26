@@ -572,7 +572,7 @@ enum Commands {
     Read {
         /// Path to the session document
         file: PathBuf,
-        /// Name of a specific component to extract (e.g. "exchange", "pending").
+        /// Name of a specific component to extract (e.g. "exchange", "backlog").
         /// If omitted, the full file is printed.
         #[arg(long)]
         component: Option<String>,
@@ -776,13 +776,13 @@ enum Commands {
         /// Skip git commit after notification
         #[arg(long)]
         no_commit: bool,
-        /// Add a pending item to the target document (repeatable). Auto-creates agent:pending if absent.
+        /// Add a pending item to the target document (repeatable). Auto-creates agent:backlog if absent.
         #[arg(long = "pending-add")]
         pending_add: Vec<String>,
         /// Add a gated pending item (repeatable). Like --pending-add but assigns [/] instead of [ ].
         #[arg(long = "pending-add-gated")]
         pending_add_gated: Vec<String>,
-        /// Do not auto-create agent:pending component if absent
+        /// Do not auto-create agent:backlog component if absent
         #[arg(long = "no-create-pending")]
         no_create_pending: bool,
     },
@@ -826,7 +826,7 @@ enum Commands {
         #[arg(long, default_value = "sonnet")]
         fallback_model: String,
     },
-    /// Manage the agent:pending component
+    /// Manage the agent:backlog (pending) component
     Pending {
         /// Path to the session document
         file: PathBuf,

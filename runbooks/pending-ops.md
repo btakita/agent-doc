@@ -1,8 +1,8 @@
 # Pending ops — granular contract
 
-When a template-mode document has an `<!-- agent:pending -->` component, the agent mutates it
-through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:pending -->`
-(or the deprecated `<!-- patch:pending -->`) is **forbidden** in normal response cycles — the
+When a template-mode document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, the agent mutates it
+through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:backlog -->`
+(or the deprecated `<!-- patch:pending -->` / `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
 binary rejects those blocks with a clear error. See `src/agent-doc/specs/pending-system.md`
 for the full contract.
 

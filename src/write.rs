@@ -208,7 +208,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::snapshot::find_project_root;
-use crate::{component, frontmatter, merge, repair, sessions, snapshot, template};
+use crate::{component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot, template};
 
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
@@ -584,7 +584,7 @@ pub(crate) fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Re
     if allow_canonical || allow_legacy {
         return Ok(());
     }
-    if patches.iter().any(|p| p.name == "pending") {
+    if patches.iter().any(|p| is_backlog_component(&p.name)) {
         anyhow::bail!(
             "ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. \
              See specs/pending-system.md."
@@ -1316,7 +1316,7 @@ pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
         Err(_) => return None,
     };
     let exchange = components.iter().find(|c| c.name == "exchange")?;
-    let pending = components.iter().find(|c| c.name == "pending")?;
+    let pending = components.iter().find(|c| is_backlog_component(&c.name))?;
 
     if pending.open_start >= exchange.close_end {
         return None; // already a sibling — no repair needed
@@ -3642,7 +3642,7 @@ fn splice_pending_component(target: &str, source: &str) -> String {
             return target.to_string();
         }
     };
-    let source_pending = source_comps.iter().find(|c| c.name == "pending");
+    let source_pending = source_comps.iter().find(|c| is_backlog_component(&c.name));
     let Some(src_comp) = source_pending else {
         // No pending component in source — nothing to splice.
         return target.to_string();
@@ -3659,7 +3659,7 @@ fn splice_pending_component(target: &str, source: &str) -> String {
             return target.to_string();
         }
     };
-    let target_pending = target_comps.iter().find(|c| c.name == "pending");
+    let target_pending = target_comps.iter().find(|c| is_backlog_component(&c.name));
     match target_pending {
         Some(tgt_comp) => tgt_comp.replace_content(target, source_content),
         None => {
@@ -4217,6 +4217,7 @@ mod tests {
     #[test]
     fn replace_mode_components_not_append() {
         assert!(!is_append_mode_component("pending"));
+        assert!(!is_append_mode_component("backlog"));
         assert!(!is_append_mode_component("status"));
         assert!(!is_append_mode_component("output"));
         assert!(!is_append_mode_component("todo"));

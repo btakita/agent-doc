@@ -248,5 +248,5 @@ Each plugin implementation should have tests (or manual test procedures) coverin
 9. **ACK protocol:** Patch file is deleted only after successful application; left in place on failure.
 10. **Concurrent edit safety:** Patch application while user is typing does not corrupt the document or lose user edits.
 11. **Double-invocation guard:** Rapid submit/claim calls do not produce duplicate CLI invocations.
-12. **`agent:pending` component:** A patch targeting `agent:pending` applies in replace mode, overwriting the checkbox list rather than appending to it.
+12. **`agent:backlog` component:** A patch targeting `agent:backlog` (or legacy `agent:pending`) applies in replace mode, overwriting the checkbox list rather than appending to it.
 13. **Tag sanitization:** Component names with special characters are sanitized before tag emission; the plugin correctly matches sanitized tags.

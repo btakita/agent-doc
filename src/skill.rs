@@ -922,7 +922,7 @@ mod tests {
     fn bundled_skill_contains_pending_capture_rules() {
         assert!(SKILL_TEMPLATE.contains("Pending capture rule"));
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
-        assert!(SKILL_TEMPLATE.contains("beginning of `agent:pending`"));
+        assert!(SKILL_TEMPLATE.contains("beginning of `agent:backlog`"));
         assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
         assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));
         assert!(SKILL_TEMPLATE.contains("--pending-done <id>"));

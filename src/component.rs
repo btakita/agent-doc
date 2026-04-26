@@ -67,6 +67,18 @@ use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
+/// Canonical component name for the backlog/pending component.
+pub const BACKLOG_COMPONENT: &str = "backlog";
+
+/// Legacy alias for the backlog component.
+pub const BACKLOG_ALIAS: &str = "pending";
+
+/// Check whether a component name refers to the backlog component
+/// (accepts both canonical `"backlog"` and legacy `"pending"`).
+pub fn is_backlog_component(name: &str) -> bool {
+    name == BACKLOG_COMPONENT || name == BACKLOG_ALIAS
+}
+
 /// A parsed component in a document.
 ///
 /// Components are bounded regions marked by `<!-- agent:name -->...<!-- /agent:name -->`.
@@ -1230,5 +1242,41 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(comps[1].name, "pending");
         assert!(comps[0].content(doc).contains("<!-- prefix"));
         assert!(comps[1].content(doc).contains("#cfdy"));
+    }
+
+    #[test]
+    fn is_backlog_component_accepts_both_names() {
+        assert!(is_backlog_component("backlog"));
+        assert!(is_backlog_component("pending"));
+        assert!(!is_backlog_component("exchange"));
+        assert!(!is_backlog_component("status"));
+        assert!(!is_backlog_component("pending-done"));
+    }
+
+    #[test]
+    fn backlog_component_parsed_from_new_marker() {
+        let doc = "\
+<!-- agent:backlog patch=replace -->
+- [ ] [#abc] First item
+<!-- /agent:backlog -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "backlog");
+        assert!(is_backlog_component(&comps[0].name));
+        assert!(comps[0].content(doc).contains("#abc"));
+    }
+
+    #[test]
+    fn legacy_pending_marker_still_parsed() {
+        let doc = "\
+<!-- agent:pending patch=replace -->
+- [ ] [#xyz] Legacy item
+<!-- /agent:pending -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "pending");
+        assert!(is_backlog_component(&comps[0].name));
     }
 }

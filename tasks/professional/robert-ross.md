@@ -332,7 +332,24 @@ Three changes to the kit:
 - Guide (gray) → reference material, consulted when Rob has questions
 
 Also renamed `robert-ross-claude-code-guide.md` → `robert-ross-workspace-guide.md` to match what you wrote in the document. Zip rebuilt (7.8 KB).
-<!-- agent:boundary:f13e4e45 -->
+
+❯ Please add mermaid diagrams in robert-ross-workspace-guide.md for robert-ross to understand each process.
+### Re: Mermaid diagrams in workspace guide — opus-4-6
+
+Added 5 new Mermaid diagrams to `robert-ross-workspace-guide.md`. The guide already had diagrams for How It Works, Migration, New Project, and Existing Repos. Now every section has visual context:
+
+| Section | Diagram added |
+|---------|--------------|
+| **3. Day-to-Day Workflow** | Decision tree: continue work, check status, save, cross-project |
+| **4. Submodule double-commit** | Linear flow: edit → Save 1 (inside project) → Save 2 (parent repo) → push |
+| **4. Uncommitted changes** | Decision tree: leftover changes? keep or discard? |
+| **2. Local vs. submodule** | Conversion flow: start local → project grows → convert to GitHub repo |
+| **5. Git Concepts** | Subgraph: working files → commit → push/pull ↔ GitHub |
+
+The git concepts diagram uses the Google Docs analogy colors (green = your computer, yellow = local history, blue = GitHub cloud) plus a one-sentence summary of the flow.
+
+Zip rebuilt (8.4 KB).
+<!-- agent:boundary:71355163 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

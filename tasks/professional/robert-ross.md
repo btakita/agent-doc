@@ -567,11 +567,23 @@ Separate step, not now. Two reasons:
 **What would need a migration step:** if Rob wants Codex and Claude Code to share hooks, skills, or MCP server configs. Those live in different dotfile trees (`.claude/` vs `.codex/`). But that's a power-user concern — cross that bridge when Rob actually has opinions about tool integration.
 
 Recommend adding a single pending item for future Codex setup rather than baking it into the current plan.
-<!-- agent:boundary:8abd0bd3 -->
+
+❯ Please make a salient entry in SPEC.md or point to a plan file that can be used for a Codex setup.
+### Re: Codex setup plan file — opus-4-6
+
+Created both:
+
+1. **Plan file:** [`tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md`](tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md) — 6-step setup covering install, auth, shell alias (`cx`), AGENTS.md compatibility check, optional config, and dual-tool workflow notes.
+
+2. **SPEC.md forward-reference:** added a "Codex CLI (future)" section at the end of SPEC.md with the expected post-setup state (binary, alias, config dir, instructions file) and a link to the plan. Marked as `Status: pending — complete Claude Code setup first`.
+
+The plan is gated on completing the Claude Code setup first. Rob runs `codex-setup-plan.md` after all 10 steps in `robert-ross-workspace-setup.md` are done.
+<!-- agent:boundary:45b534ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 
+- [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:pending -->

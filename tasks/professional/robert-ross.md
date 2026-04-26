@@ -374,7 +374,41 @@ Two changes across README.md and the setup plan:
 **2. Removed Zoom scheduling gate.** Since you're already on a call with Rob, changed all "(Zoom with Brian)" markers to "(with Brian)" and rephrased from "Stop here — schedule Zoom" to "Ask Brian to help with this step." The diagram also dropped the yellow Zoom node — Steps 5 and 7 are now green like the rest, just flagged as needing Brian's involvement.
 
 Zip rebuilt.
-<!-- agent:boundary:633c8311 -->
+
+❯ In robert-ross-workspace-guide.md, robert-ross will need to be able to create his own skills, install his own plugins, etc. Please add to the guide on how robert-ross will create his own personal skills and create/install plugins. Include deterministic software he can run on his machine where appropriate. Note that brian-takita will not know what plugins robert-ross should install so this loop will need to be managed/maintained by robert-ross. If there is any Claude Code automation to setup in robert-ross-workspace-setup.md, please add there. This process should be easy to follow.
+
+```
+Phase 3: Claude Code hooks (one-time, ~15 min)
+Hooks let Claude auto-run setup steps. Brian installs these on Rob's machine:
+```
+
+❯ Could we have a help or a skill to re-generate the guide from robert-ross's Claude Code session as robert-ross makes changes to his harness?
+### Re: skills, plugins, hooks + guide regeneration — opus-4-6
+
+#### Added to the guide (new Section 6: Skills, Plugins, and Hooks)
+
+Three subsections, each with a Mermaid diagram and example prompts:
+
+- **Skills** — creating (`"Create a skill called 'meeting-notes' that..."`), using (`/meeting-notes`), browsing (`"What skills do I have?"`), installing from GitHub. Skills live in `~/.claude/skills/`.
+- **MCP Plugins** — installing (`"Install the Figma MCP plugin"`), checking what's installed, where to find community plugins. Decision tree diagram for common plugin categories.
+- **Hooks** — creating (`"Set up a hook that runs tests after every code change"`), viewing configured hooks. These go in `.claude/settings.json`.
+
+All framed as Rob-managed — Brian doesn't know what plugins Rob needs, so the section teaches him the self-serve loop.
+
+#### Guide regeneration (no separate skill needed)
+
+Instead of building a dedicated skill, the guide itself tells Rob to say:
+
+> "Read robert-ross-workspace-guide.md and update it to reflect my current skills, plugins, hooks, and workspace layout."
+
+Claude reads the guide, compares it to Rob's actual `~/.claude/` configuration and workspace, and rewrites the stale sections. This works because Claude Code can already read files + inspect the filesystem — no custom tooling required. Added this prompt to both the guide's "Managing your setup" subsection and the setup plan's quick-reference table.
+
+#### Setup plan changes
+
+Added **Step 8** (optional, self-serve) covering skills/plugins exploration. Quick-reference table expanded with 4 new entries: create a skill, install a plugin, check setup, update guide.
+
+Zip rebuilt.
+<!-- agent:boundary:e886eae8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

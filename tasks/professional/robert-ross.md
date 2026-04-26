@@ -311,7 +311,28 @@ Done. Deleted both:
 The canonical copies now live in `tasks/dreamable/robert-ross-claude-code-kit/`. The zip is already built from those copies, so no rebuild needed.
 
 Note: earlier exchange responses link to the old paths — those links are now broken in the document history, but the kit directory has the same files with the same names, so Rob's zip is unaffected.
-<!-- agent:boundary:4c8aeada -->
+
+❯ Can robert-ross-workspace-setup.md be a one-shot plan that robert-ross can point Claude Code to run the setup?
+
+❯ We also need to go over the plan first because this plan involves moving his ~/Documents/Code/*/ project directories into ~/Documents/Code/src/. We will need to talk about this.
+
+❯ Please setup a mermaid in README.md to diagram the high level process of using the both:
+❯ - robert-ross-workspace-setup.md
+❯ - robert-ross-workspace-guide.md
+### Re: one-shot setup plan + Mermaid README — opus-4-6
+
+Three changes to the kit:
+
+**1. Setup plan is now one-shot.** Rewrote `robert-ross-workspace-setup.md` so Rob can tell Claude Code: *"Read robert-ross-workspace-setup.md and run it step by step."* Claude executes each step, pauses for confirmation, and stops at Zoom-gated steps (5 and 7). The first line of the file is an instruction to Claude, not to Rob.
+
+**2. Step 3 (migration) has a review gate.** The plan now explicitly tells Claude to show Rob the inventory and get confirmation before moving anything into `src/`. This is the part you want to discuss with him first — moving existing project directories is the one step that could cause confusion if Rob doesn't understand what's happening.
+
+**3. README has a Mermaid diagram** showing the high-level flow:
+- Setup plan (green) → Steps 1-4 solo → Zoom gates (yellow) → Step 6 solo → Done (blue)
+- Guide (gray) → reference material, consulted when Rob has questions
+
+Also renamed `robert-ross-claude-code-guide.md` → `robert-ross-workspace-guide.md` to match what you wrote in the document. Zip rebuilt (7.8 KB).
+<!-- agent:boundary:f13e4e45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

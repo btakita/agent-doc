@@ -858,7 +858,20 @@ The differences are UX surface, not execution engine:
 | **CLI scaffolding** | N/A | `queue add/list/clear` |
 
 Given the overlap, `#queue` should be a thin wrapper around the orchestrate sequential path — the component parser feeds items into the same dispatch chain, adding only the persistent in-document surface and the edit-while-running semantics. The execution core is already built.
-<!-- agent:boundary:6974c9ac -->
+
+❯ With `---` as an alias to `~~~prompt`, this seems viable. We can also have additional orchestration for each prompt queue. When would the queue be executed? Would I need a prompt in the exchange to run through the queue?
+### Re: queue execution trigger — opus-4-6
+
+Two viable models:
+
+**Self-triggering:** preflight detects non-empty `agent:queue`, emits `queue_prompts`, and the first item becomes the cycle's prompt automatically. Problem: needs a start signal so preflight doesn't consume while you're still editing the queue.
+
+**Exchange-triggered (better):** you write `do queue` or `run queue` in the exchange once. That starts consumption. After each item commits, the harness loops back — a persisted `queue_active: true` flag tells preflight to keep consuming without needing another exchange prompt. Queue drains until empty, then the flag clears.
+
+Each queue item can carry its own preset or orchestration metadata (`#spec-test-build-install-commit-push`), so you get per-item orchestration for free — every item flows through the normal cycle.
+
+So: one `do queue` to start, then automatic looping. No per-item exchange prompt needed.
+<!-- agent:boundary:8d5aa640 -->
 <!-- /agent:exchange -->
 
 <!--

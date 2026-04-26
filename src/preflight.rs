@@ -235,6 +235,23 @@ pub struct PreflightOutput {
     /// and must never substitute the harness label (`codex`, `claude`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_model: Option<String>,
+    /// Ordered prompt texts from the `agent:queue` component.
+    /// Non-empty only when the queue is active and contains prompts.
+    /// The first entry is the effective user prompt for this cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_prompts: Vec<String>,
+    /// Whether the queue is currently active (consuming prompts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_active: Option<bool>,
+    /// True when a time-gated start fence defers activation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_deferred: bool,
+    /// Raw datetime string from `--- start at <time>` when deferred.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_start_at: Option<String>,
+    /// How the queue was activated (auto, start_fence, exchange_request, persisted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_trigger: Option<crate::queue::QueueTrigger>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
@@ -1012,6 +1029,14 @@ pub fn run(file: &Path) -> Result<()> {
         suggested,
     );
 
+    // Step 4f: Queue component analysis — resolve activation, consume start fences,
+    // and emit queue_prompts for the skill. Runs after diff so exchange triggers
+    // ("do queue") can be detected from user-added lines.
+    let queue_state = run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
+        eprintln!("[preflight] queue maintenance warning: {}", e);
+        QueueState::default()
+    });
+
     // Step 5: Scan for pending callback requests from other processes.
     let pending_callbacks = crate::callback::scan_pending_callbacks(None).unwrap_or_default();
     if !pending_callbacks.is_empty() {
@@ -1050,6 +1075,11 @@ pub fn run(file: &Path) -> Result<()> {
         pending_reordered,
         pending_gated_count,
         agent_model,
+        queue_prompts: queue_state.queue_prompts,
+        queue_active: queue_state.queue_active,
+        queue_deferred: queue_state.queue_deferred,
+        queue_start_at: queue_state.queue_start_at,
+        queue_trigger: queue_state.queue_trigger,
     };
 
     let json =
@@ -1180,6 +1210,198 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     }
 
     Ok((reordered, gated_count))
+}
+
+/// Queue component state extracted during maintenance.
+///
+/// Returned by `run_queue_maintenance` for later composition into `PreflightOutput`.
+/// The `queue_prompts` are only populated when the queue is active.
+#[derive(Debug, Default)]
+struct QueueState {
+    queue_prompts: Vec<String>,
+    queue_active: Option<bool>,
+    queue_deferred: bool,
+    queue_start_at: Option<String>,
+    queue_trigger: Option<crate::queue::QueueTrigger>,
+}
+
+/// Run queue component maintenance: resolve activation, consume start fences,
+/// persist `queue_active` state, and emit queue prompts for the skill.
+///
+/// Mutations (consumed start fences, `queue_active` changes) are persisted to
+/// BOTH the working tree file and the snapshot, same as pending maintenance.
+///
+/// The `diff` parameter is optional — only needed for detecting exchange-level
+/// `do queue`/`run queue` triggers. Pass `None` on the first call (before diff
+/// computation) and the exchange trigger will be resolved in a later step.
+fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(QueueState::default()),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(QueueState::default()),
+    };
+    let comp = match components.iter().find(|c| c.name == "queue") {
+        Some(c) => c,
+        None => return Ok(QueueState::default()),
+    };
+
+    let body = &content[comp.open_end..comp.close_start];
+    let entries = match crate::queue::parse(body) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[preflight] queue parse warning: {}", e);
+            return Ok(QueueState::default());
+        }
+    };
+
+    // Read current state
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
+    let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
+    let persisted_active = fm.queue_active.unwrap_or(false);
+
+    let activation = crate::queue::resolve_activation(
+        &entries,
+        has_auto,
+        exchange_triggered,
+        persisted_active,
+    );
+
+    let mut mutated = false;
+    let mut current_content = content.clone();
+
+    // Consume start fence if needed
+    if activation.consumed_start_fence {
+        let new_body = crate::queue::render(&activation.entries_after);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps.iter().find(|c| c.name == "queue").unwrap();
+            q.replace_content(&current_content, &new_body)
+        };
+        mutated = true;
+        eprintln!("[preflight] queue: consumed start fence");
+    }
+
+    // Handle queue drain: if active but no prompts, clear queue_active and strip auto
+    let queue_has_prompts = !crate::queue::prompts(&activation.entries_after).is_empty();
+    let need_set_active = activation.active && !persisted_active;
+    let need_clear_active = !activation.active && persisted_active && !activation.deferred;
+    let need_strip_auto = has_auto && !queue_has_prompts;
+
+    // Strip auto attribute from opening tag when queue drains
+    if need_strip_auto {
+        let comps = crate::component::parse(&current_content)?;
+        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+        let raw_tag = &current_content[q.open_start..q.open_end];
+        let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+        if new_tag != raw_tag {
+            let mut rebuilt = String::with_capacity(current_content.len());
+            rebuilt.push_str(&current_content[..q.open_start]);
+            rebuilt.push_str(&new_tag);
+            rebuilt.push_str(&current_content[q.open_end..]);
+            current_content = rebuilt;
+            mutated = true;
+            eprintln!("[preflight] queue: stripped auto (queue drained)");
+        }
+    }
+
+    // Persist queue_active state to frontmatter
+    if need_set_active {
+        current_content = frontmatter::merge_fields(&current_content, "queue_active: true")?;
+        mutated = true;
+        eprintln!("[preflight] queue: set queue_active: true");
+    } else if need_clear_active {
+        current_content = frontmatter::merge_fields(&current_content, "queue_active: false")?;
+        mutated = true;
+        eprintln!("[preflight] queue: cleared queue_active");
+    }
+
+    // Persist mutations to both file and snapshot
+    if mutated {
+        std::fs::write(file, &current_content)
+            .with_context(|| format!("failed to write queue updates to {}", file.display()))?;
+
+        // Update snapshot surgically
+        if let Ok(Some(snap_content)) = snapshot::load(file) {
+            let mut new_snap = snap_content.clone();
+
+            // Apply queue body change to snapshot
+            if activation.consumed_start_fence || need_strip_auto {
+                if let Ok(snap_comps) = crate::component::parse(&new_snap) {
+                    if let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
+                        let new_body = crate::queue::render(&activation.entries_after);
+                        new_snap = snap_q.replace_content(&new_snap, &new_body);
+
+                        // Re-parse to get updated offsets for auto stripping
+                        if need_strip_auto {
+                            if let Ok(snap_comps2) = crate::component::parse(&new_snap) {
+                                if let Some(snap_q2) =
+                                    snap_comps2.iter().find(|c| c.name == "queue")
+                                {
+                                    let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
+                                    let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+                                    if new_tag != raw_tag {
+                                        let mut rebuilt =
+                                            String::with_capacity(new_snap.len());
+                                        rebuilt.push_str(&new_snap[..snap_q2.open_start]);
+                                        rebuilt.push_str(&new_tag);
+                                        rebuilt.push_str(&new_snap[snap_q2.open_end..]);
+                                        new_snap = rebuilt;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apply frontmatter change to snapshot
+            if need_set_active {
+                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true") {
+                    new_snap = merged;
+                }
+            } else if need_clear_active {
+                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false") {
+                    new_snap = merged;
+                }
+            }
+
+            if new_snap != snap_content {
+                if let Err(e) = snapshot::save(file, &new_snap) {
+                    eprintln!("[preflight] queue: snapshot sync warning: {}", e);
+                }
+            }
+        }
+    }
+
+    // Build output
+    let queue_prompts: Vec<String> = if activation.active {
+        crate::queue::prompts(&activation.entries_after)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect()
+    } else {
+        vec![]
+    };
+
+    Ok(QueueState {
+        queue_prompts,
+        queue_active: if activation.active {
+            Some(true)
+        } else if activation.deferred {
+            None
+        } else if persisted_active {
+            Some(false)
+        } else {
+            None
+        },
+        queue_deferred: activation.deferred,
+        queue_start_at: activation.start_at,
+        queue_trigger: activation.trigger,
+    })
 }
 
 /// Archive reaped pending items to `agent:pending-done` if the component

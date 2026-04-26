@@ -69,6 +69,17 @@ The `agent:queue` component holds a batch of prompts consumed sequentially. It i
 
 **Attributes:** `<!-- agent:queue auto -->` enables immediate activation when the queue is non-empty. The `auto` attribute is stripped when the queue drains.
 
+**Activation resolution (preflight):** Preflight detects the `agent:queue` component and resolves activation in priority order:
+
+1. **`auto` attribute** — `<!-- agent:queue auto -->` activates immediately when prompts exist.
+2. **Start fence at head** — bare `--- start` is consumed and activates; `--- start at <time>` defers (emits `queue_deferred: true`, `queue_start_at`).
+3. **Exchange trigger** — user writes `do queue` or `run queue` in the exchange.
+4. **Persisted state** — `queue_active: true` in frontmatter (set on activation, cleared on drain).
+
+On activation, preflight emits `queue_active: true`, `queue_prompts: [...]` (ordered prompt texts), and `queue_trigger` (how the queue was activated). The first prompt is the effective user edit for the cycle.
+
+When the queue drains to empty: `auto` is stripped from the opening tag, `queue_active` is cleared in frontmatter.
+
 **Parsing rules:**
 1. Lines starting with `- ` at column 0 → single-line prompt.
 2. `~~~prompt` opens a multi-line prompt fence; `~~~` closes it.

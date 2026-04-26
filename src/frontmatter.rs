@@ -387,6 +387,11 @@ pub struct Frontmatter {
         rename = "agent_doc_cwd"
     )]
     pub cwd: Option<String>,
+    /// Whether the queue is currently active (consuming prompts).
+    /// Set to `true` when the queue is activated via `auto`, start fence, or
+    /// `do queue`/`run queue`. Cleared when the queue drains to empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_active: Option<bool>,
 }
 
 impl Frontmatter {
@@ -553,6 +558,9 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "agent_args" => fm.agent_args = val_str(),
             "claude_args" => fm.claude_args = val_str(),
             "codex_args" => fm.codex_args = val_str(),
+            "queue_active" => {
+                fm.queue_active = value.as_bool();
+            }
             _ => {
                 eprintln!("[frontmatter] ignoring unknown patch field: {}", key_str);
             }
@@ -777,6 +785,7 @@ mod tests {
             prompt_presets: indexmap::IndexMap::new(),
             agent_doc_env_inherit: None,
             cwd: None,
+            queue_active: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

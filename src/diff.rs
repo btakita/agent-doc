@@ -1123,6 +1123,77 @@ pub fn detect_orchestration_request(diff: &str) -> Option<OrchestrationRequest> 
     None
 }
 
+/// Detect whether the user wrote `do queue` or `run queue` in an added diff line.
+///
+/// Returns `true` when any user-added line (outside code fences/blockquotes)
+/// starts with one of these trigger phrases. Does NOT match `do #queue` (pending
+/// item reference) — only the bare component activation form.
+pub fn detect_queue_trigger(diff: &str) -> bool {
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+        if !line.starts_with('+') {
+            continue;
+        }
+        let content = &line[1..];
+        let trimmed = content.trim_start();
+
+        // Track code fences
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+
+        // Skip blockquotes
+        if trimmed.starts_with('>') {
+            continue;
+        }
+
+        // Strip the `❯ ` prompt prefix if present
+        let text = trimmed
+            .strip_prefix("❯ ")
+            .unwrap_or(trimmed);
+        let lower = text.to_lowercase();
+
+        if lower.starts_with("do queue") || lower.starts_with("run queue") {
+            let after = if lower.starts_with("do queue") {
+                &text[8..]
+            } else {
+                &text[9..]
+            };
+            // Must be end of line, or followed by non-alphanumeric (punctuation, space)
+            if after.is_empty()
+                || after.starts_with(|c: char| !c.is_alphanumeric() && c != '#')
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Build a unified diff directly from two content strings after comment stripping.
 ///
 /// Returns `None` when there are no meaningful changes.
@@ -3128,6 +3199,60 @@ Please fix the bug.\n\
             request.trigger_text,
             "❯ synchronous opera ❯ preset #spec-test-build-install-commit-push"
         );
+    }
+
+    #[test]
+    fn detect_queue_trigger_do_queue() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do queue\n";
+        assert!(detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_run_queue() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+run queue\n";
+        assert!(detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_case_insensitive() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+Do Queue\n";
+        assert!(detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_with_prompt_prefix() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+❯ do queue\n";
+        assert!(detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_not_pending_ref() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do #queue Phase 2\n";
+        assert!(!detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_not_in_code_fence() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n+```\n+do queue\n+```\n";
+        assert!(!detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_not_in_blockquote() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+> do queue\n";
+        assert!(!detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_with_trailing_punct() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do queue.\n";
+        assert!(detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn detect_queue_trigger_not_on_context_line() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n do queue\n+other\n";
+        assert!(!detect_queue_trigger(diff));
     }
 
     #[test]

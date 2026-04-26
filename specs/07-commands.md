@@ -876,3 +876,37 @@ pub struct QueuePrompt {
 ```
 
 **`parse(body: &str) -> Result<Vec<QueueEntry>>`** — pure parser for the component body. I/O-free; caller reads the component body from the document.
+
+### Activation resolution (`queue.rs`)
+
+```rust
+pub enum QueueTrigger { Auto, StartFence, ExchangeRequest, Persisted }
+pub struct QueueActivation {
+    pub active: bool,
+    pub trigger: Option<QueueTrigger>,
+    pub deferred: bool,
+    pub start_at: Option<String>,
+    pub consumed_start_fence: bool,
+    pub entries_after: Vec<QueueEntry>,
+}
+pub fn resolve_activation(entries, has_auto, exchange_triggered, persisted_active) -> QueueActivation
+```
+
+Priority order: `auto` attribute > inline start fence > exchange `do queue`/`run queue` > persisted `queue_active: true`.
+
+### Preflight queue fields
+
+When the document has an `agent:queue` component, preflight computes queue state and emits:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `queue_prompts` | `Vec<String>` | Ordered prompt texts (only when active) |
+| `queue_active` | `Option<bool>` | Whether the queue is currently active |
+| `queue_deferred` | `bool` | True when a time-gated start fence defers activation |
+| `queue_start_at` | `Option<String>` | Raw datetime string from `--- start at <time>` |
+| `queue_trigger` | `Option<QueueTrigger>` | How the queue was activated |
+
+Preflight performs these mutations before emitting queue state:
+- **Consume bare start fence:** If `--- start` (no `at`) is at the head, remove it from the queue body and write back to document + snapshot.
+- **Strip auto on drain:** If `auto` is set but no prompts remain, strip `auto` from the opening tag.
+- **Persist queue_active:** Set/clear `queue_active` in frontmatter when activation state changes.

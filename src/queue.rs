@@ -8,9 +8,15 @@
 //! - `--- start [at <datetime>]` / `~~~start` → start fence (activation signal)
 //! - `--- stop` / `~~~stop` → stop fence (breakpoint)
 //!
+//! Activation resolution (Phase 2):
+//! - `resolve_activation()` determines whether the queue should be active
+//!   based on (in priority order): `auto` attribute, inline start fence,
+//!   exchange trigger (`do queue`/`run queue`), persisted `queue_active` state.
+//!
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueEntry {
@@ -29,6 +35,109 @@ pub struct QueuePrompt {
 pub struct QueueComponent {
     pub auto: bool,
     pub entries: Vec<QueueEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueTrigger {
+    Auto,
+    StartFence,
+    ExchangeRequest,
+    Persisted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QueueActivation {
+    pub active: bool,
+    pub trigger: Option<QueueTrigger>,
+    pub deferred: bool,
+    pub start_at: Option<String>,
+    pub consumed_start_fence: bool,
+    pub entries_after: Vec<QueueEntry>,
+}
+
+/// Resolve whether the queue should be activated this cycle.
+///
+/// Priority order:
+/// 1. `auto` attribute on `<!-- agent:queue auto -->` → immediate if prompts exist
+/// 2. Start fence at head of entries → consume bare `--- start`; defer `--- start at <time>`
+/// 3. Exchange trigger (`do queue` / `run queue` detected in diff)
+/// 4. Persisted `queue_active: true` from frontmatter
+///
+/// Returns the resolved activation state including whether a start fence was consumed.
+pub fn resolve_activation(
+    entries: &[QueueEntry],
+    has_auto: bool,
+    exchange_triggered: bool,
+    persisted_active: bool,
+) -> QueueActivation {
+    let has_prompts = !prompts(entries).is_empty();
+
+    // Priority 1: auto attribute
+    if has_auto && has_prompts {
+        return QueueActivation {
+            active: true,
+            trigger: Some(QueueTrigger::Auto),
+            entries_after: entries.to_vec(),
+            ..Default::default()
+        };
+    }
+
+    // Priority 2: start fence at head
+    if let Some(QueueEntry::StartFence(datetime)) = entries.first() {
+        if let Some(dt) = datetime {
+            return QueueActivation {
+                deferred: true,
+                start_at: Some(dt.clone()),
+                entries_after: entries.to_vec(),
+                ..Default::default()
+            };
+        } else {
+            let remaining: Vec<QueueEntry> = entries[1..].to_vec();
+            let has_remaining_prompts = !prompts(&remaining).is_empty();
+            return QueueActivation {
+                active: has_remaining_prompts,
+                trigger: if has_remaining_prompts {
+                    Some(QueueTrigger::StartFence)
+                } else {
+                    None
+                },
+                consumed_start_fence: true,
+                entries_after: remaining,
+                ..Default::default()
+            };
+        }
+    }
+
+    // Priority 3: exchange trigger
+    if exchange_triggered && has_prompts {
+        return QueueActivation {
+            active: true,
+            trigger: Some(QueueTrigger::ExchangeRequest),
+            entries_after: entries.to_vec(),
+            ..Default::default()
+        };
+    }
+
+    // Priority 4: persisted active state
+    if persisted_active && has_prompts {
+        return QueueActivation {
+            active: true,
+            trigger: Some(QueueTrigger::Persisted),
+            entries_after: entries.to_vec(),
+            ..Default::default()
+        };
+    }
+
+    QueueActivation {
+        entries_after: entries.to_vec(),
+        ..Default::default()
+    }
+}
+
+/// Reconstruct an `<!-- agent:queue -->` opening tag without the `auto` attribute.
+pub fn strip_auto_from_tag(tag: &str) -> String {
+    tag.replace(" auto", "")
 }
 
 pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
@@ -537,5 +646,143 @@ mod tests {
         let body = "- do #fix1\n\n\n- do #fix2\n";
         let entries = parse(body).unwrap();
         assert_eq!(entries.len(), 2);
+    }
+
+    // --- Activation resolution tests ---
+
+    fn make_prompt(text: &str) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+        })
+    }
+
+    #[test]
+    fn activation_auto_with_prompts() {
+        let entries = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        let act = resolve_activation(&entries, true, false, false);
+        assert!(act.active);
+        assert_eq!(act.trigger, Some(QueueTrigger::Auto));
+        assert!(!act.consumed_start_fence);
+        assert_eq!(act.entries_after.len(), 2);
+    }
+
+    #[test]
+    fn activation_auto_empty_queue() {
+        let entries: Vec<QueueEntry> = vec![];
+        let act = resolve_activation(&entries, true, false, false);
+        assert!(!act.active);
+        assert!(act.trigger.is_none());
+    }
+
+    #[test]
+    fn activation_start_fence_bare() {
+        let entries = vec![
+            QueueEntry::StartFence(None),
+            make_prompt("do #fix1"),
+        ];
+        let act = resolve_activation(&entries, false, false, false);
+        assert!(act.active);
+        assert_eq!(act.trigger, Some(QueueTrigger::StartFence));
+        assert!(act.consumed_start_fence);
+        assert_eq!(act.entries_after.len(), 1);
+        assert!(matches!(&act.entries_after[0], QueueEntry::Prompt(p) if p.text == "do #fix1"));
+    }
+
+    #[test]
+    fn activation_start_fence_bare_no_prompts_after() {
+        let entries = vec![QueueEntry::StartFence(None)];
+        let act = resolve_activation(&entries, false, false, false);
+        assert!(!act.active);
+        assert!(act.trigger.is_none());
+        assert!(act.consumed_start_fence);
+        assert!(act.entries_after.is_empty());
+    }
+
+    #[test]
+    fn activation_start_fence_with_time_defers() {
+        let entries = vec![
+            QueueEntry::StartFence(Some("17:00 ET".to_string())),
+            make_prompt("run nightly"),
+        ];
+        let act = resolve_activation(&entries, false, false, false);
+        assert!(!act.active);
+        assert!(act.deferred);
+        assert_eq!(act.start_at, Some("17:00 ET".to_string()));
+        assert!(!act.consumed_start_fence);
+        assert_eq!(act.entries_after.len(), 2);
+    }
+
+    #[test]
+    fn activation_exchange_trigger() {
+        let entries = vec![make_prompt("do #fix1")];
+        let act = resolve_activation(&entries, false, true, false);
+        assert!(act.active);
+        assert_eq!(act.trigger, Some(QueueTrigger::ExchangeRequest));
+    }
+
+    #[test]
+    fn activation_exchange_trigger_empty_queue() {
+        let entries: Vec<QueueEntry> = vec![];
+        let act = resolve_activation(&entries, false, true, false);
+        assert!(!act.active);
+    }
+
+    #[test]
+    fn activation_persisted_active() {
+        let entries = vec![make_prompt("do #fix1")];
+        let act = resolve_activation(&entries, false, false, true);
+        assert!(act.active);
+        assert_eq!(act.trigger, Some(QueueTrigger::Persisted));
+    }
+
+    #[test]
+    fn activation_persisted_empty_queue() {
+        let entries: Vec<QueueEntry> = vec![];
+        let act = resolve_activation(&entries, false, false, true);
+        assert!(!act.active);
+    }
+
+    #[test]
+    fn activation_auto_takes_precedence_over_exchange() {
+        let entries = vec![make_prompt("task")];
+        let act = resolve_activation(&entries, true, true, false);
+        assert_eq!(act.trigger, Some(QueueTrigger::Auto));
+    }
+
+    #[test]
+    fn activation_start_fence_takes_precedence_over_exchange() {
+        let entries = vec![QueueEntry::StartFence(None), make_prompt("task")];
+        let act = resolve_activation(&entries, false, true, false);
+        assert_eq!(act.trigger, Some(QueueTrigger::StartFence));
+        assert!(act.consumed_start_fence);
+    }
+
+    #[test]
+    fn activation_none_when_no_triggers() {
+        let entries = vec![make_prompt("task")];
+        let act = resolve_activation(&entries, false, false, false);
+        assert!(!act.active);
+        assert!(act.trigger.is_none());
+    }
+
+    #[test]
+    fn strip_auto_from_tag_removes_auto() {
+        assert_eq!(
+            strip_auto_from_tag("<!-- agent:queue auto -->"),
+            "<!-- agent:queue -->"
+        );
+        assert_eq!(
+            strip_auto_from_tag("<!-- agent:queue auto patch=append -->"),
+            "<!-- agent:queue patch=append -->"
+        );
+    }
+
+    #[test]
+    fn strip_auto_from_tag_noop_without_auto() {
+        assert_eq!(
+            strip_auto_from_tag("<!-- agent:queue -->"),
+            "<!-- agent:queue -->"
+        );
     }
 }

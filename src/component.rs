@@ -263,11 +263,12 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
 pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
     for token in attr_text.split_whitespace() {
-        if let Some((key, value)) = token.split_once('=')
-            && !key.is_empty()
-            && !value.is_empty()
-        {
-            attrs.insert(key.to_string(), value.to_string());
+        if let Some((key, value)) = token.split_once('=') {
+            if !key.is_empty() && !value.is_empty() {
+                attrs.insert(key.to_string(), value.to_string());
+            }
+        } else if !token.is_empty() {
+            attrs.insert(token.to_string(), String::new());
         }
     }
     attrs
@@ -1059,10 +1060,16 @@ actual content
         let attrs = parse_attrs("");
         assert!(attrs.is_empty());
 
-        // Malformed tokens without = are ignored
+        // Bare tokens (no =) are parsed as boolean flags with empty string values
         let attrs = parse_attrs("mode=append broken novalue=");
-        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs.len(), 2);
         assert_eq!(attrs.get("mode").map(|s| s.as_str()), Some("append"));
+        assert_eq!(attrs.get("broken").map(|s| s.as_str()), Some(""));
+
+        // auto flag (used by agent:queue)
+        let attrs = parse_attrs("auto");
+        assert_eq!(attrs.len(), 1);
+        assert!(attrs.contains_key("auto"));
     }
 
     #[test]

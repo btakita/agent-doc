@@ -490,7 +490,29 @@ Single-file declarative spec with sections for: workspace layout, CLAUDE.md rule
 4. **Guide sections renumbered:** Automation Setup Plan is now Section 8, Next Steps is Section 9.
 
 Zip rebuilt with all four files.
-<!-- agent:boundary:203c7875 -->
+
+❯ Should we have a hook or skill to ensure the spec is up to date if any harness changes occur? At what level of specification should SPEC.md operate?
+### Re: spec automation + specification level — opus-4-6
+
+
+#### Automation: not yet
+
+The spec already has check commands and the guide has the verification prompt. That's sufficient for now. Adding a hook or skill before Rob is comfortable with the base concepts creates friction. Once he's settled in, a **session-start hook** that silently checks and only speaks when drift is detected would be the natural next step — but that's Phase 3+, not a kit deliverable.
+
+#### Specification level: depends on who controls the component
+
+| Who controls it | Level | What the spec says | Example |
+|----------------|-------|--------------------|---------| 
+| Brian | Configuration-level | Exact values, exact structure | Hook definitions: specific trigger, specific command |
+| Rob | Component-level | "This exists, check it here" | Plugins: "check what's installed, no prescribed set" |
+| Shared | Section-level | Required sections, flexible content | CLAUDE.md: "must have these 5 sections, content can vary" |
+
+The rule: **if Brian controls it, prescriptive; if Rob controls it, descriptive.**
+
+Avoids two failure modes: (1) Rob installs a plugin and the spec flags false "drift," (2) Brian changes a hook but the spec doesn't catch it because it only checks existence.
+
+Current SPEC.md is already close to this split. The one area to tighten: the hooks section should include actual hook definitions once Brian installs them in Phase 3, not just category names.
+<!-- agent:boundary:9d5d6948 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -202,7 +202,66 @@ The response from the prior cycle is already committed in the document — no re
 | 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
 
 Plan file: `tasks/agent-doc/agent-queue-plan.md`
-<!-- agent:boundary:8a8aca8a -->
+
+❯ do #queue Phase 2
+
+### Re: do #queue Phase 2 — opus-4-6
+
+Phase 2 implemented, tested, committed, and pushed (`26b0c75` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+**Activation resolution** (`queue.rs`) — `resolve_activation()` determines whether the queue should be active using priority order:
+
+1. `auto` attribute on `&lt;!-- agent:queue auto --&gt;` → immediate activation when prompts exist
+2. Start fence at head → bare `--- start` consumed and activates; `--- start at <time>` defers
+3. Exchange trigger → `do queue` / `run queue` detected in diff
+4. Persisted state → `queue_active: true` in frontmatter
+
+New types: `QueueTrigger` enum (Auto, StartFence, ExchangeRequest, Persisted), `QueueActivation` struct with activation state + consumed entries.
+
+**Preflight integration** (`preflight.rs`) — Step 4f runs queue maintenance after diff computation:
+
+- Reads `agent:queue` component, parses entries, resolves activation
+- Consumes bare start fences (writes back to document + snapshot)
+- Strips `auto` from opening tag when queue drains
+- Persists `queue_active` in frontmatter (set on activation, cleared on drain)
+- Emits `queue_prompts`, `queue_active`, `queue_deferred`, `queue_start_at`, `queue_trigger` in preflight JSON
+
+**Exchange trigger detection** (`diff.rs`) — `detect_queue_trigger()` scans user-added diff lines for `do queue` / `run queue`, respecting code fences, blockquotes, and the `❯ ` prompt prefix. Does NOT match `do #queue` (pending item reference).
+
+**Bare flag support** (`component.rs`) — `parse_attrs()` now supports bare flags like `auto` (previously only `key=value` pairs were parsed, so `&lt;!-- agent:queue auto --&gt;` never actually populated the attrs map).
+
+**Frontmatter** — Added `queue_active: Option<bool>` field with `merge_fields` handler.
+
+#### Tests
+
+- 16 new activation resolution tests (all trigger modes, priority, empty queue, drain)
+- 9 new `detect_queue_trigger` tests (positive/negative: exchange/code fence/blockquote/prefix)
+- `parse_attrs` test updated for bare flag support
+- Full suite: 1215 unit + 337 integration tests pass
+
+#### Changes summary
+
+| File | Lines | What |
+|------|-------|------|
+| `queue.rs` | +247 | QueueTrigger, QueueActivation, resolve_activation(), strip_auto_from_tag(), 16 tests |
+| `preflight.rs` | +222 | QueueState, run_queue_maintenance(), 5 new PreflightOutput fields, Step 4f wiring |
+| `diff.rs` | +125 | detect_queue_trigger() + 9 tests |
+| `component.rs` | +14/−7 | parse_attrs bare flag support |
+| `frontmatter.rs` | +9 | queue_active field + merge handler |
+| `specs/02-document-format.md` | +11 | §2.5 activation resolution docs |
+| `specs/07-commands.md` | +34 | Activation + preflight queue fields |
+
+#### Remaining phases
+
+| Phase | Status | Summary |
+|-------|--------|---------|
+| 1. Parser + data model | Done | `queue.rs` parser, scaffold updates, 30 tests |
+| 2. Preflight integration | **Done** | Trigger resolution, `queue_active` state, `queue_prompts` emission |
+| 3. Consumption + dispatch | Open | Per-item removal after commit, change detection halt, stop/start fence handling, looping |
+| 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
+<!-- agent:boundary:e473b148 -->
 <!-- /agent:exchange -->
 <!--
 -->

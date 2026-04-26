@@ -17,3 +17,20 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
   patchbacks/pending ops without turning plain user prompts into committed content.
 - **Delete**: On `reset`, snapshot removed
 - **Missing**: Diff treats previous as empty (entire doc is the diff)
+
+## Auto-Migration on Rename
+
+When a document is renamed/moved, its path hash changes, orphaning all `.agent-doc/` state
+files. `ensure_initialized` (called from `preflight`, `claim`, and `sync`) detects this
+automatically:
+
+1. Document has a `agent_doc_session` UUID in frontmatter
+2. No snapshot exists for the current path hash
+3. Scan `.agent-doc/snapshots/*.md` for a snapshot whose frontmatter has the same session UUID
+
+If an orphaned snapshot is found, all state files are migrated from the old hash to the new
+hash: snapshots, baselines, locks, pending, CRDT, and pre-response. The sessions registry is
+also updated.
+
+**Fallback:** `agent-doc rename <old> <new>` performs the same migration explicitly when
+the old path is known.

@@ -35,6 +35,7 @@ use crate::{sessions, snapshot};
 /// State file types to migrate, with their subdirectory and extension.
 const STATE_FILES: &[(&str, &str)] = &[
     ("snapshots", "md"),
+    ("baselines", "md"),
     ("locks", "lock"),
     ("pending", "md"),
     ("crdt", "yrs"),

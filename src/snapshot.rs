@@ -42,6 +42,9 @@
 //! - `delete` and `delete_crdt` are idempotent: calling them on an absent file is not an error.
 //! - Pre-response snapshots are not flock-protected (single-writer assumption: only the
 //!   active write path saves them).
+//! - `try_migrate_renamed(doc)` auto-detects orphaned state files after a rename by matching
+//!   the document's session UUID against snapshots. Migrates all state file types (snapshots,
+//!   baselines, locks, pending, crdt, pre-response) and updates the sessions registry.
 //!
 //! ## Evals
 //! - `path_for_consistent_hash`: calling `path_for` twice on the same doc returns equal paths.
@@ -67,6 +70,13 @@
 //!   file → final content is exactly one complete write (no corruption).
 //! - `resolve_prefers_snapshot_over_git`: snapshot file present with different content than
 //!   disk → `resolve` returns snapshot content, not disk/git content.
+//! - `try_migrate_renamed_finds_orphaned_snapshot`: snapshot under old hash with matching
+//!   session UUID → migrated to new hash, all state file types moved.
+//! - `try_migrate_renamed_noop_when_snapshot_exists`: snapshot already exists for current
+//!   hash → returns false, no migration.
+//! - `try_migrate_renamed_noop_when_no_session`: document without session UUID → returns
+//!   false, no migration.
+//! - `try_migrate_renamed_noop_when_no_match`: no snapshot has matching UUID → returns false.
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -271,6 +281,176 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-migration on file rename
+// ---------------------------------------------------------------------------
+
+/// Detect and migrate orphaned state files after a document rename.
+///
+/// When a document is moved/renamed, its path hash changes, orphaning all
+/// `.agent-doc/` state files (snapshots, baselines, locks, pending, crdt,
+/// pre-response). This function detects the situation by:
+/// 1. Checking the document has a session UUID
+/// 2. Checking no snapshot exists for the current path hash
+/// 3. Scanning existing snapshots for one with a matching session UUID
+///
+/// If found, migrates all state files from old hash to new hash and updates
+/// the sessions registry. Returns `true` if migration occurred.
+pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
+    let snap = path_for(doc)?;
+    if snap.exists() {
+        return Ok(false);
+    }
+
+    let content = match std::fs::read_to_string(doc) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    let (fm, _) = match crate::frontmatter::parse(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(false),
+    };
+    let session_uuid = match &fm.session {
+        Some(uuid) => uuid.clone(),
+        None => return Ok(false),
+    };
+
+    let canonical = doc.canonicalize()?;
+    let project_root = match find_project_root(&canonical) {
+        Some(root) => root,
+        None => return Ok(false),
+    };
+
+    let snap_dir = project_root.join(SNAP_DIR);
+    if !snap_dir.is_dir() {
+        return Ok(false);
+    }
+
+    // Scan snapshots for one with matching session UUID
+    let mut old_hash: Option<String> = None;
+    for entry in std::fs::read_dir(&snap_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        // Skip if this is the current hash (shouldn't exist, but guard)
+        let new_hash = doc_hash(doc)?;
+        if stem == new_hash {
+            continue;
+        }
+        // Read and parse frontmatter
+        if let Ok(snap_content) = std::fs::read_to_string(&path) {
+            if let Ok((snap_fm, _)) = crate::frontmatter::parse(&snap_content) {
+                if snap_fm.session.as_deref() == Some(&session_uuid) {
+                    old_hash = Some(stem);
+                    break;
+                }
+            }
+        }
+    }
+
+    let old_hash = match old_hash {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+
+    let new_hash = doc_hash(doc)?;
+    eprintln!(
+        "[init] detected rename — migrating state files from {}.. to {}..",
+        &old_hash[..8.min(old_hash.len())],
+        &new_hash[..8.min(new_hash.len())]
+    );
+
+    // Migrate all state file types (same as rename.rs + baselines)
+    const MIGRATE_DIRS: &[(&str, &str)] = &[
+        ("snapshots", "md"),
+        ("baselines", "md"),
+        ("locks", "lock"),
+        ("pending", "md"),
+        ("crdt", "yrs"),
+        ("pre-response", "md"),
+    ];
+
+    let mut migrated = 0u32;
+    for &(subdir, ext) in MIGRATE_DIRS {
+        let dir = project_root.join(".agent-doc").join(subdir);
+        let old_file = dir.join(format!("{}.{}", old_hash, ext));
+        let new_file = dir.join(format!("{}.{}", new_hash, ext));
+        if !old_file.exists() {
+            continue;
+        }
+        if new_file.exists() {
+            eprintln!(
+                "[init] skip migrate {}/{}.{} — destination exists",
+                subdir, &new_hash[..8.min(new_hash.len())], ext
+            );
+            continue;
+        }
+        std::fs::rename(&old_file, &new_file)?;
+        eprintln!(
+            "[init] migrated {}/{}.{} → {}.{}",
+            subdir,
+            &old_hash[..8.min(old_hash.len())],
+            ext,
+            &new_hash[..8.min(new_hash.len())],
+            ext
+        );
+        migrated += 1;
+    }
+
+    // Migrate lock files with compound extensions
+    for (subdir, old_ext) in &[
+        ("locks", format!("{}.md.lock", old_hash)),
+        ("crdt", format!("{}.yrs.lock", old_hash)),
+    ] {
+        let dir = project_root.join(".agent-doc").join(subdir);
+        let old_file = dir.join(old_ext);
+        let new_ext = old_ext.replace(&old_hash, &new_hash);
+        let new_file = dir.join(&new_ext);
+        if old_file.exists() && !new_file.exists() {
+            std::fs::rename(&old_file, &new_file)?;
+            migrated += 1;
+        }
+    }
+
+    // Update sessions registry
+    let doc_path_str = doc.to_string_lossy().to_string();
+    let canonical_str = canonical.to_string_lossy().to_string();
+    let registry_path = crate::sessions::registry_path();
+    if registry_path.exists() {
+        if let Ok(_lock) = crate::sessions::RegistryLock::acquire(&registry_path) {
+            if let Ok(mut registry) = crate::sessions::load() {
+                let mut updated = 0u32;
+                for (_sid, entry) in registry.iter_mut() {
+                    // Match by session UUID — the file field may have the old path
+                    if _sid == &session_uuid {
+                        let old_file = entry.file.clone();
+                        if old_file != doc_path_str && old_file != canonical_str {
+                            entry.file = doc_path_str.clone();
+                            updated += 1;
+                        }
+                    }
+                }
+                if updated > 0 {
+                    let _ = crate::sessions::save(&registry);
+                    eprintln!("[init] updated {} session registry entry(ies)", updated);
+                }
+            }
+        }
+    }
+
+    eprintln!(
+        "[init] rename migration complete — {} state file(s) migrated",
+        migrated
+    );
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // Auto-initialization for new documents
 // ---------------------------------------------------------------------------
 
@@ -291,11 +471,16 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 /// Returns `true` if any initialization was performed, `false` if already initialized.
 pub fn ensure_initialized(doc: &Path) -> Result<bool> {
     let uuid_assigned = ensure_session_uuid(doc)?;
-    let snapshot_created = ensure_snapshot(doc)?;
+    let migrated = try_migrate_renamed(doc)?;
+    let snapshot_created = if migrated {
+        false
+    } else {
+        ensure_snapshot(doc)?
+    };
     if snapshot_created {
         ensure_git_tracked(doc)?;
     }
-    Ok(uuid_assigned || snapshot_created)
+    Ok(uuid_assigned || migrated || snapshot_created)
 }
 
 /// Assign a session UUID to a document that has `agent_doc_format` but no `agent_doc_session`.
@@ -958,6 +1143,115 @@ mod tests {
     // -----------------------------------------------------------------------
     // ensure_initialized composite tests
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // try_migrate_renamed tests
+    // -----------------------------------------------------------------------
+
+    fn setup_project_with_session(session_uuid: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        // Create .agent-doc/ directory structure (project root marker)
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/pre-response")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\n## Exchange\nSome content\n",
+            session_uuid
+        );
+        fs::write(&doc, &content).unwrap();
+        (dir, doc)
+    }
+
+    #[test]
+    fn try_migrate_renamed_finds_orphaned_snapshot() {
+        let session_uuid = "test-uuid-1234";
+        let (dir, old_doc) = setup_project_with_session(session_uuid);
+
+        // Save a snapshot for the old path
+        let old_hash = doc_hash(&old_doc).unwrap();
+        let snap_dir = dir.path().join(".agent-doc/snapshots");
+        let old_snap_content = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nStripped exchange\n",
+            session_uuid
+        );
+        fs::write(snap_dir.join(format!("{}.md", old_hash)), &old_snap_content).unwrap();
+
+        // Also create a baseline and pending file for the old hash
+        let baseline_dir = dir.path().join(".agent-doc/baselines");
+        fs::write(baseline_dir.join(format!("{}.md", old_hash)), "baseline content").unwrap();
+        let pending_dir = dir.path().join(".agent-doc/pending");
+        fs::write(pending_dir.join(format!("{}.md", old_hash)), "pending content").unwrap();
+
+        // "Rename" the file
+        let new_doc = dir.path().join("renamed.md");
+        fs::rename(&old_doc, &new_doc).unwrap();
+
+        // Verify new hash differs
+        let new_hash = doc_hash(&new_doc).unwrap();
+        assert_ne!(old_hash, new_hash);
+
+        // Run migration
+        let migrated = try_migrate_renamed(&new_doc).unwrap();
+        assert!(migrated, "should detect and migrate orphaned snapshot");
+
+        // Verify state files were migrated
+        assert!(snap_dir.join(format!("{}.md", new_hash)).exists());
+        assert!(!snap_dir.join(format!("{}.md", old_hash)).exists());
+        assert!(baseline_dir.join(format!("{}.md", new_hash)).exists());
+        assert!(!baseline_dir.join(format!("{}.md", old_hash)).exists());
+        assert!(pending_dir.join(format!("{}.md", new_hash)).exists());
+        assert!(!pending_dir.join(format!("{}.md", old_hash)).exists());
+
+        // Verify snapshot content preserved
+        let new_snap = fs::read_to_string(snap_dir.join(format!("{}.md", new_hash))).unwrap();
+        assert_eq!(new_snap, old_snap_content);
+    }
+
+    #[test]
+    fn try_migrate_renamed_noop_when_snapshot_exists() {
+        let session_uuid = "test-uuid-5678";
+        let (dir, doc) = setup_project_with_session(session_uuid);
+
+        // Save a snapshot for the current path
+        let hash = doc_hash(&doc).unwrap();
+        let snap_dir = dir.path().join(".agent-doc/snapshots");
+        fs::write(snap_dir.join(format!("{}.md", hash)), "existing snapshot").unwrap();
+
+        let migrated = try_migrate_renamed(&doc).unwrap();
+        assert!(!migrated, "should not migrate when snapshot already exists");
+    }
+
+    #[test]
+    fn try_migrate_renamed_noop_when_no_session() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nagent_doc_format: template\n---\n\nNo session UUID\n").unwrap();
+
+        let migrated = try_migrate_renamed(&doc).unwrap();
+        assert!(!migrated, "should not migrate without session UUID");
+    }
+
+    #[test]
+    fn try_migrate_renamed_noop_when_no_match() {
+        let session_uuid = "test-uuid-abcd";
+        let (dir, doc) = setup_project_with_session(session_uuid);
+
+        // Create a snapshot with a DIFFERENT session UUID
+        let snap_dir = dir.path().join(".agent-doc/snapshots");
+        fs::write(
+            snap_dir.join("deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678.md"),
+            "---\nagent_doc_session: different-uuid\nagent_doc_format: template\n---\n\nOther doc\n",
+        ).unwrap();
+
+        let migrated = try_migrate_renamed(&doc).unwrap();
+        assert!(!migrated, "should not migrate when no matching UUID found");
+    }
 
     #[test]
     fn ensure_initialized_assigns_uuid_even_when_snapshot_exists() {

@@ -455,6 +455,24 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content. For template docs that means `AlreadyApplied` is still a document-mutation-capable repair outcome when transcript canonicalization is needed.
 
+## rename
+
+`agent-doc rename <OLD_PATH> <NEW_PATH>` — migrate session state after a document rename.
+
+Moves all hash-keyed state files (snapshots, baselines, locks, pending, CRDT, pre-response)
+from the old path hash to the new path hash. Updates session registry entries.
+
+- Old path may not exist (rename already happened); uses `doc_hash_from_str` as fallback.
+- New path must exist.
+- Missing source files are silently skipped (idempotent).
+- Existing destination files cause an error (no overwrite).
+
+**Auto-migration:** `ensure_initialized` (called from `preflight`, `claim`, `sync`) also
+detects renames automatically by scanning `.agent-doc/snapshots/` for orphaned files whose
+frontmatter session UUID matches the current document. This makes `rename` a fallback for
+cases where the old path is known but auto-detection failed (e.g., symlink resolution
+differences).
+
 ## watch
 
 `agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]` — watch session files for changes and auto-submit.

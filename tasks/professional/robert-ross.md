@@ -113,7 +113,32 @@ Transcribed & diarized — 56:15 call between you and Robert. Saved to [`transcr
 - **Collaborative agenda in Slack:** Rob asked you to scribe a numbered agenda in Slack (1. AWS, etc.) — he dictates, you edit the same message, building the list collaboratively.
 - **Recording app:** Rob uses "Cube ACR" on his phone for auto-recording calls.
 - **Action items from call:** (1) Brian creates a Mermaid decision tree showing the Claude Code project scaffolding automation process, (2) get on Zoom at ~1:15 PM PT to continue, (3) Rob wants to learn FigJam integration for Mermaid output. Rob explicitly said not to commit this to session-share — keep it local for now, will eventually become build party "GitHub 101" course material.
-<!-- agent:boundary:f3d7b7ef -->
+
+❯ Using the conversation, please create a markdown document with diagrams for Rob to have his own Claude Code process in his ~/Documents/Code directory. This process should work with both git submodules and with local content.
+
+❯ Question, should robert-ross have a private git repo? I will ask robert-ross. Let's assume robert-ross will have a private git repo. Similar to my agent-loop. There are some rough edges that may trip up robert-ross, such as having uncommitted code.
+
+❯ We may want automation as well. This can be planned in the document.
+### Re: Claude Code setup guide + private repo for Rob — sonnet-4-6
+
+Created [`tasks/dreamable/robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) — a beginner-friendly guide with:
+
+- **Two workflows:** local-only (quick experiments) and git submodule (real projects)
+- **Mermaid decision trees:** which workflow to use, the scaffolding flow, the planned automation flow
+- **⚠️ Rough edges section:** uncommitted changes hazard, submodule double-commit, and the setup overhead (the ADHD stall point)
+- **Automation plan:** `new-project` script spec + GitHub personal access token integration
+- **Git 101 reference table:** the Google Docs analogies from your call
+
+**On the private repo question:** Yes, Rob should have one — same mono-repo pattern as `agent-loop`. A single private `robert-code` repo in `~/Documents/Code` tracks everything, with submodules for bigger projects. Simpler than managing separate repos per project at the start.
+
+Main rough edges for a beginner:
+
+1. **Uncommitted changes** — the #1 confusion source. Claude Code can't track what's unsaved. Guide includes "Rule: commit before switching topics."
+2. **Submodule double-commit** — easy to forget the parent-repo commit after committing inside the submodule. Guide has a two-step checklist.
+3. **Setup overhead** — the exact ADHD friction from the call. The `new-project` automation in Section 6 of the guide is the fix.
+
+Recommend asking Rob: mono-repo (`robert-code`) or separate GitHub repos per project? Guide defaults to mono-repo since it's simpler to start.
+<!-- agent:boundary:c8fab4ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

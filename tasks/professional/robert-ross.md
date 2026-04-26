@@ -259,7 +259,30 @@ Then:
 4. Verify: `"Show me the new layout."`
 
 One unknown: is `~/Documents/Code` already a git repo? If not, the migration prompt should also init git. The guide assumes it is.
-<!-- agent:boundary:395ac6d9 -->
+
+❯ Please create a separate plan document for robert-ross to run via Claude Code. Separate the guide for instructions for robert-ross.
+### Re: separate plan document for Rob — opus-4-6
+
+Created [`robert-ross-workspace-setup.md`](../dreamable/robert-ross-workspace-setup.md) — a step-by-step runnable plan separate from the guide.
+
+**What it covers (7 steps, in order):**
+
+1. **Update CLAUDE.md** — paste the scaffolding rules so future projects auto-follow the convention
+2. **Inventory** — "Show me what's in my Code directory" before touching anything
+3. **Migrate** — "Organize my workspace" one-liner
+4. **Verify** — confirm the new layout
+5. **GitHub token** — needs Zoom with Brian
+6. **Add existing repos** — submodule prompts for ClaudeScore repos
+7. **Hooks** — needs Zoom with Brian
+
+Plus a quick-reference table at the bottom for day-to-day prompts after setup.
+
+**Guide vs. plan split:**
+- [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) — reference material (concepts, diagrams, rough edges, git 101)
+- [`robert-ross-workspace-setup.md`](../dreamable/robert-ross-workspace-setup.md) — runnable checklist Rob executes in Claude Code
+
+Steps 5 and 7 are gated on a Zoom session with Brian. Everything else Rob can run solo.
+<!-- agent:boundary:469c1074 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

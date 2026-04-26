@@ -928,3 +928,40 @@ fn test_submodule_write_patches_dir_structure() {
         "patches directory should be initially empty"
     );
 }
+
+#[test]
+fn test_compact_message_dash_reads_stdin() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+
+    init_git_repo(root, &root.join("session.md"));
+
+    let doc = concat!(
+        "---\nagent_doc_session: stdin-test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: topic\n\nSome response content.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(root.join("session.md"), doc).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args(["compact", "session.md", "--message", "-", "--tag", "skip"]);
+    cmd.write_stdin("Summary from stdin pipe.");
+    cmd.assert().success();
+
+    let result = fs::read_to_string(root.join("session.md")).unwrap();
+    assert!(
+        result.contains("Summary from stdin pipe."),
+        "compact should use stdin content as message, got:\n{result}"
+    );
+    assert!(
+        !result.contains("### Re: topic"),
+        "original content should be archived"
+    );
+}

@@ -39,6 +39,8 @@
 //!   or any I/O operation fails.
 //! - `tag: Some(name)` creates a lightweight git tag at HEAD before compaction (pre-compact checkpoint).
 //!   `tag: None` auto-generates `agent-doc/<doc-name>/pre-compact-N` where N is the next ordinal.
+//! - `message: Some("-")` reads from stdin (standard Unix convention for CLIs that accept
+//!   file-or-string arguments).
 //! - `commit: true` uses `git::commit_with_outcome` after a successful mutation. If the commit
 //!   path reports that a VCS refresh signal target existed but writing it failed, compact fails
 //!   closed instead of silently accepting the closeout.
@@ -56,6 +58,7 @@
 //! - partial_compact_result_format: result has archive pointer + preamble (or message) + kept sections
 //! - compact_with_commit_writes_vcs_refresh_signal: `--commit` closeout creates an `agent-doc`
 //!   commit and updates `.agent-doc/patches/vcs-refresh.signal` when that refresh channel exists
+//! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -92,6 +95,19 @@ pub fn run(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+
+    let stdin_message;
+    let message = if message == Some("-") {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("failed to read --message from stdin")?;
+        stdin_message = buf;
+        Some(stdin_message.as_str())
+    } else {
+        message
+    };
 
     // Create a pre-compact git tag at HEAD before modifying the document.
     // Skipped if tag == Some("skip").

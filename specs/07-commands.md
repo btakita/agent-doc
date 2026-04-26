@@ -222,7 +222,7 @@ Exits with error if the pane is dead or no session is registered.
 `agent-doc compact <FILE>` — archive old exchange/component content and rewrite the document + snapshot atomically.
 
 - Default `template` target is `exchange`; `--component <name>` overrides it.
-- `--message <text>` replaces the default archive pointer text.
+- `--message <text>` replaces the default archive pointer text. `--message -` reads the message from stdin (standard Unix convention).
 - `--tag <name>` sets the pre-compact checkpoint tag; `--tag skip` disables tagging.
 - `--commit` closes out the compacted file through the same `agent-doc commit` path described above, rather than relying on an external raw `git commit`.
 - When `--commit` is used and the project exposes `.agent-doc/patches/vcs-refresh.signal`, the closeout must verify that the refresh signal write succeeded; a failed signal write is a hard closeout failure, not a warning.

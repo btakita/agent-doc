@@ -511,7 +511,7 @@ Implemented, tested, built, installed, committed, and pushed (`d8f066a` on `2026
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
 
 Full suite: 1239 unit + integration pass (1 pre-existing codex hook flake).
-<!-- agent:boundary:36e4acbe -->
+<!-- agent:boundary:81d26ec6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -521,7 +521,6 @@ Add to pending changing `agent:pending` to `agent:backlog`.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [ ] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
 - [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

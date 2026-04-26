@@ -817,3 +817,62 @@ Execution semantics:
 - Requested prompt presets are expanded into each DAG node's concrete prompt before dispatch, so `sequential`, `dag`, and `parallel` share the same labeled preset block behavior.
 - Because every node writes back to the same session document, DAG mode does **not** run siblings concurrently. Fan-in is supported through multiple `after=` dependencies; fan-out across isolated worktrees remains `--mode parallel`.
 - `--no-git` is rejected for the same reason as sequential mode: persistence still flows through git-backed `finalize`.
+
+## agent:queue component
+
+The `<!-- agent:queue -->...<!-- /agent:queue -->` component batches multiple prompts in one block. The binary parses the body into a `Vec<QueueEntry>` (I/O-free; callers handle file reads/writes).
+
+### Syntax
+
+Items inside the block use a hybrid syntax:
+
+**Single-line prompts** — bare `- ` list items (column 0, dash-space):
+
+```markdown
+<!-- agent:queue -->
+- do #fix1
+- do #fix2
+- run tests
+<!-- /agent:queue -->
+```
+
+**Multi-line prompts** — opened by `~~~prompt` or bare `---`, closed by the matching `~~~` or `---`:
+
+```markdown
+<!-- agent:queue -->
+~~~prompt
+Review the changes in src/agent-doc/src/frontmatter.rs
+and check for edge cases with empty body content.
+Then run cargo test.
+~~~
+<!-- /agent:queue -->
+```
+
+Both fence styles are equivalent inside `<!-- agent:queue -->` boundaries. Outside those boundaries, `---` retains its standard markdown meaning (thematic break / frontmatter delimiter).
+
+**Control fences:**
+
+| Syntax | Meaning |
+|--------|---------|
+| `--- start` / `~~~start` | Activation signal; consumed on first cycle |
+| `--- start at <time>` / `--- start <time>` | Scheduled activation; defer until `<time>` |
+| `--- stop` / `~~~stop` | Breakpoint; halts the queue when reached |
+
+Blank lines between items are silently skipped. Any other content is a parse error.
+
+### Data model (`queue.rs`)
+
+```rust
+pub enum QueueEntry {
+    Prompt(QueuePrompt),        // single-line or multi-line prompt
+    StartFence(Option<String>), // None = immediate; Some(time) = scheduled
+    StopFence,
+}
+
+pub struct QueuePrompt {
+    pub text: String,
+    pub multiline: bool,  // true for ~~~prompt/--- fences
+}
+```
+
+**`parse(body: &str) -> Result<Vec<QueueEntry>>`** — pure parser for the component body. I/O-free; caller reads the component body from the document.

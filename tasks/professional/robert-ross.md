@@ -1024,7 +1024,48 @@ All 18 are in the Dreamable, Inc. org. Each is a standalone FigJam file with pro
 **Re: agent-doc-bugs.md backlog item** — Added `#4wa1` to `tasks/agent-doc/agent-doc-bugs.md` pending:
 
 > Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
-<!-- agent:boundary:9a7d3d5a -->
+
+❯ Please organize the draft diagrams in https://www.figma.com/board/hRFplC9Ig2tMVPTfFMD8r6/rob-harness-automation-for-git?t=E1gHWLhGnUTmc6DQ-0
+
+❯ Organization of workflows should follow a logical format.
+
+❯ All diagrams must be left to right. Transparent boxes as the base. With background colors to distinguish nodes or a group of nodes.
+
+❯ The contrast of text to background must be high.
+### Re: Organize FigJam diagrams — opus-4-6
+
+All 20 diagrams are now organized on the board at [rob-harness-automation-for-git](https://www.figma.com/board/hRFplC9Ig2tMVPTfFMD8r6/rob-harness-automation-for-git).
+
+**Layout applied:**
+- All diagrams flow **left to right** (converted from the original top-to-bottom mermaid layout)
+- **Transparent section backgrounds** as the base container for each group
+- **Background colors** distinguish node types:
+  - Dark green — user actions / start nodes
+  - Dark blue — Claude process steps
+  - Orange/amber — decision diamonds
+  - Purple — end/result nodes
+  - Teal — reference nodes
+  - Gold — special states (saves, reconciliation)
+  - Light green/blue — variant outcomes
+- **High contrast**: white text on all dark-colored backgrounds
+
+**10 sections, 20 diagrams:**
+
+| # | Section | Diagrams |
+|---|---------|----------|
+| 1 | Getting Started | README Setup Flow, Basic Workflow |
+| 2 | Workspace Structure | Flat → src/ Migration |
+| 3 | Starting Projects | New Project, Adding GitHub Repo, Local vs Submodule |
+| 4 | Day-to-Day Workflow | Day-to-Day Workflow, Submodule Commits, Uncommitted Changes |
+| 5 | Git Concepts | Push/Pull Flow |
+| 6 | Skills, Plugins & Hooks | Skills, MCP Plugins, Hooks |
+| 7 | Exploration | Exploring Git Repos, Investigating External Repos |
+| 8 | Plugin Management | Plugin Lifecycle, Maintenance Schedule |
+| 9 | Planning | Plan Documents, Enhanced Planning |
+| 10 | Automation Setup | 4-Phase Setup Flow |
+
+Each diagram title label identifies the source section (e.g., "§3 Day-to-Day Workflow"). Connectors use elbowed lines with arrow endpoints and labeled branch paths (Yes/No, etc.).
+<!-- agent:boundary:c18aaa93 -->
 <!-- /agent:exchange -->
 
 <!--

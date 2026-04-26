@@ -969,7 +969,28 @@ The user then finishes their edit and explicitly restarts (`do queue` or re-add 
 Change detection is scoped to the next item only — appending new items to the end of the queue doesn't trigger a halt, so you can safely add work to the tail while earlier items are still processing.
 
 This sidesteps the entire typing-detection problem. The snapshot comparison is deterministic and cheap (string equality on the next item's text).
-<!-- agent:boundary:feea31a5 -->
+
+❯ If a prompt is currently running, and the user defines a queue with `auto`, will agent-doc be able to immediately start the queue after the previous turn ends?
+### Re: queue activation after a running prompt — opus-4-6
+
+Yes, but the handoff depends on how the harness loops:
+
+**Preflight detection works immediately.** When the current turn commits and the next preflight runs, it will see `&lt;!-- agent:queue auto --&gt;` with items, activate the queue, and start consuming. No special wiring needed — `auto` detection happens on every preflight cycle regardless of what triggered it.
+
+**The gap is: what triggers the next preflight?**
+
+| Harness mode | Queue starts automatically? |
+|---|---|
+| `/loop /agent-doc <file>` | Yes — next loop iteration picks up the queue |
+| Manual `/agent-doc <file>` | No — user must invoke again after the current turn |
+| Supervisor session | Possible — commit could signal re-invoke via IPC |
+
+For the manual case, there's a design option: the commit/finalize step could detect a newly-appeared `auto` queue and emit a `queue_ready: true` signal. The harness could use that to auto-loop one more time without the user re-invoking. This would make the experience seamless — you define the queue while the agent is working, and it picks up immediately after the current turn.
+
+The implementation would be: after `session-check` passes, do a lightweight queue scan. If `auto` queue is non-empty and `queue_active` is not yet set, emit the signal. The harness decides whether to honor it (Claude Code could auto-loop; Codex might not).
+
+This is worth adding to the plan as an optional Phase 5 enhancement — the core queue works without it, and `/loop` users already get the behavior for free.
+<!-- agent:boundary:653c2969 -->
 <!-- /agent:exchange -->
 
 <!--

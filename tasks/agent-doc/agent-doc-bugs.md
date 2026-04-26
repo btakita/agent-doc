@@ -185,7 +185,24 @@ Parser handles: bare `- ` list items, `~~~prompt`/`---` multi-line fences, `--- 
 - `cf490fa` — spec: `07-commands.md` agent:queue section
 
 Both pushed to `20260422/codex-agent-backend`. `cargo install` + `cargo build --release` completed; `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
-<!-- agent:boundary:9630439c -->
+
+❯ Add response to this doc. is #queue done?
+
+### Re: is #queue done? — opus-4-6
+
+The response from the prior cycle is already committed in the document — no re-add needed.
+
+**#queue is not done.** Phase 1 (parser + data model) is complete and live at 0.33.14, but three phases remain:
+
+| Phase | Status | Summary |
+|-------|--------|---------|
+| 1. Parser + data model | Done | `queue.rs` parser, scaffold updates, 30 tests |
+| 2. Preflight integration | Open | Trigger resolution (`auto`, start fences, `do queue`), `queue_active` state, emit `queue_prompts` |
+| 3. Consumption + dispatch | Open | Per-item removal after commit, change detection halt, stop/start fence handling, looping |
+| 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
+
+Plan file: `tasks/agent-doc/agent-queue-plan.md`
+<!-- agent:boundary:8a8aca8a -->
 <!-- /agent:exchange -->
 <!--
 -->

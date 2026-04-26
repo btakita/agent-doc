@@ -954,7 +954,36 @@ Your screenshot confirms the situation: you're on a **Collab seat** under Dreama
 **Cost implication:** upgrading a seat from Collab to Full/Dev increases the per-seat cost on the org's Figma bill. Rob would see the pricing difference in the admin panel before confirming.
 
 If Rob wants to do this quickly, he can also click the "Upgrade to Dev / Full" links visible on your account page — but those may prompt *you* to request the upgrade from the admin rather than doing it directly. The cleanest path is Rob doing it from the admin Members panel.
-<!-- agent:boundary:bca56783 -->
+
+❯ What is the difference in cost between Dev and Full. With Dev, can I have full mcp access?
+### Re: Dev vs Full seat + MCP access — opus-4-6
+
+Just read Figma's official MCP rate limit docs. The numbers are much worse than I initially described:
+
+**MCP tool call limits by seat type (on Organization plan):**
+
+| Seat | Daily limit | Per-minute rate |
+|------|------------|-----------------|
+| **View / Collab** | **6 per month** | n/a |
+| **Dev / Full** | **200 per day** | 15/min |
+
+You're on Collab = 6 calls *per month total*. We burned all 6 in one session. That's why it cut off.
+
+**Dev vs Full for MCP: identical.** Both get 200 calls/day and 15/min on the Organization plan. The difference is only in Figma design capabilities:
+
+- **Dev seat** — inspect, export, Dev Mode, limited editing. Cheaper.
+- **Full seat** — full design editing, prototyping, everything.
+
+**For MCP purposes, Dev is sufficient and cheaper.** You'd go from 6/month to 200/day — more than enough to transfer all 20 diagrams in a single session.
+
+**Pricing** (approximate, Rob will see exact numbers in admin):
+- Dev seat: ~$25/editor/month (billed annually on Org plan)
+- Full seat: ~$75/editor/month (billed annually on Org plan)
+
+**Recommendation:** Ask Rob to upgrade your seat to **Dev**. It's 1/3 the cost of Full and gives identical MCP access. You only need Full if you also want to create/edit designs directly in Figma's editor.
+
+**Note:** the rate limit resets monthly for Collab, so we'll need to wait until next month or upgrade before continuing the diagram transfer.
+<!-- agent:boundary:d3e78fd0 -->
 <!-- /agent:exchange -->
 
 <!--

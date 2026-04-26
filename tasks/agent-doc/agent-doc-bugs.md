@@ -20,9 +20,21 @@ prompt_presets:
 
 <!-- agent:exchange patch=append -->
 -
-<!-- agent:boundary:0d6d035c -->
-<!-- /agent:exchange -->
+❯ When I did ran `compact exchange`, it has a list that is empty. Why?
+### Re: empty list after compact exchange — opus-4-6
 
+My invocation error. When I ran the compact, I used `--message -` expecting the Unix convention where `-` means "read from stdin." But `agent-doc compact --message` treats its argument as a literal string, so the exchange was replaced with the character `-` (an empty markdown list item) and the piped summary was discarded.
+
+The original exchange is safely archived (1,335 lines in `.agent-doc/archives/...-20260426-044100.md`).
+
+**Fix paths:**
+
+1. **Binary-side:** teach `agent-doc compact --message -` to read from stdin (standard Unix convention for CLIs that accept file-or-string arguments)
+2. **Skill-side:** pass the summary inline as `--message "text..."` instead of piping
+
+Both are worth doing — the first prevents this class of error for any caller, the second is the immediate workaround.
+<!-- agent:boundary:92606ef1 -->
+<!-- /agent:exchange -->
 <!--
 -->
 

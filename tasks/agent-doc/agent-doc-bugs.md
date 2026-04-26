@@ -811,7 +811,24 @@ The submodule routing logic in `route.rs` is the single point of failure. When a
 **Not included:** periodic response checkpoint capture during generation. The eviction guard is the root fix — once busy panes aren't killed, checkpoint capture is a lower-priority enhancement.
 
 Committed as `79d9aba` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:529d737d -->
+
+❯ do #route1. #spec-test-build-install-commit-push
+### Re: do #route1 — opus-4-6
+
+Root cause: `route.rs` sends trigger commands to tmux panes using the caller's relative file path (e.g. `tasks/agent-doc/agent-doc-bugs.md`). When the pane's CWD is narrowed to a submodule root (via `resolve_pane_cwd`), the relative path resolves against that CWD — picking up `src/session-share/tasks/agent-doc/agent-doc-bugs.md` (3.7KB) instead of the main-repo file (52KB). Preflight runs in the skill's shell (CWD = main repo root) so it reads the correct file, but the trigger and subsequent `finalize`/write in the pane context route to the submodule version.
+
+**Fix:** Added `resolve_absolute_file_path(file)` in `git.rs` — canonicalizes relative paths against the process CWD. In `route.rs::run_with_tmux`, the `file_path` used for trigger commands, session registration, and pane startup is now the absolute path. This eliminates CWD-dependent resolution entirely.
+
+**Changes:**
+
+- **`git.rs`** — new `pub fn resolve_absolute_file_path(file: &Path) -> PathBuf`: returns canonical absolute path for existing relative paths, passes through absolute paths unchanged, falls back to the original path when the file doesn't exist
+- **`route.rs`** — `run_with_tmux` now calls `resolve_absolute_file_path(file)` at line 193 instead of `file.to_string_lossy()`. All downstream uses (`send_command`, `sessions::register`, `auto_start_in_session`) get the absolute path
+- **`SPEC.md`** — added invariant: route trigger commands must use absolute file paths
+
+**Tests:** 4 new tests — `resolve_absolute_file_path_returns_absolute_for_existing_relative`, `resolve_absolute_file_path_preserves_absolute_input`, `resolve_absolute_file_path_returns_relative_when_not_found`, `run_with_tmux_resolves_file_path_to_absolute`.
+
+Committed as `f846940` on `20260422/codex-agent-backend`, pushed.
+<!-- agent:boundary:a47cf9d8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -820,7 +837,7 @@ Committed as `79d9aba` on `20260422/codex-agent-backend`, pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
+- [x] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
 - [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

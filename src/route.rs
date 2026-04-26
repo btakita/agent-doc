@@ -605,6 +605,7 @@ fn evict_previous_stash_pane(
     session_id: &str,
     replacement_pane: &str,
     target_session: &str,
+    harness: &HarnessConfig,
 ) {
     let Ok(Some(previous)) = sessions::lookup_entry(session_id) else {
         return;
@@ -615,6 +616,7 @@ fn evict_previous_stash_pane(
         &previous,
         replacement_pane,
         target_session,
+        harness,
     );
 }
 
@@ -624,6 +626,7 @@ fn evict_previous_stash_pane_entry(
     previous: &sessions::SessionEntry,
     replacement_pane: &str,
     target_session: &str,
+    harness: &HarnessConfig,
 ) {
     if previous.pane.is_empty()
         || previous.pane == replacement_pane
@@ -638,6 +641,15 @@ fn evict_previous_stash_pane_entry(
         return;
     };
     if !is_stash_window_name(&window_name) {
+        return;
+    }
+
+    if is_agent_process(tmux, &previous.pane, harness) {
+        eprintln!(
+            "[route] skipping eviction of stash pane {} for session {} — agent process still active",
+            previous.pane,
+            &session_id[..std::cmp::min(8, session_id.len())]
+        );
         return;
     }
 
@@ -933,7 +945,7 @@ fn auto_start_in_session(
         }
     };
 
-    evict_previous_stash_pane(tmux, session_id, &new_pane, session_name);
+    evict_previous_stash_pane(tmux, session_id, &new_pane, session_name, harness);
 
     // Register immediately so subsequent route calls find this pane
     sessions::register(session_id, &new_pane, file_path)?;
@@ -1971,11 +1983,99 @@ history line
                 &previous,
                 &replacement_pane,
                 session,
+                &HarnessConfig::claude(),
             );
 
             assert!(
                 wait_for_pane_exit(&iso, &old_pane, std::time::Duration::from_secs(1)),
                 "previous stash pane should be evicted"
+            );
+            assert!(
+                iso.pane_alive(&replacement_pane),
+                "replacement pane should stay alive"
+            );
+            Ok(())
+        })();
+
+        result.unwrap();
+    }
+
+    #[test]
+    fn eviction_skipped_when_agent_process_active() {
+        let iso = IsolatedTmux::new("route-test-evict-busy");
+        let session = "route-evict-busy";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let result = (|| -> anyhow::Result<()> {
+            let busy_pane = iso.auto_start(session, dir.path())?;
+            iso.stash_pane(&busy_pane, session)?;
+
+            // Copy /bin/sleep as "agent-doc" so tmux's #{pane_current_command}
+            // reports the binary name that matches the harness process list.
+            let bin_dir = dir.path().join("bin");
+            std::fs::create_dir_all(&bin_dir)?;
+            let fake_agent = bin_dir.join("agent-doc");
+            std::fs::copy("/bin/sleep", &fake_agent)?;
+
+            iso.raw_cmd(&[
+                "send-keys",
+                "-t",
+                &busy_pane,
+                &format!("{} 60", fake_agent.display()),
+                "Enter",
+            ])?;
+
+            // Poll until pane_current_command changes from the shell
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let out = iso
+                    .cmd()
+                    .args([
+                        "display-message",
+                        "-t",
+                        &busy_pane,
+                        "-p",
+                        "#{pane_current_command}",
+                    ])
+                    .output()?;
+                let cmd =
+                    String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if cmd == "agent-doc" {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for agent-doc to start in pane (last cmd: '{}')",
+                    cmd
+                );
+            }
+
+            let replacement_pane = iso.auto_start(session, dir.path())?;
+            iso.stash_pane(&replacement_pane, session)?;
+
+            let previous = sessions::SessionEntry {
+                pane: busy_pane.clone(),
+                pid: std::process::id(),
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                file: "doc.md".to_string(),
+                window: iso.pane_window(&busy_pane)?,
+            };
+            evict_previous_stash_pane_entry(
+                &iso,
+                "session-busy",
+                &previous,
+                &replacement_pane,
+                session,
+                &HarnessConfig::claude(),
+            );
+
+            assert!(
+                iso.pane_alive(&busy_pane),
+                "stash pane running agent process should NOT be evicted"
             );
             assert!(
                 iso.pane_alive(&replacement_pane),

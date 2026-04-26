@@ -138,7 +138,24 @@ Main rough edges for a beginner:
 3. **Setup overhead** — the exact ADHD friction from the call. The `new-project` automation in Section 6 of the guide is the fix.
 
 Recommend asking Rob: mono-repo (`robert-code`) or separate GitHub repos per project? Guide defaults to mono-repo since it's simpler to start.
-<!-- agent:boundary:c8fab4ce -->
+
+❯ robert-ross does not want to have to type in terminal commands. He wants to drive the automation from Claude Code. He already has ~/Documents/Code with a CLAUDE.md.
+### Re: Claude Code-driven workflow for Rob — opus-4-6
+
+Rewrote [`tasks/dreamable/robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) — no terminal commands anywhere. The entire guide is now "tell Claude what you want in plain English."
+
+**What changed:**
+
+- **All workflows are conversational prompts.** Instead of `mkdir` / `git init` / `git submodule add`, the guide shows example phrases: _"Create a new project called 'landing-page'"_, _"Move this to its own GitHub repo"_, _"Commit everything and push."_
+- **Mermaid diagrams updated** — every step shows Claude doing the work, not Rob typing commands.
+- **No setup overhead.** Since Rob already has `~/Documents/Code` with a `CLAUDE.md`, the guide starts from there. Section 6 shows how to customize the CLAUDE.md with scaffolding rules so Claude auto-asks "submodule or local?" when Rob says "new project."
+- **Rough edges reframed** — instead of "type this command to fix it," each scenario shows what to _say_ to Claude ("Commit what's there and start fresh", "Throw away those changes").
+- **Git reference table** kept but reframed: "What Claude does / What it's called / Google Docs analogy." Rob doesn't need to learn git commands — just the concepts.
+
+**Remaining setup Rob needs (one-time, Brian can walk through):**
+1. Review/customize his `CLAUDE.md` preferences
+2. GitHub personal access token — so Claude can create repos on his behalf
+<!-- agent:boundary:a9864a36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

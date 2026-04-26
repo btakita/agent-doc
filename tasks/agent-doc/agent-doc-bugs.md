@@ -956,7 +956,20 @@ This is more reliable because editors know the actual cursor position and keystr
 Ship tier 1 first — it's self-contained and works without plugin updates. Add tier 2 as an enhancement when the plugins already report region-level activity. The debounce approach is good enough for the common case (user adds a few items, pauses, queue picks up). Edge case where the user types exactly one item boundary during the debounce window is unlikely and recoverable (just re-add the partially consumed item).
 
 A third option that sidesteps detection entirely: items in the queue that start with `[ ] ` (unchecked checkbox) are treated as "not ready" and skipped. The user checks them (`[x] ` or removes the checkbox) when ready. This gives explicit user control at the cost of one extra gesture per item.
-<!-- agent:boundary:1da3bc02 -->
+
+❯ If the user is still typing on the queue item that is to be processed, the queue should stop rather than waiting for the user to stop typing. Since the use may pause typing...It would be better to force the user restart the queue than to run an incomplete prompt in the queue.
+### Re: stop-on-change semantics — opus-4-6
+
+Good call — debounce is unreliable and running an incomplete prompt is the worse failure mode. Updated the plan to **stop-on-change**:
+
+After each consumed item is removed, the queue snapshots the remaining items. On the next cycle, preflight compares the next-to-consume item against that snapshot. If it changed, the queue halts immediately — strips `auto`, clears `queue_active`, emits `queue_halted: "item_modified"` in the preflight JSON. No waiting, no guessing.
+
+The user then finishes their edit and explicitly restarts (`do queue` or re-add `auto`).
+
+Change detection is scoped to the next item only — appending new items to the end of the queue doesn't trigger a halt, so you can safely add work to the tail while earlier items are still processing.
+
+This sidesteps the entire typing-detection problem. The snapshot comparison is deterministic and cheap (string equality on the next item's text).
+<!-- agent:boundary:feea31a5 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -628,11 +628,18 @@ Implemented, tested, built, installed, committed, and pushed (`731992a` on `2026
 #### Build
 
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
-<!-- agent:boundary:49faec81 -->
+
+❯ Sanity check: `agent:exchange` `patch` attribute is still active. Make sure `patch` is not also deprecated on `agent:exchange`.
+### Re: sanity check — agent:exchange patch attribute — opus-4-6
+
+Confirmed safe. `strip_backlog_patch_attr()` iterates only over `BACKLOG_COMPONENT` (`"backlog"`) and `BACKLOG_ALIAS` (`"pending"`) — `agent:exchange` is never matched.
+
+`agent:exchange patch=append` remains active and meaningful: `template::default_mode("exchange")` returns `"append"` (the built-in default), and the template engine uses it to decide append-vs-replace behavior in `apply_patches_with_overrides()`. The attribute is also explicitly documented in `specs/02-document-format.md` as part of the inline-attr precedence chain.
+
+<!-- agent:boundary:b14726ba -->
 <!-- /agent:exchange -->
 
 <!--
-Sanity check: `agent:exchange` `patch` attribute is still active. Make sure `patch` is not also deprecated on `agent:exchange`.
 -->
 
 ## Pending / Not Built

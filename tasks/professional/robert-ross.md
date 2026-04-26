@@ -639,7 +639,32 @@ Added **Section 10: Plan Documents — Building, Running, and Tracking Work** to
 The section emphasizes that plan documents are plain markdown and require zero plugins — Claude handles them natively. The plugin option is presented as an upgrade path if Rob finds himself managing complex dependency graphs later.
 
 Quick Reference table updated with plan-related entries. Sections renumbered (11→12, 12→13).
-<!-- agent:boundary:065ad10f -->
+
+❯ Are there any gaps in the artifacts for robert-ross to have a smooth Claude Code experience?
+### Re: Gaps in the kit — opus-4-6
+
+Found and fixed one concrete bug, added a missing section, and identified remaining gaps:
+
+#### Fixed
+- **README.md stale reference** — said "Quick Reference in Section 7" but it's now Section 11. Fixed.
+
+#### Added
+- **Section 12: Troubleshooting** — covers the most common failure modes a new user hits: push permission errors, submodule sync issues, Claude not finding a project, broken skills, recovery from mistakes, session continuity ("Claude forgot"), and the SPEC.md health check as the catch-all.
+
+#### Remaining gaps (not yet addressed)
+
+1. **No example session transcript** — Rob has never seen a real Claude Code back-and-forth. A short annotated example showing "user says X → Claude does Y → result" would demystify the interaction faster than diagrams alone. Could be a new section or a separate `example-session.md` file.
+
+2. **No settings.json template for hooks** — SPEC.md says "Brian installs these during Zoom" for hooks, but there's no pre-built JSON template for what those hooks actually look like. If Brian can't make the Zoom, Rob has no fallback.
+
+3. **CLAUDE.md doesn't reference SPEC.md** — The workspace CLAUDE.md template doesn't tell Claude "when verifying my environment, read SPEC.md." Adding one line would make the health-check flow discoverable without Rob remembering the exact prompt.
+
+4. **No seed content in tasks/** — The setup creates `tasks/` but it starts empty. A starter `tasks/README.md` or example planning doc would show Rob the pattern by example rather than just describing it.
+
+5. **Session continuity isn't in the guide's mental model section** — Section 12 (troubleshooting) now mentions it, but it might deserve a callout in Section 1 or 3 so Rob doesn't hit it as a surprise.
+
+Items 1-5 are all quick fixes. Want me to address any or all of them?
+<!-- agent:boundary:b2965eb3 -->
 <!-- /agent:exchange -->
 
 <!--

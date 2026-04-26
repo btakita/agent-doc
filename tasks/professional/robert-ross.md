@@ -881,7 +881,31 @@ The whole setup takes about 10-15 minutes. The kit also has a reference guide an
 ---
 
 Ready to send whenever you are.
-<!-- agent:boundary:d69d3684 -->
+
+❯ Using the figma mcp, Please transfer all of the mermaid diagrams onto the figjam board https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=0-1&p=f&t=FXQcxmR1HArTV2Us-0
+
+❯ Have separate sections for the README.md and robert-ross-workspace-guide.md
+### Re: FigJam mermaid transfer — opus-4-6
+
+Started transferring mermaid diagrams to the FigJam board. Created:
+
+**Board structure:**
+- Section: "README.md — Setup Flow"
+- Section: "robert-ross-workspace-guide.md — Reference Diagrams"
+
+**Completed diagrams (2 of 20):**
+1. README setup flowchart (9 nodes: Open Claude Code → Setup steps → Start working, with decision branch for "Question about how something works?")
+2. Workspace guide "Basic Workflow" (8 nodes: Open Claude Code → Tell Claude → Create folder → Write code → Commit/push → Want changes? loop)
+
+**Blocked:** Hit the Figma MCP tool call rate limit for the Collab seat on the Dreamable org. The remaining 18 workspace-guide diagrams can't be completed this session.
+
+**Options to finish:**
+1. Wait for rate limit reset and continue in a later session
+2. Upgrade seat (Figma link: https://www.figma.com/files/1613946391556996643/recents-and-sharing?upgrade_request_type=expert&entry_point=mcp_rate_limit_deeplink)
+3. Use `generate_diagram` (creates proper mermaid renderings but as separate FigJam files, not on the same board)
+
+Board link: https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=0-1
+<!-- agent:boundary:12dfc3bc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -890,6 +914,6 @@ Ready to send whenever you are.
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:pending -->

@@ -1166,7 +1166,11 @@ mod tests {
         .unwrap();
 
         let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
-        assert!(signal.exists(), "expected VCS refresh signal at {}", signal.display());
+        assert!(
+            signal.exists(),
+            "expected VCS refresh signal at {}",
+            signal.display()
+        );
 
         let log = std::process::Command::new("git")
             .current_dir(root)

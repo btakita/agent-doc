@@ -1364,8 +1364,7 @@ mod tests {
     fn reposition_preserve_head_keeps_head_markers() {
         let doc = "<!-- agent:exchange patch=append -->\n### Re: topic (HEAD)\ntext\n<!-- agent:boundary:aaaa1111 -->\n<!-- /agent:exchange -->\n";
         let c_doc = CString::new(doc).unwrap();
-        let result =
-            unsafe { agent_doc_reposition_boundary_to_end_preserve_head(c_doc.as_ptr()) };
+        let result = unsafe { agent_doc_reposition_boundary_to_end_preserve_head(c_doc.as_ptr()) };
         assert!(result.error.is_null());
         assert!(!result.text.is_null());
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();

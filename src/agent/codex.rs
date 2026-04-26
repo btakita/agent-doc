@@ -412,10 +412,7 @@ impl Iterator for CodexStreamIterator {
                             let msg = if stderr.trim().is_empty() {
                                 format!("codex subprocess exited with {status}")
                             } else {
-                                format!(
-                                    "codex subprocess exited with {status}: {}",
-                                    stderr.trim()
-                                )
+                                format!("codex subprocess exited with {status}: {}", stderr.trim())
                             };
                             return Some(Err(anyhow::anyhow!(msg)));
                         }
@@ -444,9 +441,7 @@ mod tests {
                 "echo >&2 'sandbox violation'; exit 1".into(),
             ]),
         );
-        let iter = codex
-            .send_streaming("ignored", None, false, None)
-            .unwrap();
+        let iter = codex.send_streaming("ignored", None, false, None).unwrap();
         let chunks: Vec<_> = iter.collect();
         assert_eq!(chunks.len(), 1);
         let err = chunks[0].as_ref().unwrap_err();
@@ -465,17 +460,15 @@ mod tests {
                     .into(),
             ]),
         );
-        let iter = codex
-            .send_streaming("ignored", None, false, None)
-            .unwrap();
+        let iter = codex.send_streaming("ignored", None, false, None).unwrap();
         let chunks: Vec<Result<StreamChunk>> = iter.collect();
         assert!(
             chunks.iter().all(|c| c.is_ok()),
             "expected no errors, got: {chunks:?}"
         );
-        let final_chunk = chunks.iter().find(|c| {
-            c.as_ref().map(|sc| sc.is_final).unwrap_or(false)
-        });
+        let final_chunk = chunks
+            .iter()
+            .find(|c| c.as_ref().map(|sc| sc.is_final).unwrap_or(false));
         assert!(final_chunk.is_some(), "expected final chunk");
     }
 
@@ -485,9 +478,7 @@ mod tests {
             Some("bash".into()),
             Some(vec!["-c".into(), "exit 42".into()]),
         );
-        let iter = codex
-            .send_streaming("ignored", None, false, None)
-            .unwrap();
+        let iter = codex.send_streaming("ignored", None, false, None).unwrap();
         let chunks: Vec<_> = iter.collect();
         assert_eq!(chunks.len(), 1);
         let err = chunks[0].as_ref().unwrap_err();

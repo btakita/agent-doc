@@ -2492,8 +2492,7 @@ body b
 body
 <!-- agent:boundary:old-id -->
 <!-- /agent:exchange -->";
-        let result =
-            reposition_boundary_to_end_preserve_head_with_id(doc, Some("explicit-id"));
+        let result = reposition_boundary_to_end_preserve_head_with_id(doc, Some("explicit-id"));
         assert!(
             result.contains("### Re: topic (HEAD)"),
             "preserve_head must keep (HEAD); got:\n{result}"
@@ -2502,7 +2501,10 @@ body
             result.contains("<!-- agent:boundary:explicit-id -->"),
             "explicit boundary id should be used; got:\n{result}"
         );
-        assert!(!result.contains("old-id"), "old boundary gone; got:\n{result}");
+        assert!(
+            !result.contains("old-id"),
+            "old boundary gone; got:\n{result}"
+        );
     }
 
     #[test]

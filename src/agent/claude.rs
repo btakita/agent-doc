@@ -329,8 +329,7 @@ mod tests {
             Some("bash".into()),
             Some(vec![
                 "-c".into(),
-                r#"echo '{"type":"result","result":"ok"}'; echo >&2 'deprecation warning'"#
-                    .into(),
+                r#"echo '{"type":"result","result":"ok"}'; echo >&2 'deprecation warning'"#.into(),
             ]),
         );
         let iter = claude.send_streaming("ignored", None, false, None).unwrap();
@@ -389,11 +388,7 @@ mod tests {
     #[test]
     fn streaming_args_includes_verbose() {
         let args = build_streaming_args(
-            &[
-                "-p".into(),
-                "--output-format".into(),
-                "json".into(),
-            ],
+            &["-p".into(), "--output-format".into(), "json".into()],
             None,
             false,
             None,
@@ -461,10 +456,7 @@ impl Iterator for StreamIterator {
                             let msg = if stderr.trim().is_empty() {
                                 format!("claude subprocess exited with {status}")
                             } else {
-                                format!(
-                                    "claude subprocess exited with {status}: {}",
-                                    stderr.trim()
-                                )
+                                format!("claude subprocess exited with {status}: {}", stderr.trim())
                             };
                             return Some(Err(anyhow::anyhow!(msg)));
                         }

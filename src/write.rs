@@ -1144,10 +1144,7 @@ pub fn normalize_user_prompts_in_exchange_safe(
 /// `trimEnd()`-matched prefixed line (`❯ <target>`) exists in the sidecar.
 /// Returns `true` when all expected prefixes are present (or when there are
 /// no targets to check).
-pub fn verify_sidecar_normalization(
-    sidecar: &str,
-    normalize_prefix_lines: &[String],
-) -> bool {
+pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[String]) -> bool {
     if normalize_prefix_lines.is_empty() {
         return true;
     }
@@ -1159,10 +1156,7 @@ pub fn verify_sidecar_normalization(
             continue;
         }
         let expected = format!("❯ {}", trimmed);
-        if !sidecar_lines
-            .iter()
-            .any(|l| l.trim_end() == expected)
-        {
+        if !sidecar_lines.iter().any(|l| l.trim_end() == expected) {
             return false;
         }
     }
@@ -5289,12 +5283,8 @@ mod ack_content_snapshot_tests {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json") {
                         if let Ok(text) = std::fs::read_to_string(&path) {
-                            if let Ok(json) =
-                                serde_json::from_str::<serde_json::Value>(&text)
-                            {
-                                if let Some(pid) =
-                                    json.get("patch_id").and_then(|v| v.as_str())
-                                {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                                if let Some(pid) = json.get("patch_id").and_then(|v| v.as_str()) {
                                     // Write sidecar WITHOUT ❯ prefix (plugin failure)
                                     let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
                                     let _ = std::fs::write(
@@ -5322,7 +5312,10 @@ mod ack_content_snapshot_tests {
             None,
         )
         .unwrap();
-        assert!(result.success, "IPC should succeed when plugin consumes patch");
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
 
         // Snapshot must use content_ours (has ❯ prefix), NOT the sidecar
         let snap = snapshot::load(&doc).unwrap().unwrap();
@@ -5847,9 +5840,7 @@ response here
 
 #[cfg(test)]
 mod verify_sidecar_normalization_tests {
-    use super::{
-        enforce_orchestrate_template_patch_contract, verify_sidecar_normalization,
-    };
+    use super::{enforce_orchestrate_template_patch_contract, verify_sidecar_normalization};
 
     #[test]
     fn empty_targets_always_passes() {
@@ -5880,11 +5871,7 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn blank_targets_skipped() {
         let sidecar = "❯ do #task1\nother";
-        let targets = vec![
-            "do #task1".to_string(),
-            "".to_string(),
-            "   ".to_string(),
-        ];
+        let targets = vec!["do #task1".to_string(), "".to_string(), "   ".to_string()];
         assert!(verify_sidecar_normalization(sidecar, &targets));
     }
 
@@ -5919,9 +5906,8 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn orchestrate_contract_requires_exchange_patch() {
         let patches = vec![crate::template::PatchBlock::new("status", "updated")];
-        let err =
-            enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
-                .unwrap_err();
+        let err = enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .unwrap_err();
         assert!(err.to_string().contains("patch:exchange"));
     }
 

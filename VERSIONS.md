@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.14
+
+- **Code formatting cleanup.** Applied rustfmt across 8 source files (claude.rs, codex.rs, compact.rs, ffi.rs, preflight.rs, template.rs, write.rs, Cargo.lock). No functional changes — purely whitespace and line-wrapping normalization.
+
 ## 0.33.13
 
 - **Workspace-write submodule sessions now auto-add external gitdirs.** When a session document lives in a git submodule, the harness launch path and fresh-agent backends now append `--add-dir` entries for the submodule's external gitdir under the superproject `.git/modules/...` tree plus the superproject `.git` used by parent-pointer updates. That keeps normal workspace-write Claude/Codex sessions from tripping permission failures on submodule commits while preserving the existing arg-precedence chains. Added regression coverage for external-gitdir discovery and for Claude streaming preserving extra `--add-dir` args when switching to `stream-json`.

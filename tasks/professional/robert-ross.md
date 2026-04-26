@@ -839,7 +839,49 @@ The whole setup takes about 10-15 minutes. The kit also has a reference guide an
 ---
 
 Let me know if you want to adjust the tone or add/remove anything before sending.
-<!-- agent:boundary:6118252f -->
+
+❯ robert-ross uses Warp Term. So please tailor the instructions for Warp Term.
+### Re: Warp Term instructions — opus-4-6
+
+Revised draft, tailored for Warp:
+
+---
+
+Hey Rob! I put together a Claude Code kit to get your workspace set up. Here's how to get started:
+
+1. Download the zip: `robert-ross-claude-code-kit.zip` (I'll send it here or via email — let me know which you prefer)
+
+2. Unzip it — double-click the file in Finder, or open a Warp tab and run:
+   ```
+   cd ~/Downloads
+   unzip robert-ross-claude-code-kit.zip -d ~/Documents/Code/claude-code-kit
+   ```
+
+3. Read through `README.md` in the unzipped folder — it's a short table of contents explaining what each file does
+
+4. In Warp, cd into your workspace:
+   ```
+   cd ~/Documents/Code
+   ```
+
+5. Start Claude Code from that directory:
+   ```
+   claude
+   ```
+
+6. Once Claude Code is running, paste this prompt:
+   ```
+   Read ~/Documents/Code/claude-code-kit/robert-ross-workspace-setup.md and run it step by step.
+   ```
+
+7. Claude will walk through each setup step and pause for your confirmation before moving on. If anything is unclear or you hit a snag, just ping me.
+
+The whole setup takes about 10-15 minutes. The kit also has a reference guide and example session you can check out later.
+
+---
+
+Ready to send whenever you are.
+<!-- agent:boundary:d69d3684 -->
 <!-- /agent:exchange -->
 
 <!--

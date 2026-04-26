@@ -349,7 +349,19 @@ Added 5 new Mermaid diagrams to `robert-ross-workspace-guide.md`. The guide alre
 The git concepts diagram uses the Google Docs analogy colors (green = your computer, yellow = local history, blue = GitHub cloud) plus a one-sentence summary of the flow.
 
 Zip rebuilt (8.4 KB).
-<!-- agent:boundary:71355163 -->
+
+❯ I use dark mode themes. robert-ross uses light mode themes. On dark mode themes, the mermaid diagram text is low contrast with the background. Please fix the mermaid diagrams to have high contrast on both light and dark mode themes.
+❯ ![img_2.png](img_2.png)
+### Re: Mermaid contrast fix for light + dark mode — opus-4-6
+
+Fixed. The issue was that Mermaid's `style` directives only set `fill` (background) but not `color` (text). In dark mode, the default text color is white — invisible against light green (`#90EE90`), yellow (`#FFD700`), and blue (`#87CEEB`) backgrounds.
+
+Added `color:#333` to every styled node across all diagrams in both files:
+- **README.md** — 6 nodes fixed (the overview flowchart)
+- **robert-ross-workspace-guide.md** — 11 nodes fixed across 4 diagrams (local-vs-submodule, submodule double-commit, uncommitted changes, git concepts, automation phases)
+
+Dark text on light fills reads well in both themes. Zip rebuilt.
+<!-- agent:boundary:0bcf4429 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

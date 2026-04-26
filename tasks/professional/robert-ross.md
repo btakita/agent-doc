@@ -932,7 +932,29 @@ The Figma MCP server enforces per-session tool call limits based on your seat ty
 - Or wait for the rate limit window to reset (likely hourly or daily — Figma doesn't document the exact reset cadence)
 
 The `generate_diagram` tool would hit the same limit since it goes through the same MCP server. The only workaround within this session is to wait for the reset.
-<!-- agent:boundary:261c3168 -->
+
+❯ What does robert-ross, the admin, need to do to increase my rate limit?
+❯ ![img_3.png](img_3.png)
+### Re: What Rob needs to do — opus-4-6
+
+Your screenshot confirms the situation: you're on a **Collab seat** under Dreamable, Inc., with upgrade options to **Dev** or **Full**.
+
+**What Rob needs to do (as org admin):**
+
+1. Open Figma → click the Dreamable, Inc. team icon in the left sidebar
+2. Go to **Members** (under the team settings/admin area)
+3. Find **Brian** (brian@dreamable.com) in the member list
+4. Change seat from **Collab** → **Full** (or **Dev** if MCP access is the only need)
+
+**Seat differences:**
+- **Collab** (current) — can view, comment, use limited features. Low MCP tool call limit.
+- **Dev** — developer-focused seat with inspect/export access. May have higher MCP limits but Figma's docs are unclear on this.
+- **Full** — full editor seat with unlimited design access. Highest MCP tool call limit.
+
+**Cost implication:** upgrading a seat from Collab to Full/Dev increases the per-seat cost on the org's Figma bill. Rob would see the pricing difference in the admin panel before confirming.
+
+If Rob wants to do this quickly, he can also click the "Upgrade to Dev / Full" links visible on your account page — but those may prompt *you* to request the upgrade from the admin rather than doing it directly. The cleanest path is Rob doing it from the admin Members panel.
+<!-- agent:boundary:bca56783 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -45,9 +45,35 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 | `exchange` | append | Conversation history — each cycle appends |
 | `findings` | append | Accumulated research data — grows over time |
 | `status` | replace | Current state — updated at milestones |
-| `pending` | replace | Task queue — auto-cleaned each cycle |
+| `queue` | (none) | Prompt queue — consumed sequentially (see §2.5) |
+| `pending` | replace | Task backlog — auto-cleaned each cycle |
 | `output` | replace | Latest agent response only |
 | `input` | replace | User prompt area |
 | (custom) | replace | All other components default to replace |
 
 Per-component behavior is configured in `.agent-doc/components.toml` (see §7.21).
+
+### §2.5 Queue Component
+
+The `agent:queue` component holds a batch of prompts consumed sequentially. It is scaffolded between `exchange` and `pending` in the default template.
+
+**Syntax:** hybrid list items and fenced prompts.
+
+| Form | Example | Description |
+|------|---------|-------------|
+| Single-line | `- do #fix1` | Bare `- ` prefix at column 0 |
+| Multi-line (tilde) | `~~~prompt`...`~~~` | Fenced with `~~~prompt` opener |
+| Multi-line (dash) | `---`...`---` | Fenced with bare `---` |
+| Start fence | `--- start [at <datetime>]` | Activation signal (consumed on use) |
+| Stop fence | `--- stop` | Breakpoint (consumed when reached) |
+
+**Attributes:** `<!-- agent:queue auto -->` enables immediate activation when the queue is non-empty. The `auto` attribute is stripped when the queue drains.
+
+**Parsing rules:**
+1. Lines starting with `- ` at column 0 → single-line prompt.
+2. `~~~prompt` opens a multi-line prompt fence; `~~~` closes it.
+3. Bare `---` (not followed by ` start` or ` stop`) opens a multi-line prompt fence; matching `---` closes it.
+4. `--- start`, `--- start <time>`, `--- start at <time>`, `~~~start` → start fence.
+5. `--- stop`, `~~~stop` → stop fence.
+6. Blank lines between items are ignored.
+7. Content outside list items, fences, or control fences is a parse error.

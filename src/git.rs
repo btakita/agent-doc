@@ -468,6 +468,10 @@ fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
     let mut redacted = String::with_capacity(body.len());
     let mut last = 0usize;
     for comp in components {
+        if comp.open_end < last {
+            // Nested inside a previously processed component — already redacted
+            continue;
+        }
         redacted.push_str(&body[last..comp.open_end]);
         redacted.push_str(&body[comp.close_start..comp.close_end]);
         last = comp.close_end;
@@ -579,8 +583,10 @@ fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
     }
 
     components.iter().all(|component| {
-        matches!(component.name.as_str(), "status" | "exchange" | "pending")
-            && normalize_component_content_for_absorb(component.content(body)).is_empty()
+        matches!(
+            component.name.as_str(),
+            "status" | "exchange" | "queue" | "pending"
+        ) && normalize_component_content_for_absorb(component.content(body)).is_empty()
     })
 }
 
@@ -4584,6 +4590,52 @@ mod tests {
         assert!(
             log_str.contains("agent-doc(plan-b):"),
             "git log should contain the plan-b closeout, got:\n{log_str}"
+        );
+    }
+
+    #[test]
+    fn redact_component_contents_handles_nested_components() {
+        let body = r#"## Status
+
+<!-- agent:status patch=replace -->
+Status content here.
+<!-- /agent:status -->
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+Some exchange content.
+Add <!-- agent:queue -->...<!-- /agent:queue --> to the template.
+More content.
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending patch=replace -->
+- [ ] task
+<!-- /agent:pending -->
+"#;
+        let result = redact_component_contents_for_absorb(body);
+        assert!(
+            result.is_some(),
+            "should not panic on nested components"
+        );
+        let redacted = result.unwrap();
+        assert!(
+            redacted.contains("<!-- agent:status patch=replace -->"),
+            "should contain status open marker"
+        );
+        assert!(
+            redacted.contains("<!-- /agent:status -->"),
+            "should contain status close marker"
+        );
+        assert!(
+            !redacted.contains("Status content here."),
+            "should redact status content"
+        );
+        assert!(
+            !redacted.contains("Some exchange content."),
+            "should redact exchange content (including nested markers)"
         );
     }
 }

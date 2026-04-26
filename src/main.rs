@@ -86,6 +86,7 @@ mod plugin;
 mod preflight;
 mod project_config;
 mod prompt;
+mod queue;
 mod queue_dispatch;
 mod read;
 mod rename;

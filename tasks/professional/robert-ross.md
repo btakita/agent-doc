@@ -361,7 +361,20 @@ Added `color:#333` to every styled node across all diagrams in both files:
 - **robert-ross-workspace-guide.md** — 11 nodes fixed across 4 diagrams (local-vs-submodule, submodule double-commit, uncommitted changes, git concepts, automation phases)
 
 Dark text on light fills reads well in both themes. Zip rebuilt.
-<!-- agent:boundary:0bcf4429 -->
+
+❯ In README.md, we have "Point Claude at robert-ross-workspace-setup.md". Please provide literal instructions...such as prompt Claude Code "...".
+
+❯ "Schedule Zoom with Brian (Steps 5 + 7)": We are already on a Zoom call, and robert-ross can ask me questions at any step...So either rephrase this step or remove the step.
+### Re: literal instructions + remove Zoom gate — opus-4-6
+
+Two changes across README.md and the setup plan:
+
+**1. Literal prompt in README.** The diagram node now reads `Tell Claude: 'Read robert-ross-workspace-setup.md and run it step by step'` instead of the vague "Point Claude at..." phrasing. The Getting Started section already had the literal prompt — now the diagram matches.
+
+**2. Removed Zoom scheduling gate.** Since you're already on a call with Rob, changed all "(Zoom with Brian)" markers to "(with Brian)" and rephrased from "Stop here — schedule Zoom" to "Ask Brian to help with this step." The diagram also dropped the yellow Zoom node — Steps 5 and 7 are now green like the rest, just flagged as needing Brian's involvement.
+
+Zip rebuilt.
+<!-- agent:boundary:633c8311 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

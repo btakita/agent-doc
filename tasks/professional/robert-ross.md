@@ -605,7 +605,7 @@ Updated both sections in SPEC.md:
 
 Both sections now point to Step 10 (reconciliation) as the place where the specific inventory gets captured. I don't have visibility into what Rob has installed, so the tables are left as placeholders that the reconciliation step fills in when Rob runs it.
 
-❯ robert-ross will want to regularly pull from git repos such as `ClaudeCode/SessionShare` and it's submodules, and explore the repo. He may want to look into recent activity, decisions that were made, how the rubrics work, recent test runs, etc.
+❯ robert-ross will want to regularly pull from git repos such as `ClaudeCode/SessionShare` and its submodules, and explore the repo. He may want to look into recent activity, decisions that were made, how the rubrics work, recent test runs, etc.
 
 ❯ robert-ross may also want to investigate other github repos to explore how the repos work and how they can benefit business objectives that robert-ross will have defined in ~/Documents/Code. Please make section(s) in robert-ross-workspace-guide.md to for robert-ross to follow.
 
@@ -623,8 +623,28 @@ Added three new sections to `robert-ross-workspace-guide.md`:
 Also updated the Quick Reference table (now Section 10) with new entries for pulling, activity checks, external repo exploration, auditing, and plugin reconciliation.
 
 Renumbered existing sections 8→11, 9→12 to accommodate.
-<!-- agent:boundary:cfa65444 -->
+
+❯ Please add a section on building a plan document, modifying or interrogating the plan document, and running the plan document. This should work without any plugins...but robert-ross may also opt to use a plugin such as orba/superpowers.
+### Re: Plan documents section — opus-4-6
+
+Added **Section 10: Plan Documents — Building, Running, and Tracking Work** to the workspace guide. Covers:
+
+- **Creating a plan** — Claude generates a structured markdown file in `tasks/` with goal, phases, and checkboxes
+- **Interrogating a plan** — asking about status, gaps, or where you left off without changing anything
+- **Modifying a plan** — adding/reordering steps, updating scope
+- **Running a plan** — telling Claude to execute the next step(s), with auto-checkoff on completion
+- **Plan structure** — shows what a typical plan file looks like (phases, checkboxes, notes)
+- **Optional plugins** — explains that native markdown plans work immediately with no setup, but orchestration plugins like `orba/superpowers` can add dependency resolution, parallel execution, and automated sequencing for more complex plans
+
+The section emphasizes that plan documents are plain markdown and require zero plugins — Claude handles them natively. The plugin option is presented as an upgrade path if Rob finds himself managing complex dependency graphs later.
+
+Quick Reference table updated with plan-related entries. Sections renumbered (11→12, 12→13).
+<!-- agent:boundary:065ad10f -->
 <!-- /agent:exchange -->
+
+<!--
+
+-->
 
 ## Pending / Not Built
 

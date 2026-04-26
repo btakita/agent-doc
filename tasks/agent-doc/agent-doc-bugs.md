@@ -5,6 +5,7 @@ agent_doc_write: crdt
 agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
 prompt_presets:
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
@@ -566,18 +567,30 @@ codex_model: o3-pro
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
 
 Full suite: 1729 tests pass (1 pre-existing codex hook flake).
-<!-- agent:boundary:a9cfe5e7 -->
+
+❯ Add to pending changing `agent:pending` to `agent:backlog`. `agent:pending` will alias to `agent:backlog`...but `agent:backlog` is the canonical element name. Please update the agent document template to use `agent:backlog`.
+
+❯ Please add `agent:icebox` as another element. This is the project icebox not in the active backlog. Please add `agent:icebox` to the template.
+### Re: backlog rename + icebox element — opus-4-6
+
+Added both to pending:
+
+- **#hbacklog** — Rename `agent:pending` to `agent:backlog`. The existing `agent:pending` marker becomes an alias so old documents keep working, but `agent:backlog` is the canonical element name going forward. Scaffold sites in `claim.rs` and `sync.rs`, the document-format spec, and the SKILL.md instructions all need updating.
+
+- **#hicebox** — New `agent:icebox` component for parking items outside the active backlog. Placed after `agent:backlog` in the template. Needs scaffold, spec, parser, and component handling support.
+
+Also noted the `claude_model: claude-opus-4-6` frontmatter addition.
+<!-- agent:boundary:df7d2cef -->
 <!-- /agent:exchange -->
 
 <!--
-Add to pending changing `agent:pending` to `agent:backlog`. `agent:pending` will alias to `agent:backlog`...but `agent:backlog` is the canonical element name. Please update the agent document template to use `agent:backlog`.
-
-Please add `agent:icebox` as another element. This is the project icebox not in the active backlog. Please add `agent:icebox` to the template.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#hbacklog] Rename agent:pending → agent:backlog. agent:pending remains as alias. Update template scaffolds (claim.rs, sync.rs) and document-format spec to use agent:backlog as canonical name
+- [ ] [#hicebox] Add agent:icebox component. Sits after agent:pending/agent:backlog in the template. Represents project icebox (items not in active backlog). Update scaffolds, spec, parser, and component handling
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

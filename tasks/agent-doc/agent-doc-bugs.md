@@ -920,7 +920,20 @@ A `--- trigger` / `~~~trigger` fence inside the queue acts as a one-shot start s
 #### Trigger precedence
 
 `auto` attribute > inline trigger fence > exchange `do queue`. Phase 2 now resolves all three in priority order. Added open questions about `auto` re-activation semantics and whether trigger fence content should be forwarded.
-<!-- agent:boundary:98d0f769 -->
+
+❯ I like the `auto` attribute that is removed once the queue completes. Would adding tasks to the queue while the queue is running be possible? Would each completed task be removed from the queue while the queue is running?
+### Re: queue runtime semantics — opus-4-6
+
+Yes to both. Updated the plan:
+
+**`auto` is one-shot:** when the queue drains to empty, `auto` is stripped from the opening comment (`&lt;!-- agent:queue auto --&gt;` → `&lt;!-- agent:queue --&gt;`). To re-run, you re-add `auto` or use `do queue`. This keeps things explicit — a completed queue is visibly inert.
+
+**Completed items are removed:** each item is removed from the `agent:queue` block immediately after its cycle commits. The queue shrinks visibly as it runs — you can watch progress by looking at the block.
+
+**Adding tasks while running:** yes. The queue lives in the document, and preflight re-reads it on each cycle. Between cycles (after one item commits, before the next preflight), you can freely add, remove, or reorder items. The only constraint is not editing the first item in the list while it's being consumed — everything else is fair game. New items appended to the bottom will be reached when the queue gets to them.
+
+This gives you a live work queue: populate it, trigger with `auto` or `do queue`, watch items disappear as they complete, and inject new work mid-run.
+<!-- agent:boundary:6a63f878 -->
 <!-- /agent:exchange -->
 
 <!--

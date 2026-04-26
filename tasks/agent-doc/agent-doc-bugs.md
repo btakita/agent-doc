@@ -540,7 +540,33 @@ Added `snapshot::ensure_initialized(file)` call to `start.rs:run()` between sess
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
 
 Full suite: 1720 tests pass (1 pre-existing codex hook flake).
-<!-- agent:boundary:f5c3e2fc -->
+
+❯ do #hmodel. #spec-test-build-install-commit-push
+### Re: do #hmodel — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`9a255d2` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+Added `claude_model` and `codex_model` frontmatter fields for per-harness model override. When running under Claude Code, `claude_model` takes precedence over `model`; under Codex, `codex_model` takes precedence. Falls back to `model` when no harness-specific field is set.
+
+**Resolution method:** `Frontmatter::resolve_harness_model(&self, harness: &str)` — called by preflight (for `agent_model` attribution), `run`, `stream`, `orchestrate`, `hooks`, and `capture`.
+
+**Example frontmatter:**
+```yaml
+model: gpt-5
+claude_model: opus
+codex_model: o3-pro
+```
+
+**Files changed:** `frontmatter.rs` (struct + method + merge_fields + 11 tests), `preflight.rs`, `run.rs`, `stream.rs`, `orchestrate.rs`, `hooks.rs`, `capture.rs`, `start.rs`, `specs/02-document-format.md`.
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+
+Full suite: 1729 tests pass (1 pre-existing codex hook flake).
+<!-- agent:boundary:075292e2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -552,7 +578,7 @@ Please add `agent:icebox` as another element. This is the project icebox not in 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
+- [x] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

@@ -524,7 +524,24 @@ Added **Step 10: Reconcile environment against spec** to `robert-ross-workspace-
 3. After reconciliation, Claude updates SPEC.md to reflect Rob-managed components (plugins, skills) so the spec stays accurate going forward.
 
 This closes the loop — the spec starts as Brian's declaration of intended state, setup runs against it, and the reconciliation step confirms alignment and captures any Rob-added components. Zip rebuilt.
-<!-- agent:boundary:d5f2cbda -->
+
+❯ When robert-ross opens Warm Terminal (his current method of interacting with Claude Code), the initial directory may not be correct. Please suggest simple options for robert-ross to start Claude Code in the ~/Documents/Code directory using Warp Terminal.
+### Re: starting Claude Code in ~/Documents/Code from Warp — opus-4-6
+
+Three options, simplest first:
+
+1. **Just type it each time** — Open Warp, run `cd ~/Documents/Code && claude`. Two commands, zero setup. Good enough if Rob doesn't open Claude Code often.
+
+2. **Set Warp's default directory** — In Warp: Settings → Features → Session → "New sessions/tabs start in" → set to `~/Documents/Code`. Every new Warp tab starts there, so Rob just types `claude`. Downside: all Warp tabs start in that directory, not just Claude Code sessions.
+
+3. **Shell alias** — Add this line to `~/.zshrc` (or `~/.bashrc`):
+   ```bash
+   alias cc='cd ~/Documents/Code && claude'
+   ```
+   Then restart Warp (or run `source ~/.zshrc`). Now Rob types `cc` from anywhere and lands in the right directory with Claude Code running.
+
+**Recommendation:** Option 3 (alias) is the sweet spot — one-time setup, works from any directory, doesn't change Warp's default for other work. If Rob is uncomfortable editing dotfiles, option 2 is fully GUI-based.
+<!-- agent:boundary:8408a571 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

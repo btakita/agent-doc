@@ -309,7 +309,38 @@ Phase 3 implemented, tested, committed, and pushed (`0cb4810` on `20260422/codex
 | 2. Preflight integration | Done | Trigger resolution, `queue_active` state, `queue_prompts` emission |
 | 3. Consumption + dispatch | **Done** | Post-commit removal, halt detection (stop fence, time gate, item modified), 19 tests |
 | 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
-<!-- agent:boundary:20b78e5c -->
+
+❯ I moved tasks/recruit/robert-ross.md to tasks/professional/robert-ross.md. agent-doc was inserting duplicates of the prompt corrupting the document. Why?
+
+❯ Also, Idea is not responding with lag. Why?
+
+### Re: prompt duplication after file move — opus-4-6
+
+**Root cause: snapshot keyed by path hash, not session UUID.**
+
+agent-doc snapshots live at `.agent-doc/snapshots/<sha256(file_path)>.md`. When you manually moved `tasks/dreamable/robert-ross.md` → `tasks/professional/robert-ross.md` (commit `18973f81`), the snapshot stayed keyed to the old path. On the next preflight at the new path:
+
+1. No snapshot found → fresh baseline created from the file as-is
+2. First agent-doc cycle (`b1e3c5e33`) saw the entire compacted exchange as "new user content" → the write pipeline stripped 89 lines trying to normalize
+3. Second cycle (`a879f0bbd`) re-added the same content with `❯` prompt prefixes on lines it classified as user prompts → corruption
+
+The oscillation (strip → re-add with prefixes) is the write pipeline fighting itself: each cycle sees a diff against its own previous mutation and tries to "fix" it again.
+
+**Fix:** agent-doc should detect file renames via the session UUID in frontmatter. When preflight finds no snapshot for the current path but the frontmatter UUID matches a snapshot at a different path, it should migrate the snapshot to the new path hash before computing the diff. Alternatively, an explicit `agent-doc move <old> <new>` command could relocate the snapshot + baseline + pre-response artifacts in one step.
+
+**Workaround for now:** after moving a session document, run `agent-doc claim <new-path>` to force a fresh snapshot from the committed state before resuming the session.
+
+### Re: IDEA lag — opus-4-6
+
+IDEA isn't in the process list right now — it's either crashed or was killed. Without it running, I can't diagnose the specific lag.
+
+Common causes given the agent-doc JB plugin context:
+- The IPC file-watcher polling too aggressively (the preflight log showed `IPC listener active` — the plugin was connected at 13:16)
+- Large `.agent-doc/` directory with many snapshot/archive files triggering IntelliJ's VFS indexer
+- The `ActionPromoter` issue from the memory notes — though that manifests as broken intentions, not lag
+
+If you restart IDEA and the lag returns, I can check plugin logs, thread dumps (`jstack`), or the IDE's built-in freeze reporter. Let me know.
+<!-- agent:boundary:5f886522 -->
 <!-- /agent:exchange -->
 <!--
 -->

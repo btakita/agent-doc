@@ -1224,7 +1224,48 @@ So yes — `[defer:*]` executes the prompt as soon as its scope completes. The "
 **Stacking:** multiple `[defer]` annotations in the same item execute in LIFO order (matching Zig/Go semantics), or FIFO if we prefer document-order predictability. I'd lean FIFO here — document order is more intuitive for a markdown workflow than stack unwinding. But worth flagging as a design choice.
 
 **Updated naming:** `[defer:queue]` / `[defer:exchange]` replaces `[emit]`, `[enqueue]`, and `[post]` from the previous discussion. One keyword, target-qualified, with well-understood scope semantics.
-<!-- agent:boundary:62d74412 -->
+
+❯ If we are using FIFO, perhaps defer is an incorrect term. `[enqueue:queue]`, `[enqueue:exchange]`, `[post:queue]`, `[post:exchange]` would be a better set of instructions. If we type in `enqueue:queue`, `enqueue:exchange`, `post:queue`, `post:exchange` without the square brackets `[]`, would that also run the operation?
+### Re: FIFO naming and bare syntax — opus-4-6
+
+You're right — `defer` implies LIFO by convention. If the ordering is FIFO (document order), the verb should reflect that. Between the two:
+
+- **`enqueue`** — precise, data-structure-correct for FIFO. Slightly technical but unambiguous.
+- **`post`** — conversational, works across contexts ("post to queue", "post to exchange"). Less precise but more readable.
+
+I'd go with **`post`** as the primary verb. It's shorter, reads naturally in markdown (`[post:queue] run tests`), and doesn't carry the CS-jargon weight of `enqueue`. Accept `enqueue` as an alias for users who prefer it.
+
+#### Bare syntax (without brackets)
+
+Yes — bare `post:queue` and `post:exchange` could work as recognized prefix commands. The parser would match the pattern `^post:(queue|exchange)\s` at the start of a queue item or exchange line.
+
+```markdown
+<!-- agent:queue auto -->
+- [post:queue] run regression suite
+- post:queue run regression suite
+<!-- /agent:queue -->
+```
+
+Both forms would be equivalent. The brackets version is canonical (explicit, no ambiguity), but bare prefix is accepted as shorthand. Same for exchange context:
+
+```
+post:exchange Summarize today's session
+```
+
+**Disambiguation rule:** bare `post:*` is only recognized as a command when it appears as the first token of a queue item (`- post:queue ...`) or as a standalone line in the exchange. Mid-sentence occurrences like "we should post:queue items later" are treated as regular text. This mirrors how `do #id` works — position-dependent parsing.
+
+**Full syntax table:**
+
+| Form | Context | Recognized? |
+|---|---|---|
+| `[post:queue] text` | queue item or exchange | Yes (canonical) |
+| `[post:exchange] text` | queue item or exchange | Yes (canonical) |
+| `post:queue text` | first token of queue item | Yes (bare shorthand) |
+| `post:exchange text` | standalone exchange line | Yes (bare shorthand) |
+| `...post:queue...` | mid-sentence | No (plain text) |
+| `[enqueue:queue] text` | anywhere | Yes (alias) |
+| `enqueue:queue text` | first token | Yes (alias, bare) |
+<!-- agent:boundary:a20601e4 -->
 <!-- /agent:exchange -->
 
 <!--

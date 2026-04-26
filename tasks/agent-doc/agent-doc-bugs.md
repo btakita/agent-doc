@@ -45,7 +45,12 @@ Implemented `--message -` stdin support in `compact::run()`. When the message ar
 - `tests/test_cli.rs` — CLI integration test (`test_compact_message_dash_reads_stdin`) pipes content via `write_stdin` and asserts it appears in the compacted document.
 
 Verified end-to-end: `echo "Summary piped from stdin." | agent-doc compact session.md --message - --tag skip` produces the piped text in the exchange component.
-<!-- agent:boundary:49d84d87 -->
+
+❯ in the #queue plan, add `<!-- agent:queue -->`...`<!-- /agent:queue -->` to the agent doc template.
+### Re: agent:queue in template — opus-4-6
+
+Added to Phase 1 of the #queue plan: `&lt;!-- agent:queue --&gt;...&lt;!-- /agent:queue --&gt;` goes into the default template scaffold, placed between `agent:exchange` and `agent:pending`. This covers all three scaffold sites (`claim.rs` empty-file scaffold, `claim.rs` component scaffold, and `sync.rs` scaffold).
+<!-- agent:boundary:d19a35cc -->
 <!-- /agent:exchange -->
 <!--
 -->

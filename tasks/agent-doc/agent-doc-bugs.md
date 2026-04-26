@@ -1131,7 +1131,50 @@ Disables clearing for the entire queue — one continuous session across all ite
 **Interaction with `--- start <time>` fences:** a time gate inherently introduces a long pause. Context from before the gate may be stale or compacted by the time the gate opens. I'd recommend that time gates implicitly clear context (even under queue-level `noclear`), unless the item after the gate also has `[noclear]`. This keeps the default safe — stale context across a 3-hour pause is more likely to confuse than help.
 
 **Plan update:** added `noclear` to the queue syntax section, Phase 1 test coverage, and Phase 3 consumption loop logic.
-<!-- agent:boundary:6cc1d77d -->
+
+❯ Can we transfer items onto a queue from another document?
+❯ Can we have a prompt in the exchange or in the queue to write a prompt into the exchange or queue?
+### Re: cross-document queue transfer and self-writing prompts — opus-4-6
+
+#### Cross-document transfer
+
+Yes. `agent-doc transfer` already moves content between documents — extending it to target a queue is natural:
+
+```bash
+agent-doc transfer source.md --to target.md --into queue
+```
+
+This would extract items from `source.md` (exchange prompts, pending items, or explicit selections) and append them as queue entries in `target.md`'s `<!-- agent:queue -->` block. The reverse — pulling from a queue into another document's exchange or pending — works the same way with `--from queue`.
+
+Use cases:
+- **Triage document → work queue:** a brainstorm session produces a list of tasks; transfer them into a queue for sequential execution.
+- **Multi-document pipeline:** document A's queue includes `transfer results.md --into queue` as an item, chaining documents together.
+- **Splitting a large queue:** move items from one queue to another to parallelize across sessions.
+
+The transfer would respect queue ordering — items are appended at the tail by default, or inserted at a specific position with `--before <item>` / `--after <item>`.
+
+#### Self-writing prompts (exchange/queue → exchange/queue)
+
+Yes — this is meta-prompting. A prompt in the exchange or queue that writes content back into the same or another component:
+
+```markdown
+<!-- agent:queue auto -->
+- Add "run regression suite" to pending
+- Write a prompt into exchange: "Summarize the changes from today's session"
+<!-- /agent:queue -->
+```
+
+The queue item `Add "run regression suite" to pending` is an imperative that the agent executes via `--pending-add`. The second item instructs the agent to write a new prompt into the exchange — effectively scheduling a future conversation turn.
+
+Implementation: the agent recognizes "write a prompt into exchange/queue" as a directive and uses `agent-doc write` with appropriate flags to inject the content. For queue self-insertion, items appended during a running queue would be picked up on subsequent cycles (the queue re-reads on each preflight).
+
+**Safety consideration:** self-writing prompts create feedback loops. A queue item that adds more queue items could run indefinitely. Safeguards:
+1. **Depth limit** — track how many times a queue item was "generated" vs "user-authored." Auto-generated items can't spawn more auto-generated items (depth = 1).
+2. **Explicit syntax** — require a specific annotation like `[emit]` so accidental phrasing doesn't trigger meta-prompting: `- [emit:queue] run regression suite after deploy`
+3. **Audit trail** — generated prompts carry a `<!-- generated-by: #item-id -->` annotation so the user can trace provenance.
+
+The `[emit]` prefix keeps it opt-in and visible. Without it, the agent treats queue items as normal work directives — no self-modification.
+<!-- agent:boundary:d959b872 -->
 <!-- /agent:exchange -->
 
 <!--

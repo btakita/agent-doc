@@ -754,7 +754,21 @@ Ends with "Key things to notice" summary. Added to README.
   - `example-session.md`
 
 The kit is now complete. All identified gaps are addressed.
-<!-- agent:boundary:87d5993b -->
+
+❯ Instruct SPEC.md to create/update a Document Header on markdown artifacts.
+### Re: SPEC.md Document Header section — opus-4-6
+
+Added a **Document Headers** section to SPEC.md. It specifies:
+
+- **Format** — table after H1 with Name, Source, Version, Last Updated, Purpose, Audience
+- **When to add** — every new `.md` file in the workspace
+- **Version bumping** — patch/minor/major on edits, always update Last Updated
+- **Exclusions** — session files (`tasks/*.md`), files with YAML frontmatter, scratch files
+- **Check command** — verify all workspace `.md` files have headers
+- **Fix prompt** — "Add a Document Header to this file"
+
+Now when Claude creates or edits markdown in Rob's workspace, SPEC.md tells it to include/update the header. The health check (`"Read SPEC.md and verify my environment matches"`) will catch files missing headers.
+<!-- agent:boundary:d7d0462f -->
 <!-- /agent:exchange -->
 
 <!--

@@ -768,7 +768,23 @@ Added a **Document Headers** section to SPEC.md. It specifies:
 - **Fix prompt** — "Add a Document Header to this file"
 
 Now when Claude creates or edits markdown in Rob's workspace, SPEC.md tells it to include/update the header. The health check (`"Read SPEC.md and verify my environment matches"`) will catch files missing headers.
-<!-- agent:boundary:d7d0462f -->
+
+❯ If robert-ross already has a SPEC.md in his ~/Documents/Code directory, please reconcile this SPEC.md with his current SPEC.md.
+### Re: SPEC.md reconciliation — opus-4-6
+
+Updated Step 8 in `robert-ross-workspace-setup.md` to handle the case where Rob already has a SPEC.md. The new flow:
+
+1. Check if `~/Documents/Code/SPEC.md` exists
+2. If **new** — simple copy
+3. If **exists** — read both and merge:
+   - Keep Rob's customized sections (plugins/skills/hooks with actual data)
+   - Add new sections from the kit that don't exist yet (Document Headers, etc.)
+   - Preserve Rob's version numbers
+   - Prefer Rob's populated tables over kit placeholders
+   - Show result to Rob for confirmation before overwriting
+
+This ensures the setup plan won't clobber any work Rob has already done in his SPEC.md.
+<!-- agent:boundary:45e31cd8 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -905,8 +905,23 @@ When the document has an `agent:queue` component, preflight computes queue state
 | `queue_deferred` | `bool` | True when a time-gated start fence defers activation |
 | `queue_start_at` | `Option<String>` | Raw datetime string from `--- start at <time>` |
 | `queue_trigger` | `Option<QueueTrigger>` | How the queue was activated |
+| `queue_halted` | `Option<String>` | Halt reason: `"stop_fence"` or `"item_modified"` |
 
 Preflight performs these mutations before emitting queue state:
 - **Consume bare start fence:** If `--- start` (no `at`) is at the head, remove it from the queue body and write back to document + snapshot.
 - **Strip auto on drain:** If `auto` is set but no prompts remain, strip `auto` from the opening tag.
 - **Persist queue_active:** Set/clear `queue_active` in frontmatter when activation state changes.
+- **Halt on stop fence (Phase 3):** If `--- stop` is at the head, consume the fence, strip `auto`, clear `queue_active`, and emit `queue_halted: "stop_fence"`. No prompt is dispatched.
+- **Halt on time gate (Phase 3):** If `--- start at <time>` is at the head and the time hasn't arrived, emit `queue_deferred: true` and skip the cycle.
+- **Halt on item modified (Phase 3):** If the head prompt's text differs between snapshot and file (user edited it between cycles), strip `auto`, clear `queue_active`, and emit `queue_halted: "item_modified"`.
+
+### Post-commit consumption (Phase 3)
+
+After a successful response commit (`finalize` or `write --commit`), the consumed prompt is removed from the `agent:queue` block. This happens between the write step and the commit step so the consumption is included atomically in the same git commit as the response.
+
+- Read frontmatter: if `queue_active != true`, skip.
+- Parse the queue component body.
+- Remove the first `Prompt` entry via `remove_first_prompt()`.
+- If queue drained (no prompts remain): strip `auto` from opening tag, set `queue_active: false` in frontmatter.
+- Write updated content to file AND snapshot.
+- The commit that follows stages the snapshot (which now includes the consumed queue).

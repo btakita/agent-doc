@@ -284,3 +284,126 @@ fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
         "HEAD blob should still contain the committed response when internal session-check fails"
     );
 }
+
+// --- Phase 3: Queue consumption integration tests ---
+
+fn queue_doc_content() -> String {
+    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- run tests\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
+#[test]
+fn finalize_consumes_first_queue_prompt_after_commit() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, queue_doc_content()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), &queue_doc_content());
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("- do #fix1"),
+        "first prompt should be consumed"
+    );
+    assert!(
+        content.contains("- do #fix2"),
+        "second prompt should remain"
+    );
+    assert!(
+        content.contains("- run tests"),
+        "third prompt should remain"
+    );
+    assert!(
+        content.contains("queue_active: true"),
+        "queue_active should stay true when prompts remain"
+    );
+}
+
+#[test]
+fn finalize_drains_queue_and_clears_active_on_last_prompt() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let single_prompt = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- describe the project\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    fs::write(&doc, single_prompt).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), single_prompt);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions with AI agents.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] drained"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("- describe the project"),
+        "prompt should be consumed"
+    );
+    assert!(
+        content.contains("queue_active: false"),
+        "queue_active should be false when drained"
+    );
+    assert!(
+        !content.contains("auto"),
+        "auto attribute should be stripped on drain"
+    );
+}
+
+#[test]
+fn finalize_does_not_consume_when_queue_inactive() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let inactive = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    fs::write(&doc, inactive).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), inactive);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- do #fix1"),
+        "prompt should NOT be consumed when queue is inactive"
+    );
+}

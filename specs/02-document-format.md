@@ -80,6 +80,14 @@ On activation, preflight emits `queue_active: true`, `queue_prompts: [...]` (ord
 
 When the queue drains to empty: `auto` is stripped from the opening tag, `queue_active` is cleared in frontmatter.
 
+**Consumption (Phase 3):** After a successful response commit (via `finalize` or `write --commit`), the consumed prompt is removed from the `agent:queue` block atomically in the same commit. The snapshot is updated in sync so change detection works on the next cycle.
+
+- **Drain:** When the last prompt is consumed, `auto` is stripped and `queue_active` is cleared.
+- **Stop fence at head:** If the next entry is `--- stop`, preflight halts the queue (strips `auto`, clears `queue_active`), consumes the fence, and emits `queue_halted: "stop_fence"`. No prompt is dispatched.
+- **Time gate at head:** If the next entry is `--- start at <time>` and the time hasn't arrived, preflight emits `queue_deferred: true` and skips the cycle. When the time arrives, the fence is consumed and the next prompt dispatches.
+- **Item modified:** If the head prompt's text differs between snapshot and file (user edited it between cycles), preflight halts with `queue_halted: "item_modified"`. The user must restart the queue explicitly.
+- **Appended items:** New items added after the head prompt are not a halt — only the next-to-consume item triggers change detection.
+
 **Parsing rules:**
 1. Lines starting with `- ` at column 0 → single-line prompt.
 2. `~~~prompt` opens a multi-line prompt fence; `~~~` closes it.

@@ -381,6 +381,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     };
 
+    // Phase 3: consume queue prompt after successful write, before commit.
+    // Included in the same commit as the response for atomicity.
+    if write_result.is_ok() && commit_mode != CommitMode::None {
+        if let Err(e) = consume_queue_prompt(file) {
+            eprintln!("[queue] warning: consumption failed: {}", e);
+        }
+    }
+
     let commit_result = finalize_commit(file, commit_mode);
 
     match (write_result, commit_result) {
@@ -435,6 +443,117 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
     }
+}
+
+/// Consume the first queue prompt after a successful write cycle.
+///
+/// Called between the write step and the commit step so the consumption
+/// is included in the same git commit as the response (atomic).
+///
+/// Reads frontmatter for `queue_active: true`; if the queue is not active
+/// or has no prompts, this is a no-op. On consumption, the first prompt is
+/// removed from both the file and the snapshot. When the queue drains to
+/// empty, `auto` is stripped and `queue_active` is cleared.
+fn consume_queue_prompt(file: &Path) -> Result<bool> {
+    let content =
+        std::fs::read_to_string(file).context("queue consume: failed to read document")?;
+    let (fm, _) = frontmatter::parse(&content)?;
+
+    if fm.queue_active != Some(true) {
+        return Ok(false);
+    }
+
+    let components = component::parse(&content)?;
+    let comp = match components.iter().find(|c| c.name == "queue") {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+
+    let body = &content[comp.open_end..comp.close_start];
+    let entries = match crate::queue::parse(body) {
+        Ok(e) => e,
+        Err(_) => return Ok(false),
+    };
+
+    let consumed_text = match crate::queue::first_prompt(&entries) {
+        Some(p) => p.text.clone(),
+        None => return Ok(false),
+    };
+
+    let new_entries = crate::queue::remove_first_prompt(&entries);
+    let new_body = crate::queue::render(&new_entries);
+    let mut current = comp.replace_content(&content, &new_body);
+
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    let remaining = crate::queue::prompts(&new_entries).len();
+    let drained = remaining == 0;
+
+    if drained {
+        if has_auto {
+            let comps = component::parse(&current)?;
+            if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                let raw = &current[q.open_start..q.open_end];
+                let new_tag = crate::queue::strip_auto_from_tag(raw);
+                if new_tag != raw {
+                    let mut rebuilt = String::with_capacity(current.len());
+                    rebuilt.push_str(&current[..q.open_start]);
+                    rebuilt.push_str(&new_tag);
+                    rebuilt.push_str(&current[q.open_end..]);
+                    current = rebuilt;
+                }
+            }
+        }
+        current = frontmatter::merge_fields(&current, "queue_active: false")?;
+    }
+
+    std::fs::write(file, &current).context("queue consume: failed to write document")?;
+
+    // Update snapshot in sync
+    if let Ok(Some(snap)) = snapshot::load(file) {
+        let mut new_snap = snap.clone();
+        if let Ok(snap_comps) = component::parse(&new_snap) {
+            if let Some(sq) = snap_comps.iter().find(|c| c.name == "queue") {
+                new_snap = sq.replace_content(&new_snap, &new_body);
+
+                if drained {
+                    if has_auto {
+                        if let Ok(sc2) = component::parse(&new_snap) {
+                            if let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
+                                let raw = &new_snap[sq2.open_start..sq2.open_end];
+                                let new_tag = crate::queue::strip_auto_from_tag(raw);
+                                if new_tag != raw {
+                                    let mut rebuilt = String::with_capacity(new_snap.len());
+                                    rebuilt.push_str(&new_snap[..sq2.open_start]);
+                                    rebuilt.push_str(&new_tag);
+                                    rebuilt.push_str(&new_snap[sq2.open_end..]);
+                                    new_snap = rebuilt;
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(merged) =
+                        frontmatter::merge_fields(&new_snap, "queue_active: false")
+                    {
+                        new_snap = merged;
+                    }
+                }
+
+                if new_snap != snap {
+                    snapshot::save(file, &new_snap)?;
+                }
+            }
+        }
+    }
+
+    eprintln!(
+        "[queue] consumed: {:?} (remaining: {})",
+        consumed_text, remaining
+    );
+    if drained {
+        eprintln!("[queue] drained — cleared queue_active");
+    }
+
+    Ok(true)
 }
 
 /// Enforcement: reject full-replacement blocks targeting the `pending` component

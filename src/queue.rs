@@ -13,6 +13,11 @@
 //!   based on (in priority order): `auto` attribute, inline start fence,
 //!   exchange trigger (`do queue`/`run queue`), persisted `queue_active` state.
 //!
+//! Halt detection (Phase 3):
+//! - `detect_head_prompt_modified()` compares the head prompt between snapshot
+//!   and file to detect user edits between cycles.
+//! - Stop fence at head → halt signal for preflight.
+//!
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use anyhow::{bail, Result};
@@ -326,6 +331,47 @@ pub fn remove_first_prompt(entries: &[QueueEntry]) -> Vec<QueueEntry> {
         result.push(entry.clone());
     }
     result
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueHaltReason {
+    StopFence,
+    ItemModified,
+}
+
+/// Check if the head prompt has been modified between snapshot and file entries.
+///
+/// Compares the text of the first `Prompt` entry in each list. Returns `true`
+/// if either list has no prompt or the texts differ.
+///
+/// This is the "stop-on-change" mechanism: if the user edits the next-to-consume
+/// item between cycles, the queue halts immediately.
+pub fn detect_head_prompt_modified(
+    snapshot_entries: &[QueueEntry],
+    file_entries: &[QueueEntry],
+) -> bool {
+    let snap_head = first_prompt(snapshot_entries);
+    let file_head = first_prompt(file_entries);
+    match (snap_head, file_head) {
+        (Some(s), Some(f)) => s.text != f.text,
+        (None, None) => false,
+        _ => true,
+    }
+}
+
+/// Check if a stop fence is at the head of the entries (before any prompt).
+pub fn has_stop_fence_at_head(entries: &[QueueEntry]) -> bool {
+    matches!(entries.first(), Some(QueueEntry::StopFence))
+}
+
+/// Check if a time-gated start fence is at the head of the entries.
+/// Returns `Some(datetime)` if a time gate is found.
+pub fn time_gate_at_head(entries: &[QueueEntry]) -> Option<&str> {
+    match entries.first() {
+        Some(QueueEntry::StartFence(Some(dt))) => Some(dt.as_str()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -784,5 +830,98 @@ mod tests {
             strip_auto_from_tag("<!-- agent:queue -->"),
             "<!-- agent:queue -->"
         );
+    }
+
+    // --- Phase 3: halt detection tests ---
+
+    #[test]
+    fn detect_head_modified_same_prompt() {
+        let snap = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        let file = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        assert!(!detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_different_prompt() {
+        let snap = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        let file = vec![make_prompt("do #fix1 EDITED"), make_prompt("do #fix2")];
+        assert!(detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_prompt_removed() {
+        let snap = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        let file = vec![make_prompt("do #fix2")];
+        assert!(detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_both_empty() {
+        let snap: Vec<QueueEntry> = vec![];
+        let file: Vec<QueueEntry> = vec![];
+        assert!(!detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_snap_empty_file_has() {
+        let snap: Vec<QueueEntry> = vec![];
+        let file = vec![make_prompt("new item")];
+        assert!(detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_ignores_later_changes() {
+        let snap = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];
+        let file = vec![make_prompt("do #fix1"), make_prompt("do #fix2 EDITED")];
+        assert!(!detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn detect_head_modified_skips_control_fences() {
+        let snap = vec![QueueEntry::StopFence, make_prompt("task")];
+        let file = vec![QueueEntry::StopFence, make_prompt("task")];
+        assert!(!detect_head_prompt_modified(&snap, &file));
+    }
+
+    #[test]
+    fn stop_fence_at_head_detected() {
+        let entries = vec![QueueEntry::StopFence, make_prompt("task")];
+        assert!(has_stop_fence_at_head(&entries));
+    }
+
+    #[test]
+    fn stop_fence_not_at_head() {
+        let entries = vec![make_prompt("task"), QueueEntry::StopFence];
+        assert!(!has_stop_fence_at_head(&entries));
+    }
+
+    #[test]
+    fn stop_fence_empty_entries() {
+        let entries: Vec<QueueEntry> = vec![];
+        assert!(!has_stop_fence_at_head(&entries));
+    }
+
+    #[test]
+    fn time_gate_at_head_detected() {
+        let entries = vec![
+            QueueEntry::StartFence(Some("17:00 ET".to_string())),
+            make_prompt("task"),
+        ];
+        assert_eq!(time_gate_at_head(&entries), Some("17:00 ET"));
+    }
+
+    #[test]
+    fn time_gate_at_head_bare_start_not_time_gate() {
+        let entries = vec![QueueEntry::StartFence(None), make_prompt("task")];
+        assert_eq!(time_gate_at_head(&entries), None);
+    }
+
+    #[test]
+    fn time_gate_at_head_prompt_first() {
+        let entries = vec![
+            make_prompt("task"),
+            QueueEntry::StartFence(Some("17:00 ET".to_string())),
+        ];
+        assert_eq!(time_gate_at_head(&entries), None);
     }
 }

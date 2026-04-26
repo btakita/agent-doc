@@ -252,6 +252,12 @@ pub struct PreflightOutput {
     /// How the queue was activated (auto, start_fence, exchange_request, persisted).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_trigger: Option<crate::queue::QueueTrigger>,
+    /// If non-null, the queue was halted this cycle. Value is the reason:
+    /// `"stop_fence"` (hit a `--- stop` breakpoint) or `"item_modified"`
+    /// (user edited the next-to-consume prompt between cycles).
+    /// When halted, `queue_prompts` is empty and `queue_active` is `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_halted: Option<String>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
@@ -1080,6 +1086,7 @@ pub fn run(file: &Path) -> Result<()> {
         queue_deferred: queue_state.queue_deferred,
         queue_start_at: queue_state.queue_start_at,
         queue_trigger: queue_state.queue_trigger,
+        queue_halted: queue_state.queue_halted,
     };
 
     let json =
@@ -1223,6 +1230,7 @@ struct QueueState {
     queue_deferred: bool,
     queue_start_at: Option<String>,
     queue_trigger: Option<crate::queue::QueueTrigger>,
+    queue_halted: Option<String>,
 }
 
 /// Run queue component maintenance: resolve activation, consume start fences,
@@ -1283,6 +1291,193 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         };
         mutated = true;
         eprintln!("[preflight] queue: consumed start fence");
+    }
+
+    // Phase 3: halt detection — stop fences and item modification
+    if activation.active {
+        // Stop fence at head → halt the queue
+        if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
+            eprintln!("[preflight] queue: halt — stop fence at head");
+            // Consume the stop fence
+            let after_stop: Vec<crate::queue::QueueEntry> =
+                activation.entries_after[1..].to_vec();
+            let new_body = crate::queue::render(&after_stop);
+            current_content = {
+                let comps = crate::component::parse(&current_content)?;
+                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                q.replace_content(&current_content, &new_body)
+            };
+            // Strip auto and clear queue_active
+            if has_auto {
+                let comps = crate::component::parse(&current_content)?;
+                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                    let raw = &current_content[q.open_start..q.open_end];
+                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(current_content.len());
+                        rebuilt.push_str(&current_content[..q.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&current_content[q.open_end..]);
+                        current_content = rebuilt;
+                    }
+                }
+            }
+            if persisted_active {
+                current_content =
+                    frontmatter::merge_fields(&current_content, "queue_active: false")?;
+            }
+            // Persist to file + snapshot
+            std::fs::write(file, &current_content)
+                .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
+            if let Ok(Some(snap)) = snapshot::load(file) {
+                let mut new_snap = snap.clone();
+                if let Ok(sc) = crate::component::parse(&new_snap) {
+                    if let Some(sq) = sc.iter().find(|c| c.name == "queue") {
+                        new_snap = sq.replace_content(&new_snap, &new_body);
+                        if has_auto {
+                            if let Ok(sc2) = crate::component::parse(&new_snap) {
+                                if let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
+                                    let raw = &new_snap[sq2.open_start..sq2.open_end];
+                                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                                    if new_tag != raw {
+                                        let mut rebuilt =
+                                            String::with_capacity(new_snap.len());
+                                        rebuilt.push_str(&new_snap[..sq2.open_start]);
+                                        rebuilt.push_str(&new_tag);
+                                        rebuilt.push_str(&new_snap[sq2.open_end..]);
+                                        new_snap = rebuilt;
+                                    }
+                                }
+                            }
+                        }
+                        if persisted_active {
+                            if let Ok(m) =
+                                frontmatter::merge_fields(&new_snap, "queue_active: false")
+                            {
+                                new_snap = m;
+                            }
+                        }
+                        if new_snap != snap {
+                            if let Err(e) = snapshot::save(file, &new_snap) {
+                                eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(QueueState {
+                queue_prompts: vec![],
+                queue_active: Some(false),
+                queue_deferred: false,
+                queue_start_at: None,
+                queue_trigger: activation.trigger,
+                queue_halted: Some("stop_fence".into()),
+            });
+        }
+
+        // Time gate at head → defer if not yet time
+        if let Some(dt) = crate::queue::time_gate_at_head(&activation.entries_after) {
+            eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
+            return Ok(QueueState {
+                queue_prompts: vec![],
+                queue_active: None,
+                queue_deferred: true,
+                queue_start_at: Some(dt.to_string()),
+                queue_trigger: activation.trigger,
+                queue_halted: None,
+            });
+        }
+
+        // Change detection: compare head prompt between snapshot and file
+        if let Ok(Some(snap_content)) = snapshot::load(file) {
+            if let Ok(snap_comps) = crate::component::parse(&snap_content) {
+                if let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
+                    let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
+                    if let Ok(snap_entries) = crate::queue::parse(snap_body) {
+                        if crate::queue::detect_head_prompt_modified(
+                            &snap_entries,
+                            &activation.entries_after,
+                        ) {
+                            eprintln!(
+                                "[preflight] queue: halt — head prompt modified between cycles"
+                            );
+                            // Strip auto and clear queue_active
+                            if has_auto {
+                                let comps = crate::component::parse(&current_content)?;
+                                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                                    let raw = &current_content[q.open_start..q.open_end];
+                                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                                    if new_tag != raw {
+                                        let mut rebuilt =
+                                            String::with_capacity(current_content.len());
+                                        rebuilt.push_str(&current_content[..q.open_start]);
+                                        rebuilt.push_str(&new_tag);
+                                        rebuilt.push_str(&current_content[q.open_end..]);
+                                        current_content = rebuilt;
+                                    }
+                                }
+                            }
+                            if persisted_active {
+                                current_content = frontmatter::merge_fields(
+                                    &current_content,
+                                    "queue_active: false",
+                                )?;
+                            }
+                            std::fs::write(file, &current_content).with_context(|| {
+                                format!("queue halt: failed to write {}", file.display())
+                            })?;
+                            // Update snapshot
+                            if let Ok(Some(snap2)) = snapshot::load(file) {
+                                let mut ns = snap2.clone();
+                                if has_auto {
+                                    if let Ok(sc) = crate::component::parse(&ns) {
+                                        if let Some(sq) =
+                                            sc.iter().find(|c| c.name == "queue")
+                                        {
+                                            let raw = &ns[sq.open_start..sq.open_end];
+                                            let new_tag =
+                                                crate::queue::strip_auto_from_tag(raw);
+                                            if new_tag != raw {
+                                                let mut rebuilt =
+                                                    String::with_capacity(ns.len());
+                                                rebuilt.push_str(&ns[..sq.open_start]);
+                                                rebuilt.push_str(&new_tag);
+                                                rebuilt.push_str(&ns[sq.open_end..]);
+                                                ns = rebuilt;
+                                            }
+                                        }
+                                    }
+                                }
+                                if persisted_active {
+                                    if let Ok(m) = frontmatter::merge_fields(
+                                        &ns,
+                                        "queue_active: false",
+                                    ) {
+                                        ns = m;
+                                    }
+                                }
+                                if ns != snap2 {
+                                    if let Err(e) = snapshot::save(file, &ns) {
+                                        eprintln!(
+                                            "[preflight] queue halt: snapshot sync warning: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            return Ok(QueueState {
+                                queue_prompts: vec![],
+                                queue_active: Some(false),
+                                queue_deferred: false,
+                                queue_start_at: None,
+                                queue_trigger: activation.trigger,
+                                queue_halted: Some("item_modified".into()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Handle queue drain: if active but no prompts, clear queue_active and strip auto
@@ -1401,6 +1596,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         queue_deferred: activation.deferred,
         queue_start_at: activation.start_at,
         queue_trigger: activation.trigger,
+        queue_halted: None,
     })
 }
 

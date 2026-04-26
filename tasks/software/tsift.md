@@ -118,7 +118,36 @@ What tsift *does* provide is the interop surface graphify needs:
 The implementation path for #9jc8 is a graphify feature that consumes tsift's JSON output, runs it through an LLM for entity extraction / concept labeling, and merges the result into graphify's knowledge graph. tsift's role is already complete — it exports the structured data.
 
 I'd recommend closing #9jc8 as "graphify-owned" and tracking it in a graphify session doc if you want to pursue it. The pending items #zv4m (HTML visualization) and #rd2f (semantic similarity) are similarly graphify-side work.
-<!-- agent:boundary:a16f54de -->
+
+❯ Are there alternative rust or cli tools that can do what graphify does?
+### Re: alternative tools for graphify's role — opus-4-6
+
+The short answer: Python dominates this space. Rust is catching up but nothing ships a complete CLI pipeline yet.
+
+**Closest alternatives (all Python):**
+
+| Tool | CLI? | What it does | Trade-off |
+|------|------|-------------|-----------|
+| **LightRAG** (HKUDS) | Yes, 5 commands | Entity/relationship extraction via LLM, dual-level retrieval, 3D graph viewer | ~10x cheaper than GraphRAG. Active, EMNLP 2025 |
+| **Microsoft GraphRAG** | Yes (`graphrag init/index/query`) | Full pipeline: Leiden community detection, global/local query modes | Token-heavy. Python 3.11+ |
+| **sift-kg** | Yes | LLM entity extraction, dedup, export JSON/GraphML/GEXF/SQLite, browser viz | Most direct CLI analogue to graphify |
+
+**Rust-native options:**
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| **EdgeQuake** | Active, young (~2025) | Rust GraphRAG inspired by LightRAG. 8 crates, Tokio async, Sigma.js frontend. REST API only — no single-binary CLI yet |
+| **Rig** (`rig-core`) | Mature | LLM framework with RAG pipelines, vector stores. No graph extraction built in — it's plumbing |
+| **petgraph** | Stable | Graph data structures + algorithms. The Rust standard for graph ops, but no LLM awareness |
+
+**Bottom line:** No Rust tool assembles the full "ingest → extract entities → cluster → HTML+JSON" pipeline as a CLI today. If you wanted to replace graphify with a standalone tool:
+
+1. **Quickest path:** LightRAG or sift-kg (Python, CLI-ready now)
+2. **Rust-native path:** EdgeQuake is closest but REST-only; building a CLI wrapper around it or composing Rig + petgraph + a viz layer is feasible but non-trivial
+3. **Current graphify advantage:** it runs in-context inside Claude Code with zero install — the LLM is already there. A standalone tool needs API keys and network calls
+
+For the tsift integration story specifically, any of these tools could consume `tsift graph --json` output the same way graphify does.
+<!-- agent:boundary:52dafa9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

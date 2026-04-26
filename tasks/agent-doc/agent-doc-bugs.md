@@ -1094,7 +1094,44 @@ Updated `agent-queue-plan.md` with per-item time gates:
 - **Phase 1 updated:** unit tests now cover `--- start <time>`, `--- stop`, and multiple time gates.
 - **Phase 3 updated:** consumption loop now checks for control fences at the head before consuming. Time gates emit `queue_deferred` when the time hasn't arrived (queue stays active but paused). Stop fences and item modifications halt the queue.
 - **Parsing rules updated:** `--- start` accepts both `--- start <time>` and `--- start at <time>`, and can appear at head (initial activation) or mid-queue (time gate).
-<!-- agent:boundary:55f4c1be -->
+
+❯ Can we add a noclear attribute to prevent `/clear` from being called for an item in the queue?
+### Re: noclear attribute for queue items — opus-4-6
+
+Yes — `noclear` fits naturally as both an item-level and queue-level annotation.
+
+**Default behavior:** the queue runner calls `/clear` between items so each runs with a clean context window. `noclear` opts out of that reset.
+
+**Item-level:**
+
+```markdown
+<!-- agent:queue auto -->
+- do #fix1
+- [noclear] do #fix2
+- do #fix3
+<!-- /agent:queue -->
+```
+
+`#fix1` runs → `/clear` → `#fix2` runs with `#fix1`'s context still present → `/clear` → `#fix3` runs clean.
+
+Semantics: `noclear` on an item means "don't clear context before processing this item." The prior item's full conversation — tool results, code reads, diffs — stays available. Useful when items are coupled: one produces analysis the next consumes.
+
+**Queue-level:**
+
+```markdown
+<!-- agent:queue auto noclear -->
+- do #fix1
+- do #fix2
+- do #fix3
+<!-- /agent:queue -->
+```
+
+Disables clearing for the entire queue — one continuous session across all items. Good for tightly coupled batches where every item builds on prior context.
+
+**Interaction with `--- start <time>` fences:** a time gate inherently introduces a long pause. Context from before the gate may be stale or compacted by the time the gate opens. I'd recommend that time gates implicitly clear context (even under queue-level `noclear`), unless the item after the gate also has `[noclear]`. This keeps the default safe — stale context across a 3-hour pause is more likely to confuse than help.
+
+**Plan update:** added `noclear` to the queue syntax section, Phase 1 test coverage, and Phase 3 consumption loop logic.
+<!-- agent:boundary:6cc1d77d -->
 <!-- /agent:exchange -->
 
 <!--

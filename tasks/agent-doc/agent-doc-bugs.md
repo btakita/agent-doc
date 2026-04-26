@@ -261,7 +261,55 @@ New types: `QueueTrigger` enum (Auto, StartFence, ExchangeRequest, Persisted), `
 | 2. Preflight integration | **Done** | Trigger resolution, `queue_active` state, `queue_prompts` emission |
 | 3. Consumption + dispatch | Open | Per-item removal after commit, change detection halt, stop/start fence handling, looping |
 | 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
-<!-- agent:boundary:e473b148 -->
+
+❯ do #queue Phase 3. spec-test-commit-push
+
+### Re: do #queue Phase 3 — opus-4-6
+
+Phase 3 implemented, tested, committed, and pushed (`0cb4810` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+**Post-commit consumption** (`write.rs`) — `consume_queue_prompt()` runs between the write step and the commit step, so the consumption is included atomically in the same git commit as the response:
+
+- Reads frontmatter; if `queue_active != true`, no-op.
+- Parses queue component, removes the first `Prompt` entry via `remove_first_prompt()`.
+- On drain (no prompts remain): strips `auto` from opening tag, sets `queue_active: false`.
+- Writes updated content to file AND snapshot.
+
+**Halt detection** (`preflight.rs`) — three new guards in `run_queue_maintenance()` that fire before prompts are dispatched:
+
+1. **Stop fence at head** — consumes the `--- stop` fence, strips `auto`, clears `queue_active`, emits `queue_halted: "stop_fence"`. No prompt dispatched.
+2. **Time gate at head** — if `--- start at <time>` and time hasn't arrived, emits `queue_deferred: true`. Queue stays active but paused.
+3. **Item modified** — compares head prompt text between snapshot and file. If different (user edited between cycles), strips `auto`, clears `queue_active`, emits `queue_halted: "item_modified"`.
+
+**Pure functions** (`queue.rs`) — `detect_head_prompt_modified()`, `has_stop_fence_at_head()`, `time_gate_at_head()`, `QueueHaltReason` enum. 16 new unit tests.
+
+**New preflight output field** — `queue_halted: Option<String>` in both `QueueState` and `PreflightOutput`.
+
+#### Tests
+
+- 16 new unit tests in `queue.rs` (change detection, stop fence, time gate, edge cases)
+- 3 new integration tests in `finalize_integration.rs`:
+  - `finalize_consumes_first_queue_prompt_after_commit` — verifies first prompt removed, others remain
+  - `finalize_drains_queue_and_clears_active_on_last_prompt` — verifies drain + auto strip + queue_active clear
+  - `finalize_does_not_consume_when_queue_inactive` — verifies no consumption when queue_active is not set
+- Full suite: 1664 pass (1 pre-existing flake in codex hook test)
+
+#### Spec updates
+
+- `specs/02-document-format.md` — §2.5 consumption semantics
+- `specs/07-commands.md` — `queue_halted` field, halt rules, post-commit consumption docs
+
+#### Remaining phases
+
+| Phase | Status | Summary |
+|-------|--------|---------|
+| 1. Parser + data model | Done | `queue.rs` parser, scaffold updates, 30 tests |
+| 2. Preflight integration | Done | Trigger resolution, `queue_active` state, `queue_prompts` emission |
+| 3. Consumption + dispatch | **Done** | Post-commit removal, halt detection (stop fence, time gate, item modified), 19 tests |
+| 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
+<!-- agent:boundary:1e6f6728 -->
 <!-- /agent:exchange -->
 <!--
 -->
@@ -269,7 +317,7 @@ New types: `QueueTrigger` enum (Auto, StartFence, ExchangeRequest, Persisted), `
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md
+- [x] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md [Phase 3 done, Phase 4 open]
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

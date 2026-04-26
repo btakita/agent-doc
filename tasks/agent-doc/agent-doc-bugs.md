@@ -691,7 +691,36 @@ Or as a dedicated CLI subcommand (`agent-doc migrate <FILE|DIR>`) that:
 #### Recommendation
 
 The alias system is sufficient for backward compat. A CLI `migrate` command would be a nice-to-have for repos that want to standardize their markup, but it's low priority since behavior is identical either way. The sed one-liner covers the 90% case today.
-<!-- agent:boundary:aa0b8de0 -->
+
+❯ Add the migrate command. Remove deprecated attributes such as `agent:backlog patch` or `agent:pending patch`->`agent:backlog patch`.
+❯ #spec-test-build-install-commit-push
+### Re: migrate command — opus-4-6
+
+Added `agent-doc migrate` with three modes:
+
+- **Positional files:** `agent-doc migrate tasks/plan.md tasks/bugs.md`
+- **Project scan:** `agent-doc migrate --all` — walks the project root for `.md` files containing `<!-- agent:pending` markers
+- **Preview:** `agent-doc migrate --dry-run` — reports which files would change without writing
+
+#### What it migrates
+
+1. `<!-- agent:pending ... -->` → `&lt;!-- agent:backlog ... --&gt;` (open tags)
+2. `&lt;!-- /agent:pending --&gt;` → `&lt;!-- /agent:backlog --&gt;` (close tags)
+3. Strips deprecated `patch=`/`mode=` attributes from backlog component tags (both newly-renamed and already-canonical)
+
+Markers inside fenced code blocks and inline code spans are left untouched. Idempotent — running twice produces identical output.
+
+#### Implementation
+
+- New module: `src/migrate.rs` with 7 unit tests (pending→backlog rename, attr stripping, code-block immunity, idempotency, etc.)
+- Wired as `Commands::Migrate` in `main.rs`
+- Added to `commands.rs` for editor autocomplete
+- Spec entry in `specs/07-commands.md`
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both binaries are live at 0.33.14. Committed and pushed as `5850228` on `20260422/codex-agent-backend`.
+<!-- agent:boundary:98698f9a -->
 <!-- /agent:exchange -->
 
 <!--

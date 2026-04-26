@@ -654,7 +654,7 @@ Added `agent:icebox` component to the template system.
 #### Build
 
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14. Committed and pushed as `69843ee` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:4bdec7c5 -->
+<!-- agent:boundary:e7fe6c8c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -663,7 +663,6 @@ Added `agent:icebox` component to the template system.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#hicebox] Add agent:icebox component. Sits after agent:pending/agent:backlog in the template. Represents project icebox (items not in active backlog). Update scaffolds, spec, parser, and component handling
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

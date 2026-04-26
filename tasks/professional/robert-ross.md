@@ -983,7 +983,48 @@ You're on Collab = 6 calls *per month total*. We burned all 6 in one session. Th
 **Recommendation:** Ask Rob to upgrade your seat to **Dev**. It's 1/3 the cost of Full and gives identical MCP access. You only need Full if you also want to create/edit designs directly in Figma's editor.
 
 **Note:** the rate limit resets monthly for Collab, so we'll need to wait until next month or upgrade before continuing the diagram transfer.
-<!-- agent:boundary:d3e78fd0 -->
+
+❯ Please add transferring the mermaid diagram to figma as a backlog item. 
+❯ robert-ross just upgraded my seat to the dev plan. Please commence.
+
+❯ Please transfer a backlog item to agent-loop/tasks/agent-doc/agent-doc-bugs.md with a plan why the current task to transfer the mermaids to figma jam was not added to agent:backlog.
+### Re: Mermaid diagram transfer + agent-doc-bugs backlog item — opus-4-6
+
+Seat confirmed upgraded to Dev (200 calls/day, 15/min). All 20 mermaid diagrams are now transferred — the 2 from the earlier session on the original board, plus 18 new FigJam files with proper mermaid rendering:
+
+**Previously completed (on board):**
+- README.md — Setup Flow
+- Section 1 — Basic Workflow
+
+**Newly generated (proper mermaid renderings):**
+
+| # | Source Section | Diagram | FigJam Link |
+|---|---------------|---------|-------------|
+| 1 | Migrating from flat layout | Flat → src/ structure | [View](https://www.figma.com/board/0nxj7PUqetkiU4DELukH08) |
+| 2 | §2 Starting a New Project | Quick experiment vs real project | [View](https://www.figma.com/board/Rr8SyqyTC288WoeFTCO2f5) |
+| 3 | §2 Adding existing GitHub repo | Clone → submodule → push | [View](https://www.figma.com/board/6HBwfqCs6cLY7bg5esybdG) |
+| 4 | §2 Local folder vs submodule | Decision tree | [View](https://www.figma.com/board/S5OKQZ8oaVlF7EzhCIT8Wq) |
+| 5 | §3 Day-to-Day Workflow | 4-branch workflow | [View](https://www.figma.com/board/9AsuaXJqJZ44SYGqM5IAYi) |
+| 6 | §4 Submodule commits | Two-save flow | [View](https://www.figma.com/board/IPszEJPfioBNtAcmlqixfX) |
+| 7 | §4 Uncommitted changes | Keep or discard decision | [View](https://www.figma.com/board/MwAsBp0syvcGz6v3lep1wu) |
+| 8 | §5 Git Concepts | Push/Pull between local and GitHub | [View](https://www.figma.com/board/qCovuRadA38zlB0V9NOCcl) |
+| 9 | §6 Skills | Create → auto-detect → follow | [View](https://www.figma.com/board/cmo9UeGFRBo4xCfOxuyvnF) |
+| 10 | §6 MCP Plugins | Need-based plugin selection | [View](https://www.figma.com/board/iz6uo0vDDj39AeTpJQE9Bw) |
+| 11 | §6 Hooks | Automated action setup | [View](https://www.figma.com/board/cnqkyMKB2UNQ00n0iCNVW4) |
+| 12 | §7 Exploring Git Repos | 4-branch repo exploration | [View](https://www.figma.com/board/u0yGOTc1N8MaJl3nguLnz5) |
+| 13 | §8 Investigating External Repos | Clone → assess vs summarize | [View](https://www.figma.com/board/07WHnOpEyFfPIlmohFK6av) |
+| 14 | §9 Plugin Lifecycle | Install → reconcile conflicts | [View](https://www.figma.com/board/ExZPuU5mp3XAZj2YkeX0zN) |
+| 15 | §9 Maintenance Schedule | Add → reconcile → audit cycle | [View](https://www.figma.com/board/qs8f7hh57TWw9nzoJ5eIVK) |
+| 16 | §10 Plan Documents | Create → check/change/execute loop | [View](https://www.figma.com/board/GGcd5yqnCpoecmxlwwOAwc) |
+| 17 | §10 Enhanced Planning | Native vs orchestration plugin | [View](https://www.figma.com/board/IUJRq9QEboNW6cG4k9jR6c) |
+| 18 | §14 Automation Setup | 4-phase setup flow | [View](https://www.figma.com/board/r39yplfH6XMguY6iMsPtsd) |
+
+All 18 are in the Dreamable, Inc. org. Each is a standalone FigJam file with proper mermaid rendering. You can copy elements from any of these into the original board if you want them consolidated.
+
+**Re: agent-doc-bugs.md backlog item** — Added `#4wa1` to `tasks/agent-doc/agent-doc-bugs.md` pending:
+
+> Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
+<!-- agent:boundary:27f57e5d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -992,6 +1033,7 @@ You're on Collab = 6 calls *per month total*. We burned all 6 in one session. Th
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:backlog -->
+- [x] [#figma] Transfer mermaid diagrams to FigJam — 20/20 complete
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
-<!-- /agent:pending -->
+<!-- /agent:backlog -->

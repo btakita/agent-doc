@@ -1174,10 +1174,41 @@ Implementation: the agent recognizes "write a prompt into exchange/queue" as a d
 3. **Audit trail** — generated prompts carry a `<!-- generated-by: #item-id -->` annotation so the user can trace provenance.
 
 The `[emit]` prefix keeps it opt-in and visible. Without it, the agent treats queue items as normal work directives — no self-modification.
-<!-- agent:boundary:d959b872 -->
+
+Ther term `[emit]` seem ambiguous. Is there a more precise term to add an active prompt into the document? Something like `[prompt:queue]`, `[reprompt:queue]`, `[schedule:queue]`, `[write:queue]`, `[emit:queue]`, or other good alternatives? 
+### Re: naming the self-writing prompt annotation — opus-4-6
+
+Good instinct — `[emit]` reads like a programming term (event emitters) and doesn't communicate the document-level intent. Here's my assessment of the options:
+
+| Annotation | Pros | Cons |
+|---|---|---|
+| `[enqueue]` | Most precise for queue target; verb matches data structure exactly | Awkward for exchange target (`[enqueue:exchange]`?); CS jargon |
+| `[post:queue]` | Conversational metaphor ("post to queue"); works for both targets (`[post:exchange]`) | Slightly ambiguous — "post" could mean publish |
+| `[prompt:queue]` | Says exactly what it produces — a prompt | "prompt" is heavily overloaded in this context |
+| `[defer:queue]` | Communicates intent — "do this later" | Implies postponement, not just scheduling; doesn't convey that a new prompt is being created |
+| `[schedule:queue]` | Clear intent | Collides with `--- start <time>` scheduling; different mechanism |
+| `[write:queue]` | Describes the mechanism | Too generic — every queue operation "writes" |
+| `[reprompt:queue]` | Clear that a new prompt cycle is created | Implies re-doing something, not creating new work |
+
+**My recommendation: `[enqueue]`** for queue targets and **`[post:exchange]`** for exchange targets, with `[post:queue]` accepted as an alias for `[enqueue]`.
+
+Reasoning: `[enqueue]` is unambiguous — it means exactly one thing in any programming or workflow context. For the exchange target, `[post]` reads naturally: "post this prompt to the exchange." Having `[post]` as the unified verb with target-specific shorthand (`[enqueue]` = `[post:queue]`) gives you both precision and consistency.
+
+Examples:
+```markdown
+<!-- agent:queue auto -->
+- do #fix1
+- [enqueue] run regression suite after all fixes land
+- [post:exchange] Summarize today's queue results
+<!-- /agent:queue -->
+```
+
+`#fix1` executes → "run regression suite..." is added to the tail of the queue → when the queue drains, "Summarize today's queue results" appears as a new prompt in the exchange for the next conversation cycle.
+<!-- agent:boundary:d0c33012 -->
 <!-- /agent:exchange -->
 
 <!--
+Pending is ambiguous. 
 -->
 
 ## Pending / Not Built

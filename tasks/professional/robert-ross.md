@@ -590,7 +590,21 @@ Updated both files to reflect that Rob's workspace doesn't have the symlink yet:
 **`SPEC.md`** — changed the Instructions row from "already symlinked" to "symlink created in Step 4."
 
 Also updated the dual-tool workflow note in Step 6 to reference the symlink direction (`AGENTS.md -> CLAUDE.md`) rather than implying shared instructions are automatic.
-<!-- agent:boundary:94a76966 -->
+
+❯ robert-ross already has mcp and skills configured. Please update SPEC.md accordingly
+❯ > No plugins are pre-configured. Rob installs these on his own based on what tools he uses.
+
+❯ > No skills are pre-configured. Rob creates these as he discovers repeated workflows.
+### Re: SPEC.md MCP + skills update — opus-4-6
+
+Updated both sections in SPEC.md:
+
+- **MCP Plugins** — changed from "No plugins are pre-configured" to "Rob has MCP plugins already configured." Added a stub table for the reconciliation step to populate, and changed the check command to `jq '.mcpServers | keys'` (lists plugin names rather than dumping full config).
+
+- **Skills** — same pattern: changed from "No skills are pre-configured" to "Rob has skills already configured." Added a stub table for reconciliation.
+
+Both sections now point to Step 10 (reconciliation) as the place where the specific inventory gets captured. I don't have visibility into what Rob has installed, so the tables are left as placeholders that the reconciliation step fills in when Rob runs it.
+<!-- agent:boundary:bdf7cb8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

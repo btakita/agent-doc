@@ -1265,11 +1265,51 @@ post:exchange Summarize today's session
 | `...post:queue...` | mid-sentence | No (plain text) |
 | `[enqueue:queue] text` | anywhere | Yes (alias) |
 | `enqueue:queue text` | first token | Yes (alias, bare) |
-<!-- agent:boundary:a20601e4 -->
+
+❯ With `queue`, `pending` is ambiguous. Rename `pending` to `backlog` with `pending` being an alias to `backlog`.
+### Re: rename pending to backlog — opus-4-6
+
+Good call — with `queue` in the picture, `pending` is ambiguous. "Pending in queue" vs "pending in backlog" are different states, and the current naming conflates them.
+
+**`backlog`** is the right name. The distinction becomes:
+
+| Component | Purpose | Processing |
+|---|---|---|
+| `<!-- agent:backlog -->` | Items planned but not yet started; tracked work | Manual — user selects via `do #id` |
+| `<!-- agent:queue -->` | Items actively staged for sequential execution | Automatic — consumed in order by the queue runner |
+
+`backlog` is universally understood (agile, project management, gamedev) and communicates "we intend to do these, but not right now in this order." `queue` communicates "these run next, in this order, automatically."
+
+**Migration:**
+
+- `<!-- agent:pending -->` → `<!-- agent:backlog -->` (canonical)
+- `<!-- agent:pending -->` remains accepted as an alias — existing documents continue to work
+- CLI flags: `--backlog-add`, `--backlog-done`, `--backlog-edit`, `--backlog-gate`, `--backlog-ungate`, `--backlog-clear`, `--backlog-reorder`
+- Old flags (`--pending-add`, etc.) remain as aliases
+- `post:backlog` / `[post:backlog]` works alongside `post:queue` and `post:exchange`
+
+**Workflow with both:**
+
+```markdown
+<!-- agent:backlog -->
+- [ ] [#fix1] Fix auth timeout
+- [ ] [#fix2] Update error messages  
+- [ ] [#fix3] Refactor token validation
+<!-- /agent:backlog -->
+
+<!-- agent:queue auto -->
+- do #fix1
+- do #fix2
+--- start 17:00 ET
+- do #fix3
+<!-- /agent:queue -->
+```
+
+Backlog tracks what exists. Queue determines execution order and timing. Completing `do #fix1` in the queue also marks `#fix1` done in the backlog — the `do #id` closeout rule applies across both components.
+<!-- agent:boundary:f1fd9c1e -->
 <!-- /agent:exchange -->
 
 <!--
-With `queue`, `pending` is ambiguous. Rename `pending` to `backlog` with `pending` being an alias to `backlog`. 
 -->
 
 ## Pending / Not Built

@@ -512,7 +512,19 @@ The rule: **if Brian controls it, prescriptive; if Rob controls it, descriptive.
 Avoids two failure modes: (1) Rob installs a plugin and the spec flags false "drift," (2) Brian changes a hook but the spec doesn't catch it because it only checks existence.
 
 Current SPEC.md is already close to this split. The one area to tighten: the hooks section should include actual hook definitions once Brian installs them in Phase 3, not just category names.
-<!-- agent:boundary:9d5d6948 -->
+
+❯ We should have a step to reconcile the SPEC.md that is generated here with robert-ross's environment. Please add the reconciliation step into the robert-ross-workspace-setup.md.
+### Re: reconciliation step added — opus-4-6
+
+
+Added **Step 10: Reconcile environment against spec** to `robert-ross-workspace-setup.md`. It runs after all setup steps (including optional skills/plugins exploration) and does three things:
+
+1. Rob tells Claude: "Read SPEC.md and verify my environment matches. Fix anything that's off."
+2. Claude reads each spec section, runs the check commands, and reports matches vs drift.
+3. After reconciliation, Claude updates SPEC.md to reflect Rob-managed components (plugins, skills) so the spec stays accurate going forward.
+
+This closes the loop — the spec starts as Brian's declaration of intended state, setup runs against it, and the reconciliation step confirms alignment and captures any Rob-added components. Zip rebuilt.
+<!-- agent:boundary:d5f2cbda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

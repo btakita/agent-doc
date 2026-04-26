@@ -511,17 +511,48 @@ Implemented, tested, built, installed, committed, and pushed (`d8f066a` on `2026
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
 
 Full suite: 1239 unit + integration pass (1 pre-existing codex hook flake).
-<!-- agent:boundary:81d26ec6 -->
+
+❯ do #startval. #spec-test-build-install-commit-push
+### Re: do #startval — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`ec1e133` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+Added `snapshot::ensure_initialized(file)` call to `start.rs:run()` between session registration and the IPC listener loop. On every `agent-doc start`, this now:
+
+1. **Migrates orphaned state** — if the file was moved (e.g., JB plugin respawn after rename), detects the old-path snapshot by session UUID match and migrates all state files (snapshots, baselines, locks, pending, CRDT, pre-response) to the new path hash
+2. **Bootstraps fresh snapshot** — if no snapshot exists at all (first launch), creates one from the current file content with stripped exchange
+3. **Logs the outcome** — writes to session log (`snapshot_validated action=initialized|already_valid`) and stderr on initialization or failure
+
+#### Tests (2 new)
+
+- `ensure_initialized_migrates_after_move_with_existing_session` — simulates JB respawn scenario: file with existing session UUID + old-path snapshot/CRDT state → move → `ensure_initialized` migrates both to new hash
+- `ensure_initialized_bootstraps_snapshot_for_fresh_file` — file with session UUID but no prior state → creates snapshot
+
+#### Specs
+
+- `specs/03-snapshot-system.md` — added `start` to the list of `ensure_initialized` callers
+- `specs/07-commands.md` — new step 4 in `start` command documenting snapshot integrity validation
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+
+Full suite: 1720 tests pass (1 pre-existing codex hook flake).
+<!-- agent:boundary:c7378840 -->
 <!-- /agent:exchange -->
 
 <!--
-Add to pending changing `agent:pending` to `agent:backlog`.
+Add to pending changing `agent:pending` to `agent:backlog`. `agent:pending` will alias to `agent:backlog`...but `agent:backlog` is the canonical element name. Please update the agent document template to use `agent:backlog`.
+
+Please add `agent:icebox` as another element. This is the project icebox not in the active backlog. Please add `agent:icebox` to the template.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
+- [x] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
 - [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

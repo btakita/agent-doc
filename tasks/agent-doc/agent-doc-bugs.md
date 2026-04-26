@@ -871,7 +871,18 @@ Two viable models:
 Each queue item can carry its own preset or orchestration metadata (`#spec-test-build-install-commit-push`), so you get per-item orchestration for free — every item flows through the normal cycle.
 
 So: one `do queue` to start, then automatic looping. No per-item exchange prompt needed.
-<!-- agent:boundary:8d5aa640 -->
+
+❯ Use Exchange-triggered option in agent-queue-plan.md
+### Re: Exchange-triggered queue — opus-4-6
+
+Updated `tasks/agent-doc/agent-queue-plan.md` to use the Exchange-triggered execution model:
+
+- **Design decision added:** queue does not self-trigger. User writes `do queue` / `run queue` in the exchange to start. A persisted `queue_active: true` flag drives automatic looping on subsequent cycles. Flag clears when the queue drains.
+- **Per-item orchestration:** each queue item can carry its own preset/orchestration metadata, flowing through the normal cycle.
+- **Phase 2 updated:** preflight recognizes activation trigger, manages `queue_active` flag, emits `queue_prompts` only when active.
+- **Phase 3 updated:** harness loops back automatically while `queue_active: true` — no per-item exchange prompt needed. Consumption state tracked for crash safety.
+- **Open questions updated:** removed the `/clear` auto-trigger question (no longer relevant with Exchange-triggered model), added question about where to persist `queue_active`.
+<!-- agent:boundary:0d7cf266 -->
 <!-- /agent:exchange -->
 
 <!--

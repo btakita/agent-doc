@@ -882,7 +882,7 @@ The whole setup takes about 10-15 minutes. The kit also has a reference guide an
 
 Ready to send whenever you are.
 
-❯ Using the figma mcp, Please transfer all of the mermaid diagrams onto the figjam board https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=0-1&p=f&t=FXQcxmR1HArTV2Us-0
+❯ Using the figma mcp, Please transfer all the mermaid diagrams onto the figjam board https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=0-1&p=f&t=FXQcxmR1HArTV2Us-0
 
 ❯ Have separate sections for the README.md and robert-ross-workspace-guide.md
 ### Re: FigJam mermaid transfer — opus-4-6
@@ -899,13 +899,40 @@ Started transferring mermaid diagrams to the FigJam board. Created:
 
 **Blocked:** Hit the Figma MCP tool call rate limit for the Collab seat on the Dreamable org. The remaining 18 workspace-guide diagrams can't be completed this session.
 
+❯ Please elaborate. What is the rate limit and how did I hit the rate limit?
+
 **Options to finish:**
 1. Wait for rate limit reset and continue in a later session
 2. Upgrade seat (Figma link: https://www.figma.com/files/1613946391556996643/recents-and-sharing?upgrade_request_type=expert&entry_point=mcp_rate_limit_deeplink)
 3. Use `generate_diagram` (creates proper mermaid renderings but as separate FigJam files, not on the same board)
 
 Board link: https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=0-1
-<!-- agent:boundary:12dfc3bc -->
+### Re: Rate limit explanation — opus-4-6
+
+The Figma MCP server enforces per-session tool call limits based on your seat type and plan tier. Here's what happened:
+
+**Your account (brian@dreamable.com):**
+- Dreamable, Inc. — **Collab seat** on the Organization plan
+- Brian Takita's team — View seat on Starter plan
+
+**What the limit is:** The Collab seat has a capped number of `use_figma` / `generate_diagram` / etc. tool calls per time window. The exact cap isn't published, but we burned through it in ~6 calls:
+
+1. `whoami` (auth check)
+2. `use_figma` — inspect board structure
+3. `use_figma` — create test shapes + verify FigJam primitives work
+4. `use_figma` — test connectors between shapes
+5. `use_figma` — clean up + create two sections
+6. `use_figma` — build README flowchart (9 nodes + connectors)
+7. `use_figma` — build "Basic Workflow" diagram → **rate limit hit on this call**
+
+**Why it's low:** A Collab seat is Figma's lower-permission tier (can comment + use some features but isn't a full Editor). Full Editor seats and higher plan tiers (Business/Enterprise) get higher MCP call limits.
+
+**How to fix:**
+- Upgrade your seat from Collab → Editor/Full on the Dreamable org (the upgrade link Figma returned: https://www.figma.com/files/1613946391556996643/recents-and-sharing?upgrade_request_type=expert&entry_point=mcp_rate_limit_deeplink)
+- Or wait for the rate limit window to reset (likely hourly or daily — Figma doesn't document the exact reset cadence)
+
+The `generate_diagram` tool would hit the same limit since it goes through the same MCP server. The only workaround within this session is to wait for the reset.
+<!-- agent:boundary:261c3168 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -914,6 +941,6 @@ Board link: https://www.figma.com/board/4EdwVOS1SyIAeu9kCBnzIk/Untitled?node-id=
 
 ## Pending / Not Built
 
-<!-- agent:pending -->
+<!-- agent:pending patch=replace -->
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:pending -->

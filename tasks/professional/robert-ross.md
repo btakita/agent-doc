@@ -186,7 +186,28 @@ Four phases, phased by dependency:
 
 Phase diagram in the doc with color-coding: green (ready now), yellow (needs Zoom), blue (Brian builds).
 
-<!-- agent:boundary:d9d18ccd -->
+❯ I have a src/ directory for all of my projects. And I have top level harness directories such as tasks/, docs/, etc.
+
+❯ Should robert-ross have a similar structure?
+### Re: should robert-ross use a similar `src/` + `tasks/` structure? — sonnet-4-6
+
+Yes — the same separation makes sense for Rob, and it maps cleanly to what he'll actually have:
+
+- **`src/`** — submodule projects (`ClaudeScore/SessionShare`, `ClaudeScore/scoring-api`, etc.). Keeps code out of the root.
+- **`tasks/`** — planning and agent-doc session files. Harness context that isn't code and doesn't belong inside any single submodule.
+- **Root `CLAUDE.md`** — workspace-level preferences, already in place at `~/Documents/Code`.
+
+The main benefit: as the number of submodules grows, the root doesn't turn into a flat pile of folders where projects and planning docs intermingle. Brian already navigates that structure, so collaboration on ClaudeScore files will feel familiar.
+
+**What to skip initially:**
+
+- `docs/` — not needed yet; add when Rob has public-facing docs worth separating
+- Deep nesting inside `tasks/` — one level (`tasks/claudescore/`, `tasks/build-party/`) is enough to start
+
+**How to introduce it:** Rob shouldn't need to mkdir anything. Adding a note to his `CLAUDE.md` that says "put new project submodules under `src/`, put planning docs under `tasks/`" gives Claude the scaffolding rule and Rob never has to think about it.
+
+Should add this structure recommendation to [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) — the current guide assumes a flat layout.
+<!-- agent:boundary:13f0c9a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

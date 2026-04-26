@@ -385,7 +385,18 @@ The feature has two surfaces:
 - `watch.pid` references a dead process — remove the stale PID file
 
 Added as `#gcsock` in pending.
-<!-- agent:boundary:d4506499 -->
+
+❯ Add to pending a claude_model and codex_model for the frontmatter to use the model for the agent doc sessions.
+
+### Re: claude_model / codex_model frontmatter — opus-4-6
+
+Added `#hmodel` to pending. The feature adds two frontmatter fields:
+
+- `claude_model` — model override for Claude Code sessions (e.g., `opus`, `sonnet`)
+- `codex_model` — model override for Codex sessions (e.g., `o3-pro`, `gpt-5`)
+
+Preflight already emits `agent_model` for model attribution. These fields would feed into that, letting each harness resolve its own model from the frontmatter rather than relying on the generic `agent` field. The skill uses the resolved value for the `— model-name` suffix on response headers.
+<!-- agent:boundary:1c046060 -->
 <!-- /agent:exchange -->
 <!--
 -->
@@ -393,6 +404,7 @@ Added as `#gcsock` in pending.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [ ] [#gcsock] Orphaned socket GC: on preflight startup, scan .agent-doc/supervisor/*.sock — for each, try connect or check sessions.json PID liveness; remove dead sockets and prune stale sessions.json entries. Also expose as agent-doc gc subcommand for manual cleanup
 - [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

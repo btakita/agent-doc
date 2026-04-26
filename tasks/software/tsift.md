@@ -60,19 +60,45 @@ Implemented `tsift audit` duplicate skill detection via Jaccard similarity on de
 **Tests:** +8 tests → 174 total (`btakita/tsift@59e1e79`)
 
 **Smoke test on `~/.claude/skills`:** 3 skills, 0 duplicates detected (agent-doc / graphify / tsift are semantically distinct — correct).
-<!-- agent:boundary:dfed28f5 -->
+### Re: sync orchestra #spec-test-commit-push — opus-4-6
+
+All 5 tasks implemented in a single commit (`btakita/tsift@056dbac`), plus #jzm8 marked done (stale — #cdet already shipped community detection).
+
+#### #865b — Duplicate skill detection
+Already shipped in `59e1e79`. Jaccard similarity over description word sets, threshold 0.3. 8 tests. No new work needed.
+
+#### #ay3j — Usage tracking (`--usage`)
+Scans Claude Code session history (`.jsonl` files across all `~/.claude/projects/*/`) for `Skill` tool invocations. Counts per skill, sets `invocation_count` on each `SkillEntry`. Plugin-namespaced skills (`codex:rescue`) counted under base name (`codex`). Uninstalled skills with invocations included in usage list. 5 tests.
+
+#### #t3pq — Cleanup recommendations (`--cleanup`)
+Flags skills for pruning when any of: health issues, zero invocations, or ≥50% Jaccard similarity with another skill. Token savings estimated as total file bytes / 4. Sorted by savings descending. 4 tests.
+
+#### #dt80 — Report output (`--report <path>`)
+Writes markdown audit report with skills table (status, name, description, uses), duplicate pairs, manifest diffs, and cleanup recommendations with total savings estimate. Creates parent directories. 2 tests.
+
+#### #cs4r — `tsift lint`
+New subcommand. Detects unannotated concepts in markdown by cross-referencing plain text against known graph entities (AST symbols from `symbols.db`, headings, bold terms, backtick terms ≥4 chars). Skips code blocks, headings, HTML comments, already-annotated terms. Classifies suggestions: symbol → backtick, multi-word capitalized → link, other → bold. 12 tests.
+
+**Changes:**
+- `src/audit.rs` — `SkillUsage`, `CleanupEntry` structs; `track_usage()`, `generate_cleanup()`, `write_report()`; `SkillEntry.invocation_count` field
+- `src/lint.rs` — new module: `lint_markdown()`, `collect_entities_from_db()`, `collect_entities_from_markdown()`
+- `src/main.rs` — `--usage`, `--cleanup`, `--report` flags on `Audit`; new `Lint` subcommand + `cmd_lint()`
+- `SPEC.md` + `CLAUDE.md` updated with all new commands and test count
+
+**Tests:** 166 → 197 (+31). `btakita/tsift@056dbac`. Pushed.
+<!-- agent:boundary:02ba6d55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
-- [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
-- [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
-- [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
-- [ ] [#cs4r] tsift lint: detect unannotated concepts in markdown — cross-reference plain text against known graph entities (symbols, headings, bold terms), suggest backtick/bold/link annotations
+- [x] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
+- [x] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
+- [x] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
+- [x] [#cs4r] tsift lint: detect unannotated concepts in markdown — cross-reference plain text against known graph entities (symbols, headings, bold terms), suggest backtick/bold/link annotations
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [ ] [#jzm8] tsift native: community detection (Louvain clustering) over call_edges + symbol references
+- [x] [#jzm8] tsift native: community detection (Louvain clustering) over call_edges + symbol references
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:pending -->

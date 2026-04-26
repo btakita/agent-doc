@@ -86,19 +86,13 @@ New subcommand. Detects unannotated concepts in markdown by cross-referencing pl
 - `SPEC.md` + `CLAUDE.md` updated with all new commands and test count
 
 **Tests:** 166 → 197 (+31). `btakita/tsift@056dbac`. Pushed.
-<!-- agent:boundary:02ba6d55 -->
+<!-- agent:boundary:7c662f61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
-- [x] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
-- [x] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
-- [x] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
-- [x] [#cs4r] tsift lint: detect unannotated concepts in markdown — cross-reference plain text against known graph entities (symbols, headings, bold terms), suggest backtick/bold/link annotations
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [x] [#jzm8] tsift native: community detection (Louvain clustering) over call_edges + symbol references
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:pending -->

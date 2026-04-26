@@ -21,8 +21,8 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
 ## Auto-Migration on Rename
 
 When a document is renamed/moved, its path hash changes, orphaning all `.agent-doc/` state
-files. `ensure_initialized` (called from `preflight`, `claim`, and `sync`) detects this
-automatically:
+files. `ensure_initialized` (called from `start`, `preflight`, `claim`, and `sync`) detects
+this automatically:
 
 1. Document has a `agent_doc_session` UUID in frontmatter
 2. No snapshot exists for the current path hash

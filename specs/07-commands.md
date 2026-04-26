@@ -94,8 +94,9 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Ensure session UUID in frontmatter (generate if missing)
 2. Read `$TMUX_PANE` (must be inside tmux)
 3. Register session → pane in `sessions.json`
-4. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append harness-native `--add-dir` entries for any external git metadata directories needed by submodule documents (`.git/modules/...` and the superproject `.git` when applicable)
-5. Exec the configured harness (replaces process)
+4. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
+5. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append harness-native `--add-dir` entries for any external git metadata directories needed by submodule documents (`.git/modules/...` and the superproject `.git` when applicable)
+6. Exec the configured harness (replaces process)
 
 ## route
 

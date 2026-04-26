@@ -602,6 +602,27 @@ pub fn run(file: &Path) -> Result<()> {
         &fm.model,
     );
 
+    // --- Snapshot integrity validation ---
+    // If file was moved (JB plugin respawn after rename), the old path hash
+    // won't match — migrate state files or bootstrap a fresh snapshot before
+    // the IPC listener starts. Prevents CRDT corruption from stale state.
+    match crate::snapshot::ensure_initialized(file) {
+        Ok(true) => {
+            log_event(&mut session_log, "snapshot_validated action=initialized");
+            eprintln!("[start] snapshot integrity validated (initialized)");
+        }
+        Ok(false) => {
+            log_event(&mut session_log, "snapshot_validated action=already_valid");
+        }
+        Err(e) => {
+            log_event(
+                &mut session_log,
+                &format!("snapshot_validation_failed error={}", e),
+            );
+            eprintln!("[start] warning: snapshot validation failed: {}", e);
+        }
+    }
+
     // --- Supervisor setup ---
 
     // Resolve CWD deterministically

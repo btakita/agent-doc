@@ -1271,4 +1271,62 @@ mod tests {
             "UUID should be assigned"
         );
     }
+
+    /// Simulates the `start` command scenario: file already has a session UUID
+    /// (written by `frontmatter::ensure_session`), then is moved. Calling
+    /// `ensure_initialized` on the new path should migrate orphaned state.
+    #[test]
+    fn ensure_initialized_migrates_after_move_with_existing_session() {
+        let session_uuid = "start-scenario-uuid-1234";
+        let (dir, old_doc) = setup_project_with_session(session_uuid);
+
+        // Create snapshot + CRDT state for old path (simulates prior session)
+        let old_hash = doc_hash(&old_doc).unwrap();
+        let snap_dir = dir.path().join(".agent-doc/snapshots");
+        let crdt_dir = dir.path().join(".agent-doc/crdt");
+        let old_snap = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nOld snapshot\n",
+            session_uuid
+        );
+        fs::write(snap_dir.join(format!("{}.md", old_hash)), &old_snap).unwrap();
+        fs::write(crdt_dir.join(format!("{}.yrs", old_hash)), b"crdt-state").unwrap();
+
+        // Move the file (simulates JB plugin respawn after rename)
+        let new_doc = dir.path().join("moved-doc.md");
+        fs::rename(&old_doc, &new_doc).unwrap();
+        let new_hash = doc_hash(&new_doc).unwrap();
+        assert_ne!(old_hash, new_hash);
+
+        // Call ensure_initialized — the path start.rs now takes
+        let initialized = ensure_initialized(&new_doc).unwrap();
+        assert!(initialized, "should migrate orphaned state");
+
+        // Snapshot migrated to new hash
+        assert!(snap_dir.join(format!("{}.md", new_hash)).exists());
+        assert!(!snap_dir.join(format!("{}.md", old_hash)).exists());
+
+        // CRDT state migrated to new hash
+        assert!(crdt_dir.join(format!("{}.yrs", new_hash)).exists());
+        assert!(!crdt_dir.join(format!("{}.yrs", old_hash)).exists());
+    }
+
+    /// When `start` calls `ensure_initialized` on a file with no prior state
+    /// (no snapshot, no orphaned state), it should bootstrap a fresh snapshot.
+    #[test]
+    fn ensure_initialized_bootstraps_snapshot_for_fresh_file() {
+        let session_uuid = "fresh-start-uuid-5678";
+        let (dir, doc) = setup_project_with_session(session_uuid);
+
+        // No snapshot exists — ensure_initialized should create one
+        let initialized = ensure_initialized(&doc).unwrap();
+        assert!(initialized, "should create snapshot for fresh file");
+
+        // Verify snapshot was created
+        let hash = doc_hash(&doc).unwrap();
+        let snap_dir = dir.path().join(".agent-doc/snapshots");
+        assert!(
+            snap_dir.join(format!("{}.md", hash)).exists(),
+            "snapshot should be bootstrapped"
+        );
+    }
 }

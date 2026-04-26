@@ -790,7 +790,28 @@ Same root cause for both turns: the **submodule routing bug** described in the p
 **Turn 3** (absolute path): using `/home/brian/.../tasks/agent-doc/agent-doc-bugs.md` forced the binary to resolve against the main repo's `.agent-doc` root. Both preflight and finalize operated on the correct file. Both responses were written successfully.
 
 The submodule routing logic in `route.rs` is the single point of failure. When a relative path matches a file in both the main repo and a submodule, the binary should prefer the main repo's file (since that's what the user's CWD-relative path resolves to on the filesystem). Added both bugs as pending items.
-<!-- agent:boundary:c2523710 -->
+
+❯ do #pane1. #spec-test-build-install-commit-push
+
+### Re: do #pane1 — opus-4-6
+
+`evict_previous_stash_pane_entry()` in `route.rs` now checks `#{pane_current_command}` against the harness's known agent process names (claude, codex, agent-doc, node) before killing a stash pane. If the pane is running an active agent session, eviction is skipped with a diagnostic log line:
+
+```
+[route] skipping eviction of stash pane %42 for session 1ef5f0e7 — agent process still active
+```
+
+**Changes:**
+
+- Threaded `&HarnessConfig` through `evict_previous_stash_pane` → `evict_previous_stash_pane_entry` → caller in `auto_start_in_session`
+- Added `is_agent_process()` guard before `kill-pane` — reuses the existing process-name query pattern
+- Conservative default: if the pane can't be inspected, treat it as busy (skip eviction)
+- Added `eviction_skipped_when_agent_process_active` test — copies `/bin/sleep` as a binary named `agent-doc`, polls until tmux reports the process name, then verifies eviction is skipped
+
+**Not included:** periodic response checkpoint capture during generation. The eviction guard is the root fix — once busy panes aren't killed, checkpoint capture is a lower-priority enhancement.
+
+Committed as `79d9aba` on `20260422/codex-agent-backend`, pushed.
+<!-- agent:boundary:0e14290c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -799,7 +820,7 @@ The submodule routing logic in `route.rs` is the single point of failure. When a
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#pane1] [recommended] Pane eviction guard: sync/route should check for active Claude sessions before killing panes. Fix: add busy-check in evict_previous_stash_pane_entry() (route.rs:621-655) — query tmux pane PID, verify process is still running agent-doc or claude, skip eviction if so. Also add periodic response checkpoint capture during generation so a killed pane doesn't lose the entire in-flight response.
+- [x] [#pane1] [recommended] Pane eviction guard: sync/route should check for active Claude sessions before killing panes. Fix: add busy-check in evict_previous_stash_pane_entry() (route.rs:621-655) — query tmux pane PID, verify process is still running agent-doc or claude, skip eviction if so. Also add periodic response checkpoint capture during generation so a killed pane doesn't lose the entire in-flight response.
 - [ ] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
 - [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

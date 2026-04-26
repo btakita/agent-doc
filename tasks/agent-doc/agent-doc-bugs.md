@@ -434,7 +434,50 @@ This means the JB plugin can keep its respawn behavior unchanged — the binary 
 Together, `#mvsnap` + `#startval` + `#gcsock` close the full lifecycle: preflight migrates snapshots, start validates before listening, and GC cleans up dead sockets.
 
 Added `#startval` to pending.
-<!-- agent:boundary:41bffa35 -->
+
+❯ do #gcsock. #spec-test-build-install-commit-push
+
+### Re: do #gcsock — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`8481bd7` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+**Orphaned socket GC** integrated into `gc.rs` — runs as part of the existing `gc::run()` pipeline, which means preflight's daily auto-GC (Step 0a, `.agent-doc/gc.stamp`) includes socket cleanup with zero new wiring.
+
+**Algorithm** (`clean_orphaned_sockets`):
+
+1. Scan `.agent-doc/supervisor/*.sock` files, extract session UUID from filename
+2. Look up UUID in `sessions.json` — if registered PID is alive (`/proc/<pid>/` exists), keep socket
+3. If PID dead or no registry entry, try `ipc::is_active()` (socket connect) as fallback
+4. If connect fails: remove `.sock` file, mark sessions.json entry for pruning
+5. Phase 2: also scan sessions.json entries whose PID is dead AND socket doesn't exist — prune those ghost entries
+6. Acquire `RegistryLock` before modifying sessions.json (safe under concurrent agent-doc processes)
+
+**No new subcommand needed** — `agent-doc gc` already existed; socket cleanup is now included in its sweep. `--dry-run` works for sockets too.
+
+#### Tests (7 new)
+
+| Test | Verifies |
+|------|----------|
+| `gc_removes_orphaned_socket_with_dead_pid` | Dead PID → socket removed + sessions.json pruned |
+| `gc_keeps_socket_with_live_pid` | Current process PID → socket kept |
+| `gc_removes_socket_without_session_entry` | Leaked socket (no registry) → removed |
+| `gc_prunes_session_entry_with_dead_pid_and_no_socket` | Ghost entry (no socket, dead PID) → pruned |
+| `gc_dry_run_does_not_delete_sockets` | Dry run reports counts but doesn't mutate |
+| `gc_no_supervisor_dir_returns_zero` | Missing supervisor/ dir → graceful no-op |
+| `gc_mixed_live_and_dead_sockets` | Mixed: only dead socket removed, live kept |
+
+#### Spec
+
+Added `## gc` section to `specs/07-commands.md` with the full algorithm table and preflight integration note.
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+
+Full suite: 1235 unit + integration pass (1 pre-existing codex hook flake).
+<!-- agent:boundary:c3a4b0ea -->
 <!-- /agent:exchange -->
 
 <!--
@@ -444,10 +487,10 @@ Add to pending changing `agent:pending` to `agent:backlog`.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [x] [#gcsock] Orphaned socket GC: on preflight startup, scan .agent-doc/supervisor/*.sock — for each, try connect or check sessions.json PID liveness; remove dead sockets and prune stale sessions.json entries. Also expose as agent-doc gc subcommand for manual cleanup
+- [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [ ] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
 - [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
-- [ ] [#gcsock] Orphaned socket GC: on preflight startup, scan .agent-doc/supervisor/*.sock — for each, try connect or check sessions.json PID liveness; remove dead sockets and prune stale sessions.json entries. Also expose as agent-doc gc subcommand for manual cleanup
-- [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

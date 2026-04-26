@@ -1084,7 +1084,17 @@ Semantically, `--- start <time>` mid-queue is "stop, then resume at `<time>`" �
 `#fix3` runs after `#fix2`, before the 17:00 pause. Items after the time fence are unaffected. This follows naturally from sequential consumption — no special ordering logic needed.
 
 Want me to update the plan with per-item time gates?
-<!-- agent:boundary:8aaeae0c -->
+❯ yes
+### Re: plan updated with per-item time gates — opus-4-6
+
+Updated `agent-queue-plan.md` with per-item time gates:
+
+- **Design decision added:** `--- start <time>` fences placed between items act as time gates. Items before run immediately; queue pauses until the time arrives. Multiple gates create a scheduled pipeline.
+- **New syntax section** with examples showing multi-gate pipelines and insertion before a time gate.
+- **Phase 1 updated:** unit tests now cover `--- start <time>`, `--- stop`, and multiple time gates.
+- **Phase 3 updated:** consumption loop now checks for control fences at the head before consuming. Time gates emit `queue_deferred` when the time hasn't arrived (queue stays active but paused). Stop fences and item modifications halt the queue.
+- **Parsing rules updated:** `--- start` accepts both `--- start <time>` and `--- start at <time>`, and can appear at head (initial activation) or mid-queue (time gate).
+<!-- agent:boundary:55f4c1be -->
 <!-- /agent:exchange -->
 
 <!--

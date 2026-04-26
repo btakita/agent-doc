@@ -1306,7 +1306,16 @@ Good call — with `queue` in the picture, `pending` is ambiguous. "Pending in q
 ```
 
 Backlog tracks what exists. Queue determines execution order and timing. Completing `do #fix1` in the queue also marks `#fix1` done in the backlog — the `do #id` closeout rule applies across both components.
-<!-- agent:boundary:f1fd9c1e -->
+
+❯ Why are there 6 shells running in this session?
+### Re: 6 shells in this session — opus-4-6
+
+Those are zombie `zsh` → `cat` process pairs from previous `agent-doc finalize` calls. Each cycle, I ran the finalize command with `run_in_background` in the Bash tool, which spawns a `zsh` shell that pipes the heredoc through `cat` into `agent-doc finalize`. The finalize completed and committed, but the shell processes weren't reaped by the Claude Code runtime.
+
+Process tree shows 6 stale shells (PIDs 918265, 932759, 956947, 974030, 995685, 1295898), each stuck on a `cat` that's already finished writing. They're harmless — consuming no CPU — but they accumulate one per cycle.
+
+This is a Claude Code runtime behavior, not agent-doc. The `run_in_background` Bash tool creates a shell that persists for the session lifetime. I've been using background mode to avoid blocking while reading the finalize output, but I can run finalize in foreground instead to avoid the accumulation. The tradeoff is a slightly longer tool-call wait per cycle.
+<!-- agent:boundary:abf82e3d -->
 <!-- /agent:exchange -->
 
 <!--

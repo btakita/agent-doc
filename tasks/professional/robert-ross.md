@@ -708,14 +708,53 @@ The kit is substantively complete (994-line guide, setup plan, spec, tasks READM
 
 1. **Permission prompts** — Claude Code asks "Allow Claude to run X?" before shell commands, file edits, etc. Rob will see these on day one and won't know what they mean or when to say yes/no. A short section explaining the permission model (what's safe to allow, what to read carefully, how to pre-approve common commands) would prevent confusion.
 
+❯ Yes
+
 2. **Example session transcript** — despite all the prompts in the guide, Rob has never seen what the actual back-and-forth looks like in the terminal. A short annotated example (5-10 exchanges) showing: open Claude Code → ask for something → see Claude work → result. Could be a separate `example-session.md` or a section in the guide.
 
+❯ Sure. Let's have an example-session.md. Not super important, but examples are good.
+
 3. **Reading path for the guide** — the guide is now 994 lines / 15 sections. For a new user, that's overwhelming. A "start here" callout at the top pointing to the 3-4 sections Rob should read first (1, 3, 11, 12) would prevent him from bouncing off the length.
+
+❯ Yes. Also please add the Document Header specified in the session-share project to any document that robert-ross will read.
 
 Beyond those three, the functional coverage is solid. The remaining pending item (Codex CLI) is explicitly deferred. Everything else Rob needs is either in the guide, the setup plan, or SPEC.md.
 
 Want me to address any or all of these?
-<!-- agent:boundary:76339280 -->
+### Re: All three final gaps — opus-4-6
+
+Done. All three addressed:
+
+#### 1. Permission prompts
+Added a full subsection in Section 4 (Things to Watch For) explaining:
+- What the permission prompts look like
+- What's safe to always allow (reads, tests, edits, commits)
+- What to read carefully (rm, force, push, installs, files outside workspace)
+- How to pre-approve commands you're tired of confirming
+- What to do if unsure (say no, Claude explains)
+
+#### 2. Example session transcript
+Created `example-session.md` with 5 annotated exchanges:
+- Creating a new project (shows permission prompts)
+- Working on an existing project (shows edit + commit flow)
+- Checking status (shows workspace overview)
+- Using a plan (shows plan-driven workflow)
+- Pulling latest (shows submodule sync)
+
+Ends with "Key things to notice" summary. Added to README.
+
+#### 3. Reading path + Document Headers
+- Added "Start here" callout at top of the guide pointing to sections 1, 4, 11, 12
+- Added Document Header tables (Name, Source, Version, Last Updated, Purpose, Audience) to all kit files Rob reads:
+  - `robert-ross-workspace-guide.md`
+  - `SPEC.md`
+  - `README.md`
+  - `robert-ross-workspace-setup.md`
+  - `example-tasks-readme.md`
+  - `example-session.md`
+
+The kit is now complete. All identified gaps are addressed.
+<!-- agent:boundary:87d5993b -->
 <!-- /agent:exchange -->
 
 <!--

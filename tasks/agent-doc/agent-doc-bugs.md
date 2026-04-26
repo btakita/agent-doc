@@ -882,7 +882,45 @@ Updated `tasks/agent-doc/agent-queue-plan.md` to use the Exchange-triggered exec
 - **Phase 2 updated:** preflight recognizes activation trigger, manages `queue_active` flag, emits `queue_prompts` only when active.
 - **Phase 3 updated:** harness loops back automatically while `queue_active: true` — no per-item exchange prompt needed. Consumption state tracked for crash safety.
 - **Open questions updated:** removed the `/clear` auto-trigger question (no longer relevant with Exchange-triggered model), added question about where to persist `queue_active`.
-<!-- agent:boundary:0d7cf266 -->
+
+❯ I want the Exchange-triggered option to be the default. I also want an option, via an element attribute or prompt inside of the agent:queue element to self-trigger. Please explore both options.
+### Re: queue trigger modes — opus-4-6
+
+Updated `agent-queue-plan.md` with Exchange-triggered as default plus two self-trigger options:
+
+#### Exchange-triggered (default)
+
+User writes `do queue` / `run queue` in the exchange. A `queue_active: true` flag drives looping. One-shot — flag clears when queue drains.
+
+#### Self-trigger option 1: element attribute
+
+```markdown
+&lt;!-- agent:queue auto --&gt;
+- do #fix1
+- do #fix2
+&lt;!-- /agent:queue --&gt;
+```
+
+The `auto` attribute tells preflight to consume immediately when the queue is non-empty. No exchange prompt needed. Unlike the one-shot triggers, `auto` persists — if new items are added after the queue drains, it re-activates.
+
+#### Self-trigger option 2: inline trigger fence
+
+```markdown
+&lt;!-- agent:queue --&gt;
+--- trigger
+Start processing these items now.
+---
+- do #fix1
+- do #fix2
+&lt;!-- /agent:queue --&gt;
+```
+
+A `--- trigger` / `~~~trigger` fence inside the queue acts as a one-shot start signal. Preflight consumes the fence on first cycle and activates the queue. The fence content could optionally be injected as context for the first item.
+
+#### Trigger precedence
+
+`auto` attribute > inline trigger fence > exchange `do queue`. Phase 2 now resolves all three in priority order. Added open questions about `auto` re-activation semantics and whether trigger fence content should be forwarded.
+<!-- agent:boundary:98d0f769 -->
 <!-- /agent:exchange -->
 
 <!--

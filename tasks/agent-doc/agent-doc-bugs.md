@@ -309,7 +309,7 @@ Phase 3 implemented, tested, committed, and pushed (`0cb4810` on `20260422/codex
 | 2. Preflight integration | Done | Trigger resolution, `queue_active` state, `queue_prompts` emission |
 | 3. Consumption + dispatch | **Done** | Post-commit removal, halt detection (stop fence, time gate, item modified), 19 tests |
 | 4. CLI scaffolding | Open | `agent-doc queue add/list/clear` commands |
-<!-- agent:boundary:1e6f6728 -->
+<!-- agent:boundary:20b78e5c -->
 <!-- /agent:exchange -->
 <!--
 -->
@@ -317,7 +317,6 @@ Phase 3 implemented, tested, committed, and pushed (`0cb4810` on `20260422/codex
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#queue] Implement agent:queue component with hybrid syntax (- list + ~~~prompt/--- fences), sequential dispatch, and CLI scaffolding — tasks/agent-doc/agent-queue-plan.md [Phase 3 done, Phase 4 open]
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

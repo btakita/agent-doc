@@ -206,7 +206,8 @@ pub fn run(
 
     // Send to agent — use `resume` for agent conversation tracking
     let fork = fm.resume.is_none();
-    let model = model.or(fm.model.as_deref());
+    let harness = agent_doc::model_tier::detect_harness();
+    let model = model.or(fm.resolve_harness_model(&harness));
     let response = backend.send(&prompt, fm.resume.as_deref(), fork, model)?;
 
     let response_text = match run_mode {

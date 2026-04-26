@@ -981,7 +981,10 @@ pub fn run(file: &Path) -> Result<()> {
         Ok(content) => {
             let (fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
                 .ok()
-                .map(|(fm, _)| (fm.model_tier, fm.env, fm.model, fm.prompt_presets))
+                .map(|(fm, _)| {
+                    let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
+                    (fm.model_tier, fm.env, resolved, fm.prompt_presets)
+                })
                 .unwrap_or_default();
             let comp_value = agent_doc::model_tier::extract_model_component(&content);
             (fm_tier, comp_value, env_map, fm_model, prompt_presets)

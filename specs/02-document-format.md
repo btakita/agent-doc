@@ -10,7 +10,9 @@ Frontmatter fields:
 - `agent_doc_write`: Write strategy — `merge` or `crdt` (default: `crdt`).
 - `agent_doc_mode`: **Deprecated.** Single field mapping: `append` → format=append, `template` → format=template, `stream` → format=template+write=crdt. Explicit `agent_doc_format`/`agent_doc_write` take precedence. Legacy aliases: `mode`, `response_mode`.
 - `agent`: Agent backend name (overrides config default)
-- `model`: Model override (passed to agent backend)
+- `model`: Model override (passed to agent backend). Overridden by harness-specific fields when present.
+- `claude_model`: Per-harness model override for Claude Code sessions. Takes precedence over `model` when running under Claude Code.
+- `codex_model`: Per-harness model override for Codex sessions. Takes precedence over `model` when running under Codex.
 - `branch`: Reserved for branch tracking
 - `agent_args`: Additional CLI arguments for the active agent process (space-separated string)
 - `claude_args`: Additional CLI arguments for the `claude` process (space-separated string, see §6.1)

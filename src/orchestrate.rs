@@ -647,7 +647,8 @@ fn run_ordered_task_step(
         .or(fm.agent.as_deref())
         .or(global_config.default_agent.as_deref())
         .unwrap_or("claude");
-    let model = model_override.or(fm.model.as_deref());
+    let harness = agent_doc::model_tier::detect_harness();
+    let model = model_override.or(fm.resolve_harness_model(&harness));
     let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
     let expanded_env = expand_frontmatter_env(&fm);
 

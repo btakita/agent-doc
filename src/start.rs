@@ -593,13 +593,15 @@ pub fn run(file: &Path) -> Result<()> {
     );
 
     // Fire document-level session_start hooks
+    let harness_name = agent_doc::model_tier::detect_harness();
+    let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| s.to_string());
     crate::hooks::fire_doc_hooks(
         &fm.hooks,
         "session_start",
         file,
         &session_id,
         &fm.agent,
-        &fm.model,
+        &resolved_model,
     );
 
     // --- Snapshot integrity validation ---

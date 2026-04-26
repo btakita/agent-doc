@@ -174,7 +174,8 @@ pub fn run(
 
     // Send to streaming agent
     let fork = fm.resume.is_none();
-    let model = model.or(fm.model.as_deref());
+    let harness = agent_doc::model_tier::detect_harness();
+    let model = model.or(fm.resolve_harness_model(&harness));
     let chunks = streaming_agent.send_streaming(&prompt, fm.resume.as_deref(), fork, model)?;
 
     // Build thinking config

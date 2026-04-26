@@ -79,6 +79,10 @@
 //! - merge_fields_ignores_unknown: unknown key logged to stderr, not stored
 //! - parse_prompt_presets_roundtrip: preset map with multiline values → parse/write preserves keys
 //!   and bodies exactly
+//! - resolve_harness_model: `claude_model` overrides `model` under `claude-code`, `codex_model`
+//!   overrides `model` under `codex`, fallback to `model` for unknown harnesses
+//! - parse_harness_model_fields: `claude_model` and `codex_model` round-trip through parse/write
+//! - merge_fields_claude_model / merge_fields_codex_model: merge patches for harness model fields
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -228,6 +232,14 @@ pub struct Frontmatter {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Per-harness model override for Claude Code sessions.
+    /// When running under Claude Code, this takes precedence over `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_model: Option<String>,
+    /// Per-harness model override for Codex sessions.
+    /// When running under Codex, this takes precedence over `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// **Deprecated.** Tmux session name for pane affinity (e.g., "claude").
@@ -435,6 +447,19 @@ impl Frontmatter {
 
         ResolvedMode { format, write }
     }
+
+    /// Resolve the effective model for attribution, given the active harness.
+    ///
+    /// Priority: harness-specific field (`claude_model` / `codex_model`) > generic `model`.
+    /// Harness values: `"claude-code"` → `claude_model`, `"codex"` → `codex_model`.
+    pub fn resolve_harness_model(&self, harness: &str) -> Option<&str> {
+        let harness_specific = match harness {
+            "claude-code" => self.claude_model.as_deref(),
+            "codex" => self.codex_model.as_deref(),
+            _ => None,
+        };
+        harness_specific.or(self.model.as_deref())
+    }
 }
 
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
@@ -515,6 +540,8 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "resume" => fm.resume = val_str(),
             "agent" => fm.agent = val_str(),
             "model" => fm.model = val_str(),
+            "claude_model" => fm.claude_model = val_str(),
+            "codex_model" => fm.codex_model = val_str(),
             "branch" => fm.branch = val_str(),
             "tmux_session" => fm.tmux_session = val_str(),
             "agent_doc_mode" | "mode" | "response_mode" => fm.mode = val_str(),
@@ -763,6 +790,8 @@ mod tests {
             resume: Some("resume-id".to_string()),
             agent: Some("claude".to_string()),
             model: Some("opus".to_string()),
+            claude_model: None,
+            codex_model: None,
             branch: Some("dev".to_string()),
             tmux_session: None,
             mode: None,
@@ -793,6 +822,8 @@ mod tests {
         assert_eq!(fm2.session, fm.session);
         assert_eq!(fm2.agent, fm.agent);
         assert_eq!(fm2.model, fm.model);
+        assert_eq!(fm2.claude_model, fm.claude_model);
+        assert_eq!(fm2.codex_model, fm.codex_model);
         assert_eq!(fm2.branch, fm.branch);
         assert_eq!(body2, body);
     }
@@ -1344,5 +1375,99 @@ mod tests {
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("old"));
         assert_eq!(fm.codex_args.as_deref(), Some("new"));
+    }
+
+    // --- resolve_harness_model tests ---
+
+    #[test]
+    fn resolve_harness_model_claude_code_uses_claude_model() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".to_string()),
+            claude_model: Some("opus".to_string()),
+            codex_model: Some("o3-pro".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.resolve_harness_model("claude-code"), Some("opus"));
+    }
+
+    #[test]
+    fn resolve_harness_model_codex_uses_codex_model() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".to_string()),
+            claude_model: Some("opus".to_string()),
+            codex_model: Some("o3-pro".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.resolve_harness_model("codex"), Some("o3-pro"));
+    }
+
+    #[test]
+    fn resolve_harness_model_falls_back_to_generic() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.resolve_harness_model("claude-code"), Some("gpt-5"));
+        assert_eq!(fm.resolve_harness_model("codex"), Some("gpt-5"));
+        assert_eq!(fm.resolve_harness_model("default"), Some("gpt-5"));
+    }
+
+    #[test]
+    fn resolve_harness_model_none_when_no_model() {
+        let fm = Frontmatter::default();
+        assert_eq!(fm.resolve_harness_model("claude-code"), None);
+    }
+
+    #[test]
+    fn resolve_harness_model_unknown_harness_uses_generic() {
+        let fm = Frontmatter {
+            model: Some("sonnet".to_string()),
+            claude_model: Some("opus".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.resolve_harness_model("unknown"), Some("sonnet"));
+    }
+
+    #[test]
+    fn parse_harness_model_fields() {
+        let content = "---\nmodel: gpt-5\nclaude_model: opus\ncodex_model: o3-pro\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fm.claude_model.as_deref(), Some("opus"));
+        assert_eq!(fm.codex_model.as_deref(), Some("o3-pro"));
+    }
+
+    #[test]
+    fn write_roundtrip_harness_model_fields() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".to_string()),
+            claude_model: Some("opus".to_string()),
+            codex_model: Some("o3-pro".to_string()),
+            ..Default::default()
+        };
+        let doc = write(&fm, "Body\n").unwrap();
+        let (fm2, body) = parse(&doc).unwrap();
+        assert_eq!(fm2.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fm2.claude_model.as_deref(), Some("opus"));
+        assert_eq!(fm2.codex_model.as_deref(), Some("o3-pro"));
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn merge_fields_claude_model() {
+        let content = "---\nmodel: gpt-5\n---\nBody\n";
+        let result = merge_fields(content, "claude_model: opus").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fm.claude_model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn merge_fields_codex_model() {
+        let content = "---\nmodel: gpt-5\n---\nBody\n";
+        let result = merge_fields(content, "codex_model: o3-pro").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fm.codex_model.as_deref(), Some("o3-pro"));
     }
 }

@@ -253,10 +253,12 @@ fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
         return CaptureMetadata::default();
     };
     let resolved = fm.resolve_mode();
+    let harness = agent_doc::model_tier::detect_harness();
+    let resolved_model = fm.resolve_harness_model(&harness).map(|s| s.to_string());
     CaptureMetadata {
         session_id: fm.session,
         agent: fm.agent,
-        model: fm.model,
+        model: resolved_model,
         document_format: Some(resolved.format.to_string()),
         write_strategy: Some(resolved.write.to_string()),
     }

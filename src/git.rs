@@ -626,7 +626,13 @@ fn classify_safe_agent_doc_mutation(
     let mut saw_status = false;
 
     for (snap_comp, file_comp) in snap_components.iter().zip(file_components.iter()) {
-        if snap_comp.name != file_comp.name || snap_comp.patch_mode() != file_comp.patch_mode() {
+        if snap_comp.name != file_comp.name {
+            return None;
+        }
+        // Backlog/pending components tolerate patch attr differences (deprecated attr being stripped)
+        if !is_backlog_component(&snap_comp.name)
+            && snap_comp.patch_mode() != file_comp.patch_mode()
+        {
             return None;
         }
 
@@ -720,8 +726,12 @@ fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc:
     let mut saw_exchange = false;
 
     for (head_comp, current_comp) in head_components.iter().zip(current_components.iter()) {
-        if head_comp.name != current_comp.name
-            || head_comp.patch_mode() != current_comp.patch_mode()
+        if head_comp.name != current_comp.name {
+            return false;
+        }
+        // Backlog/pending: tolerate patch attr differences (deprecated attr being stripped)
+        if !is_backlog_component(&head_comp.name)
+            && head_comp.patch_mode() != current_comp.patch_mode()
         {
             return false;
         }
@@ -2101,7 +2111,7 @@ mod tests {
             old body\n\
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
         let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
@@ -2112,7 +2122,7 @@ mod tests {
             new body\n\
             <!-- agent:boundary:newid -->\n\
             <!-- /agent:exchange -->\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             - [ ] [#c3d4] new pending\n\
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
@@ -2603,7 +2613,7 @@ mod tests {
             old body\n\
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, snapshot).unwrap();
@@ -2627,7 +2637,7 @@ mod tests {
             new body\n\
             <!-- agent:boundary:newid -->\n\
             <!-- /agent:exchange -->\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             - [ ] [#c3d4] new pending\n\
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
@@ -2807,7 +2817,7 @@ mod tests {
             <!-- agent:exchange patch=append -->\n\
             <!-- /agent:exchange -->\n\n\
             ## Pending / Not Built\n\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
         crate::snapshot::save(&doc, scaffold).unwrap();
@@ -2831,7 +2841,7 @@ mod tests {
             ❯ user question that still needs an answer\n\
             <!-- /agent:exchange -->\n\n\
             ## Pending / Not Built\n\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, live).unwrap();
 
@@ -2907,7 +2917,7 @@ mod tests {
             <!-- agent:exchange patch=append -->\n\
             <!-- /agent:exchange -->\n\n\
             ## Pending / Not Built\n\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
         crate::snapshot::save(&doc, scaffold).unwrap();
@@ -2923,7 +2933,7 @@ mod tests {
            body from moved file\n\
             <!-- /agent:exchange -->\n\n\
             ## Pending / Not Built\n\n\
-            <!-- agent:pending patch=replace -->\n\
+            <!-- agent:pending -->\n\
             - [ ] [#a1b2] imported\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, live).unwrap();
@@ -4614,7 +4624,7 @@ More content.
 
 ## Pending
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] task
 <!-- /agent:pending -->
 "#;

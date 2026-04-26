@@ -2879,7 +2879,7 @@ Please fix the bug.\n\
                          [agent] \n\
                          [agent] ## Pending / Not Built\n\
                          [agent] \n\
-                         [agent] <!-- agent:pending patch=replace -->";
+                         [agent] <!-- agent:pending -->";
         let anns = extract_inline_annotations(annotated);
         assert!(
             anns.is_empty(),

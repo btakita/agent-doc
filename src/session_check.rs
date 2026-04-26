@@ -607,7 +607,7 @@ mod tests {
         let prefix = frontmatter.unwrap_or("---\nagent_doc_session: test\n---\n\n");
         let mut current = format!("{prefix}## Exchange\n\nHello\n");
         if let Some(pending_body) = pending_body {
-            current.push_str("\n<!-- agent:pending patch=replace -->\n");
+            current.push_str("\n<!-- agent:pending -->\n");
             current.push_str(pending_body);
             if !pending_body.ends_with('\n') {
                 current.push('\n');

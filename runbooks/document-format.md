@@ -33,7 +33,7 @@ The body contains named components delimited by HTML comment markers:
 <!-- agent:exchange -->
 <!-- /agent:exchange -->
 
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 <!-- /agent:backlog -->
 ```
 

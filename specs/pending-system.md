@@ -173,10 +173,12 @@ Invert the current rule:
 
 **#25ag rename (v0.32.4):** The block syntax was renamed from `patch:pending` to `replace:pending`. The `replace:` prefix signals full-replacement semantics explicitly and is the canonical form. Dual-accept is in effect for one release: `patch:pending`, `--allow-patch-pending`, and `AGENT_DOC_ALLOW_PATCH_PENDING=1` still work but emit a deprecation warning on stderr. Canonical names: `replace:pending` + `--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`. Next release removes the deprecated names.
 
+**Component attribute deprecation (v0.33.15):** The `patch=replace` (and legacy `mode=replace`) attribute on `<!-- agent:backlog -->` / `<!-- agent:pending -->` opening tags is deprecated. The backlog component defaults to `replace` mode via the built-in default in `template::default_mode()`, and the binary owns all backlog mutations through `--pending-*` flags — making the inline attribute redundant. Existing documents are normalized automatically: the write path strips `patch=` and `mode=` from backlog component tags and emits a deprecation warning. New scaffolds omit the attribute.
+
 ## Schema — fully-migrated example
 
 ```markdown
-<!-- agent:backlog patch=append -->
+<!-- agent:backlog -->
 - [ ] [#a3f2] implement --pending-reorder
 - [ ] [#b1c4] rewrite runbook to forbid replace:pending
 - [/] [#eg0w] per-file CommitLock + freshness gate — gate: v0.32.5 release

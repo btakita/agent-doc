@@ -79,6 +79,73 @@ pub fn is_backlog_component(name: &str) -> bool {
     name == BACKLOG_COMPONENT || name == BACKLOG_ALIAS
 }
 
+/// Strip deprecated `patch=...` (and legacy `mode=...`) attributes from
+/// backlog/pending component opening tags. The backlog component's patch mode
+/// is always `replace` by built-in default; the inline attribute is redundant
+/// since the binary owns all backlog mutations via `--pending-*` flags.
+///
+/// Emits a deprecation warning to stderr for each stripped attribute.
+pub fn strip_backlog_patch_attr(doc: &str) -> String {
+    let mut result = doc.to_string();
+    let mut warned = false;
+
+    for name in &[BACKLOG_COMPONENT, BACKLOG_ALIAS] {
+        let prefix = format!("<!-- agent:{} ", name);
+        loop {
+            let Some(start) = result.find(&prefix) else {
+                break;
+            };
+            let tag_start = start;
+            let rest = &result[start + prefix.len()..];
+            let Some(end_rel) = rest.find("-->") else {
+                break;
+            };
+            let attrs_text = &rest[..end_rel];
+            let tag_end = start + prefix.len() + end_rel + 3; // past `-->`
+
+            let tokens: Vec<&str> = attrs_text.split_whitespace().collect();
+            let has_patch_or_mode = tokens.iter().any(|t| {
+                t.split_once('=')
+                    .map(|(k, _)| k == "patch" || k == "mode")
+                    .unwrap_or(false)
+            });
+
+            if !has_patch_or_mode {
+                break;
+            }
+
+            if !warned {
+                eprintln!(
+                    "[deprecation] patch/mode attribute on agent:{} is deprecated and will be stripped — \
+                     the binary owns backlog mutations via --pending-* flags",
+                    name
+                );
+                warned = true;
+            }
+
+            let remaining: Vec<&str> = tokens
+                .iter()
+                .filter(|t| {
+                    t.split_once('=')
+                        .map(|(k, _)| k != "patch" && k != "mode")
+                        .unwrap_or(true)
+                })
+                .copied()
+                .collect();
+
+            let new_tag = if remaining.is_empty() {
+                format!("<!-- agent:{} -->", name)
+            } else {
+                format!("<!-- agent:{} {} -->", name, remaining.join(" "))
+            };
+
+            result.replace_range(tag_start..tag_end, &new_tag);
+        }
+    }
+
+    result
+}
+
 /// A parsed component in a document.
 ///
 /// Components are bounded regions marked by `<!-- agent:name -->...<!-- /agent:name -->`.
@@ -987,7 +1054,7 @@ new content here\n\
     fn single_backtick_component_tag_ignored() {
         // A component tag wrapped in single backticks should not be parsed
         let doc = "\
-Use `<!-- agent:pending patch=replace -->` to mark pending sections.
+Use `<!-- agent:pending -->` to mark pending sections.
 <!-- agent:real -->
 content
 <!-- /agent:real -->
@@ -1001,7 +1068,7 @@ content
     fn double_backtick_component_tag_ignored() {
         // A component tag wrapped in double backticks should not be parsed
         let doc = "\
-Use ``<!-- agent:pending patch=replace -->`` to mark pending sections.
+Use ``<!-- agent:pending -->`` to mark pending sections.
 <!-- agent:real -->
 content
 <!-- /agent:real -->
@@ -1162,7 +1229,7 @@ actual content
     #[test]
     fn html_comment_in_content_does_not_eat_close_marker() {
         let doc = "\
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#abc] Rule: first line (not starting with ### or ❯ or <!-- ) gets prefix
 <!-- /agent:pending -->
 ";
@@ -1189,7 +1256,7 @@ User typed <!-- some note --> in the text.
         // Regression: a pending item containing `<!-- ` (literal HTML comment start)
         // must not consume the `<!-- /agent:pending -->` close marker.
         let doc = "\
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#r7hw] Component parser: non-agent `<!-- ` in content ate close markers
 - [ ] [#xyz] Another item
 <!-- /agent:pending -->
@@ -1206,7 +1273,7 @@ User typed <!-- some note --> in the text.
     fn multiple_non_agent_html_comments_in_pending() {
         // Multiple `<!-- ... -->` fragments that are NOT agent markers.
         let doc = "\
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#a] Fix rule: skip lines starting with <!-- or -->
 - [ ] [#b] Handle <!-- partial comment
 - [ ] [#c] Normal item
@@ -1232,7 +1299,7 @@ The rule checks for <!-- prefix before deciding.
 Fix applied to skip non-agent <!-- sequences.
 <!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#cfdy] Verify <!-- in pending items
 <!-- /agent:pending -->
 ";
@@ -1256,7 +1323,7 @@ Fix applied to skip non-agent <!-- sequences.
     #[test]
     fn backlog_component_parsed_from_new_marker() {
         let doc = "\
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 - [ ] [#abc] First item
 <!-- /agent:backlog -->
 ";
@@ -1270,7 +1337,7 @@ Fix applied to skip non-agent <!-- sequences.
     #[test]
     fn legacy_pending_marker_still_parsed() {
         let doc = "\
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#xyz] Legacy item
 <!-- /agent:pending -->
 ";
@@ -1278,5 +1345,60 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(comps.len(), 1);
         assert_eq!(comps[0].name, "pending");
         assert!(is_backlog_component(&comps[0].name));
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_removes_patch_replace() {
+        let doc = "<!-- agent:backlog patch=replace -->\n- item\n<!-- /agent:backlog -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(
+            result,
+            "<!-- agent:backlog -->\n- item\n<!-- /agent:backlog -->\n"
+        );
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_removes_pending_patch_replace() {
+        let doc = "<!-- agent:pending patch=replace -->\n- item\n<!-- /agent:pending -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(
+            result,
+            "<!-- agent:pending -->\n- item\n<!-- /agent:pending -->\n"
+        );
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_removes_mode_replace() {
+        let doc = "<!-- agent:backlog mode=replace -->\n- item\n<!-- /agent:backlog -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(
+            result,
+            "<!-- agent:backlog -->\n- item\n<!-- /agent:backlog -->\n"
+        );
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_preserves_other_attrs() {
+        let doc =
+            "<!-- agent:backlog patch=replace max_lines=50 -->\n- item\n<!-- /agent:backlog -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(
+            result,
+            "<!-- agent:backlog max_lines=50 -->\n- item\n<!-- /agent:backlog -->\n"
+        );
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_noop_for_exchange() {
+        let doc = "<!-- agent:exchange patch=append -->\ncontent\n<!-- /agent:exchange -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(result, doc);
+    }
+
+    #[test]
+    fn strip_backlog_patch_attr_noop_when_no_attr() {
+        let doc = "<!-- agent:backlog -->\n- item\n<!-- /agent:backlog -->\n";
+        let result = strip_backlog_patch_attr(doc);
+        assert_eq!(result, doc);
     }
 }

@@ -116,7 +116,7 @@ fn write_claude_config(root: &Path, script: &Path) -> PathBuf {
 }
 
 fn template_doc() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
 fn append_doc() -> String {
@@ -144,7 +144,7 @@ fn seed_snapshot(root: &Path, doc: &Path) {
 }
 
 fn template_doc_with_model() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
 #[test]

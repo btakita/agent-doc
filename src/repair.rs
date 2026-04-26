@@ -612,7 +612,7 @@ mod tests {
             "compact exchange\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, content).unwrap();
@@ -783,7 +783,7 @@ mod tests {
             "### Re: earlier — gpt-5\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep\n",
             "<!-- /agent:pending -->\n\n",
             "[//]: # (leave this note outside exchange)\n\n",
@@ -801,7 +801,7 @@ mod tests {
             "### Re: earlier — gpt-5\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep\n",
             "<!-- /agent:pending -->\n\n",
             "[//]: # (leave this note outside exchange)\n"
@@ -911,7 +911,7 @@ mod tests {
             "### Re: earlier — gpt-5\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep\n",
             "<!-- /agent:pending -->\n\n",
             "## Assistant\n\n",
@@ -1029,7 +1029,7 @@ mod tests {
             "### Re: earlier — gpt-5\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep\n",
             "<!-- /agent:pending -->\n\n",
             "## Assistant\n\n",

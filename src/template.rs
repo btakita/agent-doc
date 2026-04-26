@@ -2904,7 +2904,7 @@ Existing answer.
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
             "## Pending / Not Built\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep me\n",
             "<!-- /agent:pending -->\n\n",
             "## Assistant\n\n",
@@ -2916,7 +2916,7 @@ Existing answer.
             .expect("repair should apply");
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
         let pending_open = repaired
-            .find("<!-- agent:pending patch=replace -->")
+            .find("<!-- agent:pending -->")
             .unwrap();
         let assistant = repaired.find("## Assistant").unwrap();
 
@@ -2965,7 +2965,7 @@ Existing answer.
             "compact exchange\n",
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:pending patch=replace -->\n",
+            "<!-- agent:pending -->\n",
             "- [ ] keep me\n",
             "<!-- /agent:pending -->\n\n",
             "<!-- agent:todo patch=replace -->\n",
@@ -2982,7 +2982,7 @@ Existing answer.
             .expect("repair should apply");
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
         let pending_open = repaired
-            .find("<!-- agent:pending patch=replace -->")
+            .find("<!-- agent:pending -->")
             .unwrap();
         let todo_open = repaired.find("<!-- agent:todo patch=replace -->").unwrap();
         let trailing_summary = repaired

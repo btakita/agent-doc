@@ -118,7 +118,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     // Prefer inserting before the exchange close tag if it exists, otherwise at end.
     let insert_pos = find_pending_insert_position(&doc, &components);
 
-    let pending_block = "\n<!-- agent:backlog patch=replace -->\n<!-- /agent:backlog -->\n";
+    let pending_block = "\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     let mut new_doc = String::with_capacity(doc.len() + pending_block.len());
     new_doc.push_str(&doc[..insert_pos]);
     new_doc.push_str(pending_block);
@@ -572,7 +572,7 @@ mod tests {
         let doc = write_doc(
             dir.path(),
             "test.md",
-            "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n<!-- agent:pending patch=replace -->\n- [ ] [#abcd] existing item\n<!-- /agent:pending -->\n",
+            "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n- [ ] [#abcd] existing item\n<!-- /agent:pending -->\n",
         );
 
         let items = vec!["new item".to_string()];
@@ -580,7 +580,7 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let pending = result
-            .split("<!-- agent:pending patch=replace -->\n")
+            .split("<!-- agent:pending -->\n")
             .nth(1)
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();
@@ -604,7 +604,7 @@ mod tests {
         let doc = write_doc(
             dir.path(),
             "test.md",
-            "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n<!-- agent:pending patch=replace -->\n- [ ] [#abcd] existing item\n<!-- /agent:pending -->\n",
+            "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n- [ ] [#abcd] existing item\n<!-- /agent:pending -->\n",
         );
 
         let items = vec!["first new".to_string(), "second new".to_string()];
@@ -612,7 +612,7 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let pending = result
-            .split("<!-- agent:pending patch=replace -->\n")
+            .split("<!-- agent:pending -->\n")
             .nth(1)
             .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
             .unwrap();

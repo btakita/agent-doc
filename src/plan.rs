@@ -271,7 +271,7 @@ Done.
 
 ## Pending
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#1g42] Add the post-preflight dispatch phase
 <!-- /agent:pending -->
 "#;
@@ -296,7 +296,7 @@ synchronous orcestra
 
 ## Pending
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#1g42] Add the post-preflight dispatch phase
 <!-- /agent:pending -->
 "#;

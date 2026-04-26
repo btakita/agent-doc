@@ -1150,7 +1150,7 @@ commit and push all rappstack packages.
     #[test]
     fn merge_empty_exchange_no_duplicate_user_line() {
         let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
-        let footer = "<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n";
+        let footer = "<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
 
         // Base: empty exchange with boundary marker
         let base = format!("{header}\n<!-- agent:boundary:base-id -->\n{footer}");

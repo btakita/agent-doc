@@ -2304,7 +2304,7 @@ mod tests {
     fn plan_flag_sequential_expands_preset_in_output() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
-        let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n";
+        let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
         fs::write(&doc, preset_doc).unwrap();
 
         let lifecycle = FakeLifecycleOps {

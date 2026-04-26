@@ -1359,7 +1359,8 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
 
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
-    match crate::template::repair_conversation_tail_outside_exchange(&lifted)? {
+    let normalized = crate::component::strip_backlog_patch_attr(&lifted);
+    match crate::template::repair_conversation_tail_outside_exchange(&normalized)? {
         Some(repaired) => {
             eprintln!(
                 "[write] repaired: moved escaped conversation tail back into agent:exchange for {}",
@@ -1371,7 +1372,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
             );
             Ok(repaired)
         }
-        None => Ok(lifted),
+        None => Ok(normalized),
     }
 }
 
@@ -5874,7 +5875,7 @@ mod future_work_signal_tests {
         let doc = "\
 <!-- agent:exchange patch=append -->
 some exchange content
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#abc1] task one
 <!-- /agent:pending -->
 <!-- /agent:exchange -->
@@ -5902,7 +5903,7 @@ some exchange content
 exchange content
 <!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#abc1] task
 <!-- /agent:pending -->
 ";
@@ -5912,7 +5913,7 @@ exchange content
     #[test]
     fn lift_pending_no_exchange_returns_none() {
         let doc = "\
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#abc1] task
 <!-- /agent:pending -->
 ";
@@ -5938,7 +5939,7 @@ title: test
 
 <!-- agent:exchange patch=append -->
 response here
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#x1] item
 <!-- /agent:pending -->
 <!-- /agent:exchange -->

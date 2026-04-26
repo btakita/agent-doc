@@ -36,13 +36,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 - Test count progression: 125 → 139 → 153 → 166.
 
 **Note:** #jzm8 in pending ("tsift native: community detection") appears stale — #cdet already shipped this work.
-<!-- agent:boundary:23fa6c80 -->
+
+❯ sync orchestra
+❯ #spec-test-commit-push
+❯ - do #865b
+❯ - do #ay3j
+❯ - do #t3pq
+❯ - do #dt80
+❯ - do #cs4r
+
+❯ do #865b
+### Re: do #865b — sonnet-4-6
+
+Implemented `tsift audit` duplicate skill detection via Jaccard similarity on description word sets.
+
+**Algorithm:** pairwise Jaccard on stop-word-filtered token sets from `description` frontmatter. Threshold 0.3. Sorted descending by score. Skills without descriptions are skipped.
+
+**Changes:**
+- `src/audit.rs` — `SimilarPair` struct, `find_similar_pairs()`, `description_tokens()` with stop word list; `AuditResult.similar_pairs` field; called from `scan_skills()`
+- `src/main.rs` — `cmd_audit` prints "Possible duplicates" block when pairs exist
+- `SPEC.md` + `CLAUDE.md` updated
+
+**Tests:** +8 tests → 174 total (`btakita/tsift@59e1e79`)
+
+**Smoke test on `~/.claude/skills`:** 3 skills, 0 duplicates detected (agent-doc / graphify / tsift are semantically distinct — correct).
+<!-- agent:boundary:dfed28f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
+- [x] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)

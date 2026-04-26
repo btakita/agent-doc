@@ -207,7 +207,19 @@ The main benefit: as the number of submodules grows, the root doesn't turn into 
 **How to introduce it:** Rob shouldn't need to mkdir anything. Adding a note to his `CLAUDE.md` that says "put new project submodules under `src/`, put planning docs under `tasks/`" gives Claude the scaffolding rule and Rob never has to think about it.
 
 Should add this structure recommendation to [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) — the current guide assumes a flat layout.
-<!-- agent:boundary:13f0c9a6 -->
+
+❯ Yes. Add the src/ directory
+### Re: add src/ directory structure to the guide — opus-4-6
+
+Done. Updated [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) with four changes:
+
+1. **New "Workspace layout" section** at the top — ASCII tree showing `src/` for projects, `tasks/` for planning docs
+2. **All project paths now use `src/`** — local experiments create under `~/Documents/Code/src/` not the root (decision tree diagram and Section 2 both updated)
+3. **CLAUDE.md scaffolding rules expanded** — added "Workspace Layout" rules (never put projects in root) and "Planning Docs" rules (`tasks/` for plans and notes, grouped by project)
+4. **Mermaid decision diagram** updated — quick experiments go to `src/` too, not root
+
+Rob's CLAUDE.md will enforce the structure so he never has to think about where things go.
+<!-- agent:boundary:7a95950b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -541,7 +541,16 @@ Three options, simplest first:
    Then restart Warp (or run `source ~/.zshrc`). Now Rob types `cc` from anywhere and lands in the right directory with Claude Code running.
 
 **Recommendation:** Option 3 (alias) is the sweet spot — one-time setup, works from any directory, doesn't change Warp's default for other work. If Rob is uncomfortable editing dotfiles, option 2 is fully GUI-based.
-<!-- agent:boundary:8408a571 -->
+
+❯ I'm not sure which shell robert-ross is running. What is the default? Should we add the `cc` alias to both `~/.zshrc` and `~/.bashrc`? Would robert-ross ever need to use the C Compiler `cc` on his machine? To my knowledge he won't but are there any popular workflows that involve using the C Compiler?
+### Re: shell default, alias name collision — opus-4-6
+
+**Default shell:** macOS has defaulted to **zsh** since Catalina (10.15, October 2019). Unless Rob explicitly changed it, Warp will launch zsh. Adding the alias to `~/.zshrc` alone is sufficient. No need to also add it to `~/.bashrc` — that file only loads if someone explicitly switches to bash.
+
+**`cc` collision:** On macOS, `cc` is a symlink to `clang` (Apple's C compiler). Rob will never invoke it directly. The workflows that use it — Homebrew compiling packages from source, `node-gyp` building native Node.js modules, Python C extensions (`pip install` with native deps) — all call `cc` through their build systems, not from the user's command line. The alias shadows the binary only in interactive shells, so even if a build tool runs during compilation, it invokes `/usr/bin/cc` via `$PATH` in the non-interactive subshell, not the alias.
+
+**Bottom line:** `cc` is safe for Rob. But if you'd prefer zero ambiguity, `ccode` or `cclaude` work just as well. I'd stick with `cc` for brevity — two keystrokes is hard to beat for something he'll type daily.
+<!-- agent:boundary:dfbba457 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

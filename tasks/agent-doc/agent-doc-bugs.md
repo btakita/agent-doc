@@ -396,7 +396,26 @@ Added `#hmodel` to pending. The feature adds two frontmatter fields:
 - `codex_model` — model override for Codex sessions (e.g., `o3-pro`, `gpt-5`)
 
 Preflight already emits `agent_model` for model attribution. These fields would feed into that, letting each harness resolve its own model from the frontmatter rather than relying on the generic `agent` field. The skill uses the resolved value for the `— model-name` suffix on response headers.
-<!-- agent:boundary:1c046060 -->
+
+❯ The CRDT corruption is still happening in tasks/professional/robert-ross.md. Please diagnose.
+
+### Re: CRDT corruption still happening — opus-4-6
+
+**Root cause found: IDEA's JB plugin (PID 774403) was auto-respawning the session.**
+
+The JB plugin owns the global `.agent-doc/ipc.sock` and monitors `sessions.json`. When I killed the `agent-doc start` process, the plugin detected the dead session and immediately spawned a new tmux pane with `agent-doc start tasks/professional/robert-ross.md`. This happened three times (%128 → %129 → %130) before I identified the respawn source.
+
+The respawned process inherited the same mismatched snapshot (keyed to the old `tasks/dreamable/` path hash), so each restart immediately resumed corrupting the document with duplicate boundary markers and prompt-prefix insertions.
+
+**Fix applied:**
+
+1. Killed the agent-doc start process (PID 1917090)
+2. Ran `agent-doc claim tasks/professional/robert-ross.md` — this establishes a fresh snapshot at the correct path hash and registers the session cleanly in `sessions.json`
+3. The claim provisioned pane %131 with a fresh Claude session
+4. Verified: the working tree now shows only legitimate user content (your unresponded edits about robert-ross's directory structure), no duplicate boundary markers or truncated prompts
+
+**IDEA was running the whole time** (PID 774403) — earlier `ps aux | grep idea` missed it because the process name is lowercase `idea` in the comm column. It holds IPC sockets across 13+ `.agent-doc/` roots in the workspace.
+<!-- agent:boundary:bd169d66 -->
 <!-- /agent:exchange -->
 <!--
 -->

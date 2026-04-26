@@ -1204,11 +1204,31 @@ Examples:
 ```
 
 `#fix1` executes → "run regression suite..." is added to the tail of the queue → when the queue drains, "Summarize today's queue results" appears as a new prompt in the exchange for the next conversation cycle.
-<!-- agent:boundary:d0c33012 -->
+
+I like `[defer:queue]`/`[defer:exchange]` as it mirrors Zig & Go `defer` command. Would `[defer:*]` immediately execute the prompt once the turn is done in the exchange or the item is reached in the queue?  
+### Re: defer semantics — opus-4-6
+
+`defer` is the right name. The Zig/Go analogy maps cleanly: "execute this when the current scope exits."
+
+**Execution semantics by context:**
+
+| Where `[defer:*]` appears | What happens |
+|---|---|
+| `[defer:queue]` in a queue item | Appended to queue tail. Runs when the queue reaches it — immediately after current item if nothing else is queued after it. |
+| `[defer:exchange]` in a queue item | Prompt injected into exchange. Runs on the next cycle after the queue drains or halts. |
+| `[defer:queue]` in an exchange prompt | Item added to queue. Runs when the queue is next activated (`auto` or `do queue`). |
+| `[defer:exchange]` in an exchange prompt | Prompt written to exchange. Runs on the very next cycle — effectively "continue this conversation with this follow-up." |
+
+So yes — `[defer:*]` executes the prompt as soon as its scope completes. The "scope" is the containing unit: for a queue item, scope exit = item completion; for an exchange prompt, scope exit = turn commit.
+
+**Stacking:** multiple `[defer]` annotations in the same item execute in LIFO order (matching Zig/Go semantics), or FIFO if we prefer document-order predictability. I'd lean FIFO here — document order is more intuitive for a markdown workflow than stack unwinding. But worth flagging as a design choice.
+
+**Updated naming:** `[defer:queue]` / `[defer:exchange]` replaces `[emit]`, `[enqueue]`, and `[post]` from the previous discussion. One keyword, target-qualified, with well-understood scope semantics.
+<!-- agent:boundary:62d74412 -->
 <!-- /agent:exchange -->
 
 <!--
-Pending is ambiguous. 
+With `queue`, `pending` is ambiguous. Rename `pending` to `backlog` with `pending` being an alias to `backlog`. 
 -->
 
 ## Pending / Not Built

@@ -219,7 +219,22 @@ Done. Updated [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-clau
 4. **Mermaid decision diagram** updated — quick experiments go to `src/` too, not root
 
 Rob's CLAUDE.md will enforce the structure so he never has to think about where things go.
-<!-- agent:boundary:7a95950b -->
+❯ robert-ross currently has a flat directory structure. Do you recommend that he migrate or just use the flat directory structure?
+❯ If we migrate, please add to the markdown.
+### Re: migrate or keep flat? — opus-4-6
+
+**Migrate.** A mixed layout (some projects at root, new ones under `src/`) creates exactly the kind of ambiguity that stalls Rob. One-time cleanup, then the CLAUDE.md rules keep everything consistent going forward.
+
+The migration instructions are already in the guide — [`robert-ross-claude-code-guide.md` § "Migrating from a flat layout"](../dreamable/robert-ross-claude-code-guide.md). Rob opens Claude Code and says:
+
+> "Organize my workspace. Move all project folders into src/ and create a tasks/ folder."
+
+Claude moves everything, updates `.gitmodules` if there are submodules, commits, and pushes. If something breaks, he tells Claude to fix it.
+
+The guide also has a note: **do this before adding new projects** so he doesn't end up with a mixed layout. That's the main risk of keeping it flat — every new project following the `src/` rules widens the inconsistency with the old ones.
+
+No additional markdown needed — the section already covers it.
+<!-- agent:boundary:0f3ac137 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

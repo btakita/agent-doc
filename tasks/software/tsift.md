@@ -98,7 +98,27 @@ Already complete from previous cycle. Verified:
 - **Commit + push:** `btakita/tsift@056dbac` on main, pushed
 
 No new changes needed — all artifacts are in sync.
-<!-- agent:boundary:20cd9e23 -->
+
+❯ re #9jc8: can tsift implement this?
+### Re: #9jc8 — opus-4-6
+
+No — and the boundary rule already says why. From SPEC.md:
+
+> tsift owns deterministic, AST-derived clustering. For LLM-derived semantic groupings, use graphify's semantic layer over `tsift graph --json` output.
+
+tsift is zero-API-key, deterministic, fast. Adding LLM calls would break all three properties.
+
+What tsift *does* provide is the interop surface graphify needs:
+
+- `tsift graph --json` — full call graph as JSON
+- `tsift communities --json` — Louvain-clustered symbol groups
+- `tsift explain <symbol>` — definitions + callers + callees + community context
+- `tsift symbols` — complete symbol table
+
+The implementation path for #9jc8 is a graphify feature that consumes tsift's JSON output, runs it through an LLM for entity extraction / concept labeling, and merges the result into graphify's knowledge graph. tsift's role is already complete — it exports the structured data.
+
+I'd recommend closing #9jc8 as "graphify-owned" and tracking it in a graphify session doc if you want to pursue it. The pending items #zv4m (HTML visualization) and #rd2f (semantic similarity) are similarly graphify-side work.
+<!-- agent:boundary:a16f54de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

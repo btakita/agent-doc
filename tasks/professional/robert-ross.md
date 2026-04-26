@@ -578,7 +578,19 @@ Created both:
 2. **SPEC.md forward-reference:** added a "Codex CLI (future)" section at the end of SPEC.md with the expected post-setup state (binary, alias, config dir, instructions file) and a link to the plan. Marked as `Status: pending — complete Claude Code setup first`.
 
 The plan is gated on completing the Claude Code setup first. Rob runs `codex-setup-plan.md` after all 10 steps in `robert-ross-workspace-setup.md` are done.
-<!-- agent:boundary:45b534ce -->
+
+❯ This is true on my environment but not true on robert-ross's environment. Please update plan accordingly.
+❯ > The workspace already symlinks CLAUDE.md -> AGENTS.md
+### Re: AGENTS.md symlink correction — opus-4-6
+
+Updated both files to reflect that Rob's workspace doesn't have the symlink yet:
+
+**`codex-setup-plan.md` Step 4** — changed from "verify" to "create." Now explicitly runs `ln -s CLAUDE.md AGENTS.md`, adds it to git, and commits. The step assumes `CLAUDE.md` exists (from the Claude Code setup) and creates the symlink pointing to it.
+
+**`SPEC.md`** — changed the Instructions row from "already symlinked" to "symlink created in Step 4."
+
+Also updated the dual-tool workflow note in Step 6 to reference the symlink direction (`AGENTS.md -> CLAUDE.md`) rather than implying shared instructions are automatic.
+<!-- agent:boundary:94a76966 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

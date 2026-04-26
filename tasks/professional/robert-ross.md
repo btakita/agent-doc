@@ -155,7 +155,38 @@ Rewrote [`tasks/dreamable/robert-ross-claude-code-guide.md`](../dreamable/robert
 **Remaining setup Rob needs (one-time, Brian can walk through):**
 1. Review/customize his `CLAUDE.md` preferences
 2. GitHub personal access token — so Claude can create repos on his behalf
-<!-- agent:boundary:a9864a36 -->
+
+❯ robert-ross will also take existing github repos and add a submodule to those repos. For example, ClaudeScore/SessionShare will be one of the repos. Please add instructions including the work to plan on setting up the automation scripts on his machine.
+### Re: existing-repo submodules + automation setup plan — opus-4-6
+
+Updated [`robert-ross-claude-code-guide.md`](../dreamable/robert-ross-claude-code-guide.md) with two additions:
+
+#### 1. Adding existing GitHub repos (new Section 2 subsection)
+
+Shows Rob how to bring in repos he already has access to — like `ClaudeScore/SessionShare` — as submodules, all through Claude Code prompts:
+
+> "Add the ClaudeScore/SessionShare repo as a submodule in my workspace."
+
+Also covers batch adds:
+
+> "Add these GitHub repos as submodules: ClaudeScore/SessionShare, ClaudeScore/scoring-api, ClaudeScore/rubrics."
+
+Includes a Mermaid diagram showing the clone → CLAUDE.md setup → commit → push flow.
+
+#### 2. Automation setup plan (Section 6, rewritten)
+
+Four phases, phased by dependency:
+
+| Phase | What | Effort | Who |
+|-------|------|--------|-----|
+| **1** | CLAUDE.md scaffolding + existing-repo rules | Ready now | Rob reviews |
+| **2** | GitHub personal access token | ~5 min, Zoom | Brian walks Rob through |
+| **3** | Claude Code hooks (auto-scaffold, auto-commit parent, auto-pull) | ~15 min, Zoom | Brian installs on Rob's machine |
+| **4** | Bootstrap script (fresh-machine setup) | ~30 min | Brian builds |
+
+Phase diagram in the doc with color-coding: green (ready now), yellow (needs Zoom), blue (Brian builds).
+
+<!-- agent:boundary:d9d18ccd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

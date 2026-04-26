@@ -415,14 +415,36 @@ The respawned process inherited the same mismatched snapshot (keyed to the old `
 4. Verified: the working tree now shows only legitimate user content (your unresponded edits about robert-ross's directory structure), no duplicate boundary markers or truncated prompts
 
 **IDEA was running the whole time** (PID 774403) — earlier `ps aux | grep idea` missed it because the process name is lowercase `idea` in the comm column. It holds IPC sockets across 13+ `.agent-doc/` roots in the workspace.
-<!-- agent:boundary:bd169d66 -->
+
+❯ Does the JB plugin need to be fixed? If yes please plan and add to pending.
+
+### Re: does the JB plugin need fixing? — opus-4-6
+
+The plugin's respawn behavior (restart dead sessions) is correct and desirable — it's a session-continuity feature. The bug is that `agent-doc start` blindly enters the CRDT listener loop without validating that the snapshot matches the current file path.
+
+**The fix belongs in the binary, not the plugin:**
+
+`agent-doc start` should validate snapshot integrity on launch:
+1. Compute the path hash for the file
+2. Check that `.agent-doc/snapshots/<hash>.md` exists
+3. If missing or stale (frontmatter UUID doesn't match), auto-reclaim before entering the listener loop
+
+This means the JB plugin can keep its respawn behavior unchanged — the binary will self-heal on startup. The existing `#mvsnap` pending item (preflight auto-migration) covers the diff-time case; this new item (`#startval`) covers the runtime case when `agent-doc start` launches.
+
+Together, `#mvsnap` + `#startval` + `#gcsock` close the full lifecycle: preflight migrates snapshots, start validates before listening, and GC cleans up dead sockets.
+
+Added `#startval` to pending.
+<!-- agent:boundary:41bffa35 -->
 <!-- /agent:exchange -->
+
 <!--
+Add to pending changing `agent:pending` to `agent:backlog`.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
 - [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [ ] [#gcsock] Orphaned socket GC: on preflight startup, scan .agent-doc/supervisor/*.sock — for each, try connect or check sessions.json PID liveness; remove dead sockets and prune stale sessions.json entries. Also expose as agent-doc gc subcommand for manual cleanup
 - [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command

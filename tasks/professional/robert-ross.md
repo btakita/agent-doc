@@ -604,7 +604,26 @@ Updated both sections in SPEC.md:
 - **Skills** — same pattern: changed from "No skills are pre-configured" to "Rob has skills already configured." Added a stub table for reconciliation.
 
 Both sections now point to Step 10 (reconciliation) as the place where the specific inventory gets captured. I don't have visibility into what Rob has installed, so the tables are left as placeholders that the reconciliation step fills in when Rob runs it.
-<!-- agent:boundary:bdf7cb8f -->
+
+❯ robert-ross will want to regularly pull from git repos such as `ClaudeCode/SessionShare` and it's submodules, and explore the repo. He may want to look into recent activity, decisions that were made, how the rubrics work, recent test runs, etc.
+
+❯ robert-ross may also want to investigate other github repos to explore how the repos work and how they can benefit business objectives that robert-ross will have defined in ~/Documents/Code. Please make section(s) in robert-ross-workspace-guide.md to for robert-ross to follow.
+
+❯ Also, add a section on adding harness plugins to his workflow. Include how to reconcile added harness plugins with his existing workflow. robert-ross is also interested in being efficient with his token usage. So please add a section on how to audit skills, mcps, plugins, etc. We want to work toward a streamlined environment that is easy to maintain.
+### Re: Workspace guide — repo exploration, plugin lifecycle — opus-4-6
+
+Added three new sections to `robert-ross-workspace-guide.md`:
+
+**Section 7: Exploring Git Repos** — covers pulling submodules, browsing recent activity/commits, understanding decisions and architecture, checking test/CI status, and staying in sync across sessions. Includes prompts like "What changed in SessionShare this week?" and "How do the rubrics work?"
+
+**Section 8: Investigating External Repos** — covers exploring repos beyond the workspace for business alignment. Includes patterns for evaluating repos against objectives defined in `~/Documents/Code/tasks/`, building comparison summaries, and forking to experiment.
+
+**Section 9: Plugin Lifecycle — Adding, Reconciling, and Auditing** — covers the full lifecycle: installing new plugins/skills, reconciling them against existing setup to catch overlap, auditing for token efficiency (dormant skills, unused MCPs, dead-weight hooks, CLAUDE.md bloat), and a maintenance schedule (weekly pulls, monthly audits, quarterly full reviews).
+
+Also updated the Quick Reference table (now Section 10) with new entries for pulling, activity checks, external repo exploration, auditing, and plugin reconciliation.
+
+Renumbered existing sections 8→11, 9→12 to accommodate.
+<!-- agent:boundary:cfa65444 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

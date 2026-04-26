@@ -654,7 +654,44 @@ Added `agent:icebox` component to the template system.
 #### Build
 
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14. Committed and pushed as `69843ee` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:e7fe6c8c -->
+
+❯ How can we automatically migrate existing agent docs to use `agent:backlog` and `agent:icebox`?
+### Re: automatic migration to backlog/icebox — opus-4-6
+
+Short answer: you don't strictly need to migrate. The alias system already handles it transparently.
+
+#### Why migration isn't required
+
+`is_backlog_component()` in `component.rs` accepts both `"backlog"` and `"pending"` at parse time. Every read path — template patching, compaction, pending ops, strip-attr — goes through this helper. Existing `<!-- agent:pending -->` documents work identically to `<!-- agent:backlog -->` ones with zero behavioral difference.
+
+New operations (e.g., `agent-doc notify --pending-add`) already emit the canonical `<!-- agent:backlog -->` form when auto-creating the component. So documents naturally migrate forward as they're used — the next compaction or auto-create produces `backlog`, not `pending`.
+
+#### If you want cosmetic consistency
+
+A batch rename for existing docs could be done with sed:
+
+```bash
+find . -name '*.md' -path '*/.agent-doc' -prune -o \
+  -name '*.md' -exec grep -l 'agent:pending' {} + | \
+  xargs sed -i \
+    -e 's/<!-- agent:pending/<!-- agent:backlog/g' \
+    -e 's/<!-- \/agent:pending/<!-- \/agent:backlog/g'
+```
+
+Or as a dedicated CLI subcommand (`agent-doc migrate <FILE|DIR>`) that:
+1. Parses with `component::parse()`
+2. Renames `pending` → `backlog` markers in-place
+3. Optionally adds an empty `<!-- agent:icebox -->` section after backlog
+4. Updates snapshot + commits
+
+#### Icebox is opt-in
+
+`agent:icebox` is a passive content component — no CLI flags, no special handling. Users add it when they want to park items out of the active backlog. There's no reason to inject it into every existing document automatically. Better to let users add it when they first need it, same as `agent:status`.
+
+#### Recommendation
+
+The alias system is sufficient for backward compat. A CLI `migrate` command would be a nice-to-have for repos that want to standardize their markup, but it's low priority since behavior is identical either way. The sed one-liner covers the 90% case today.
+<!-- agent:boundary:aa0b8de0 -->
 <!-- /agent:exchange -->
 
 <!--

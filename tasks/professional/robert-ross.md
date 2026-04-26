@@ -427,7 +427,27 @@ Updated the hooks section in the guide. Changes:
 Also added "Explain what each of my hooks does" under viewing hooks, so Rob can self-diagnose what's configured.
 
 Mermaid diagram updated to say "check for errors" instead of "runs tests." Zip rebuilt.
-<!-- agent:boundary:73fa3d9c -->
+
+❯ In robert-ross-workspace-setup.md, is `## Quick reference after setup` meant for Claude Code to read or robert-ross to read?
+❯ Note that README.md states...This implies that robert-ross will **also** reference robert-ross-workspace-setup.md...however, my understanding is that robert-ross-workspace-setup.md is single plan for Claude Code to run once. Should we also have a spec file that robert-ross will have in his ~/Documents/Code directory for Claude Code to reference and update to ensure his environment is well-defined?
+❯ > Use the Quick Reference table at the bottom of the setup plan for day-to-day prompts. The guide has deeper explanations, Mermaid diagrams, and the full automation plan if you want context on what Claude is doing under the hood.
+### Re: Quick Reference audience + spec file — opus-4-6
+
+The Quick Reference is for Rob, not Claude. The setup file opens with "Claude Code: read this file and execute each step in order" — one-shot runnable plan. But the Quick Reference at the bottom is a day-to-day cheat-sheet. Two audiences in one file.
+
+**Current state on Rob's machine after setup:**
+- `~/Documents/Code/CLAUDE.md` — workspace rules (conventions/preferences)
+- Kit files stay in Brian's repo, not on Rob's machine
+
+**The gap:** after setup runs, there's no persistent Claude-readable file on Rob's machine that tracks environment state (hooks, plugins, layout). `CLAUDE.md` has rules but not state. The guide has the regeneration prompt but lives in Brian's repo.
+
+**Proposed restructure:**
+
+1. **Move Quick Reference from setup plan → guide** (new Section 7). Setup plan becomes purely a one-shot Claude-executable script. Guide becomes the sole ongoing reference.
+2. **Copy the guide to Rob's workspace during setup.** New step copies `robert-ross-workspace-guide.md` into `~/Documents/Code/`. Now it's a living document Claude can read and update via the existing regeneration prompt.
+3. **No separate spec file needed.** The guide-on-disk *is* the spec — Claude reads it, compares against the filesystem, rewrites stale sections. `CLAUDE.md` stays focused on rules/preferences; the guide tracks state + reference.
+4. **Update README.md** to point to the guide's Quick Reference instead of the setup plan's.
+<!-- agent:boundary:edc1d51b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

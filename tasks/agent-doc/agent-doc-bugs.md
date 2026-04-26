@@ -477,7 +477,41 @@ Added `## gc` section to `specs/07-commands.md` with the full algorithm table an
 `cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
 
 Full suite: 1235 unit + integration pass (1 pre-existing codex hook flake).
-<!-- agent:boundary:447ee404 -->
+
+❯ do #mvsnap. spec-test-build-install-commit-push
+### Re: do #mvsnap — opus-4-6
+
+Implemented, tested, built, installed, committed, and pushed (`d8f066a` on `20260422/codex-agent-backend`).
+
+#### What was built
+
+**Auto-migration in preflight** (`snapshot.rs: try_migrate_renamed`): when `ensure_initialized` runs (from preflight, claim, or sync), it now detects orphaned state files after a rename:
+
+1. Reads the document's `agent_doc_session` UUID from frontmatter
+2. If no snapshot exists for the current path hash, scans `.agent-doc/snapshots/*.md` for a snapshot whose frontmatter has a matching session UUID
+3. If found, migrates all hash-keyed state files to the new path hash: snapshots, baselines, locks, pending, CRDT, and pre-response
+4. Updates the sessions registry entry
+
+**Baselines added to explicit `rename`** (`rename.rs`): the `STATE_FILES` list now includes `("baselines", "md")` so `agent-doc rename <old> <new>` also migrates baseline files.
+
+#### Tests (4 new)
+
+- `try_migrate_renamed_finds_orphaned_snapshot` — full migration path with snapshot, baseline, and pending files
+- `try_migrate_renamed_noop_when_snapshot_exists` — no migration when snapshot already present
+- `try_migrate_renamed_noop_when_no_session` — no migration without session UUID
+- `try_migrate_renamed_noop_when_no_match` — no migration when no UUID match found
+
+#### Specs
+
+- `specs/03-snapshot-system.md` — new "Auto-Migration on Rename" section
+- `specs/07-commands.md` — new `rename` command section documenting both explicit and auto-migration
+
+#### Build
+
+`cargo install --path .` + `cargo build --release` completed. Both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are live at 0.33.14.
+
+Full suite: 1239 unit + integration pass (1 pre-existing codex hook flake).
+<!-- agent:boundary:36e4acbe -->
 <!-- /agent:exchange -->
 
 <!--
@@ -487,7 +521,7 @@ Add to pending changing `agent:pending` to `agent:backlog`.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
+- [x] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [ ] [#startval] agent-doc start: validate snapshot integrity on launch — if snapshot hash doesn't match current file path or is missing, auto-reclaim before entering the IPC listener loop. Prevents CRDT corruption when JB plugin respawns a session after a file move
 - [ ] [#hmodel] Frontmatter claude_model and codex_model fields: per-harness model override so agent-doc sessions can specify which model Claude Code and Codex use (e.g. claude_model: opus, codex_model: o3-pro). Preflight emits these in agent_model for the skill's model-attribution suffix
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

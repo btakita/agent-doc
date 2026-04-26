@@ -346,7 +346,23 @@ If you restart IDEA and the lag returns, I can check plugin logs, thread dumps (
 ### Re: add fix to pending — opus-4-6
 
 Added `#mvsnap` to pending — covers both the preflight auto-migration path and the explicit `agent-doc move` command as a fallback.
-<!-- agent:boundary:07dbdda2 -->
+
+❯ Also, the background CRDT insertion of the duplicate prompts is still happening. Please clean up any orphaned sessions that are doing this.
+
+### Re: orphaned session cleanup — opus-4-6
+
+Cleaned up the active corruption and orphaned artifacts:
+
+1. **Killed `agent-doc start` PID 1824751** — the robert-ross CRDT listener that was inserting duplicate boundary markers and partial prompts into `tasks/professional/robert-ross.md`. The working tree had duplicated `&lt;!-- agent:boundary --&gt;`, `&lt;!-- /agent:exchange --&gt;`, and `&lt;!-- agent:pending --&gt;` blocks plus truncated user text (`"Shou"`, `"Should robert-ross have a sim"`).
+
+2. **Restored `tasks/professional/robert-ross.md` from HEAD** — undid the CRDT corruption. Document is clean.
+
+3. **Removed 13 orphaned supervisor sockets** — stale `.agent-doc/supervisor/*.sock` files from dead sessions. Only the bugs-doc socket (`1ef5f0e7`) remains.
+
+4. **Removed dead robert-ross socket** (`6cb2a9bf`) — process is gone, socket was stale.
+
+**Root cause confirmation:** the `agent-doc start` process was applying CRDT patches against a mismatched snapshot (from before the file move), causing the write pipeline to re-insert boundary markers and prompt prefixes on every patch cycle. Killing the process + restoring from HEAD stops the feedback loop. To resume the robert-ross session cleanly, run `agent-doc claim tasks/professional/robert-ross.md` first to establish a fresh snapshot at the new path.
+<!-- agent:boundary:2f722c9c -->
 <!-- /agent:exchange -->
 <!--
 -->

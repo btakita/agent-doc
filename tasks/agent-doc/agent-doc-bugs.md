@@ -811,7 +811,7 @@ The submodule routing logic in `route.rs` is the single point of failure. When a
 **Not included:** periodic response checkpoint capture during generation. The eviction guard is the root fix — once busy panes aren't killed, checkpoint capture is a lower-priority enhancement.
 
 Committed as `79d9aba` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:0e14290c -->
+<!-- agent:boundary:529d737d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -820,7 +820,6 @@ Committed as `79d9aba` on `20260422/codex-agent-backend`, pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#pane1] [recommended] Pane eviction guard: sync/route should check for active Claude sessions before killing panes. Fix: add busy-check in evict_previous_stash_pane_entry() (route.rs:621-655) — query tmux pane PID, verify process is still running agent-doc or claude, skip eviction if so. Also add periodic response checkpoint capture during generation so a killed pane doesn't lose the entire in-flight response.
 - [ ] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
 - [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active

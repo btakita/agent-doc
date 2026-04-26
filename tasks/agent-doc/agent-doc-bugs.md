@@ -362,7 +362,30 @@ Cleaned up the active corruption and orphaned artifacts:
 4. **Removed dead robert-ross socket** (`6cb2a9bf`) — process is gone, socket was stale.
 
 **Root cause confirmation:** the `agent-doc start` process was applying CRDT patches against a mismatched snapshot (from before the file move), causing the write pipeline to re-insert boundary markers and prompt prefixes on every patch cycle. Killing the process + restoring from HEAD stops the feedback loop. To resume the robert-ross session cleanly, run `agent-doc claim tasks/professional/robert-ross.md` first to establish a fresh snapshot at the new path.
-<!-- agent:boundary:2f722c9c -->
+
+❯ Please plan and add to pending a feature to recover from orphaned sockets.
+
+### Re: orphaned socket recovery feature — opus-4-6
+
+**Design:**
+
+The feature has two surfaces:
+
+1. **Automatic (preflight step 0.5)** — before the repair step, scan `.agent-doc/supervisor/*.sock`. For each socket:
+   - Look up the session UUID in `sessions.json` to get the PID
+   - Check PID liveness (`kill -0` or `/proc/<pid>/`)
+   - If dead: remove the socket file, prune the `sessions.json` entry, log `[preflight] gc: reaped orphaned socket <uuid>`
+   - If alive but socket won't connect (broken pipe): same treatment — the process is zombie or hung
+
+2. **Manual (`agent-doc gc`)** — same logic, callable standalone. Useful when preflight isn't running (e.g., after a crash, or during debugging). Outputs a summary of what was reaped.
+
+**Edge cases to handle:**
+- Socket exists but no `sessions.json` entry (leaked by a crash before registration) — reap the socket
+- `sessions.json` entry exists but no socket file (clean exit that didn't deregister) — prune the entry
+- `watch.pid` references a dead process — remove the stale PID file
+
+Added as `#gcsock` in pending.
+<!-- agent:boundary:d4506499 -->
 <!-- /agent:exchange -->
 <!--
 -->
@@ -370,6 +393,7 @@ Cleaned up the active corruption and orphaned artifacts:
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#gcsock] Orphaned socket GC: on preflight startup, scan .agent-doc/supervisor/*.sock — for each, try connect or check sessions.json PID liveness; remove dead sockets and prune stale sessions.json entries. Also expose as agent-doc gc subcommand for manual cleanup
 - [ ] [#mvsnap] Snapshot migration on file rename: detect session UUID mismatch in preflight, auto-migrate snapshot/baseline/pre-response artifacts to new path hash. Fallback: explicit agent-doc move <old> <new> command
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

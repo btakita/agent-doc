@@ -1065,7 +1065,73 @@ All 20 diagrams are now organized on the board at [rob-harness-automation-for-gi
 | 10 | Automation Setup | 4-Phase Setup Flow |
 
 Each diagram title label identifies the source section (e.g., "§3 Day-to-Day Workflow"). Connectors use elbowed lines with arrow endpoints and labeled branch paths (Yes/No, etc.).
-<!-- agent:boundary:c18aaa93 -->
+
+❯ robert-ross has an aversion to dark mode. Please make all group boxes have a transparent background.
+❯ All nodes must have a transparent or bright colored background.
+❯ ![img_4.png](img_4.png)
+
+❯ Please create a spec for markdown to figma. Include:
+❯ - left to right
+❯ - colors
+❯ - diagrams should be on a single figma board that is given as part of the prompt
+### Re: Light mode colors + markdown-to-figma spec — opus-4-6
+
+**Color update applied** to all 164 nodes on the [rob-harness-automation-for-git](https://www.figma.com/board/hRFplC9Ig2tMVPTfFMD8r6/rob-harness-automation-for-git) board:
+
+- All group boxes (sections) → transparent background
+- All node backgrounds remapped from dark to bright:
+  - **User actions/start** — bright green (#78DE78)
+  - **Claude process steps** — bright sky blue (#6BB5FF)
+  - **End/result nodes** — bright lavender (#B885FF)
+  - **Decision diamonds** — bright amber (#FFB840)
+  - **Reference nodes** — bright teal (#59D9C0)
+  - **Title labels** — light gray (#EDEDED)
+  - **Special/state** — bright gold (#FFD959)
+- All text → dark (#1F1F1F) for high contrast on bright backgrounds
+
+---
+
+#### Markdown-to-FigJam Spec
+
+**1. Layout**
+- All diagrams flow **left to right** (LTR). Never top-to-bottom.
+- Each step node is 200×90px (rounded rectangle), spaced 60px apart horizontally.
+- Decision diamonds are 160×140px.
+- Title labels are 300–380×40px, positioned top-left of each diagram group.
+- Connectors use elbowed lines with arrow endpoints. Branch labels ("Yes"/"No") sit on the connector.
+
+**2. Color palette** (bright backgrounds, dark text)
+
+| Role | Fill (hex) | Fill (0–1 RGB) | Usage |
+|------|-----------|----------------|-------|
+| User action | #78DE78 | 0.47, 0.87, 0.47 | User-initiated steps, start nodes |
+| Claude step | #6BB5FF | 0.42, 0.71, 1.0 | Automated/Claude process steps |
+| Decision | #FFB840 | 1.0, 0.72, 0.25 | Diamond decision nodes |
+| End/result | #B885FF | 0.72, 0.52, 1.0 | Terminal/completion nodes |
+| Reference | #59D9C0 | 0.35, 0.85, 0.75 | Cross-reference nodes (docs, guides) |
+| Special | #FFD959 | 1.0, 0.85, 0.35 | Gold — saves, reconciliation, state |
+| Title label | #EDEDED | 0.93, 0.93, 0.93 | Diagram title bars |
+| Text | #1F1F1F | 0.12, 0.12, 0.12 | All text on all nodes |
+
+**3. Section grouping**
+- Related diagrams are grouped inside a FigJam **section** (named container).
+- Section backgrounds are transparent (opacity ≤ 0.15).
+- Section titles use the naming pattern: `N. Category Name` (e.g., "4. Day-to-Day Workflow").
+- Each diagram within a section has a title label identifying its source (e.g., "§3 Day-to-Day Workflow").
+
+**4. Board convention**
+- All diagrams for a workspace/project go on a **single FigJam board**, provided as a URL in the prompt.
+- Sections are stacked vertically, spaced ~200px apart.
+- Board file key is extracted from the URL: `figma.com/board/:fileKey/:fileName`.
+
+**5. Conversion rules (mermaid → FigJam)**
+- `graph LR` → LTR layout (enforced regardless of source direction)
+- Rectangular nodes → `ROUNDED_RECTANGLE` ShapeWithText
+- `{Diamond text}` → `DIAMOND` ShapeWithText
+- `-->|label|` → Connector with text label
+- Subgraphs → FigJam sections or grouped labels
+- Stadium/pill nodes → same as rounded rectangles (FigJam has no pill shape)
+<!-- agent:boundary:0310550f -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1022,7 +1022,29 @@ Ambiguity risk is low: these control fences only have meaning inside `&lt;!-- ag
 I'd go with `--- start` as the canonical name. Since nothing is implemented yet, there's no migration cost — just update the plan and parsing rules to use `start` everywhere.
 
 Want me to update the plan to use `--- start` / `~~~start`?
-<!-- agent:boundary:b0b8dc0d -->
+❯ Yes. Would we support scheduling... `--- start at 17:00 ET`?
+### Re: rename trigger→start + scheduled start — opus-4-6
+
+Done — renamed `trigger` → `start` throughout the plan. The `start`/`stop` pair is now canonical.
+
+**Scheduled start is viable.** Added `--- start at <datetime>` as an extension to the start fence:
+
+```markdown
+&lt;!-- agent:queue --&gt;
+--- start at 17:00 ET
+- run nightly test suite
+- generate coverage report
+&lt;!-- /agent:queue --&gt;
+```
+
+Preflight parses the datetime and compares against `now`. If the time hasn't arrived, it emits `queue_deferred: true, queue_start_at: "<iso8601>"` and skips activation — no items consumed, no `queue_active` set. Once the time passes, it activates normally and consumes the fence.
+
+The requirement is a polling mechanism. Two natural fits:
+1. `/loop /agent-doc <file>` — the loop periodically invokes preflight, which checks the time
+2. Claude Code's `/schedule` or cron trigger — schedule an invocation at (or near) the target time
+
+A past-time `--- start at` would activate immediately (treat as "the time has already arrived"). Added open questions about datetime format support (natural language vs ISO 8601 only).
+<!-- agent:boundary:25add60f -->
 <!-- /agent:exchange -->
 
 <!--

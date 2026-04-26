@@ -282,7 +282,22 @@ Plus a quick-reference table at the bottom for day-to-day prompts after setup.
 - [`robert-ross-workspace-setup.md`](../dreamable/robert-ross-workspace-setup.md) — runnable checklist Rob executes in Claude Code
 
 Steps 5 and 7 are gated on a Zoom session with Brian. Everything else Rob can run solo.
-<!-- agent:boundary:469c1074 -->
+
+❯ Please create a README.md document that gives instructions for using robert-ross-claude-code-guide.md and how to use reference robert-ross-workspace-setup.md afterwards. Please group these 3 files into a directory that we will zip and send to robert-ross via Slack.
+### Re: README + zipped kit for Rob — opus-4-6
+
+Created [`tasks/dreamable/robert-ross-claude-code-kit/`](../dreamable/robert-ross-claude-code-kit/) with three files:
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Entry point — tells Rob to start with the setup plan, use the guide as reference |
+| `robert-ross-workspace-setup.md` | Step-by-step runnable checklist (copied from existing) |
+| `robert-ross-claude-code-guide.md` | Reference material with diagrams (copied from existing) |
+
+**README flow:** Open setup plan first, follow steps in order. Steps 1-4 and 6 are solo; Steps 5 and 7 need Zoom with Brian. Guide is for reference when Rob has questions.
+
+Zipped to [`tasks/dreamable/robert-ross-claude-code-kit.zip`](../dreamable/robert-ross-claude-code-kit.zip) (7.3 KB) — ready to send via Slack.
+<!-- agent:boundary:ae811376 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

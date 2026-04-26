@@ -1315,7 +1315,18 @@ Those are zombie `zsh` → `cat` process pairs from previous `agent-doc finalize
 Process tree shows 6 stale shells (PIDs 918265, 932759, 956947, 974030, 995685, 1295898), each stuck on a `cat` that's already finished writing. They're harmless — consuming no CPU — but they accumulate one per cycle.
 
 This is a Claude Code runtime behavior, not agent-doc. The `run_in_background` Bash tool creates a shell that persists for the session lifetime. I've been using background mode to avoid blocking while reading the finalize output, but I can run finalize in foreground instead to avoid the accumulation. The tradeoff is a slightly longer tool-call wait per cycle.
-<!-- agent:boundary:abf82e3d -->
+
+❯ It seems that agent-doc finalize is hanging. Please investigate
+### Re: finalize hanging investigation — opus-4-6
+
+`agent-doc finalize` itself is not hanging. All 7 finalize calls completed successfully — each wrote the response, committed, and exited. The output files confirm commits landed (e.g., `[main c5202c98a] agent-doc(agent-doc-bugs): 2026-04-25 23:28:02`).
+
+What's lingering is the `cat` process in each `zsh` shell. Claude Code's `run_in_background` creates a `zsh → cat` pipeline where `cat` reads the heredoc from stdin (a socket). After `agent-doc finalize` exits, `cat` has already written all its data, but the socket remains open from the Claude Code side — so `cat` sits in `S (sleeping)` state waiting for EOF on a socket that never closes.
+
+All 7 shells show identical behavior: `State: S (sleeping)`, stdin → socket, stdout/stderr → task output file. No CPU consumed, no work being done.
+
+**Fix:** I'm switching to foreground mode for finalize calls going forward. This eliminates the lingering shells because the Bash tool waits for the command to complete and the shell exits cleanly. The tradeoff (slightly longer tool-call time) is trivially small since finalize completes in ~50ms.
+<!-- agent:boundary:3df6e6bd -->
 <!-- /agent:exchange -->
 
 <!--

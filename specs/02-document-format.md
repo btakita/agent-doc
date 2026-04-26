@@ -49,6 +49,7 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 | `status` | replace | Current state — updated at milestones |
 | `queue` | (none) | Prompt queue — consumed sequentially (see §2.5) |
 | `pending` | replace | Task backlog — auto-cleaned each cycle |
+| `icebox` | replace | Project icebox — items parked outside active backlog |
 | `output` | replace | Latest agent response only |
 | `input` | replace | User prompt area |
 | (custom) | replace | All other components default to replace |

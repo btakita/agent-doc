@@ -761,7 +761,7 @@ fn run_with_options(
                 eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
                 let session_id = uuid::Uuid::new_v4();
                 let scaffold = format!(
-                    "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+                    "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
                     session_id
                 );
                 if let Err(e) = std::fs::write(path, &scaffold) {
@@ -2076,7 +2076,7 @@ mod tests {
         // Scaffold it
         let session_id = uuid::Uuid::new_v4();
         let scaffold = format!(
-            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
             session_id
         );
         std::fs::write(&doc, &scaffold).unwrap();
@@ -2122,7 +2122,7 @@ mod tests {
 
         let session_id = uuid::Uuid::new_v4();
         let scaffold = format!(
-            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
             session_id
         );
         std::fs::write(&doc, &scaffold).unwrap();
@@ -2134,7 +2134,7 @@ mod tests {
         assert!(fm.session.is_some(), "must have session UUID");
         assert!(fm.format.is_some(), "must have format set");
 
-        // Verify all four components
+        // Verify all five components
         assert!(
             content.contains("<!-- agent:status patch=replace -->"),
             "must have status component"
@@ -2150,6 +2150,10 @@ mod tests {
         assert!(
             content.contains("<!-- agent:backlog -->"),
             "must have backlog component"
+        );
+        assert!(
+            content.contains("<!-- agent:icebox -->"),
+            "must have icebox component"
         );
 
         // Verify components are properly closed
@@ -2168,6 +2172,10 @@ mod tests {
         assert!(
             content.contains("<!-- /agent:backlog -->"),
             "backlog must be closed"
+        );
+        assert!(
+            content.contains("<!-- /agent:icebox -->"),
+            "icebox must be closed"
         );
     }
 

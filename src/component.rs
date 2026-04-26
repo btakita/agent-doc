@@ -73,10 +73,18 @@ pub const BACKLOG_COMPONENT: &str = "backlog";
 /// Legacy alias for the backlog component.
 pub const BACKLOG_ALIAS: &str = "pending";
 
+/// Canonical component name for the icebox component.
+pub const ICEBOX_COMPONENT: &str = "icebox";
+
 /// Check whether a component name refers to the backlog component
 /// (accepts both canonical `"backlog"` and legacy `"pending"`).
 pub fn is_backlog_component(name: &str) -> bool {
     name == BACKLOG_COMPONENT || name == BACKLOG_ALIAS
+}
+
+/// Check whether a component name refers to the icebox component.
+pub fn is_icebox_component(name: &str) -> bool {
+    name == ICEBOX_COMPONENT
 }
 
 /// Strip deprecated `patch=...` (and legacy `mode=...`) attributes from
@@ -1318,6 +1326,28 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(!is_backlog_component("exchange"));
         assert!(!is_backlog_component("status"));
         assert!(!is_backlog_component("pending-done"));
+    }
+
+    #[test]
+    fn is_icebox_component_accepts_name() {
+        assert!(is_icebox_component("icebox"));
+        assert!(!is_icebox_component("backlog"));
+        assert!(!is_icebox_component("exchange"));
+        assert!(!is_icebox_component("icebox-archive"));
+    }
+
+    #[test]
+    fn icebox_component_parsed() {
+        let doc = "\
+<!-- agent:icebox -->
+- Parked idea
+<!-- /agent:icebox -->
+";
+        let comps = parse(doc).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "icebox");
+        assert!(is_icebox_component(&comps[0].name));
+        assert!(comps[0].content(doc).contains("Parked idea"));
     }
 
     #[test]

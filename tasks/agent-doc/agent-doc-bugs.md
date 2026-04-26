@@ -737,6 +737,8 @@ Both responses in `tasks/figma-diagrams.md` **were** successfully patched back a
 
 If you wrote a **third** prompt after cycle 2 and Claude started responding in the console, that response would have been lost when the pane died — there's no third capture or cycle record, meaning `finalize` never ran for it. The Codex Stop-hook backstop only fires if the hook is wired and the session is still alive; a killed pane bypasses it entirely.
 
+❯ This document also had missing patchbacks on 2 recent turns. Please assess why.
+
 #### Why the pane was lost
 
 Session log:
@@ -773,7 +775,22 @@ When invoked with a relative path (`agent-doc preflight tasks/agent-doc/agent-do
 - Fix: using the **absolute path** (`agent-doc preflight /home/brian/.../tasks/agent-doc/agent-doc-bugs.md`) correctly routes to the main repo's `.agent-doc` root and reads the 45KB file
 
 **Bug:** the submodule routing in `route.rs` incorrectly claims `tasks/agent-doc/agent-doc-bugs.md` belongs to session-share when a file with the same relative path exists in the submodule. The routing should prefer the file under the CWD's git root over submodule matches.
-<!-- agent:boundary:7fc0184d -->
+
+❯ Please add pending items with plans to fix the 2 issues.
+### Re: patchback failures on this document + pending plan — opus-4-6
+
+#### Why this document had 2 missing patchbacks
+
+Same root cause for both turns: the **submodule routing bug** described in the previous response.
+
+**Turn 1** (first `/agent-doc` invocation this session): preflight correctly read the 45KB main-repo file and computed the diff. But `finalize` resolved the commit target via `submodule_route()`, which found `src/session-share/tasks/agent-doc/agent-doc-bugs.md` and routed there. The IPC write delivered the response to the session-share file (3.7KB), not the main-repo file (45KB). The main-repo file was never touched.
+
+**Turn 2** (second invocation): preflight now read from the session-share `.agent-doc` root (its snapshot was fresher after turn 1's commit). The 3.7KB file had no user changes relative to its own snapshot, so preflight reported `no_changes`. The 45KB main-repo file was completely bypassed.
+
+**Turn 3** (absolute path): using `/home/brian/.../tasks/agent-doc/agent-doc-bugs.md` forced the binary to resolve against the main repo's `.agent-doc` root. Both preflight and finalize operated on the correct file. Both responses were written successfully.
+
+The submodule routing logic in `route.rs` is the single point of failure. When a relative path matches a file in both the main repo and a submodule, the binary should prefer the main repo's file (since that's what the user's CWD-relative path resolves to on the filesystem). Added both bugs as pending items.
+<!-- agent:boundary:c2523710 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -782,6 +799,9 @@ When invoked with a relative path (`agent-doc preflight tasks/agent-doc/agent-do
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#pane1] [recommended] Pane eviction guard: sync/route should check for active Claude sessions before killing panes. Fix: add busy-check in evict_previous_stash_pane_entry() (route.rs:621-655) — query tmux pane PID, verify process is still running agent-doc or claude, skip eviction if so. Also add periodic response checkpoint capture during generation so a killed pane doesn't lose the entire in-flight response.
+- [ ] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
+- [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

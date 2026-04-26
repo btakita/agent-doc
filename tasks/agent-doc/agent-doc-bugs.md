@@ -720,7 +720,60 @@ Markers inside fenced code blocks and inline code spans are left untouched. Idem
 #### Build
 
 `cargo install --path .` + `cargo build --release` completed. Both binaries are live at 0.33.14. Committed and pushed as `5850228` on `20260422/codex-agent-backend`.
-<!-- agent:boundary:98698f9a -->
+
+❯ In src/session-share, `agent-doc tasks/figma-diagrams.md` did not patchback the response into the document. Also, when I navigated the editor to another document and back, I lost the tmux pane. Why?
+
+❯ patchback the last response into this document. Why is agent-doc having issues with the patchback?
+### Re: figma-diagrams patchback + lost pane — opus-4-6
+
+Investigated both issues via the ops log, session log, cycle state, and captures for `src/session-share`.
+
+#### Patchback status
+
+Both responses in `tasks/figma-diagrams.md` **were** successfully patched back and committed during the original session in pane %138:
+
+- **Cycle 1** (20:11 UTC): "Re: Mermaid-to-Figma migration plan" — `commit_success`, capture shows `state: "committed"`
+- **Cycle 2** (20:19 UTC): "Re: Figma MCP setup" — `commit_success`, capture shows `state: "committed"`
+
+If you wrote a **third** prompt after cycle 2 and Claude started responding in the console, that response would have been lost when the pane died — there's no third capture or cycle record, meaning `finalize` never ran for it. The Codex Stop-hook backstop only fires if the hook is wired and the session is still alive; a killed pane bypasses it entirely.
+
+#### Why the pane was lost
+
+Session log:
+```
+[1777234179] session_start pane=%138  ← original
+[1777234896] session_start pane=%140  ← replacement (12 min later)
+```
+
+The `agent-doc` pane lifecycle has three relevant mechanisms:
+
+1. **`sync` layout reconciliation** — when the editor switches focus, `agent-doc sync` runs and can stash or kill panes that don't match the current layout
+2. **`route` auto-start** — if the registered pane (%138) is found dead, `resolve_or_create_pane()` provisions a new one (%140) and calls `evict_previous_stash_pane_entry()` to clean up
+3. **`sessions.json` single-pane invariant** — registration removes stale entries pointing to the same pane
+
+Most likely: when you navigated away, either (a) `sync` killed %138 as part of layout reconciliation (moving it to stash where it was later evicted), or (b) the Claude Code process in %138 exited on its own (timeout/idle), and when you navigated back, `route` found it dead and auto-started %140.
+
+The net result: if Claude was mid-response in %138 when it died, `finalize` never ran and the response was lost. The capture/recovery mechanism only works if the response was captured *before* the pane died.
+
+### Re: patchback routing bug in this document — opus-4-6
+
+Found the root cause of patchback failures in **this** document. The file `tasks/agent-doc/agent-doc-bugs.md` exists at **two paths**:
+
+| Location | Session UUID | Size |
+|----------|-------------|------|
+| Main repo: `tasks/agent-doc/agent-doc-bugs.md` | `1ef5f0e7-...` | 45KB (full history) |
+| Submodule: `src/session-share/tasks/agent-doc/agent-doc-bugs.md` | `b7e2a8c1-...` | 3.7KB (fresh) |
+
+When invoked with a relative path (`agent-doc preflight tasks/agent-doc/agent-doc-bugs.md`), the binary's submodule routing resolves the file to `src/session-share/` — reading, writing, and committing against the 3.7KB session-share copy instead of the 45KB main repo file. The response gets patched into the wrong file.
+
+**Evidence from this session:**
+
+- First invocation: preflight read 45KB (correct), but `finalize` committed to session-share (`[commit] file is in submodule .../src/session-share`)
+- Second invocation: preflight read 3.7KB (wrong file entirely) and reported `no_changes`
+- Fix: using the **absolute path** (`agent-doc preflight /home/brian/.../tasks/agent-doc/agent-doc-bugs.md`) correctly routes to the main repo's `.agent-doc` root and reads the 45KB file
+
+**Bug:** the submodule routing in `route.rs` incorrectly claims `tasks/agent-doc/agent-doc-bugs.md` belongs to session-share when a file with the same relative path exists in the submodule. The routing should prefer the file under the CWD's git root over submodule matches.
+<!-- agent:boundary:7fc0184d -->
 <!-- /agent:exchange -->
 
 <!--

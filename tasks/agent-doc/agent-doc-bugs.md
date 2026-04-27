@@ -844,7 +844,24 @@ Root cause: `detect_uncaptured_recommendations` in `heuristics.rs` only recogniz
 **Tests:** 5 new heuristic tests (`unconditional_followup_with_quantified_remaining_work`, `unconditional_followup_standalone_remaining`, `zero_remaining_does_not_trigger_followup`, `quantified_left_to_triggers_followup`, `options_without_remaining_work_no_followup`) + 1 new session_check integration test (`session_check_warns_on_unconditional_followup_remaining_work`). All 11 heuristic + 25 session_check tests pass; full suite clean (1 pre-existing unrelated failure in codex hook artifact test).
 
 Committed as `ea98fbc` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:86b37bc0 -->
+
+❯ In src/boost-client, `agent-doc tasks/monsterrodholders.md` patchbacks have a `<!-- no-pending-capture -->`. Why?
+### Re: no-pending-capture in monsterrodholders.md — opus-4-6
+
+`<!-- no-pending-capture -->` is a per-cycle suppression directive for the `session-check` pending-capture guard. It tells the guard: "this response intentionally has no `--pending-add` — don't warn or fail."
+
+The 5 occurrences in `src/boost-client/tasks/monsterrodholders.md` all share the same pattern: the response text triggers the pending-capture heuristic's pattern matching but doesn't actually warrant new pending items. Specifically:
+
+1. **"All 39 variable products now have defaults set."** — quantified statement ("39 products") fires the heuristic, but the work is complete.
+2. **Dark mode swatch CSS deployed** — concluding advisory with action-like language; nothing left to track.
+3. **"This way we stop the bots…"** — preceded by a numbered recommendation list whose items are already captured in pending (`#z035`, `#ppdb`, etc.).
+4. **"No code changes — `wp post delete 86212 --force`"** — simple task completion for an already-tracked item.
+5. **"Cloudflare Managed Ruleset is safe to enable at default sensitivity"** — advisory phrasing that reads like an actionable recommendation but is conversational guidance in context.
+
+Without the annotation, `session-check` would warn (or fail closed under `pending_capture_guard: strict`) because the heuristic detects recommendation-like patterns but no `--pending-add` was recorded for that cycle. The annotation explicitly marks it as intentional, not an oversight.
+
+**TL;DR:** it's the opt-out for false-positive pending-capture detection on responses that conclude work or give advice without creating new backlog.
+<!-- agent:boundary:96c5fc28 -->
 <!-- /agent:exchange -->
 
 <!--

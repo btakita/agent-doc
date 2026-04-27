@@ -71,7 +71,18 @@ Changes:
 Tests: 5/5 new pass, full suite clean (autoclaim cascade is pre-existing). Clippy clean. Release built + installed. Committed + pushed.
 
 Both phases added to backlog. Phase 2 (plan emits `pending_mutations`) is gated on Phase 1 validation.
-<!-- agent:boundary:216700d6 -->
+
+❯ Did you retain `agent:pending` being an alias to `agent:backlog`?
+### Re: agent:pending alias retained — opus-4-6
+
+Yes. `agent:pending` is a fully functional alias for `agent:backlog`. The aliasing is handled at two levels:
+
+1. **Component parser** (`component.rs:71-82`): `BACKLOG_ALIAS = "pending"` and `is_backlog_component()` accepts both `"backlog"` and `"pending"`. All pending-related operations (add, done, edit, gate, etc.) use `is_backlog_component()` to find the component, so either tag name works.
+
+2. **Migration** (`migrate.rs`): `agent-doc migrate` rewrites `&lt;!-- agent:pending --&gt;` → `&lt;!-- agent:backlog --&gt;` in the document text for canonicalization, but documents that still use the old tag continue to work without migration.
+
+The `migrate` run on this document renamed the tags to canonical `agent:backlog`, but if you had a document still using `agent:pending` tags, all binary operations would work identically.
+<!-- agent:boundary:20d00395 -->
 <!-- /agent:exchange -->
 
 <!--

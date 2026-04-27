@@ -222,7 +222,63 @@ Implemented `tsift summarize` — cached LLM analysis with batch extraction and 
 **Tests:** +14 → 211 total. Covers DB CRUD, entity roundtrip, content hashing, large file rejection, API key validation, prompt construction.
 
 **Commit:** `btakita/tsift@5801090`. Pushed.
-<!-- agent:boundary:6beeaed5 -->
+
+❯ What prompts and skills should I use to reliably apply tsift to a claude code session on a codebase?
+### Re: applying tsift to a Claude Code session — opus-4-6
+
+Three layers: one-time setup, CLAUDE.md integration, and session-time commands.
+
+#### 1. One-time setup (per codebase)
+
+```bash
+# Build the AST index (symbols.db + call graph)
+tsift index .                          # single repo
+tsift index --workspace                # multi-submodule
+
+# Pre-cache LLM summaries (pay once, query free)
+tsift summarize --extract src/         # full extraction
+tsift summarize --extract --diff src/  # incremental after edits
+```
+
+The rewrite hook (`~/.claude/hooks/tsift-rewrite.sh`) already intercepts `rg`/`grep -r` → `tsift search` automatically. No prompt needed for that.
+
+#### 2. CLAUDE.md integration
+
+Add to the project's `CLAUDE.md` so every session knows tsift is available:
+
+```markdown
+## Code Navigation
+
+- `tsift search <query>` — AST-aware hybrid search (use instead of grep/rg)
+- `tsift graph <symbol> --callers` — who calls this function?
+- `tsift graph <symbol> --callees` — what does it call?
+- `tsift explain <symbol>` — full context: callers, callees, community
+- `tsift summarize <symbol>` — cached 2-sentence summary + entities
+- `tsift communities` — architectural subsystem clustering
+- `tsift path <from> <to>` — shortest call-chain between symbols
+```
+
+This puts the commands in context for every session without a prompt.
+
+#### 3. Session-time patterns
+
+**For exploration/onboarding:**
+- "Use `tsift explain main` to understand the entry point, then `tsift communities` for the high-level architecture"
+- Or just: "What does this codebase do?" — with tsift indexed, the agent can use `tsift search` and `tsift summarize` instead of reading full files
+
+**For focused work:**
+- `tsift graph <symbol> --callers` before refactoring (find all call sites)
+- `tsift summarize --file src/config.rs` to understand a module without reading it into context
+- `tsift path <from> <to>` to trace how two distant symbols connect
+
+**The `/tsift` skill** wraps these as a Claude Code slash command for convenience — invoke with `/tsift <query>` for search.
+
+#### What makes it reliable
+
+The key property is **determinism after indexing**. `tsift index` + `tsift summarize --extract` are the only steps that touch external resources (file system, API). After that, every query is a local SQLite lookup — instant, offline, and token-efficient (~50-100 tokens vs ~2000 for reading the source file).
+
+The main failure mode is a stale index. Reindex after significant refactoring: `tsift index --rebuild .` or `tsift summarize --extract --diff src/`.
+<!-- agent:boundary:6c78bb85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

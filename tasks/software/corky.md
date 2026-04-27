@@ -152,11 +152,34 @@ I fixed the remaining doc and instruction drift around that work, including one 
 - `make install` succeeded (`transcribe-cuda` path)
 
 I did not make the requested `src/corky` commit or push yet. The concrete blocker is the repo state: branch `20260413/corky-gsc` already has a large pre-existing dirty worktree across roughly 100 tracked files plus untracked `src/gsc/`. A clean commit now would either bundle unrelated branch work under this Codex Gmail task or violate the repo's "no dangling unstaged files" rule for split commits. The existing pending Codex Gmail support item stays open until that commit boundary is clarified.
-<!-- agent:boundary:626314f7 -->
+
+❯ do #1bgy. spec-test-build-install-commit-push
+### Re: Codex Gmail support plan — gpt-5
+
+I completed the part of `#1bgy` that was still missing outside `src/corky`.
+
+`src/corky` is already in the right state: branch `20260413/corky-gsc` is clean and `cf63185` is already pushed to `origin/20260413/corky-gsc`. I re-ran the task-level verification there:
+- `cargo clippy -- -D warnings`
+- `cargo test` (293 tests plus the full integration suite)
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install`
+
+I then added the repo-local Codex adapter in `plugins/corky-gmail/`:
+- plugin manifest plus marketplace entry in `.agents/plugins/marketplace.json`
+- a `corky-gmail` skill for auth, refetch, draft, push, and send flows
+- thin wrapper scripts for `doctor gmail --json`, `sync refetch --json`, guarded `draft new`, `draft push --json`, and `draft send --json`
+
+The `draft-new.sh` wrapper specifically blocks the bad threading path this task was about: it rejects using the Gmail thread ID as `--in-reply-to` and requires the RFC 2822 `Message-ID` there.
+
+I also validated the adapter locally: both JSON manifests parse cleanly, all wrapper scripts pass `bash -n`, the `draft-new.sh` guard rejects the wrong thread-id flow, and `auth-status.sh` resolves to the local `corky` binary correctly.
+
+I did not make the requested root-repo commit or push. The blocker is the current `agent-loop` repo state: `main` is already ahead of `origin/main` by 10 commits and the worktree is dirty across many unrelated tracked and untracked paths, so a clean adapter-only `commit + push` from here is not safe.
+<!-- agent:boundary:ce15d1c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#1bgy] Codex Gmail support plan — implement [tasks/software/corky/plan-codex-gmail-support.md](/home/brian/work/btakita/agent-loop/tasks/software/corky/plan-codex-gmail-support.md): fix Gmail reply/thread correctness, add connector-grade JSON/auth-status CLI surfaces, then build the Codex adapter outside `corky`
+- [ ] [#1bgy] Codex Gmail support plan - commit and push the repo-local corky-gmail adapter once the root repo boundary is clarified; src/corky is already shipped and the plugin is implemented and verified locally
 <!-- /agent:pending -->

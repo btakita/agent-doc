@@ -206,7 +206,23 @@ Commit: `caeb41ec6` (`feat: add corky gmail codex adapter`)
 I then pushed `main` to `origin`, so the `agent-loop` side of this work is now shipped as well.
 
 That means `#1bgy` is complete and I closed it.
-<!-- agent:boundary:09da24a9 -->
+
+❯ Look in the /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md agent-doc session. Why did the session fail to send to gmail even with this fix applied?
+### Re: why the Ron send still failed after the Codex Gmail fix — gpt-5
+
+It failed for a different reason than the fix addressed.
+
+The retry in `monsterrodholders.md` used a standalone draft file at `/tmp/ron-search-console-access-request.md` with `account: personal` and no `thread_id` / `in_reply_to`, so the Gmail reply-threading fix was not even on the path for that send. The Codex adapter wrappers are also thin pass-throughs to `corky draft push` / `corky draft send`, so they do not change auth or network behavior.
+
+What actually blocked that send was the Gmail auth/runtime path for the `personal` account:
+- `src/corky/src/draft/send.rs` first asks `gmail_auth::get_access_token_for_user(..., gmail.compose, ...)` for a send token before it POSTs to Gmail
+- the `personal` send token on disk is expired, so `corky` had to refresh or re-auth
+- in that session, refresh failed on DNS for `oauth2.googleapis.com`, and fallback re-auth failed because the local OAuth callback server could not bind (`Operation not permitted`)
+
+So both things are true at once: the Codex Gmail fix is present, and this particular send still failed. The fix covered connector/threading correctness; it did not remove the need for a live Gmail compose token or bypass that session's DNS/OAuth callback restrictions.
+
+Operationally, the next step is to retry the `personal` send path from a normal shell/session that can reach Google and complete the OAuth callback, or refresh that `personal` Gmail send token there first.
+<!-- agent:boundary:bbd3c179 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

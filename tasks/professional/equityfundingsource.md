@@ -511,7 +511,31 @@ So the local pair would be:
 CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN="<token>"
 CLOUDFLARE_ACCOUNT_ID="1e7e194ff8da4ad9e40ce041aea84f76"
 ```
-<!-- agent:boundary:7c1c9d6f -->
+
+❯ I selected Edit account settings only but the "Review Token" button is disabled.
+
+❯ ![img_5.png](img_5.png)
+❯ ![img_6.png](img_6.png)
+### Re: disabled `Review Token` button — gpt-5
+
+From your screenshots, the account scope and permissions are already selected. The most likely reason `Review Token` is still disabled is that the **token name field at the top of the page is still empty**.
+
+Set the token name first, for example:
+
+```bash
+CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN
+```
+
+Then the button should enable.
+
+If it still does not, check these in order:
+1. The token is being created under `Brian.takita@gmail.com's Account`, not user-profile tokens.
+2. The policy scope is `Include -> Account -> Brian.takita@gmail.com's Account`.
+3. The permission row is fully added and shows `Account Settings Write`.
+4. There is no partially-open `Edit policy` modal still waiting for confirmation.
+
+But based on the screenshots, the missing token name is the main thing I would fix first.
+<!-- agent:boundary:840c3fea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

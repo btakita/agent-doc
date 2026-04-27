@@ -714,7 +714,21 @@ tsift audit --usage --json      # invocation counts from session history
 ```
 
 If you want ongoing visibility, `tsift status --json` at session start gives machine-parseable state — the `tsift init` section now tells agents to do exactly this.
-<!-- agent:boundary:96cd21b0 -->
+
+❯ Please test in this session.
+### Re: test in this session — opus-4-6
+
+
+Ran all three verification methods live:
+
+**1. `tsift status`** — index was stale (1d, 16 stale files). Reindexed, now fresh (17 files tracked). `recommendations.run` correctly switched from `tsift index .` to `tsift summarize --extract src/`.
+
+**2. `tsift audit --usage --json`** — works, shows invocation counts from session history. `agent-doc: 67`, `tsift: 0` (expected — tsift is used via hooks/CLI, not the skill interface).
+
+**3. `tsift search "check_status"` + `tsift explain check_status`** — both found the new status module. Search returned exact symbol match (score 1.0) plus 9 partial matches. Explain showed 6 callers (cmd_status + 5 tests), 6 callees, community membership.
+
+All three levels of verification confirmed working. The index freshness check is the most useful ongoing signal — if `tsift status` shows `fresh`, the auto-reindex hook is firing.
+<!-- agent:boundary:f1067c70 -->
 <!-- /agent:exchange -->
 
 <!--

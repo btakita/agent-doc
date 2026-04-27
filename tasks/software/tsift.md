@@ -87,7 +87,27 @@ Implemented `--terse` global flag for abbreviated JSON field names with inline s
 - Compatible with `--pretty` for indented terse output
 
 **Commit:** `btakita/tsift@c2010bd`. 261 tests pass (5 new terse tests). Built + installed.
-<!-- agent:boundary:1fa427da -->
+
+❯ do #paths. spec-test-build-install-commit-push
+### Re: do #paths — opus-4-6
+
+Implemented `--absolute` global flag. All output paths are now project-relative by default (token savings).
+
+**What it does:**
+- Default: paths stripped to project-relative (`src/main.rs` instead of `/home/user/project/src/main.rs`)
+- `tsift --absolute <command>` restores full filesystem paths
+- Affects: search, graph, explain, index, summarize, lint
+- JSON: known path keys (`file`, `path`, `caller_file`, `file_path`) stripped via `relativize_json_paths()`
+- Database storage stays absolute — stripping is display-only
+
+**Implementation:**
+- `relativize(path, root)` / `relativize_pathbuf()` utility functions
+- `relativize_edges()`, `relativize_symbols()`, `relativize_symbol_hits()` batch helpers
+- `relativize_json_paths()` for post-processing sift library JSON output
+- Threaded through `cmd_graph`, `cmd_explain`, `cmd_search`, `cmd_index` via `absolute` parameter
+
+**Commit:** `btakita/tsift@357af45`. 268 tests pass (7 new). Built + installed.
+<!-- agent:boundary:285e4b2b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -96,7 +116,7 @@ Implemented `--terse` global flag for abbreviated JSON field names with inline s
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
+- [x] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)

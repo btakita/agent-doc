@@ -287,15 +287,38 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#4qgx` files.
-<!-- agent:boundary:a04a8b3f -->
+
+❯ execute plan tasks/agent-doc/agent-doc-bugs3.md. spec-test-build-install-commit-push
+### Re: execute plan `tasks/agent-doc/agent-doc-bugs3.md` — gpt-5
+
+Implemented and pushed the `#closeout-bypass` fix in `src/agent-doc` as commit `e6a562c` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route` no longer treats mutations to an already-committed baseline cycle as proof that a new document cycle started.
+- Start acknowledgment now requires a genuinely newer cycle id when the baseline state is already `committed`, so same-cycle `commit_already_current` churn cannot produce a false `route_cycle_start_acknowledged` / `fresh_route_start_acknowledged`.
+- Added regressions for both shapes: the low-level wait helper and the live-pane reroute path that accepts the trigger but only mutates the same committed cycle.
+- Updated `SPEC.md`, `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the stricter contract.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `e6a562c` (`fix: require new cycle id for route ack`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#closeout-bypass` files.
+<!-- agent:boundary:cda2a349 -->
 <!-- /agent:exchange -->
 
 <!--
-execute plan tasks/agent-doc/agent-doc-bugs3.md. spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#cxr1] [recommended] Fix `compact exchange` so it replaces, not appends, the `agent:exchange` body. Repro in `src/session-share/tasks/claudescore-3.md`: repeated compaction requests keep layering new `### Re:` summaries over older exchange text instead of collapsing to one checkpoint summary. See `tasks/agent-doc/plan-compact-exchange-replace-not-append.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
+- [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 <!-- /agent:pending -->

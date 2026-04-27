@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -198,7 +198,20 @@ Implemented `--schema` global flag for columnar JSON output — arrays of same-s
 ```
 
 **Commit:** `btakita/tsift@cfc73ea`. 297 tests pass (6 new schema tests). Built + installed.
-<!-- agent:boundary:9b1aed2b -->
+
+❯ In the skill file, add a version check similar to agent-doc. Also add versioning to tsift even though tsift is currently private.
+### Re: tsift version check + versioning — gpt-5
+
+Implemented the tsift versioning surface in three places:
+
+- `.claude/skills/tsift/SKILL.md` now has `tsift-version: "0.1.0"` frontmatter plus a `tsift --version` check. If the installed binary is newer, the skill now treats itself as stale and refreshes from `src/tsift/CLAUDE.md`, `src/tsift/VERSIONS.md`, and live `tsift --help` output.
+- `src/tsift/VERSIONS.md` now establishes a private-project changelog and documents `Cargo.toml` / `tsift --version` as the canonical version source.
+- `src/tsift/CLAUDE.md` now documents the versioning contract so the skill has a repo-local source of truth.
+
+**Verification:**
+- `cargo test` passed: 297 tests total.
+- `make check` is still failing on pre-existing clippy findings in `src/main.rs` (`clippy::collapsible-if` around lines 863-868, plus existing `clippy::too_many_arguments` findings on several command helpers). I did not change those code paths in this cycle.
+<!-- agent:boundary:0b88e55d -->
 <!-- /agent:exchange -->
 
 <!--

@@ -105,7 +105,18 @@ use: search, explain, graph
 The index exists with 5,885 tracked files but 14,364 files need reindexing. No summaries are cached. The core commands (`search`, `explain`, `graph`) are available — `summarize` is not (no summaries built).
 
 To bring it current: `tsift index .`
-<!-- agent:boundary:f9780f41 -->
+
+❯ `/tsift init` on the claude code session on src/session-share/tasks/claudescore-3.md did not add `tsift/` to src/session-share/.gitignore. Why?
+### Re: tsift init didn't update session-share .gitignore — opus-4-6
+
+`tsift init` operates on the directory you pass it, defaulting to `.` (cwd). Claude Code's cwd is always the project root — `/home/brian/work/btakita/agent-loop` — regardless of which session document is active. So `/tsift init` modified (or would modify) agent-loop's `.gitignore`, not `src/session-share/.gitignore`.
+
+Notably, agent-loop's `.gitignore` doesn't have `.tsift/` either right now, so either `tsift init` wasn't actually run on agent-loop, or the entry was lost in a subsequent `.gitignore` edit.
+
+To fix session-share specifically: `tsift init src/session-share`
+
+The broader gap: the `/tsift` skill doesn't infer the target submodule from the session document path. It could resolve `src/session-share/tasks/claudescore-3.md` → submodule root `src/session-share` and pass that to `tsift init` instead of `.`. That would be a skill-level change (not a tsift binary change), since the binary already accepts an explicit path argument.
+<!-- agent:boundary:6ebe58c3 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -232,7 +232,68 @@ The key insight: agent-doc doesn't need to be the practitioner's editing tool fo
 The pieces that should NOT go through agent-doc: JSONL transcript analysis, real-time monitoring, metrics aggregation, semantic search, and the knowledge graph. Those need their own fit-for-purpose infrastructure.
 
 So: good backend for the write-side and lifecycle-management parts of Sidekick. Not the right choice for the read-side analytics. The two together make a complete system.
-<!-- agent:boundary:df4dbb8a -->
+
+I do want to steer agent-dor toward real-time streams. Even though the lifecycle is currently turn-based. I envision agent-doc to be an interactive dashboard document. Would this change any of the analysis? We can build toward being a "virtual" document for Sidekick. 
+### Re: real-time streams and the dashboard document vision — opus-4-6
+
+Yes, this materially changes the analysis. The biggest gap I identified — "real-time in-session interventions are event-driven, agent-doc's cycle model is turn-based" — collapses if the supervisor learns to ingest event streams and push live updates to document components.
+
+#### What shifts
+
+**The document becomes a materialized view, not just a transcript.** Today agent-doc's document is a conversation record: user writes, agent responds, cycle commits. A dashboard document is fundamentally different — it's a live projection of system state. Components update because the underlying data changed, not because someone wrote a prompt. This is a bigger conceptual shift than it sounds: the trigger for document mutation moves from "user edit detected" to "event received."
+
+**The supervisor already has the right shape.** It's a long-running daemon with IPC sockets, CRDT merge capability, and concurrent-write safety. The missing piece is an event ingestion path. If Claude Code hooks pipe tool-call events into the supervisor socket (PostToolUse, token counts, file modifications), the supervisor can:
+
+1. Maintain running state (tool call history, token spend, loop counters)
+2. Evaluate rules against that state (search loop detection, budget thresholds)
+3. Push component updates to the document (live metrics, health status, alerts)
+4. Trigger interventions (context injection, rewind suggestions)
+
+That's Sidekick's Health Monitor and Budget Guardian running inside agent-doc's existing process model.
+
+**Virtual dashboard components map directly to Sidekick surfaces:**
+
+| Component | Updates on | Content |
+|-----------|-----------|---------|
+| `sidekick:health` | Every N tool calls | Loop count, correction cascade status, current episode classification |
+| `sidekick:budget` | Token threshold crossings | Spend vs baseline, projected total, alert level |
+| `sidekick:proposals` | Post-session analysis | Queued AGENTS.md diffs with confidence scores |
+| `sidekick:metrics` | Session end | Discovery-lag, correction rate, golden path delta |
+| `sidekick:session-log` | Continuous | Structured episode timeline with annotations |
+
+The practitioner never opens this document. The VS Code extension or CLI reads from it. The document format gives you structured persistence, git history, and diff-ability for free.
+
+#### What still needs its own infrastructure
+
+**The analysis pipeline is still a pipeline.** JSONL transcript → segment → annotate → extract → propose is a batch data-processing job. It could feed *results* into document components, but the transform stages themselves don't belong in a document model. Think of it like: the pipeline writes to agent-doc, not through agent-doc.
+
+**Vector store and knowledge graph.** Semantic session search and the codebase knowledge graph are query-optimized data structures. They need a proper store (SQLite + embedded vectors). But agent-doc could be the write-back surface — when the knowledge graph detects a new pattern, it materializes as a component update in the virtual document.
+
+**Cross-developer aggregation.** Team-level pattern mining aggregates across multiple developers' session data. This is a server-side concern (or a local aggregation daemon in local-only mode). Agent-doc operates per-document. But: each developer's virtual Sidekick document could be the data source that feeds the aggregator.
+
+#### The revised architecture
+
+| Layer | Owns | Implementation |
+|-------|------|----------------|
+| **Event ingestion** | Hook events → supervisor state machine | agent-doc supervisor + new event channel |
+| **Live dashboard** | Real-time component updates, health/budget surfaces | agent-doc virtual document + CRDT |
+| **Analysis pipeline** | JSONL processing, pattern extraction, proposal generation | Purpose-built (writes results to agent-doc components) |
+| **Knowledge store** | Semantic search, knowledge graph, metrics time-series | SQLite + vector store (reads/writes via agent-doc API) |
+| **Harness integration** | Multi-tool hooks, model resolution, write-back | agent-doc (already exists) |
+
+The key difference from my first analysis: agent-doc moves from "integration layer and lifecycle host" to "the central nervous system." The analysis pipeline and knowledge store become plugins that feed into and read from agent-doc, rather than independent systems that happen to use agent-doc for output.
+
+#### Architecture decisions to resolve
+
+1. **Event throughput.** A busy session might fire 50+ tool calls per minute. CRDT merge on every event is expensive. Debouncing strategy: batch component updates at ~1s intervals, but evaluate alert rules immediately.
+
+2. **Component schema.** Dashboard components need structured data (JSON-like metrics), not just markdown prose. This might mean a new component content type — structured data rendered as markdown for human readability but parseable for machine consumption.
+
+3. **Push vs pull for consumers.** VS Code extension reading from the document: does it watch the file, subscribe to the supervisor's IPC, or poll? The supervisor IPC path is lower latency and doesn't require git operations.
+
+Building toward this makes agent-doc a credible full backend for Sidekick — not just the write side, but the state management and real-time observation layer too. The only pieces that stay external are the heavyweight analytics (batch pipeline, vector store) that any system would separate.
+
+<!-- agent:boundary:24fa3e9f -->
 <!-- /agent:exchange -->
 
 <!--

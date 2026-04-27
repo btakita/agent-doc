@@ -325,7 +325,7 @@ On the original 14K stale files scenario, this cuts output from 1.7MB (433K toke
 **Tests:** +3 → 249 total. Covers: quiet suppresses file list, exit-code implies quiet, quiet JSON omits changes.
 
 **Commit:** `btakita/tsift@936b2da`. Pushed. Submodule pointer updated (`83d9942ac`).
-<!-- agent:boundary:7f7b6557 -->
+<!-- agent:boundary:d593f931 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -334,7 +334,6 @@ On the original 14K stale files scenario, this cuts output from 1.7MB (433K toke
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute

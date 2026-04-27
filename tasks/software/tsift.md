@@ -247,7 +247,7 @@ tsift search timed out after 30s (strategy: lexical). The index may be stale —
 **Verified:** `tsift search "main" --timeout 5` on the stale agent-loop repo correctly times out with the error message. Small directories complete normally.
 
 **Commit:** `btakita/tsift@91aaab0`. Pushed. Submodule pointer updated (`205e7dea5`).
-<!-- agent:boundary:43190077 -->
+<!-- agent:boundary:ba7fd0bc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -256,7 +256,6 @@ tsift search timed out after 30s (strategy: lexical). The index may be stale —
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#hang] [recommended] Fix search hang on stale index — fail fast or add timeout
 - [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)

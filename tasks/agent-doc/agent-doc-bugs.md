@@ -168,7 +168,18 @@ Fixed Codex submodule handoff. Root cause: `codex exec resume` does not accept `
 **Verification:** clippy clean, 7/7 build_command tests pass, full suite clean (pre-existing route + codex hook failures only). Release built + installed. Commit `ffdc1b6`, pushed to `origin/20260422/codex-agent-backend`.
 
 **Note:** manual verification with a live submodule session is the remaining gate before release.
-<!-- agent:boundary:ecf09705 -->
+
+❯ release + publish
+### Re: release + publish — opus-4-6
+
+v0.33.16 released and published.
+
+- **VERSIONS.md** updated with the Codex submodule handoff fix
+- **crates.io**: published
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.16
+- **Tag**: `v0.33.16` on `20260422/codex-agent-backend`
+- **PyPI**: publishes automatically via CI on the GitHub release event
+<!-- agent:boundary:1c24323b -->
 <!-- /agent:exchange -->
 
 <!--

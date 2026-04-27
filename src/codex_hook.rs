@@ -12,6 +12,9 @@
 //!   cycle deterministically: validate `last_assistant_message`, replay only a
 //!   single-response closeout through `repair`, and run the normal
 //!   `git::commit()` boundary.
+//! - The same closeout path also self-heals a missed startup when the document
+//!   still has unresolved prompt-bearing user edits but no new cycle ever
+//!   started, instead of letting Codex exit with an external-only answer.
 //! - If the cycle still cannot be closed automatically, the hook falls back to
 //!   blocking the turn with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
@@ -638,6 +641,38 @@ mod tests {
         );
         let root = project_root_for(dir.path()).unwrap();
         assert!(load_state(&root, "codex-session").unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_auto_closes_prompt_bearing_diff_when_cycle_never_started() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        let current = format!("{original}\n❯ Why was startup missed?\n");
+        fs::write(&doc, &current).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "### Re: startup miss — gpt-5\n\nRecovered through Stop.\n"
+                .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Why was startup missed?"));
+        assert!(content.contains("Recovered through Stop."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
     }
 
     #[test]

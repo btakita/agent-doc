@@ -13,6 +13,9 @@
 //! - Also fails closed when the current document diverges from its snapshot in
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
+//! - Also fails closed when the current document already has unresolved
+//!   prompt-bearing user edits (`prompt_target` / `content_edit`) relative to
+//!   the snapshot, but no new `agent-doc` cycle ever started for them.
 //! - When that bypassed patchback also leaves prompt-target lines in the same
 //!   diff without the binary-owned `❯ ` transcript prefix, `session-check`
 //!   reports the bare prompt target in the failure marker so the write path can
@@ -155,6 +158,15 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 marker
             )));
         }
+        if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                state.cycle_id,
+                phase_name(state.phase),
+                state.last_event,
+                marker
+            )));
+        }
         return Ok(SessionCheckStatus::Ok(format!(
             "[session-check] ok — cycle `{}` is `{}` ({})",
             state.cycle_id,
@@ -175,6 +187,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                )));
+            }
+            if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: document has unresolved prompt-bearing user changes but no agent-doc cycle ever started: {}",
                     marker
                 )));
             }
@@ -205,6 +223,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                )));
+            }
+            if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: last ops.log event is terminal, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
                     marker
                 )));
             }
@@ -617,6 +641,41 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
     Ok(None)
 }
 
+fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let current = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+
+    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let snap_norm = norm(&snapshot);
+    let cur_norm = norm(&current);
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
+        return Ok(None);
+    };
+
+    for change in crate::diff::classify_prompt_bearing_changes(&diff_text) {
+        let label = match change.kind {
+            crate::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
+            crate::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
+            crate::diff::PromptBearingChangeKind::RecoveryArtifact
+            | crate::diff::PromptBearingChangeKind::BoundaryArtifact => continue,
+        };
+        let preview = change
+            .text
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(change.text.as_str())
+            .trim();
+        return Ok(Some(format!("{label}: {preview}")));
+    }
+
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,6 +923,81 @@ mod tests {
         let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
         assert!(marker.contains("### Re: test — gpt-5"));
         assert!(marker.contains("Why was this missed?"));
+    }
+
+    #[test]
+    fn session_check_interrupts_on_prompt_bearing_diff_without_cycle_state() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please investigate this startup miss.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("prompt-bearing user changes"));
+                assert!(message.contains("prompt_target"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_interrupts_when_committed_state_has_new_prompt_diff() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n\n",
+            "❯ Follow up on the remaining gap.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("no new agent-doc cycle started"));
+                assert!(message.contains("prompt_target"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
     }
 
     #[test]

@@ -417,7 +417,38 @@ So this was not a tsift-status ambiguity. It was an `agent-doc` closeout gap: th
 I treated your `#agent-doc-bug` note as actionable and recorded that follow-up in `tasks/agent-doc/agent-doc-bugs2.md` as `#pdone1`, with plan file `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`.
 
 I am closing `#vxtz` in this cycle via the binary-owned pending mutation path now.
-<!-- agent:boundary:74e3f596 -->
+
+❯ In tasks/agent-doc/agent-doc-bugs2.md, this issue happened. Why?
+```
+• Ran tsift search --autoindex "pending capture guard strict warn existing pending done"
+  └ Error: autoindexing index
+
+    Caused by:
+        0: database is locked
+        1: Error code 5: The database file is locked
+```
+### Re: `agent-doc-bugs2.md` autoindex lock — gpt-5
+
+That error happened because `tsift search --autoindex ...` did not stay on the read-only search path. It first hit the stale-index precheck, then took the `autoindex` branch in `precheck_search_indexes()` and tried to run `apply_search_index_update()` against the root repo index (`src/tsift/src/main.rs:2669` and `src/tsift/src/main.rs:2677`).
+
+At that point the root `agent-loop` index was already contended:
+
+- `.tsift/index.db-journal` exists right now, which means the active writer is using rollback-journal mode instead of a clean WAL sidecar.
+- there are other live `tsift search --autoindex ...` processes in this workspace right now, and both are stuck in `D` state:
+  - `PID 927595` — `tsift search --autoindex corky gmail codex adapter`
+  - `PID 2002091` — `tsift search --autoindex pending-done finalize session-check closeout`
+- when a later `--autoindex` search tried to open the same DB for write/update, SQLite returned `Error code 5: database is locked`.
+
+So the answer is: the `agent-doc-bugs2.md` failure was caused by `--autoindex` attempting a write while another root-repo tsift autoindex/update was already holding the DB in a lock-prone state. It was not a plain search timeout, and it was not just the read-only query path.
+
+Why this still happens even after `#vxtz`:
+
+- `#vxtz` fixed the normal query/status paths to use read-only opens with a busy timeout.
+- `--autoindex` is intentionally different: it escalates into the write path when the index is stale or missing.
+- the write path still has to acquire the SQLite writer lock, so if another autoindex/index process is already wedged, the later one fails exactly the way you saw.
+
+So the narrower root cause for that note in `tasks/agent-doc/agent-doc-bugs2.md` is: concurrent root-level `--autoindex` writers, not a regression in the read-only search fix.
+<!-- agent:boundary:1d30b6e9 -->
 <!-- /agent:exchange -->
 
 <!--

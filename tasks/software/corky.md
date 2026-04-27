@@ -206,11 +206,10 @@ Commit: `caeb41ec6` (`feat: add corky gmail codex adapter`)
 I then pushed `main` to `origin`, so the `agent-loop` side of this work is now shipped as well.
 
 That means `#1bgy` is complete and I closed it.
-<!-- agent:boundary:56c25a20 -->
+<!-- agent:boundary:09da24a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#1bgy] Codex Gmail support plan - implementation, verification, and repo-local adapter are complete; blocked only on deciding a safe root-repo commit/push boundary for plugins/corky-gmail and .agents/plugins/marketplace.json
 <!-- /agent:pending -->

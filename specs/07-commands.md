@@ -383,7 +383,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Manual-repair contract:** For documented manual repair across Claude Code and Codex, once the user prompt already exists in the document the assistant response path is `agent-doc write --commit <FILE>`. Do not document or rely on a repair flow that stops after bare `agent-doc write`; that leaves the cycle open on the wrong side of the response-commit boundary.
 
-**`--commit` behavior:** `agent-doc write --commit <FILE>` remains a best-effort convenience: it runs the normal write path, then tries `git::commit()`. Outside git it warns and skips commit; inside git it warns on commit failure but still reports the underlying write result. This is the documented manual-repair path because it preserves the older CLI surface while crossing the write/commit boundary in one invocation.
+**`--commit` behavior:** `agent-doc write --commit <FILE>` has two modes. For non-session documents and `--pending-only` maintenance, it remains a best-effort convenience: it runs the normal write path, then tries `git::commit()`. Outside git it warns and skips commit; inside git it warns on commit failure but still reports the underlying write result. For real session documents (`agent_doc_session` / legacy `session`) that are writing a response, `write --commit` upgrades to the same strict closeout contract as `finalize`: non-git documents are rejected before mutation, commit failure is a command failure, and success means the cycle reached `committed`.
 
 **Response-commit invariant:** Every appended response must cross a commit boundary unless the user explicitly asks to leave it uncommitted. The default happy-path command for normal response cycles is `agent-doc finalize <FILE>`; bare `agent-doc write` is for explicit no-commit exceptions or intermediate checkpoints, not for the final response.
 
@@ -434,7 +434,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 4. Invoke `git::commit(<FILE>)` even if the write path returned an error, because the write may have partially succeeded after persisting snapshot/cycle state.
 5. Fail unless the final persisted cycle state for the document is `committed`.
 
-**Contract:** `finalize` is the binary-owned happy path for normal session responses. Unlike `write --commit`, it is not best-effort:
+**Contract:** `finalize` is the binary-owned happy path for normal session responses. Session-document `write --commit` response closeouts share the same strict contract:
 
 - non-git documents are rejected before any write
 - `--pending-only` is rejected because `finalize` is for response cycles, not standalone pending maintenance

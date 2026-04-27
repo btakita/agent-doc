@@ -13,11 +13,23 @@ fn template_doc_content() -> String {
     "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
+fn session_template_doc_content() -> String {
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 fn setup_template_doc() -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, template_doc_content()).unwrap();
+    (tmp, doc)
+}
+
+fn setup_session_template_doc() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, session_template_doc_content()).unwrap();
     (tmp, doc)
 }
 
@@ -85,6 +97,79 @@ fn finalize_requires_git_repo_before_mutating_document() {
         before, after,
         "finalize should fail before mutating the file"
     );
+}
+
+#[test]
+fn write_commit_requires_git_repo_before_mutating_session_document() {
+    let (_tmp, doc) = setup_session_template_doc();
+    let before = fs::read_to_string(&doc).unwrap();
+
+    agent_doc()
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "write --commit requires a git repository for session documents",
+        ));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        before, after,
+        "write --commit should fail before mutating a git-less session document"
+    );
+}
+
+#[test]
+fn write_commit_writes_and_commits_session_response() {
+    let (tmp, doc) = setup_session_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: repair — gpt-5"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: repair — gpt-5"),
+        "HEAD blob should contain the write --commit response"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn write_commit_remains_best_effort_for_non_session_document() {
+    let (_tmp, doc) = setup_template_doc();
+
+    agent_doc()
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: note — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: note — gpt-5"));
 }
 
 #[test]

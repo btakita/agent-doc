@@ -47,6 +47,12 @@
 //! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
 //!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
 //!   as ACK (2 s timeout), then falls back to the direct CRDT disk path.
+//! - `run_command(options, commit_mode)`: shared CLI entrypoint for `write` and
+//!   `finalize`. `finalize` is always strict. `write --commit` stays
+//!   best-effort for non-session documents and `--pending-only`, but upgrades to
+//!   the same strict commit-boundary contract as `finalize` when the target file
+//!   is a real session document (`agent_doc_session` / legacy `session`) and the
+//!   command is writing a response.
 //!
 //! - `try_ipc`: low-level IPC helper used by `run_stream`. Writes a JSON patch
 //!   file (component patches + optional frontmatter + `reposition_boundary`
@@ -245,14 +251,32 @@ pub enum CommitMode {
     Required,
 }
 
+fn is_session_document(file: &Path) -> Result<bool> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse(&content)?;
+    Ok(fm
+        .session
+        .as_deref()
+        .is_some_and(|session| !session.trim().is_empty()))
+}
+
+fn resolve_commit_mode(
+    file: &Path,
+    requested: CommitMode,
+    pending_only: bool,
+) -> Result<CommitMode> {
+    if pending_only || requested != CommitMode::BestEffort {
+        return Ok(requested);
+    }
+    if is_session_document(file)? {
+        return Ok(CommitMode::Required);
+    }
+    Ok(CommitMode::BestEffort)
+}
+
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
-
-    if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
-        anyhow::bail!(
-            "finalize requires a git repository so the cycle can reach a committed state"
-        );
-    }
 
     if let Some(ref origin) = options.origin {
         crate::ops_log::log_op(
@@ -280,6 +304,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
     if options.pending_only && commit_mode == CommitMode::Required {
         anyhow::bail!("finalize does not support --pending-only");
+    }
+    let commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
+    if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
+        if is_session_document(file)? {
+            anyhow::bail!(
+                "write --commit requires a git repository for session documents so the cycle can reach a committed state"
+            );
+        }
+        anyhow::bail!(
+            "finalize requires a git repository so the cycle can reach a committed state"
+        );
     }
 
     if has_pending_ops {

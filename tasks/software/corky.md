@@ -190,11 +190,27 @@ The implementation part is complete:
 What is still not complete is the final `commit + push` part for the root `agent-loop` repo. Those adapter files are present locally, but this repo is still dirty across many unrelated paths and `main` is already ahead of `origin/main`, so I do not consider `#1bgy` fully done yet in the operational sense.
 
 So the right status is: implementation complete, delivery boundary still blocked. I gated `#1bgy` instead of closing it.
-<!-- agent:boundary:36549284 -->
+
+❯ commit + push agent-loop.
+### Re: Codex Gmail support plan — gpt-5
+
+Done.
+
+I made a bounded root-repo commit that includes only the `#1bgy` adapter deliverables:
+- `.agents/plugins/marketplace.json`
+- `plugins/corky-gmail/`
+- `tasks/software/corky/plan-codex-gmail-support.md`
+
+Commit: `caeb41ec6` (`feat: add corky gmail codex adapter`)
+
+I then pushed `main` to `origin`, so the `agent-loop` side of this work is now shipped as well.
+
+That means `#1bgy` is complete and I closed it.
+<!-- agent:boundary:56c25a20 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [/] [#1bgy] Codex Gmail support plan - implementation, verification, and repo-local adapter are complete; blocked only on deciding a safe root-repo commit/push boundary for plugins/corky-gmail and .agents/plugins/marketplace.json
+- [x] [#1bgy] Codex Gmail support plan - implementation, verification, and repo-local adapter are complete; blocked only on deciding a safe root-repo commit/push boundary for plugins/corky-gmail and .agents/plugins/marketplace.json
 <!-- /agent:pending -->

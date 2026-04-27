@@ -507,7 +507,18 @@ The tone is factual, not adversarial — it presents the prior art reality and t
 Updated the sidekick docs to make this case directly, not just imply it.
 
 **business-case-open-platform.md** now has a new section, Why
-<!-- agent:boundary:b6f19fea -->
+
+❯ Include the agent-doc supervisor in the analysis and business case. List the supervisor as part of the Open infrastructure.
+### Re: include the supervisor in the open infrastructure case — gpt-5
+
+Updated the analysis and business-case framing to name the `agent-doc` supervisor explicitly as part of the open infrastructure.
+
+**business-case-open-platform.md** now includes the supervisor/runtime in the top-level model, in the adoption argument, and in the patent-boundary table. The business case is clearer now: the open layer is not just virtual documents and a plugin API, but also the always-on runtime that handles lifecycle, event delivery, and state coordination across tools.
+
+**sidekick-agent-doc-integration.md** now includes the supervisor/runtime in the separation-of-concerns section and in the IP boundary. I also tightened the utility section so it states that the virtual document is the visible state surface, while the supervisor is the open runtime that keeps that surface synchronized and observable.
+
+That makes the open/proprietary split cleaner: the supervisor, daemon lifecycle, event channel, virtual documents, CRDT merge, snapshots, plugin API, and export layer stay open; Sidekick's proprietary value remains the analysis pipeline, scoring, aggregation, and coaching that run on top.
+<!-- agent:boundary:123e0135 -->
 <!-- /agent:exchange -->
 
 <!--

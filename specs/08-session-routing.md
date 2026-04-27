@@ -45,6 +45,8 @@ Multiple documents can map to the same pane (one Claude session, multiple files)
 
 Last-call-wins: any `claim` overwrites the previous mapping for that document's session UUID.
 
+**Prompt-bearing rerun acknowledgment:** When `route` dispatches to an already-running pane and the document already has prompt-bearing user drift on top of a closed cycle, pane-input acceptance is not sufficient proof of success. Route must observe a newer per-document cycle state (`preflight_started` or later) before returning success; otherwise it fails closed instead of silently leaving the prompt stranded in the document.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.

@@ -641,7 +641,7 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
     Ok(None)
 }
 
-fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
+pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = crate::snapshot::load(file)? else {
         return Ok(None);
     };

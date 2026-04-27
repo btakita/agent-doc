@@ -16,11 +16,13 @@
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
 //!   5. Looks up the registered pane in `sessions.json`.
-//!   6. If pane is alive: unconditionally sends the trigger command via `send_command`.
-//!      Pane IDs (`%N`) are globally unique per tmux server, so `target_session` matching
-//!      is not required for routing. `rescue_from_stash` is attempted (it self-gates on
-//!      session match) so panes stashed within the target session get rescued, but panes
-//!      in other sessions are left in place.
+//!   6. If pane is alive: sends the trigger command via `send_command`. Pane IDs (`%N`)
+//!      are globally unique per tmux server, so `target_session` matching is not required
+//!      for routing. `rescue_from_stash` is attempted (it self-gates on session match) so
+//!      panes stashed within the target session get rescued, but panes in other sessions
+//!      are left in place. When the document already has prompt-bearing user drift after a
+//!      closed cycle, the routed trigger must also produce a new per-document cycle
+//!      acknowledgment before route returns success; otherwise route fails closed.
 //!   7. If pane is dead and was previously registered: lazy-claims to an active pane via
 //!      `find_target_pane` (skipped if the candidate is running a non-agent process), sends
 //!      the command, then calls `sync_after_claim` to re-sync layout.
@@ -78,10 +80,11 @@
 //!   from spawning a new pane. The call returns `Err` with a descriptive message.
 //! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
 //!   the routing flow. The command is still sent even if focus fails.
-//! - **Fresh-start acknowledgment**: Fresh auto-start success is not inferred from pane input
-//!   acceptance alone. After sending the initial trigger, route must observe a new
-//!   per-document cycle state before considering the start successful; otherwise it fails
-//!   closed.
+//! - **Cycle acknowledgment for prompt-bearing reruns**: Fresh auto-start success is not
+//!   inferred from pane input acceptance alone. The same fail-closed rule applies when route
+//!   dispatches to an existing pane while the document already has prompt-bearing drift on top
+//!   of a closed cycle: route must observe a new per-document cycle state before considering
+//!   the dispatch successful.
 //! - **Split direction determinism**: `is_first_column` requires ≥ 2 `col_args` entries to
 //!   return true, ensuring a single-column layout never triggers a left-split.
 //!
@@ -300,6 +303,9 @@ fn resolve_or_create_pane(
         "route::resolve_or_create_pane"
     );
     let registered = sessions::lookup(session_id)?;
+    let cycle_baseline = crate::cycle_state::load(file)?;
+    let pending_prompt_marker =
+        pending_prompt_bearing_marker_for_route(file, cycle_baseline.as_ref())?;
 
     // Strategy 1: Alive registered pane — unconditional send.
     // Pane IDs (%N) are globally unique per tmux server, so target_session
@@ -313,6 +319,13 @@ fn resolve_or_create_pane(
             rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
             eprintln!("[route] Pane {} is alive, sending command", registered_pane);
             send_command(tmux, registered_pane, file_path, harness)?;
+            require_routed_cycle_ack(
+                file,
+                registered_pane,
+                harness,
+                cycle_baseline.as_ref(),
+                pending_prompt_marker.as_deref(),
+            )?;
             return Ok(registered_pane.clone());
         }
         eprintln!("[route] Pane {} is dead", registered_pane);
@@ -339,6 +352,13 @@ fn resolve_or_create_pane(
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         sessions::register(session_id, &new_pane, file_path)?;
         send_command(tmux, &new_pane, file_path, harness)?;
+        require_routed_cycle_ack(
+            file,
+            &new_pane,
+            harness,
+            cycle_baseline.as_ref(),
+            pending_prompt_marker.as_deref(),
+        )?;
         return Ok(new_pane);
     }
 
@@ -515,6 +535,82 @@ fn wait_for_start_ack(
         std::thread::sleep(poll);
     }
     None
+}
+
+fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+    }
+}
+
+fn should_require_routed_cycle_ack(
+    baseline: Option<&crate::cycle_state::CycleState>,
+    prompt_bearing_marker: Option<&str>,
+) -> bool {
+    prompt_bearing_marker.is_some() && !baseline.is_some_and(|state| state.is_open())
+}
+
+fn pending_prompt_bearing_marker_for_route(
+    file: &Path,
+    baseline: Option<&crate::cycle_state::CycleState>,
+) -> Result<Option<String>> {
+    if baseline.is_some_and(|state| state.is_open()) {
+        return Ok(None);
+    }
+    crate::session_check::detect_unstarted_prompt_bearing_diff(file)
+}
+
+fn require_routed_cycle_ack(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    baseline: Option<&crate::cycle_state::CycleState>,
+    prompt_bearing_marker: Option<&str>,
+) -> Result<()> {
+    if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
+        return Ok(());
+    }
+
+    let marker = prompt_bearing_marker.expect("marker checked above");
+    match wait_for_start_ack(file, baseline, Duration::from_secs(15)) {
+        Some(state) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_cycle_start_acknowledged file={} pane={} harness={} cycle={} phase={} marker={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    state.cycle_id,
+                    cycle_phase_name(state.phase),
+                    marker
+                ),
+            );
+            Ok(())
+        }
+        None => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_cycle_start_missing file={} pane={} harness={} marker={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    marker
+                ),
+            );
+            anyhow::bail!(
+                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {}",
+                harness.binary,
+                file.display(),
+                pane,
+                marker
+            );
+        }
+    }
 }
 
 fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
@@ -1815,6 +1911,162 @@ history line
         assert!(
             ack.is_none(),
             "unchanged cycle state must not count as a fresh-start ack"
+        );
+    }
+
+    #[test]
+    fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
+        assert!(!should_require_routed_cycle_ack(None, None));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(!should_require_routed_cycle_ack(
+            Some(&open_state),
+            Some("prompt_target: ❯ follow-up question")
+        ));
+
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let committed_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(should_require_routed_cycle_ack(
+            Some(&committed_state),
+            Some("prompt_target: ❯ follow-up question")
+        ));
+    }
+
+    #[test]
+    fn resolve_or_create_pane_fails_closed_when_registered_pane_accepts_trigger_without_new_cycle()
+    {
+        let iso = IsolatedTmux::new("route-test-live-ack-missing");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-missing", &pane, &file_path).unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-missing",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect_err("route should fail closed when no new cycle starts");
+        let err_text = err.to_string();
+        assert!(
+            err_text.contains("no new document cycle started"),
+            "unexpected error: {err_text}"
+        );
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should still dispatch the trigger to the registered pane: {content}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts() {
+        let iso = IsolatedTmux::new("route-test-live-ack-ok");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-ok", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-ok",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect("route should accept the new cycle ack");
+        assert_eq!(resolved, pane);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should dispatch the trigger before observing the ack: {content}"
         );
     }
 

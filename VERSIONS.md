@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.16
 
+- **Live-pane reroutes now require real cycle acknowledgment for pending prompt drift.** `route.rs` now applies the same fail-closed start-ack rule to dispatches into an already-running pane when the document already has unresolved `prompt_target` / `content_edit` drift on top of a closed cycle. A consumed routed trigger no longer counts as success by itself; route waits for a newer per-document cycle state and fails closed if none appears. Added route coverage for both the acknowledged and missing-ack live-pane shapes.
+
 - **Post-commit stale-buffer guard for `codex (HEAD)` drift.** JetBrains post-commit boundary reposition now prefers the just-committed on-disk document when the open buffer differs only by agent-owned `### Re:` heading attribution and/or boundary churn. That prevents the stale-buffer failure where a successful patchback commit was immediately re-dirtied to `codex (HEAD)` with a newer boundary marker. Added JetBrains regression coverage for the prefer-disk decision and Rust closeout coverage that repairs historical heading-attribution drift back to clean `HEAD`.
 
 - **`session-check` now catches startup-miss prompt drift.** When a session document already has unresolved prompt-bearing user edits (`prompt_target` / `content_edit`) relative to its snapshot, but no newer `agent-doc` cycle ever started, `session-check` now fails closed instead of reporting the stale committed state or `no cycle state or ops.log — ok`. The Codex Stop hook inherits that signal and can auto-close the missed-start case from `last_assistant_message` through the normal repair/write/commit path. Added `session_check` and Codex hook regression coverage.

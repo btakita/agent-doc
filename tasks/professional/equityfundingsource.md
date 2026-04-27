@@ -558,13 +558,12 @@ roles: [{ id: "57280df9f1a5806e04f065b07bbdd17a" }]
 ```
 
 **Result:** `btak.dev@gmail.com` is now **Workers Platform Admin** on the Brian Cloudflare account (was Domain Administrator).
-<!-- agent:boundary:ea47455d -->
+<!-- agent:boundary:248e68d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (blocked: requires Cloudflare Super Administrator access in the dashboard or a credential with Account Settings Write)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

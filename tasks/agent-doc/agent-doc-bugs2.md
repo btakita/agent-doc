@@ -431,7 +431,27 @@ Verification:
 
 Commit / push:
 - `src/agent-doc`: `4372093` (`fix: keep boundary-only preflight cycle-free`)
-<!-- agent:boundary:265e282f -->
+
+❯ Is #pbypass1 done?
+
+❯ When I restarted the agent-doc session, the tmux pane closed on me in /home/brian/work/btakita/agent-loop/tasks/software/corky.md
+
+❯ The tmux pane was swapped out of the tmux window was recovered in /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+
+❯ This session also crashed mid-run.
+
+❯ Please add both issues to the backlog. Please add another backlog item to look into root causes for the tmux pane instability.
+### Re: `#pbypass1` and the new tmux-pane issues — gpt-5
+
+`#pbypass1` does not look done yet from the current repo state. I only see it here as an open backlog item, and I do not see a later landed response or spec/version note that explicitly closes that exact "out-of-document final response + direct file patchback after commit" case. The closest related fixes are `#doccommit`, `#nostate`, and `#closeout-bypass`, but I would treat those as adjacent coverage, not proof that `#pbypass1` is closed.
+
+I added three new backlog items:
+- restarted `agent-doc` closing the tmux pane for `tasks/software/corky.md`
+- tmux pane swap/recovery in `src/session-share/tasks/claudescore-3.md`
+- root-cause analysis for the recurring tmux pane instability behind these incidents
+
+I folded the mid-run crash note into the root-cause item because it reads like the same instability family rather than a clearly separate accepted fix item.
+<!-- agent:boundary:15352ca0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -440,6 +460,9 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cork1] Investigate/fix restarted `agent-doc` force-closing the tmux pane for `tasks/software/corky.md`.
+- [ ] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
+- [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`

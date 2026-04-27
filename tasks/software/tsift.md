@@ -448,7 +448,12 @@ Why this still happens even after `#vxtz`:
 - the write path still has to acquire the SQLite writer lock, so if another autoindex/index process is already wedged, the later one fails exactly the way you saw.
 
 So the narrower root cause for that note in `tasks/agent-doc/agent-doc-bugs2.md` is: concurrent root-level `--autoindex` writers, not a regression in the read-only search fix.
-<!-- agent:boundary:1d30b6e9 -->
+
+❯ Please add fix to backlog.
+### Re: backlog fix — gpt-5
+
+Added to backlog as `#alck`.
+<!-- agent:boundary:e9fe1e60 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -457,6 +462,7 @@ So the narrower root cause for that note in `tasks/agent-doc/agent-doc-bugs2.md`
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#alck] Fix tsift autoindex writer-lock handling so concurrent root-level --autoindex runs fail safely instead of wedging or failing with SQLite lock contention
 <!-- /agent:backlog -->
 
 <!--

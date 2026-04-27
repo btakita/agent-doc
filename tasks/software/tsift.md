@@ -321,7 +321,37 @@ So, short version:
 
 - `src/session-share` timeout: stale local index; rebuild that submodule with `tsift index .` there.
 - root `agent-loop` lock/journal issue: separate writer/locking problem still under #vxtz.
-<!-- agent:boundary:312959ae -->
+
+❯ We should be able to quickly detect if the tsift db is stale...not wait for a timeout.
+❯ If the tsift db is stale, tsift should automatically reindex the db.
+### Re: stale detection + auto-reindex — gpt-5
+
+Yes on the first part: tsift should detect staleness quickly, and it already can.
+
+The fast path is `tsift index --check --exit-code .` / `tsift status`. Those do not wait for search timeout; they compare the indexed file-state against the working tree and report stale state directly. That is also what the existing auto-reindex hooks use.
+
+The second part already exists too, but only at the hook layer today:
+
+- `tsift init --codex` installs a `UserPromptSubmit` hook that runs `tsift index --check --exit-code . || tsift index .`
+- `examples/hooks/tsift-autoindex.sh` does the same for Claude Code
+- when that hook is installed in the project you are actively working in, stale detection is quick and reindex happens before the next search/explain/graph call
+
+So the `session-share` timeout was not because tsift lacks a fast stale check. It was because that turn still reached `tsift search` with a stale local index, which means the submodule was effectively running without that auto-reindex guard on the path that mattered.
+
+I would still separate the product decisions:
+
+- fast stale detection should be unconditional
+- automatic reindex should be opt-in or harness-managed, not silently baked into every `search`
+
+Reason: hidden mutation inside `search` is a worse default than a fast fail/redirect. Reindex can be expensive, can race with active writers, and on this host we already know root `agent-loop` can wedge in `D` state during indexing. So the right hardening path is not "wait for timeout", but also not "every stale search secretly rebuilds".
+
+What I would change is narrower:
+
+- before running sift, `search` can do a cheap stale precheck and emit `index is stale; run tsift index .` immediately instead of spending 30s on a likely-bad query
+- optionally add an explicit auto mode such as hook-managed behavior or a future `--autoindex` / config flag for users who want mutation before query
+
+That gets the fast detection you want without making every search command implicitly stateful.
+<!-- agent:boundary:30eba546 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -330,6 +360,7 @@ So, short version:
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#stal] [recommended] Add built-in stale precheck and opt-in auto-reindex path for unhooked tsift sessions
 - [ ] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 

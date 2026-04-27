@@ -474,7 +474,7 @@ Verification:
 I pushed the minimal `#alck` patch from a clean `origin/main` worktree because the checked-out `src/tsift` submodule still had a broader local uncommitted stack.
 
 Commit: `btakita/tsift@9516710` pushed to `origin/main`.
-<!-- agent:boundary:2ecba4ac -->
+<!-- agent:boundary:443f66c3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -483,7 +483,6 @@ Commit: `btakita/tsift@9516710` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#alck] Fix tsift autoindex writer-lock handling so concurrent root-level --autoindex runs fail safely instead of wedging or failing with SQLite lock contention
 <!-- /agent:backlog -->
 
 <!--

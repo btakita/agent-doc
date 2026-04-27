@@ -453,7 +453,28 @@ So the narrower root cause for that note in `tasks/agent-doc/agent-doc-bugs2.md`
 ### Re: backlog fix — gpt-5
 
 Added to backlog as `#alck`.
-<!-- agent:boundary:e9fe1e60 -->
+
+❯ do #alck. spec-test-build-install-commit-push
+### Re: do #alck — gpt-5
+
+Implemented the concurrent autoindex writer guard in tsift.
+
+What changed:
+- writable index updates now claim a sibling `.tsift/index.lock` sidecar before opening SQLite, so competing `tsift index` / `tsift search --autoindex` writers fail fast with a tsift-owned error instead of surfacing raw lock contention
+- stale lock files are recovered automatically when the recorded PID is no longer alive
+- `tsift index --check` now uses read-only DB opens, so hook-style freshness checks do not contend with active writers
+- added regression coverage for both the fast-fail autoindex path and the read-only `index --check` path
+- updated `SPEC.md` with the sidecar-lock behavior
+
+Verification:
+- `cargo test` passed: 303 unit tests + 8 exit-code tests
+- `make check` passed
+- `cargo install --path .` passed
+
+I pushed the minimal `#alck` patch from a clean `origin/main` worktree because the checked-out `src/tsift` submodule still had a broader local uncommitted stack.
+
+Commit: `btakita/tsift@9516710` pushed to `origin/main`.
+<!-- agent:boundary:2ecba4ac -->
 <!-- /agent:exchange -->
 
 <!--
@@ -462,7 +483,7 @@ Added to backlog as `#alck`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#alck] Fix tsift autoindex writer-lock handling so concurrent root-level --autoindex runs fail safely instead of wedging or failing with SQLite lock contention
+- [x] [#alck] Fix tsift autoindex writer-lock handling so concurrent root-level --autoindex runs fail safely instead of wedging or failing with SQLite lock contention
 <!-- /agent:backlog -->
 
 <!--

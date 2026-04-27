@@ -485,7 +485,33 @@ From there:
 4. Add **Account -> Account Settings -> Edit**.
 
 If the page instead drops you into **My Profile** or shows user-level tokens rather than account-level tokens, switch back to the Brian account context first and then return to that URL.
-<!-- agent:boundary:0ecdee88 -->
+
+❯ If this token is only for account settings, please give it a more appropriate name than CLOUDFLARE_API_TOKEN_FULL
+### Re: token name — gpt-5
+
+Yes. `CLOUDFLARE_API_TOKEN_FULL` is too broad a name for this use.
+
+A better name is:
+
+```bash
+CLOUDFLARE_ACCOUNT_SETTINGS_TOKEN
+```
+
+If you want it to be even more specific to the actual purpose here, use:
+
+```bash
+CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN
+```
+
+My recommendation for this exact case is `CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN`, because the token is being created specifically to update account member roles on the Brian Cloudflare account.
+
+So the local pair would be:
+
+```bash
+CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN="<token>"
+CLOUDFLARE_ACCOUNT_ID="1e7e194ff8da4ad9e40ce041aea84f76"
+```
+<!-- agent:boundary:7c1c9d6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

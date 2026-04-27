@@ -333,10 +333,36 @@ A `commit: false` frontmatter setting (or global config for virtual documents) w
 
 **What you lose:** git history of the document's evolution, and the ability to recover state from git if the snapshot is lost. For a daemon's internal state document, this is an acceptable tradeoff — the source of truth is the live session data, not the historical document state.
 
-<!-- agent:boundary:8f2063bc -->
+❯ Sidekick is proprietary and confidential. agent-doc is open source. We need a vendor independent layer for elements. Make a separate Sidekick integration document.
+### Re: vendor-independent separation — opus-4-6
+
+Done. Restructured into two documents with clean boundaries:
+
+**1. [plan-sidekick-backend.md](plan-sidekick-backend.md)** — now vendor-independent. Renamed focus to "agent-doc daemon extensions." Covers generic capabilities any integration can use:
+- Snapshot-only mode (no commit pollution)
+- Event channel on supervisor
+- Virtual documents (daemon-managed, no user interaction)
+- Plugin API (register listeners, read/write components, subscribe to changes)
+- Multi-tool export interface (AGENTS.md, copilot-instructions, .cursor/rules)
+- tsift integration as a knowledge plugin
+
+No Sidekick-specific terminology. Any monitoring tool, analytics platform, or IDE extension could build on these primitives.
+
+**2. [sidekick-agent-doc-integration.md](../../src/session-share/tasks/sidekick/sidekick-agent-doc-integration.md)** — Sidekick-specific. Lives in the session-share/sidekick directory alongside the pitch and use-cases docs. Captures:
+- How Sidekick registers as an agent-doc plugin
+- Feature-to-component mapping (health monitor → event listener, proposals → export interface)
+- Event types Sidekick subscribes to
+- Proprietary analysis pipeline details
+- Team aggregation architecture
+- Open questions about plugin distribution and licensing boundaries
+
+The separation is: agent-doc publishes stable, documented extension points. Sidekick is one consumer that builds proprietary intelligence on top. Other consumers (open-source monitoring tools, enterprise observability platforms) could use the same plugin API without any Sidekick dependency.
+
+<!-- agent:boundary:306de0f1 -->
 <!-- /agent:exchange -->
 
 <!--
+I want sidekick to have the option to use git commits as well.
 -->
 
 ## Pending / Not Built

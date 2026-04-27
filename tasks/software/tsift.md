@@ -429,22 +429,43 @@ Items 1-2 are worth building. Items 3-5 are marginal — the savings exist but t
 ### Re: backlog items 3-5 — opus-4-6
 
 Added all three as recommended. They're low priority behind #paths and #caps but worth having on the radar so they don't get lost if the higher-priority items reveal further optimization opportunities.
-<!-- agent:boundary:ca1406a4 -->
+
+❯ do #rtk. spec-test-build-install-commit-push
+### Re: do #rtk — opus-4-6
+
+RTK output filtering is now active for verbose tsift commands.
+
+**TOML filters** (`~/.config/rtk/filters.toml`):
+
+| Command | Cap | Measured savings |
+|---------|-----|-----------------|
+| `tsift communities` | 80 lines | 656 → 81 (87.7%) |
+| `tsift explain` | 40 lines | 143 → 41 (71.3%) |
+| `tsift graph` | 50 lines | 69 → 51 (26.1%) |
+| `tsift index` | 30 lines | safety net for unqualified calls |
+| `tsift search` | 50 lines + strip "Strategy:" metadata | ANSI stripped |
+
+**Hook** (`~/.claude/hooks/tsift-rewrite.sh` v2): phase 2 routes `tsift {communities,explain,graph,index,search}` → `rtk tsift ...` when RTK is installed. Non-verbose commands (`status`, `init`, `route`, `sql`) pass through unchanged. Handles `--compact` and `--pretty` flag variants.
+
+**Spec:** SPEC.md + CLAUDE.md updated with RTK integration docs. Tests: 257 passed. Commit: `btakita/tsift@951a28a`. Pushed. Submodule pointer updated.
+<!-- agent:boundary:4adf5a87 -->
 <!-- /agent:exchange -->
 
 <!--
+Add **Reduce semantic content** and **Shorter field names in JSON** into the backlog.
+do **Reduce semantic content**. spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
-- [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
-- [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
-- [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
+- [x] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
+- [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
+- [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
+- [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->
 
 <!--

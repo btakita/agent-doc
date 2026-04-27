@@ -528,12 +528,13 @@ fn cycle_state_advances_start_ack(
 ) -> bool {
     match baseline {
         None => true,
-        Some(previous) => {
+        Some(previous) if previous.is_open() => {
             current.cycle_id != previous.cycle_id
                 || current.updated_at != previous.updated_at
                 || current.phase != previous.phase
                 || current.last_event != previous.last_event
         }
+        Some(previous) => current.cycle_id != previous.cycle_id,
     }
 }
 
@@ -1939,6 +1940,42 @@ history line
     }
 
     #[test]
+    fn wait_for_start_ack_ignores_same_committed_cycle_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_already_current",
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(350));
+        assert!(
+            ack.is_none(),
+            "same committed cycle mutations must not count as a new routed-start ack"
+        );
+    }
+
+    #[test]
     fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
         assert!(!should_require_routed_cycle_ack(None, None));
 
@@ -2005,6 +2042,74 @@ history line
             &HarnessConfig::codex(),
         )
         .expect_err("route should fail closed when no new cycle starts");
+        let err_text = err.to_string();
+        assert!(
+            err_text.contains("no new document cycle started"),
+            "unexpected error: {err_text}"
+        );
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should still dispatch the trigger to the registered pane: {content}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_ignores_same_committed_cycle_mutation_for_prompt_drift() {
+        let iso = IsolatedTmux::new("route-test-live-ack-same-cycle");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-same-cycle", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_already_current",
+                Some(&snapshot_for_thread),
+                Some(&snapshot_for_thread),
+            )
+            .unwrap();
+        });
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-same-cycle",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect_err("route should fail closed when only the committed baseline mutates");
         let err_text = err.to_string();
         assert!(
             err_text.contains("no new document cycle started"),

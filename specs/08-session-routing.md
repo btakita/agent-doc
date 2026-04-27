@@ -45,7 +45,7 @@ Multiple documents can map to the same pane (one Claude session, multiple files)
 
 Last-call-wins: any `claim` overwrites the previous mapping for that document's session UUID.
 
-**Prompt-bearing rerun acknowledgment:** When `route` dispatches to an already-running pane and the document already has prompt-bearing user drift on top of a closed cycle, pane-input acceptance is not sufficient proof of success. Route must observe a newer per-document cycle state (`preflight_started` or later) before returning success; otherwise it fails closed instead of silently leaving the prompt stranded in the document.
+**Prompt-bearing rerun acknowledgment:** When `route` dispatches to an already-running pane and the document already has prompt-bearing user drift on top of a closed cycle, pane-input acceptance is not sufficient proof of success. Route must observe a newer per-document cycle state (`preflight_started` or later) before returning success; if the baseline was already `committed`, that means a newer cycle id, not a same-cycle `commit_already_current` mutation. Otherwise it fails closed instead of silently leaving the prompt stranded in the document.
 
 **Dead fallback session guard:** Route may fall back to the current tmux session or an already-alive harness fallback session, but it must not auto-start a brand-new implicit fallback session such as `"claude"` or `"codex"` just because no explicit target survived resolution. If the only remaining target is a dead implicit fallback name, route fails closed.
 

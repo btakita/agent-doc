@@ -351,7 +351,27 @@ What I would change is narrower:
 - optionally add an explicit auto mode such as hook-managed behavior or a future `--autoindex` / config flag for users who want mutation before query
 
 That gets the fast detection you want without making every search command implicitly stateful.
-<!-- agent:boundary:30eba546 -->
+
+❯ do #stal. spec-test-build-install-commit-push
+### Re: do #stal — gpt-5
+
+Implemented the stale-search hardening in tsift.
+
+What changed:
+- `tsift search` now does a fast freshness precheck before it invokes the sift engine.
+- If an existing index is stale, search now fails immediately with a direct `tsift index ...` / `--autoindex` recovery message instead of waiting for the 30s timeout path.
+- Added `tsift search --autoindex` for unhooked sessions. It incrementally builds missing or stale indexes before search, and it also works with `--scope` and `--federated`.
+- Updated `SPEC.md` and `CLAUDE.md` to document the new behavior.
+
+Verification:
+- `cargo test` passed in the clean tsift clone: 295 unit tests + 6 exit-code tests.
+- `make check` passed.
+- `cargo install --path .` passed.
+
+Commit: `btakita/tsift@f017c4d` pushed to `origin/main`.
+
+I committed and pushed from a clean local clone because the checked-out `src/tsift` submodule inside `agent-loop` already had unrelated in-flight edits; that avoided folding those local changes into the `#stal` commit.
+<!-- agent:boundary:5bf34fac -->
 <!-- /agent:exchange -->
 
 <!--

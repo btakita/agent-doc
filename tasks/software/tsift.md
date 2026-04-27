@@ -365,7 +365,16 @@ This calls the Anthropic API and costs tokens, so it shouldn't auto-run. Three o
 `tsift summarize --stats` shows whether the cache exists and is populated. `tsift index --check .` reports stale files without modifying anything. Both are fast and side-effect free — safe for hooks or startup checks.
 
 The practical recommendation: hook the index check (free), gate the extraction behind a one-time prompt or Makefile target (costs money), and put both in CLAUDE.md so the agent knows the workflow.
-<!-- agent:boundary:ec18489e -->
+
+❯ add the recommendation to the backlog
+### Re: add recommendation to backlog — opus-4-6
+
+Added three items to backlog from the previous recommendation:
+
+1. **#hidx** — UserPromptSubmit hook for auto-reindex
+2. **#cmdx** — CLAUDE.md integration with tsift commands
+3. **#mext** — Makefile target for summarize extraction
+<!-- agent:boundary:2a5be876 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -375,11 +384,14 @@ Please add "check tsift first".
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
-- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
+- [ ] [#hidx] Add UserPromptSubmit hook for tsift index --check (auto-reindex on stale)
+- [ ] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
+- [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 
 <!--
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
+- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
+- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
+- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 -->

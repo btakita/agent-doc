@@ -501,7 +501,37 @@ Commit / push:
 Scope note:
 - this closes the remaining `#swap1` tmux swap/recovery path from `src/session-share/tasks/claudescore-3.md`
 - the broader tmux-instability investigation remains under `#tmuxr1`
-<!-- agent:boundary:988dec8e -->
+
+❯ do #tmuxr1. Note that the previous session crashed. spec-test-build-install-commit-push
+### Re: do `#tmuxr1` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `e295a9e` (`fix: ignore blank tmux sync scope`) on `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- the remaining tmux-instability family was an empty-window sync scope path, not another pane-rescue primitive.
+- `/tmp/agent-doc-sync.log` showed sync runs with `target_window=` and `session=Some("")`, after which tmux-router detached unrelated live panes like `%182`, `%193`, `%201`, and `%202` into stash.
+- that widened reconcile explains the repeated symptoms across `corky.md`, `claudescore-3.md`, and this session: panes appeared to close, swapped/recovered unexpectedly, and later route/start calls spawned replacement panes because the original live pane had already been displaced.
+
+What changed:
+- `sync.rs` now normalizes empty/whitespace-only `--window` and `--focus` inputs to unset before repair, auto-start scoping, stash rescue, and `tmux_router::sync`.
+- `route.rs` now ignores blank `context_session` overrides too, so an empty sync scope cannot bypass target-session validation or resolve to an empty session name.
+- updated `specs/07-commands.md` and `VERSIONS.md`, plus added regressions for blank scope normalization in both sync and route.
+
+Verification:
+- `cargo test` — 3 unrelated existing failures remain in `autoclaim`:
+  - `autoclaim_focuses_pane_with_claim`
+  - `autoclaim_no_claim_skips_focus`
+  - `autoclaim_syncs_layout_with_multiple_files`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `e295a9e` (`fix: ignore blank tmux sync scope`)
+
+Scope note:
+- this closes `#tmuxr1` as the root-cause item behind the recent cross-document tmux instability.
+- I would still treat future pane issues as separate until they reproduce without the empty-window scope path.
+<!-- agent:boundary:ca706c46 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -511,7 +541,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
+- [x] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`

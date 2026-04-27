@@ -147,7 +147,28 @@ v0.33.15 released and published.
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.15
 - **Tag**: `v0.33.15` on `20260422/codex-agent-backend`
 - **PyPI**: publishes automatically via CI on the GitHub release event
-<!-- agent:boundary:0a117b9b -->
+
+❯ do #cxdd. spec-test-build-install-commit-push
+### Re: do #cxdd — opus-4-6
+
+Fixed Codex submodule handoff. Root cause: `codex exec resume` does not accept `--add-dir`, but `append_resume_args` was passing it through. The resumed session inherits writable roots from the original `exec`, so stripping is correct behavior.
+
+**Changes:**
+
+- `src/agent/codex.rs` — `append_resume_args` now strips `--add-dir <DIR>` and `--add-dir=<DIR>` forms (same pattern as `-s/--sandbox` translation)
+- `specs/06-config.md`, `specs/07-commands.md`, `specs/09-git-integration.md` — document backend-specific `--add-dir` handling: both Claude and Codex `exec` accept it, but `codex exec resume` does not
+
+**Tests (4 new, all pass):**
+
+- `build_command_exec_preserves_add_dir` — fresh exec keeps `--add-dir` in args
+- `build_command_resume_strips_add_dir` — resume strips `--add-dir <DIR>`
+- `build_command_resume_strips_add_dir_equals_form` — resume strips `--add-dir=<DIR>`
+- `build_command_resume_strips_multiple_add_dirs` — resume strips multiple `--add-dir` entries
+
+**Verification:** clippy clean, 7/7 build_command tests pass, full suite clean (pre-existing route + codex hook failures only). Release built + installed. Commit `ffdc1b6`, pushed to `origin/20260422/codex-agent-backend`.
+
+**Note:** manual verification with a live submodule session is the remaining gate before release.
+<!-- agent:boundary:04bb4ea5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -157,6 +178,7 @@ v0.33.15 released and published.
 
 <!-- agent:backlog -->
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [x] [#cxdd] Fix Codex submodule handoff when `agent-doc` appends `--add-dir` to `codex exec resume` and the installed `codex-cli` rejects the flag. Plan: update the Codex/backend specs to say external git metadata directory handling is harness-specific; inspect supported Codex `exec`/`resume` config or sandbox knobs for submodule gitdir access and use that path where available; make argument emission backend-specific so Claude keeps native `--add-dir` while Codex never receives unsupported flags and instead either uses a supported equivalent or fails closed with an actionable error; add regression coverage for submodule `start`/resume/run paths on Codex; manually verify with a live submodule session document before release.
 <!-- /agent:backlog -->
 
 <!--

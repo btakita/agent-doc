@@ -694,7 +694,27 @@ No. #mext was already recommended for closure — it's a single-command Makefile
 2. `tsift status` (just shipped) prints a `run:` recommendation when summaries are missing or stale
 
 Closing #mext.
-<!-- agent:boundary:2cad0f80 -->
+
+❯ How can I verify that tsift is being used in sessions?
+### Re: verifying tsift usage — opus-4-6
+
+Three levels:
+
+
+**1. Is the index fresh?** Run `tsift status` — if it shows `fresh` with recent timestamp, the auto-reindex hook is firing on every prompt. If `stale` or `missing`, the hook isn't installed or isn't running.
+
+**2. Are search rewrites happening?** The `tsift-rewrite.sh` hook silently rewrites `rg`/`grep -r` to `tsift search`. You can verify by checking `rtk gain --history` which shows per-command token savings, including tsift-rewritten commands.
+
+**3. Are agents actually calling tsift?** `tsift audit --usage` scans Claude Code session transcripts and counts invocations per skill/command. It will show how many times `tsift search`, `tsift explain`, etc. were called across recent sessions.
+
+Quick check right now:
+```bash
+tsift status                    # index health
+tsift audit --usage --json      # invocation counts from session history
+```
+
+If you want ongoing visibility, `tsift status --json` at session start gives machine-parseable state — the `tsift init` section now tells agents to do exactly this.
+<!-- agent:boundary:96cd21b0 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -97,7 +97,7 @@ Phase 1 (pre-commit pending capture gate) is already implemented, spec'd, tested
 - **Push**: `origin/20260422/codex-agent-backend` up to date
 
 Added Phase 1 (`#pcg1`) to backlog and marked done. Phase 2 (`#pcg2`) was already in backlog as gated.
-<!-- agent:boundary:a689bfb2 -->
+<!-- agent:boundary:e17d740d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -108,7 +108,6 @@ do phase 1. #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pcg1] Pre-commit pending capture gate in finalize (Phase 1) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->

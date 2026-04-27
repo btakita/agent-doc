@@ -82,7 +82,22 @@ Yes. `agent:pending` is a fully functional alias for `agent:backlog`. The aliasi
 2. **Migration** (`migrate.rs`): `agent-doc migrate` rewrites `&lt;!-- agent:pending --&gt;` → `&lt;!-- agent:backlog --&gt;` in the document text for canonicalization, but documents that still use the old tag continue to work without migration.
 
 The `migrate` run on this document renamed the tags to canonical `agent:backlog`, but if you had a document still using `agent:pending` tags, all binary operations would work identically.
-<!-- agent:boundary:20d00395 -->
+
+❯ Please add both phase 1 and 2 from tasks/agent-doc/plan-pending-capture-precommit.md to backlog
+❯ do phase 1. #spec-test-build-install-commit-push
+### Re: add plan phases to backlog + do phase 1 — opus-4-6
+
+Phase 1 (pre-commit pending capture gate) is already implemented, spec'd, tested, built, installed, committed, and pushed:
+
+- **Spec**: `specs/07-commands.md` line 439 — documents the pre-commit gate contract under `finalize`
+- **Tests**: 5/5 pass in `src/write.rs` (`precommit_pending_capture_tests` module) — covers strict blocks, pending-add passthrough, warn mode, default mode, suppression marker
+- **Build**: `cargo build --release` clean
+- **Install**: `cargo install --path .` → `~/.cargo/bin/agent-doc` v0.33.15
+- **Commit**: `b7e2563 feat: pre-commit pending capture gate in finalize (strict mode)`
+- **Push**: `origin/20260422/codex-agent-backend` up to date
+
+Added Phase 1 (`#pcg1`) to backlog and marked done. Phase 2 (`#pcg2`) was already in backlog as gated.
+<!-- agent:boundary:a689bfb2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -93,6 +108,7 @@ do phase 1. #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [x] [#pcg1] Pre-commit pending capture gate in finalize (Phase 1) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->

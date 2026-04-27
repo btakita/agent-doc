@@ -90,7 +90,22 @@ No. `tsift init` does not index anything — it only touches two files:
 Running it twice produces "already present (no changes needed)" on the second run. There's a dedicated test for this (`init_is_idempotent`).
 
 `tsift init` and `tsift index` are separate commands with no overlap. Init sets up project instructions; index builds the AST symbol database. Neither calls the other.
-<!-- agent:boundary:d183a089 -->
+
+❯ Is tsift currently active on this repo?
+### Re: tsift status on agent-loop — opus-4-6
+
+Yes. tsift is initialized and has an index, but it's stale:
+
+```
+index: stale (last indexed 31m ago, 5885 files tracked, 14364 stale)
+summaries: none
+use: search, explain, graph
+```
+
+The index exists with 5,885 tracked files but 14,364 files need reindexing. No summaries are cached. The core commands (`search`, `explain`, `graph`) are available — `summarize` is not (no summaries built).
+
+To bring it current: `tsift index .`
+<!-- agent:boundary:f9780f41 -->
 <!-- /agent:exchange -->
 
 <!--

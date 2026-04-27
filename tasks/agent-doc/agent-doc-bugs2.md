@@ -576,7 +576,7 @@ Commit / push:
 Scope note:
 - this closes `#pdone1` by moving missing `--pending-done` from a warn-only post-commit audit into a binary-owned pre-commit closeout gate for session documents.
 - I did not include the unrelated pre-existing local edits already present in other `src/agent-doc` files.
-<!-- agent:boundary:8f7cdb95 -->
+<!-- agent:boundary:9455ff1c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -586,8 +586,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pdone1] [recommended] Fix resolved existing backlog items being left open after a successful response commit when the cycle omitted the matching `--pending-done`. Repro in `tasks/software/tsift.md`: `#vxtz` was implemented, verified, committed, and pushed, `session-check` warned that the response appeared to complete `#vxtz`, but the item remained open because closeout was warn-only. See `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`
-- [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
+- [ ] [#pbypass1] [recommended] Prevent active session-doc turns from degrading into ordinary dirty-worktree edits after the owning `agent-doc` closeout has already been treated as complete. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and a later reproduction in the same document patched the response back in but stopped at “Nothing has been committed,” leaving the session doc updated without a binary-owned commit boundary. Required invariant: if a substantive response lands in the active session document, `agent-doc` must either commit in the owning repo/submodule or fail closed with explicit resumable state. See `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

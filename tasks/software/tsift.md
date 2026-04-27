@@ -363,7 +363,7 @@ Done. `tsift` now accepts a global `--compact` flag for terse human-readable out
 
 **Commit:** `btakita/tsift@e01e680` — pushed.
 The parent repo now has the updated `src/tsift` submodule pointer staged for the session commit.
-<!-- agent:boundary:275b41b7 -->
+<!-- agent:boundary:b4d50640 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -372,7 +372,6 @@ The parent repo now has the updated `src/tsift` submodule pointer staged for the
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)

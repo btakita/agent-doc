@@ -94,7 +94,45 @@ Compacted. Covers CI fixes (v0.26.0 retags), dependency upgrades (agent-kit 0.4,
 ## Open items
 - `corky gsc` user-OAuth fallback (step 6) — **in progress on branch `20260413/corky-gsc`**. Plan: port `cal/auth.rs` user flow into `gsc/auth.rs`, reuse `[gmail]` credentials, port 8485, token prefix `gsc:`. Scope `webmasters.readonly` is sensitive — user must be added as GCP test user. Stray file `src/corky/src/gsc/20260413/corky-gsc` (misdirected git output) — not yet cleaned up.
 - brian@dreamable.com OAuth: GCP project 718955483040 — Sheets API must stay enabled.
-<!-- agent:boundary:3a5e9311 -->
+
+❯ I'm getting insufficient permissions to write to a google doc
+❯ See /home/brian/work/btakita/agent-loop/src/session-share/tasks/aws.md
+```
+❯ corky sheets write "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=412269394#gid=412269394" "A1" /tmp/aws-project-plan.csv --account brian@dreamable.com
+Writing 17 rows to A1...
+Error: Sheets API error (HTTP 403): {
+  "error": {
+    "code": 403,
+    "message": "Request had insufficient authentication scopes.",
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        "domain": "googleapis.com",
+        "metadata": {
+          "method": "google.apps.sheets.v4.SpreadsheetsService.UpdateValues",
+          "service": "sheets.googleapis.com"
+        }
+      }
+    ]
+  }
+}
+```
+### Re: sheets write insufficient scope — opus-4-6
+
+The 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a bug in `get_access_token_for_user` — it returns cached tokens without checking if their scopes cover the requested scope. A token obtained via `corky sheets read` (scope `spreadsheets.readonly`) gets reused for `corky sheets write` (scope `spreadsheets`), and Google rejects it.
+
+**Fix applied** in `src/filter/gmail_auth.rs`:
+
+1. Added `scope_covered()` helper — checks if stored token scopes cover the requested scope. A read-write scope (e.g., `spreadsheets`) subsumes its `.readonly` variant.
+2. `get_access_token_for_user` now validates scope coverage before returning a cached token. If insufficient, skips refresh (refresh preserves original scopes) and triggers full re-auth with the correct scope.
+3. Added 4 unit tests covering exact match, rw-subsumes-readonly, readonly-does-not-subsume-rw, and multi-scope strings.
+
+All 293 tests pass, clippy clean, both binaries rebuilt (`cargo install` + `cargo build --release`).
+
+**To fix your current token:** re-run the same `corky sheets write` command. It will detect the insufficient scope, print a message, and open the browser for OAuth consent with the full `spreadsheets` scope. After authorizing, the write should succeed.
+<!-- agent:boundary:a3ee4097 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

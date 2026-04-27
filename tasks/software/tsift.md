@@ -175,7 +175,30 @@ Implemented abbreviation conventions in `--compact` mode for shorter human-reada
 - Applied in search, explain, graph, and communities compact output
 
 **Commit:** `btakita/tsift@ea59263`. 291 tests pass (2 new abbreviation tests). Built + installed.
-<!-- agent:boundary:aff6d041 -->
+
+❯ do #schema. spec-test-build-install-commit-push
+### Re: do #schema — opus-4-6
+
+Implemented `--schema` global flag for columnar JSON output — arrays of same-structured objects become `{"_c": [cols], "_r": [[vals]...]}`.
+
+**What it does:**
+- `tsift --schema <command>` converts homogeneous arrays (2+ objects with identical keys) to `{"_c": [...], "_r": [...]}` format (implies `--json`)
+- Non-homogeneous arrays, single-element arrays, and non-object arrays pass through unchanged
+- Applied recursively to nested objects (e.g., `symbols`, `callers`, `callees`, `hits` within a response)
+- Combines with `--terse`: abbreviated column names in `_c`, plus `_s` schema mapping
+- Combines with `--pretty` for indented output
+
+**Example:**
+```json
+// --schema
+{"symbols":{"_c":["kind","line","name"],"_r":[["fn",10,"main"],["fn",20,"helper"]]}}
+
+// --schema --terse
+{"_s":{"k":"kind","l":"line","n":"name"},"d":{"sy":{"_c":["k","l","n"],"_r":[["fn",10,"main"],["fn",20,"helper"]]}}}
+```
+
+**Commit:** `btakita/tsift@cfc73ea`. 297 tests pass (6 new schema tests). Built + installed.
+<!-- agent:boundary:8a72e3be -->
 <!-- /agent:exchange -->
 
 <!--

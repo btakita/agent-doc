@@ -179,7 +179,60 @@ v0.33.16 released and published.
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.16
 - **Tag**: `v0.33.16` on `20260422/codex-agent-backend`
 - **PyPI**: publishes automatically via CI on the GitHub release event
-<!-- agent:boundary:1c24323b -->
+
+❯ Please read:
+❯ [sidekick-use-cases.md](../../src/session-share/tasks/sidekick/sidekick-use-cases.md)
+❯ [sidekick-pitch.md](../../src/session-share/tasks/sidekick/sidekick-pitch.md)
+
+❯ Can agent-doc, with the supervisor and "virtual" documents for session tracking...be a good backend for Sidekick. Even if agent-doc were not used by the practitioner?
+### Re: agent-doc as Sidekick backend — opus-4-6
+
+Short answer: agent-doc is a strong integration layer and lifecycle host, but it shouldn't be the whole backend. The fit is partial and real — the question is which parts to reuse vs build fresh.
+
+#### Where agent-doc maps well
+
+**Supervisor as daemon.** Sidekick needs a persistent per-project process monitoring sessions. Agent-doc's supervisor already does this — it manages IPC, tracks session state, handles socket GC, and survives across agent restarts. The lifecycle machinery (start/stop, orphan detection, health checks) is directly reusable. You wouldn't have to rebuild process management.
+
+**Virtual documents as session tracking surfaces.** This is the most interesting fit. A "virtual" agent-doc document that the practitioner never opens could model a Sidekick session record: components for observations, proposals, metrics, and pending follow-ups. The CRDT merge engine means the daemon can write observations while git operations happen concurrently. The template/component system (`agent:status`, `agent:exchange`, `agent:backlog`) maps onto Sidekick's data surfaces — a `sidekick:proposals` component, a `sidekick:metrics` component, a `sidekick:session-log` component.
+
+**AGENTS.md write-back.** Sidekick's core output is AGENTS.md proposals. Agent-doc already has a safe write pipeline with CRDT merging, snapshot baselines, and commit boundaries. When Sidekick proposes a change to `src/auth/AGENTS.md`, piping it through agent-doc's `finalize` gives you concurrent-edit safety and git integration for free.
+
+**Multi-harness abstraction.** Agent-doc already dispatches across Claude Code, Codex, and Cursor. Sidekick needs exactly this cross-tool reach. The harness detection, model resolution, and hook integration are transferable.
+
+#### Where it doesn't fit
+
+**Session transcript analysis is stream processing, not document editing.** The 6-stage Session Analyzer Pipeline (parse JSONL → segment → annotate → extract → propose → summarize) is fundamentally a data pipeline. Agent-doc's document model adds friction here — you'd be forcing transcript analysis into markdown components when it wants to be structured data flowing through transforms. This should be a purpose-built pipeline.
+
+**Metrics and analytics need a proper store.** Discovery-lag tracking, token cost baselines, correction event rates, per-task-type averages — this is time-series data. SQLite (as Sidekick's pitch specifies) is the right choice. Trying to encode this in document components would be awkward and slow.
+
+**Knowledge graph and semantic search are their own domain.** The codebase knowledge graph, vector embeddings for session search, and cross-developer pattern mining have no analog in agent-doc. These need a vector store and graph data structures.
+
+**Real-time in-session interventions (health monitor, budget guardian, context surgery) are event-driven.** They need to process tool-call events as they stream in. Agent-doc's cycle model (preflight → respond → finalize) is turn-based, not event-stream-based.
+
+#### The pragmatic architecture
+
+Agent-doc as **one layer** in a Sidekick stack:
+
+| Layer | Owns | Backed by |
+|-------|------|-----------|
+| **Process lifecycle** | Daemon start/stop, socket management, health checks | agent-doc supervisor (reuse) |
+| **Session analysis** | JSONL parsing, segmentation, pattern detection, metrics | Purpose-built pipeline → SQLite |
+| **Knowledge** | Semantic search, knowledge graph, cross-session intelligence | Vector store + graph structures |
+| **Document output** | AGENTS.md proposals, session summaries, virtual tracking docs | agent-doc write pipeline (reuse) |
+| **Harness integration** | Hook dispatch, multi-tool model resolution | agent-doc harness layer (reuse) |
+
+The key insight: agent-doc doesn't need to be the practitioner's editing tool for this to work. The virtual document concept lets agent-doc manage Sidekick's internal state documents (session records, proposal queues, tracking files) without requiring the user to ever open a markdown file. The user interacts through the VS Code extension, CLI, or admin console — agent-doc handles the durable-state plumbing underneath.
+
+**Even if the practitioner never runs `/agent-doc`**, the Sidekick daemon could use agent-doc internally to:
+1. Maintain a virtual session document per project that accumulates observations
+2. Write AGENTS.md proposals through the safe merge pipeline
+3. Track proposal lifecycle (pending → reviewed → merged/rejected) via the backlog component
+4. Commit changes atomically through the existing git integration
+
+The pieces that should NOT go through agent-doc: JSONL transcript analysis, real-time monitoring, metrics aggregation, semantic search, and the knowledge graph. Those need their own fit-for-purpose infrastructure.
+
+So: good backend for the write-side and lifecycle-management parts of Sidekick. Not the right choice for the read-side analytics. The two together make a complete system.
+<!-- agent:boundary:df4dbb8a -->
 <!-- /agent:exchange -->
 
 <!--

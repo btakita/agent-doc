@@ -447,17 +447,46 @@ A softer alternative: "When exploring unfamiliar code, prefer `tsift search` and
 - Update SPEC.md + CLAUDE.md
 
 Want me to build this?
-<!-- agent:boundary:ed7dde5d -->
+❯ yes. spec-test-build-install-commit-push
+### Re: do #cmdx — opus-4-6
+
+Implemented `tsift init` — idempotent project setup that injects a Code Navigation section into AGENTS.md/CLAUDE.md.
+
+**New module: `src/init.rs`** (202 lines)
+
+- `find_instruction_file(dir)` — prefers AGENTS.md over CLAUDE.md
+- `init(dir)` — creates or appends section, detects existing via `<!-- tsift:code-navigation -->` markers, updates in place if stale
+- Returns `InitResult` with file path and action (Created/Updated/AlreadyPresent)
+
+**Injected section:**
+
+```markdown
+<!-- tsift:code-navigation -->
+## Code Navigation
+
+Before reading source files for understanding, check tsift:
+- `tsift search <query>` — AST-aware hybrid search (prefer over grep/rg)
+- `tsift summarize <symbol>` — cached summary (~50 tokens vs ~2000 for file read)
+- `tsift explain <symbol>` — callers, callees, community context
+- `tsift graph <symbol> --callers` / `--callees` — call graph navigation
+
+Only read full source files when tsift results are insufficient.
+<!-- /tsift:code-navigation -->
+```
+
+**Tests:** +7 → 229 total. Covers: create from scratch, append to existing, AGENTS.md priority, CLAUDE.md fallback, idempotent re-run, stale section update, surrounding content preservation.
+
+**Commit:** `btakita/tsift@d9af2b0`. Pushed.
+<!-- agent:boundary:deda5f86 -->
 <!-- /agent:exchange -->
 
 <!--
-Please add "check tsift first". 
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
+- [x] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

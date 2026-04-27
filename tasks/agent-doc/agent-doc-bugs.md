@@ -898,7 +898,21 @@ Commits:
 - `382306d` in `src/boost-client` — retroactive marker cleanup
 
 Both pushed.
-<!-- agent:boundary:f79428e8 -->
+
+❯ release + publish
+### Re: release + publish — opus-4-6
+
+Released and published **agent-doc v0.33.14**.
+
+**Pre-release work:**
+- Fixed 29 clippy warnings across 12 source files (collapsible_if, manual_strip, while_let_on_iterator, dead_code, nonminimal_bool, starts_with, manual_pattern_char_comparison)
+- Updated VERSIONS.md with comprehensive changelog covering all features since v0.33.13 (inline guard marker stripping, agent:backlog rename, migrate command, per-harness model override, snapshot auto-migration, queue component, planning command, and more)
+
+**Published to:**
+- crates.io: https://crates.io/crates/agent-doc/0.33.14
+- GitHub Releases: https://github.com/btakita/agent-doc/releases/tag/v0.33.14 (with prebuilt binary)
+- PyPI: auto-publishes via CI workflow
+<!-- agent:boundary:a197d660 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -130,7 +130,7 @@ Implemented `--limit N` flag for `graph`, `communities`, and `explain` commands.
 - Communities truncation applied after `min_size` filtering
 
 **Commit:** `btakita/tsift@e72e982`. 277 tests pass (9 new limit tests). Built + installed.
-<!-- agent:boundary:b854c378 -->
+<!-- agent:boundary:1565f806 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -139,7 +139,6 @@ Implemented `--limit N` flag for `graph`, `communities`, and `explain` commands.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)

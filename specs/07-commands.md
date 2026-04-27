@@ -243,7 +243,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **HEAD marker:** `(HEAD)` is transient with respect to the committed blob and snapshot. `agent-doc commit` strips it before staging, and post-commit cleanup strips it from the snapshot. However, `(HEAD)` markers are **preserved in the working tree** (and editor buffer via IPC) so the user sees which response headings are new. Preflight classifies `(HEAD)` differences as `boundary_artifact`, so working-tree `(HEAD)` markers do not cause false-positive change detection.
 
-**Post-commit cleanup:** After a successful commit, the **snapshot** is normalized to the same clean single-boundary shape as the committed blob (no `(HEAD)`, single boundary). The **working tree** is repositioned (stale boundaries removed, fresh boundary inserted) but retains `(HEAD)` annotations on response headings. The IPC reposition signal includes `preserve_head: true` so editor plugins use the `(HEAD)`-preserving FFI variant.
+**Post-commit cleanup:** After a successful commit, the **snapshot** is normalized to the same clean single-boundary shape as the committed blob (no `(HEAD)`, single boundary). The **working tree** is repositioned (stale boundaries removed, fresh boundary inserted) and may retain `(HEAD)` annotations on response headings, but editor helpers must prefer the just-committed on-disk document over any stale unsaved buffer when the only drift is agent-owned response-heading attribution and/or boundary churn. In that stale-buffer case, preserving the committed response text takes priority over preserving `(HEAD)` markers. The IPC reposition signal includes `preserve_head: true` for the normal best-effort case.
 
 **FFI variants:**
 - `agent_doc_reposition_boundary_to_end()` / `_with_id()` — clean variant (strips `(HEAD)`). Used for snapshot cleanup.
@@ -422,7 +422,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - `agent_doc_reposition_boundary_to_end(doc)` — clean variant. Returns document with stale boundaries removed, `(HEAD)` markers stripped, and a single fresh boundary at end-of-exchange. Used for snapshot cleanup.
 - `agent_doc_reposition_boundary_to_end_with_id(doc, id)` — clean variant with explicit boundary ID. Used by post-commit editor refresh.
 - `agent_doc_reposition_boundary_to_end_preserve_head(doc)` — preserves `(HEAD)` annotations. Stale boundaries removed, fresh boundary inserted, but `(HEAD)` markers remain. Used for working-tree and editor-buffer post-commit cleanup.
-- `agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, id)` — preserve-head with explicit ID. Editor plugins should call this on post-commit reposition when the IPC signal has `preserve_head: true`.
+- `agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, id)` — preserve-head with explicit ID. Editor plugins should call this on post-commit reposition when the IPC signal has `preserve_head: true`, unless the open buffer is stale relative to the just-committed disk document and only differs by agent-owned response-heading attribution / boundary drift, in which case the committed disk text wins.
 
 ## finalize
 

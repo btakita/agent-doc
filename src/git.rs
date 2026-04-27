@@ -480,6 +480,40 @@ pub(crate) fn normalize_transient_agent_doc_markers(content: &str) -> String {
     strip_guard_markers(&strip_head_markers(&strip_boundary_markers(content)))
 }
 
+fn strip_re_heading_attribution(content: &str) -> String {
+    let code_ranges = code_block_byte_ranges(content);
+    let mut result_lines: Vec<String> = Vec::new();
+    let mut offset = 0usize;
+    for line in content.lines() {
+        if !is_in_code_block(&code_ranges, offset) {
+            let trimmed = line.trim_start();
+            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+            if (1..=6).contains(&hash_count) && trimmed.chars().nth(hash_count) == Some(' ') {
+                let after_hash = trimmed[hash_count..].trim_start();
+                if after_hash.starts_with("Re:")
+                    && let Some(pos) = line.rfind(" — ")
+                {
+                    result_lines.push(line[..pos].to_string());
+                    offset += line.len() + 1;
+                    continue;
+                }
+            }
+        }
+        result_lines.push(line.to_string());
+        offset += line.len() + 1;
+    }
+    let result = result_lines.join("\n");
+    if content.ends_with('\n') {
+        format!("{result}\n")
+    } else {
+        result
+    }
+}
+
+fn normalize_post_commit_re_heading_drift(content: &str) -> String {
+    strip_re_heading_attribution(&normalize_transient_agent_doc_markers(content))
+}
+
 fn normalize_component_content_for_absorb(content: &str) -> String {
     normalize_transient_agent_doc_markers(content)
         .trim()
@@ -606,10 +640,8 @@ fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
     }
 
     components.iter().all(|component| {
-        (matches!(
-            component.name.as_str(),
-            "status" | "exchange" | "queue"
-        ) || is_backlog_component(&component.name))
+        (matches!(component.name.as_str(), "status" | "exchange" | "queue")
+            || is_backlog_component(&component.name))
             && normalize_component_content_for_absorb(component.content(body)).is_empty()
     })
 }
@@ -1302,16 +1334,18 @@ fn strip_guard_markers_from_disk(file: &Path) {
     if let Ok(Some(ref content)) = crate::snapshot::load(file) {
         let cleaned = strip_guard_markers(content);
         if cleaned != *content
-            && let Err(e) = crate::snapshot::save(file, &cleaned) {
-                eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
-            }
+            && let Err(e) = crate::snapshot::save(file, &cleaned)
+        {
+            eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
+        }
     }
     if let Ok(content) = std::fs::read_to_string(file) {
         let cleaned = strip_guard_markers(&content);
         if cleaned != content
-            && let Err(e) = std::fs::write(file, &cleaned) {
-                eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
-            }
+            && let Err(e) = std::fs::write(file, &cleaned)
+        {
+            eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
+        }
     }
 }
 
@@ -1692,6 +1726,11 @@ fn classify_post_commit_local_drift(
     {
         return None;
     }
+    if normalize_post_commit_re_heading_drift(current_doc)
+        == normalize_post_commit_re_heading_drift(head_doc)
+    {
+        return None;
+    }
     if is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc) {
         return Some(PostCommitLocalDriftKind::UserFollowUp);
     }
@@ -1711,7 +1750,11 @@ fn repair_clean_head_if_only_transient_worktree_drift(
     if normalize_transient_agent_doc_markers(file_content)
         != normalize_transient_agent_doc_markers(&head_doc)
     {
-        return Ok(None);
+        if normalize_post_commit_re_heading_drift(file_content)
+            != normalize_post_commit_re_heading_drift(&head_doc)
+        {
+            return Ok(None);
+        }
     }
 
     crate::write::atomic_write_pub(file, &head_doc)?;
@@ -3553,6 +3596,83 @@ mod tests {
     }
 
     #[test]
+    fn commit_already_current_repairs_response_heading_attribution_drift() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic — gpt-5\n\
+            body\n\
+            <!-- agent:boundary:committed-id -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let drifted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic — codex (HEAD)\n\
+            body\n\
+            <!-- agent:boundary:stale-id -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, drifted).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("heading attribution drift should self-heal");
+        assert!(!did_commit, "repair should close as already committed");
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working, committed,
+            "working tree should be restored to the committed response heading and boundary"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, committed, "snapshot should also return to committed HEAD");
+    }
+
+    #[test]
     fn commit_identifies_post_commit_local_working_tree_edits() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
@@ -4368,7 +4488,10 @@ mod tests {
     fn resolve_absolute_file_path_returns_relative_when_not_found() {
         let rel = Path::new("nonexistent/path.md");
         let resolved = resolve_absolute_file_path(rel);
-        assert_eq!(resolved, rel, "missing files should return the original path");
+        assert_eq!(
+            resolved, rel,
+            "missing files should return the original path"
+        );
     }
 
     #[test]
@@ -4702,10 +4825,7 @@ More content.
 <!-- /agent:pending -->
 "#;
         let result = redact_component_contents_for_absorb(body);
-        assert!(
-            result.is_some(),
-            "should not panic on nested components"
-        );
+        assert!(result.is_some(), "should not panic on nested components");
         let redacted = result.unwrap();
         assert!(
             redacted.contains("<!-- agent:status patch=replace -->"),

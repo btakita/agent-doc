@@ -231,4 +231,45 @@ Fresh answer.
         assertTrue(result.contains("### Re: latest — gpt-5 (HEAD)\n"))
         assertEquals(1, Regex("""\(HEAD\)""").findAll(result).count())
     }
+
+    @Test
+    fun `prefers committed disk content for response-heading attribution drift`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: update Actual Dev Hrs with corky — gpt-5
+Response content.
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+### Re: update Actual Dev Hrs with corky — codex (HEAD)
+Response content.
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertTrue(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
+
+    @Test
+    fun `does not prefer disk content when user follow-up differs`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: topic — gpt-5
+Answer.
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+### Re: topic — codex (HEAD)
+Answer.
+User follow-up.
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertFalse(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
 }

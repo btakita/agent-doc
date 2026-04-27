@@ -359,18 +359,25 @@ class PatchWatcher(private val project: Project) : Disposable {
                 targetFile.refresh(false, false)
                 val fdm = FileDocumentManager.getInstance()
                 val document = fdm.getDocument(targetFile) ?: return@invokeLater
+                val diskContent = String(targetFile.contentsToByteArray(), targetFile.charset)
                 if (!fdm.isDocumentUnsaved(document)) {
                     fdm.reloadFromDisk(document)
                 }
 
                 WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
                     val content = document.text
+                    val sourceContent =
+                        if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
+                            diskContent
+                        } else {
+                            content
+                        }
                     val result = if (preserveHead) {
-                        NativePatching.repositionBoundaryToEndPreserveHead(content, boundaryId)
-                            ?: repositionBoundaryToEnd(content, "exchange", boundaryId)
+                        NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
+                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
                     } else {
-                        NativePatching.repositionBoundaryToEnd(content, boundaryId)
-                            ?: repositionBoundaryToEnd(content, "exchange", boundaryId)
+                        NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
+                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
                     } ?: return@runWriteCommandAction
                     if (result != content && document.text == content) {
                         document.setText(result)
@@ -1231,6 +1238,50 @@ private fun stripTransientHeadMarkers(content: String): String {
     }
 
     return result.joinToString("\n")
+}
+
+private fun stripReHeadingAttributionForCompare(content: String): String {
+    val codeRanges = findCodeBlockRangesUtil(content)
+    val normalized = mutableListOf<String>()
+    var offset = 0
+
+    for (line in content.split("\n")) {
+        val inCode = codeRanges.any { range -> offset >= range.first && offset < range.second }
+        offset += line.length + 1
+        if (inCode) {
+            normalized.add(line)
+            continue
+        }
+
+        val trimmed = line.trimStart()
+        val hashCount = trimmed.takeWhile { it == '#' }.length
+        if (hashCount in 1..6 && trimmed.getOrNull(hashCount) == ' ') {
+            val afterHash = trimmed.drop(hashCount).trimStart()
+            if (afterHash.startsWith("Re:")) {
+                val dash = line.lastIndexOf(" — ")
+                if (dash >= 0) {
+                    normalized.add(line.substring(0, dash))
+                    continue
+                }
+            }
+        }
+
+        normalized.add(line)
+    }
+
+    return normalized.joinToString("\n")
+}
+
+internal fun shouldPreferCommittedDiskContentForRepositionUtil(editorContent: String, diskContent: String): Boolean {
+    fun normalize(content: String): String =
+        stripReHeadingAttributionForCompare(
+            stripTransientHeadMarkers(content)
+                .lines()
+                .filterNot { it.trim().startsWith("<!-- agent:boundary:") }
+                .joinToString("\n")
+        )
+
+    return normalize(editorContent) == normalize(diskContent)
 }
 
 private fun collectReHeadingsUtil(content: String): Set<String> {

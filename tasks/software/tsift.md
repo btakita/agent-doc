@@ -211,15 +211,51 @@ Implemented the tsift versioning surface in three places:
 **Verification:**
 - `cargo test` passed: 297 tests total.
 - `make check` is still failing on pre-existing clippy findings in `src/main.rs` (`clippy::collapsible-if` around lines 863-868, plus existing `clippy::too_many_arguments` findings on several command helpers). I did not change those code paths in this cycle.
-<!-- agent:boundary:0b88e55d -->
+
+❯ If a tmux session is stale, please run `tsift index`.
+❯ This happened in /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+```
+• Ran tsift search "session digest evidence strategy"
+  └ Error: tsift search timed out after 30s (strategy: lexical). The index may be stale — run `tsift index .` to
+    rebuild, or use `--timeout 0` to disable the timeout.
+```
+### Re: stale index + lock recovery — gpt-5
+
+I ran `tsift index .` as requested. It did not complete: the process is still stuck in `D` state after more than 4 minutes, and the repo currently has `.tsift/index.db-journal`. That points to a blocked OS / filesystem wait, not a normal long-running search or a simple stale-index timeout.
+
+The stale-session guidance is already present in `.claude/skills/tsift/SKILL.md` and `src/tsift/CLAUDE.md`, so I did not add another documentation patch for that path. I fixed the lock-handling gap in the code instead:
+
+- `src/index.rs` and `src/summarize.rs` now set a 5s SQLite busy timeout and `journal_mode=WAL` for writable DBs.
+- Those modules now expose read-only open helpers, and `src/status.rs` plus the query paths in `src/main.rs` use those read-only opens so status / graph / explain / path / federated search do not grab writer-capable handles unnecessarily.
+- Added DB-open tests that assert the WAL + busy-timeout configuration.
+
+On the design question: no, a different "local file DB" is not the right fix. `.tsift/index.db` is already a local SQLite file; the issue is concurrent access plus a blocked writer, so WAL + read-only query paths are the correct first recovery step.
+
+**Verification:**
+- `cargo test` passed: 295 unit tests + 6 integration tests.
+- `make check` still fails on existing clippy debt in `src/main.rs`: `clippy::collapsible-if` around lines 1043-1046 and the pre-existing `clippy::too_many_arguments` helper warnings. I did not change those APIs in this cycle.
+<!-- agent:boundary:4726e4c8 -->
 <!-- /agent:exchange -->
 
 <!--
+If index.db is locked, please attempt to recover. Should we use a local file db that does not lock?
+This happened in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md:
+```
+• Explored
+  └ Search pending_capture|pending capture|backlog-capture|#pcap|recommended in agent-doc
+
+• Ran tsift search pending_capture
+  └ Error: database is locked
+
+    Caused by:
+        Error code 5: The database file is locked
+```
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 
 <!--

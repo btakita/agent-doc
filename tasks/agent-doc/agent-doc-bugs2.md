@@ -597,7 +597,33 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `src/git.rs`, `specs/07-commands.md`, and `VERSIONS.md`.
-<!-- agent:boundary:6fd31f67 -->
+
+❯ do #wroot1. spec-test-build-install-commit-push
+### Re: do `#wroot1` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `09e8c65` (`fix: expose parent worktree to submodule sessions`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- submodule-hosted Claude/Codex launches now add the superproject working tree as a writable root in addition to the external git metadata dirs
+- that lets a session started under `src/session-share` patch parent-repo docs like `tasks/agent-doc/agent-doc-bugs2.md` instead of treating them as outside the writable root
+- Codex resume behavior stays the same: `exec resume` still strips `--add-dir`, but the resumed thread inherits the extra writable roots from the original exec
+- updated `README.md`, `SPEC.md`, `VERSIONS.md`, `specs/06-config.md`, `specs/07-commands.md`, and `specs/09-git-integration.md`
+
+Root cause:
+- `append_workspace_access_args` only exposed external `.git` dirs for submodule docs; it never exposed the parent repo working tree itself
+- that made the writable-root refusal directionally correct for fresh submodule-rooted sessions even though `agent-doc` could still mutate the parent repo later through its own binary-owned write/commit path
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `09e8c65` (`fix: expose parent worktree to submodule sessions`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the eight `#wroot1` files.
+<!-- agent:boundary:f11e0788 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -607,6 +633,6 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
+- [x] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

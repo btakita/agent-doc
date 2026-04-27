@@ -5,6 +5,7 @@ agent_doc_write: crdt
 agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
 prompt_presets:
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
@@ -147,7 +148,34 @@ The short answer: Python dominates this space. Rust is catching up but nothing s
 3. **Current graphify advantage:** it runs in-context inside Claude Code with zero install — the LLM is already there. A standalone tool needs API keys and network calls
 
 For the tsift integration story specifically, any of these tools could consume `tsift graph --json` output the same way graphify does.
-<!-- agent:boundary:52dafa9a -->
+
+❯ I don't need a REST API or HTML+JSON. I mainly need to save on tokens + analysis.
+### Re: token savings without REST/HTML — opus-4-6
+
+If the goal is purely "save tokens + get analysis," the expensive part is graphify re-reading source into context every invocation. The fix is caching:
+
+**Option A — tsift extension (`tsift summarize`)**
+
+A new subcommand that:
+1. Walks `tsift graph --json` + source snippets
+2. Calls Claude API (batch, once per module) for entity extraction / concept labeling
+3. Stores results in a local SQLite graph (entities, relationships, summaries)
+4. Future queries hit the cache: `tsift summarize <symbol>` returns the pre-computed 2-line summary + relationships without re-reading source
+
+Token cost: one-time batch extraction. After that, queries are free (local DB lookup). Could rerun on `git diff` changes only.
+
+**Option B — LightRAG / sift-kg (Python, one-shot batch)**
+
+Run once over the codebase, extract entities into a local store, query locally. Same "pay once, query free" model. More mature but Python dependency.
+
+**Option C — Keep graphify but add caching**
+
+graphify already has the extraction logic. Adding a persistent cache layer (SQLite or flat JSON per file hash) would eliminate repeat extraction. Cheapest to implement since the LLM is already in-context.
+
+**My recommendation:** Option A fits the tsift philosophy (single Rust binary, zero runtime deps, deterministic queries after one-time extraction). It reuses the existing `symbols.db` infrastructure. The batch extraction could use the Anthropic batch API for 50% cost reduction.
+
+Want me to spec this out as a `tsift summarize` feature?
+<!-- agent:boundary:92d14039 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

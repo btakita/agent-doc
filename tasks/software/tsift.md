@@ -748,7 +748,23 @@ To make it automatic, the hook needs to be added to project settings:
 ```
 
 Want me to install it?
-<!-- agent:boundary:c1ea0b16 -->
+❯ If we install in agent-loop, will all projects in src/, including submodules, use tsift?
+### Re: scope of hook installation — opus-4-6
+
+
+No. Installing the hook in agent-loop's `.claude/settings.json` only covers sessions opened at the agent-loop root. Two limitations:
+
+**1. Submodule sessions are separate projects.** When you open a Claude Code session inside `src/tsift` or `src/agent-doc`, Claude Code finds that submodule's own `.git` and treats it as its own project. Agent-loop's `.claude/settings.json` doesn't apply there — each submodule would need its own hook (or use `tsift init` to add the instruction surface, and rely on agents running `tsift status` + following the `run:` recommendation).
+
+**2. Root-level `tsift index .` only indexes root files.** The hook as written only maintains `.tsift/index.db` for files directly in agent-loop's root. To cover submodules from the root, the hook would need `--workspace`:
+```
+tsift index --workspace --check --exit-code . 2>/dev/null && exit 0; tsift index --workspace . >/dev/null 2>&1
+```
+
+But `--workspace` re-checks every submodule on every prompt, which may be slower than single-project indexing (~50ms fresh check scales with submodule count).
+
+**Practical approach:** install `tsift init` in each submodule you actively develop in. That gives agents the `tsift status` instruction. The auto-reindex hook is most valuable per-submodule where you want zero-touch freshness.
+<!-- agent:boundary:425e9dec -->
 <!-- /agent:exchange -->
 
 <!--

@@ -400,7 +400,7 @@ All `--json` output now uses compact (single-line) serialization by default. Add
 - `tsift --pretty status src/tsift --json` — indented output confirmed
 
 **Commit:** `btakita/tsift@ce4855f` — pushed. Submodule pointer updated.
-<!-- agent:boundary:ea615f83 -->
+<!-- agent:boundary:53b43989 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -409,7 +409,6 @@ All `--json` output now uses compact (single-line) serialization by default. Add
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
 - [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)

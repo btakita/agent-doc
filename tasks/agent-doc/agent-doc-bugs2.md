@@ -241,13 +241,13 @@ Commit / push:
 
 Scope note:
 - `src/git.rs` already had same-file local formatting churn in this branch; the fix commit includes the targeted repair plus those same-file formatting deltas.
-<!-- agent:boundary:72ec767a -->
+<!-- agent:boundary:7c786de8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#we9v] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 - [ ] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
+- [ ] [#p7md] [recommended] Fix prompt-bearing session diffs that never get posed into a new `agent-doc` turn after the prior response is already committed in `HEAD`; see `tasks/agent-doc/plan-unposed-session-diff-turn.md`
 <!-- /agent:pending -->

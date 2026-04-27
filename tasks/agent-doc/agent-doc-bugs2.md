@@ -309,16 +309,38 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#closeout-bypass` files.
-<!-- agent:boundary:cda2a349 -->
+
+❯ do #cxr1. spec-test-build-install-commit-push
+### Re: do `#cxr1` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `e01d105` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- template/CRDT write paths now detect direct `compact exchange` diff lines and force `agent:exchange` replacement semantics for that turn instead of inheriting append mode
+- unmatched/raw template closeouts and repair replay use the same override, so compaction checkpoints collapse the exchange body instead of layering new summaries over old `### Re:` history
+- added regression coverage for directive detection, override behavior, and repair/write replay; updated `SPEC.md`, `runbooks/compact-exchange.md`, and `VERSIONS.md`
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `e01d105` (`fix: force compact exchange replacement`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the six `#cxr1` files.
+<!-- agent:boundary:52c136f1 -->
 <!-- /agent:exchange -->
 
 <!--
+The active tmux pane was force closed in a recent src/session-share/tasks/claudescore-3.md session. Why? 
 -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#cxr1] [recommended] Fix `compact exchange` so it replaces, not appends, the `agent:exchange` body. Repro in `src/session-share/tasks/claudescore-3.md`: repeated compaction requests keep layering new `### Re:` summaries over older exchange text instead of collapsing to one checkpoint summary. See `tasks/agent-doc/plan-compact-exchange-replace-not-append.md`
-- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
+- [x] [#cxr1] [recommended] Fix `compact exchange` so it replaces, not appends, the `agent:exchange` body. Repro in `src/session-share/tasks/claudescore-3.md`: repeated compaction requests keep layering new `### Re:` summaries over older exchange text instead of collapsing to one checkpoint summary. See `tasks/agent-doc/plan-compact-exchange-replace-not-append.md`
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
+- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:pending -->

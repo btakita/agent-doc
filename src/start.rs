@@ -119,6 +119,34 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     }
 }
 
+fn conflicting_live_session_pane(
+    tmux: &sessions::Tmux,
+    session_id: &str,
+    current_pane: &str,
+) -> Result<Option<String>> {
+    let entry = sessions::lookup_entry(session_id)?;
+    Ok(conflicting_live_session_pane_from_entry(
+        tmux,
+        current_pane,
+        entry.as_ref(),
+    ))
+}
+
+fn conflicting_live_session_pane_from_entry(
+    tmux: &sessions::Tmux,
+    current_pane: &str,
+    entry: Option<&sessions::SessionEntry>,
+) -> Option<String> {
+    let entry = entry?;
+    if entry.pane == current_pane {
+        return None;
+    }
+    if tmux.pane_alive(&entry.pane) {
+        return Some(entry.pane.clone());
+    }
+    None
+}
+
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate
 /// input bytes (ICRNL converts \r → \n, breaking Enter for Claude Code's TUI).
 /// Restores original termios on drop.
@@ -565,13 +593,22 @@ pub fn run(file: &Path) -> Result<()> {
     }
 
     let pane_id = sessions::current_pane()?;
+    let tmux = sessions::Tmux::default_server();
 
     // Guard: auto-relocate if the current pane is in a different session than the project expects.
     // This is how cross-session drift happens — a terminal in session 1 claims a document,
     // permanently binding it to session 1 even though the project targets session 0.
     if let Some(expected_session) = config::project_tmux_session() {
-        let tmux = sessions::Tmux::default_server();
         relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
+    }
+
+    if let Some(existing_pane) = conflicting_live_session_pane(&tmux, &session_id, &pane_id)? {
+        anyhow::bail!(
+            "session {} for {} is already running in pane {} — refusing to start a duplicate live pane",
+            &session_id[..8.min(session_id.len())],
+            file.display(),
+            existing_pane
+        );
     }
 
     // Register session → pane (with relative file path)
@@ -594,7 +631,9 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Fire document-level session_start hooks
     let harness_name = agent_doc::model_tier::detect_harness();
-    let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| s.to_string());
+    let resolved_model = fm
+        .resolve_harness_model(&harness_name)
+        .map(|s| s.to_string());
     crate::hooks::fire_doc_hooks(
         &fm.hooks,
         "session_start",
@@ -1199,7 +1238,10 @@ mod tests {
 
     /// Helper: simulates the base_args construction logic from run() for testing
     /// model injection without spawning a real process.
-    fn build_base_args_for_test(fm: &Frontmatter, harness: &crate::harness::HarnessConfig) -> Vec<String> {
+    fn build_base_args_for_test(
+        fm: &Frontmatter,
+        harness: &crate::harness::HarnessConfig,
+    ) -> Vec<String> {
         let cfg = Config::default();
         let resolved_agent_args = resolve_agent_args(fm, &cfg, harness);
         let mut base_args: Vec<String> = Vec::new();
@@ -1418,6 +1460,61 @@ mod tests {
         let output = std::fs::read_to_string(&tmp).unwrap_or_default();
         assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn conflicting_live_session_pane_detects_other_alive_pane() {
+        let iso = IsolatedTmux::new("start-duplicate-live-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane_a = iso.new_session("test", tmp.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane_a.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane_a).unwrap_or_default(),
+        };
+
+        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane_b, Some(&entry));
+        assert_eq!(conflict.as_deref(), Some(pane_a.as_str()));
+    }
+
+    #[test]
+    fn conflicting_live_session_pane_ignores_same_pane() {
+        let iso = IsolatedTmux::new("start-duplicate-same-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane).unwrap_or_default(),
+        };
+
+        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane, Some(&entry));
+        assert_eq!(conflict, None);
+    }
+
+    #[test]
+    fn conflicting_live_session_pane_ignores_dead_registered_pane() {
+        let iso = IsolatedTmux::new("start-duplicate-dead-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: "%999999".to_string(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            file: "tasks/software/corky.md".to_string(),
+            window: String::new(),
+        };
+
+        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane, Some(&entry));
+        assert_eq!(conflict, None);
     }
 
     // --- StopSignal + writer thread tests ---

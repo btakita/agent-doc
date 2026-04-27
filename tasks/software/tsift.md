@@ -596,7 +596,7 @@ Not always. `tsift init` and `tsift summarize` serve different purposes and have
 
 The free commands (search, explain, graph) should always be in the directive. Summarize is opt-in based on whether you've paid the extraction cost.
 
-❯ How can we make the AGENTS.md/CLAUDE.md or the skill/runbook make a proper judgement whether to use `tsift summarize` or not?
+❯ How can we make the AGENTS.md/CLAUDE.md or the skill/runbook make a proper judgment whether to use `tsift summarize` or not?
 ### Re: conditional summarize usage — opus-4-6
 
 Three approaches, from simplest to most robust:
@@ -649,7 +649,20 @@ The existing `/tsift` Claude Code skill could run `tsift summarize --stats` inte
 4. It works across all harnesses (Claude Code, Codex, Cursor) without skill-specific routing
 
 Option A is a quick win you could ship today by just updating the init section text. Option B is the proper solution. They're not mutually exclusive — update the text now, build `tsift status` later.
-<!-- agent:boundary:59305a5b -->
+
+❯ Add `tsift status` to backlog with a plan.
+### Re: add tsift status to backlog — opus-4-6
+
+Created plan at `src/tsift/plans/tsift-status.md` and added #stat to backlog.
+
+The plan covers:
+- `tsift status` subcommand with human and `--json` output
+- `src/status.rs` module reusing existing index check + summary stats logic
+- Machine-parseable `use:` list that tells the agent exactly which commands are available
+- Updated `tsift init` directive that references `tsift status` at session start
+- 6 test cases covering all combinations of index/summary state
+- ~200-300 lines, no new dependencies
+<!-- agent:boundary:cc0e723e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -657,7 +670,8 @@ Option A is a quick win you could ship today by just updating the init section t
 
 ## Pending / Not Built
 
-<!-- agent:backlog -->
+<!-- agent:backlog patch=replace -->
+- [ ] [#stat] tsift status — session-start health check with machine-parseable use: list. Plan: src/tsift/plans/tsift-status.md
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

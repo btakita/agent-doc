@@ -489,7 +489,18 @@ The individual pieces are all prior art. The novelty is in the composition appli
 #### Implications for the patent
 
 The virtual document *infrastructure* is a composition of well-established open-source patterns. Attempting to patent the infrastructure concept would face prior art challenges on every individual component. This reinforces the business case: the infrastructure should be open (it's built on open primitives), while the patent should cover the intelligence layer — the scoring algorithms, analysis pipeline, discovery-lag heuristics, and team aggregation that *use* virtual documents but aren't *about* virtual documents.
-<!-- agent:boundary:487ba909 -->
+
+❯ Please update the documents. I want to steer robert-ross from patenting the Virtual Document concept, as this is part of the open source platform. Don't steer too hard but make a case for keeping it open.
+### Re: update documents re virtual document patent scope — opus-4-6
+
+Updated both documents:
+
+**business-case-open-platform.md** — added a new subsection "Why virtual documents specifically should stay out of the patent" under the existing patent section. Lists the prior art by component (Plan 9, Yjs/Automerge, Org-mode, CQRS, etc.), references EP1642208A2 and US5787449A as existing patent art, and frames the argument pragmatically: including virtual documents invites prior art challenges and kills the ecosystem flywheel. The stronger patent strategy is to let infrastructure be open and focus claims on the intelligence layer where there's no meaningful prior art.
+
+**sidekick-agent-doc-integration.md** — added an "IP Boundary" section above Open Questions that establishes the line: virtual document infrastructure is open-source, patent scope covers intelligence running on top. Cross-links to the business case.
+
+The tone is factual, not adversarial — it presents the prior art reality and the strategic logic without framing it as "you can't patent this." The emphasis is on where the patent is *strongest* (intelligence layer) rather than where it's *weakest* (infrastructure).
+<!-- agent:boundary:9530d5cf -->
 <!-- /agent:exchange -->
 
 <!--

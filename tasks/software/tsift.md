@@ -198,7 +198,7 @@ Implemented `--schema` global flag for columnar JSON output — arrays of same-s
 ```
 
 **Commit:** `btakita/tsift@cfc73ea`. 297 tests pass (6 new schema tests). Built + installed.
-<!-- agent:boundary:f9261d4a -->
+<!-- agent:boundary:9b1aed2b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -207,7 +207,6 @@ Implemented `--schema` global flag for columnar JSON output — arrays of same-s
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->
 
 <!--

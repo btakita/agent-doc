@@ -8,6 +8,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Supervisor model injection from frontmatter.** `start.rs` now injects `--model` from `claude_model` / `codex_model` / `model` frontmatter when the freeform args (`claude_args`, `agent_args`, etc.) don't already contain `--model`. Precedence: harness-specific field (`claude_model` for Claude, `codex_model` for Codex) > generic `model` field.
 
+- **Pre-commit pending capture gate in `finalize`.** When `pending_capture_guard: strict`, `finalize` scans the response for uncaptured recommendations before committing. If recommendation-like items are detected without `--pending-add` flags, finalize exits non-zero before the commit step.
+
+- **`plan` emits `ExpectAdd` pending mutations.** When prompt targets contain backlog/recommendation signals ("tasks", "todo", "backlog", "what's next", "recommendations", "next steps", "action items"), `plan` emits an `expect_add` entry in `pending_mutations`. Tells the skill that finalize should include `--pending-add` flags for actionable items in the response.
+
+- **Post-preflight planning command.** `agent-doc plan <FILE>` emits a structured planning/dispatch record with `prompt_targets`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers`.
+
 ## 0.33.14
 
 - **Inline guard marker stripping.** `strip_guard_markers` now removes `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->` from within content lines (not just standalone lines where the entire trimmed line equals the marker). Trailing whitespace is trimmed after removal. Previously, inline markers like `**Bold text** <!-- no-pending-capture -->` survived into committed blobs.

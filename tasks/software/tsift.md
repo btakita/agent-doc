@@ -278,7 +278,41 @@ This puts the commands in context for every session without a prompt.
 The key property is **determinism after indexing**. `tsift index` + `tsift summarize --extract` are the only steps that touch external resources (file system, API). After that, every query is a local SQLite lookup — instant, offline, and token-efficient (~50-100 tokens vs ~2000 for reading the source file).
 
 The main failure mode is a stale index. Reindex after significant refactoring: `tsift index --rebuild .` or `tsift summarize --extract --diff src/`.
-<!-- agent:boundary:6c78bb85 -->
+
+❯ How can I ensure that any code prompt will use tsift to save tokens? Do I need to explicitly mention tsift? I would rather it just be applied without having to mention tsift.
+### Re: transparent tsift usage — opus-4-6
+
+Two mechanisms already work transparently. A third requires a CLAUDE.md addition.
+
+#### Already transparent (no mention needed)
+
+1. **Rewrite hook** — `tsift-rewrite.sh` is a PreToolUse hook that intercepts `rg`/`grep -r` Bash calls and silently rewrites them to `tsift search --strategy lexical`. The agent never sees tsift in the command; it thinks it's running rg.
+
+2. **AST-aware search ranking** — when `tsift search` runs and an index exists, symbol matches get boosted above text matches. This happens automatically after `tsift index .`.
+
+#### Requires CLAUDE.md (one-time, then transparent)
+
+The built-in Read/Grep/Glob tools bypass Bash hooks entirely — they're native Claude Code tools, not shell commands. To make the agent prefer tsift for those operations, add a directive to the project CLAUDE.md:
+
+```markdown
+## Code Navigation
+
+Before reading source files, check for cached summaries:
+- `tsift summarize <symbol>` for function/type context (~50 tokens vs ~2000)
+- `tsift explain <symbol>` for callers/callees/community
+- `tsift search <query>` for symbol-aware search
+
+Only read full files when the cached summary is insufficient or absent.
+```
+
+This works because Claude Code loads CLAUDE.md at the start of every session and treats it as standing instructions. The agent will internalize "check tsift first" as a default behavior pattern.
+
+#### What you can't automate (yet)
+
+There's no hook point to intercept the native `Read` or `Grep` tool calls and substitute tsift. Those tools are hardwired in the harness. The CLAUDE.md directive is the closest you can get — it makes the agent _choose_ tsift first, but can't _force_ it.
+
+The practical gap: a new session with a fresh context window may still read files directly for the first few operations before the CLAUDE.md directive fully shapes behavior. After that, the pattern sticks for the session.
+<!-- agent:boundary:9fc299cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

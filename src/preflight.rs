@@ -986,7 +986,33 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     let raw_diff = diff::compute(file)?;
-    let no_changes = raw_diff.is_none();
+
+    // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
+    // line(s) before downstream classification. The strip prevents `/model` from
+    // double-emitting in `builtin_commands`.
+    let global_config = config::load().unwrap_or_default();
+    let harness = agent_doc::model_tier::detect_harness();
+    let model_scan = raw_diff
+        .as_ref()
+        .map(|d| agent_doc::model_tier::scan_model_switch(d, &harness, &global_config.model));
+    let mut diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
+        // Use the stripped diff for downstream consumers.
+        Some(scan.stripped_diff.clone())
+    } else {
+        raw_diff.clone()
+    };
+
+    // Step 4b: Classify the diff for skill routing.
+    let mut classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+    let boundary_artifact_only = classification
+        .as_ref()
+        .is_some_and(|c| c.diff_type == diff::DiffType::BoundaryArtifact);
+    if boundary_artifact_only {
+        diff_result = None;
+        classification = None;
+    }
+
+    let no_changes = diff_result.is_none();
     if !no_changes {
         let snap = crate::snapshot::load(file).unwrap_or(None);
         let file_content = std::fs::read_to_string(file).unwrap_or_default();
@@ -1003,24 +1029,6 @@ pub fn run(file: &Path) -> Result<()> {
             ),
         );
     }
-
-    // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
-    // line(s) before downstream classification. The strip prevents `/model` from
-    // double-emitting in `builtin_commands`.
-    let global_config = config::load().unwrap_or_default();
-    let harness = agent_doc::model_tier::detect_harness();
-    let model_scan = raw_diff
-        .as_ref()
-        .map(|d| agent_doc::model_tier::scan_model_switch(d, &harness, &global_config.model));
-    let diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
-        // Use the stripped diff for downstream consumers.
-        Some(scan.stripped_diff.clone())
-    } else {
-        raw_diff.clone()
-    };
-
-    // Step 4b: Classify the diff for skill routing.
-    let classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
 
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
@@ -2298,6 +2306,61 @@ mod tests {
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn preflight_boundary_artifact_only_diff_does_not_start_cycle() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let tracked = "---\nsession: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer\n\
+            new body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, tracked).unwrap();
+        snapshot::save(&doc, tracked).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let visible = "---\nsession: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: newer (HEAD)\n\
+            new body\n\
+            <!-- agent:boundary:live -->\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, visible).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap();
+        assert!(
+            state.as_ref().is_none_or(|state| !state.is_open()),
+            "boundary-artifact-only preflight must not leave an open cycle"
+        );
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !log.contains("preflight_diff_start file="),
+            "boundary-artifact-only diff must not log preflight_diff_start:\n{log}"
+        );
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(_) => {}
+            status => panic!("expected clean closeout after boundary-artifact-only preflight, got {status:?}"),
+        }
     }
 
     #[test]

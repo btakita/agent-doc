@@ -241,7 +241,7 @@ Exits with error if the pane is dead or no session is registered.
    - rewrite the working tree locally to that clean single-boundary shape when no live editor IPC listener exists, or
    - send reposition + VCS-refresh IPC signals so the plugin applies that same clean rewrite via the Document API
 
-**HEAD marker:** `(HEAD)` is transient with respect to the committed blob and snapshot. `agent-doc commit` strips it before staging, and post-commit cleanup strips it from the snapshot. However, `(HEAD)` markers are **preserved in the working tree** (and editor buffer via IPC) so the user sees which response headings are new. Preflight classifies `(HEAD)` differences as `boundary_artifact`, so working-tree `(HEAD)` markers do not cause false-positive change detection.
+**HEAD marker:** `(HEAD)` is transient with respect to the committed blob and snapshot. `agent-doc commit` strips it before staging, and post-commit cleanup strips it from the snapshot. However, `(HEAD)` markers are **preserved in the working tree** (and editor buffer via IPC) so the user sees which response headings are new. Preflight classifies `(HEAD)` differences as `boundary_artifact`, and a boundary-artifact-only turn is normalized back to `no_changes` / already-committed closeout before `preflight_started` is recorded, so working-tree `(HEAD)` markers do not create a false-positive visible cycle.
 
 **Post-commit cleanup:** After a successful commit, the **snapshot** is normalized to the same clean single-boundary shape as the committed blob (no `(HEAD)`, single boundary). The **working tree** is repositioned (stale boundaries removed, fresh boundary inserted) and may retain `(HEAD)` annotations on response headings, but editor helpers must prefer the just-committed on-disk document over any stale unsaved buffer when the only drift is agent-owned response-heading attribution and/or boundary churn. In that stale-buffer case, preserving the committed response text takes priority over preserving `(HEAD)` markers. The IPC reposition signal includes `preserve_head: true` for the normal best-effort case.
 
@@ -585,6 +585,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 3. Read and truncate `.agent-doc/claims.log`
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`
 4. Compute diff between snapshot and current document
+   - If the diff classifies as `boundary_artifact` only (transient `(HEAD)` / boundary churn with no real user-authored prompt drift), preflight reports `no_changes: true` and does **not** open a new cycle
 5. Read document HEAD from disk
 
 **Steps (in order, pre-step 1):**

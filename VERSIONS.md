@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.16
 
+- **Boundary-artifact-only preflight now stays cycle-free.** `preflight` no longer opens `preflight_started` on pure agent-owned `(HEAD)` / boundary churn in template docs. It classifies that shape first, collapses it back to `no_changes` / already-committed closeout, and prevents that transient drift from leaking a stale user-visible lock. Added regression coverage for the exact clean-snapshot plus transient-`(HEAD)` shape that previously surfaced as `cycle started but no write/commit followed`.
+
 - **`compact exchange` write-back now replaces `agent:exchange` for that turn.** When the user-added diff explicitly starts with a direct `compact exchange` directive, template/CRDT write paths now override the normal append mode for `agent:exchange` and force replacement semantics instead. That closes the failure where repeated compaction requests kept appending new checkpoint summaries over older `### Re:` history instead of collapsing the component to one compacted checkpoint. Added directive-detection, template apply, and repair/write regression coverage for both patch-based and raw-response closeouts.
 
 - **Route start-ack now rejects same-cycle committed churn.** `route.rs` no longer treats mutations to an already-committed baseline cycle as proof that a new document cycle started. When a routed or fresh trigger is dispatched against prompt-bearing drift on top of a closed cycle, acknowledgment now requires a genuinely newer cycle id; same-cycle `commit_already_current` updates fail closed instead of logging a false `route_cycle_start_acknowledged`. Added regression coverage for the exact same-cycle false-ack shape.

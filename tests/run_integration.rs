@@ -444,7 +444,7 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
         1,
         "preflight recovery should finish the pending commit without duplicating the response"
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "preflight_started");
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
 
     let head = ProcessCommand::new("git")
         .current_dir(tmp.path())

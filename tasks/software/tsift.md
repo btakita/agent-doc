@@ -130,7 +130,23 @@ Implemented `--limit N` flag for `graph`, `communities`, and `explain` commands.
 - Communities truncation applied after `min_size` filtering
 
 **Commit:** `btakita/tsift@e72e982`. 277 tests pass (9 new limit tests). Built + installed.
-<!-- agent:boundary:1565f806 -->
+
+❯ do #codex. #spec-test-build-install-commit-push
+### Re: do #codex — opus-4-6
+
+Implemented `tsift init --codex` for Codex hook integration.
+
+**What it does:**
+- `tsift init --codex` merges a `UserPromptSubmit` auto-reindex hook into `.codex/hooks.json`
+- Creates `.codex/` directory and `hooks.json` if they don't exist
+- Appends to existing hooks when `.codex/hooks.json` already has other hooks (e.g., agent-doc)
+- Idempotent — detects existing tsift hook by status message and skips
+- Hook command: `tsift index --check --exit-code . >/dev/null 2>&1 || tsift index . >/dev/null 2>&1`
+
+**Why not the rewrite hook?** Codex doesn't support `PreToolUse` hooks, so the `grep`/`rg` → `tsift search` rewrite can't be ported. The AGENTS.md code-navigation instructions already tell Codex agents to prefer tsift over grep/rg.
+
+**Commit:** `btakita/tsift@474ef45`. 282 tests pass (5 new Codex hook tests). Built + installed.
+<!-- agent:boundary:10cbab24 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -139,7 +155,7 @@ Implemented `--limit N` flag for `graph`, `communities`, and `explain` commands.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
+- [x] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)

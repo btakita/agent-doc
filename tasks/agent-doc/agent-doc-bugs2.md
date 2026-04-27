@@ -193,12 +193,11 @@ Commit / push:
 Scope note:
 - This closes the `#doccommit` gap for active session-document response patchbacks by making the documented manual-repair path binary-owned and fail-closed.
 - It does not claim the broader `#nostate` invariant is finished; that remaining item is still about eliminating every silent open-cycle state class.
-<!-- agent:boundary:7fe91bf6 -->
+<!-- agent:boundary:95e2d770 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#n0sm] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

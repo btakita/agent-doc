@@ -116,7 +116,30 @@ Notably, agent-loop's `.gitignore` doesn't have `.tsift/` either right now, so e
 To fix session-share specifically: `tsift init src/session-share`
 
 The broader gap: the `/tsift` skill doesn't infer the target submodule from the session document path. It could resolve `src/session-share/tasks/claudescore-3.md` → submodule root `src/session-share` and pass that to `tsift init` instead of `.`. That would be a skill-level change (not a tsift binary change), since the binary already accepts an explicit path argument.
-<!-- agent:boundary:6ebe58c3 -->
+
+❯ Please update the skill/runbook to infer submodules. #spec-test-build-install-commit-push
+### Re: submodule inference for tsift init — opus-4-6
+
+Done. `tsift init` now resolves file paths to their git/submodule root via `git rev-parse --show-toplevel`.
+
+**Changes:**
+- `src/init.rs` — `resolve_project_dir()`: if path is a file, uses parent dir; then resolves to git root. Falls back to the directory itself outside git repos.
+- `src/main.rs` — `cmd_init` calls `resolve_project_dir` before `init()`. Prints `resolved: <input> → <target>` when the path changes.
+- `SPEC.md` — new "Path Resolution" section documenting the 3-step resolution.
+- `/tsift` skill (`SKILL.md`) — added Init section with submodule inference docs.
+
+**Tests:** +4 → 243 total. Covers: directory passthrough, file→parent, git root from subdirectory, git root from file.
+
+**Integration verified:**
+```
+$ tsift init src/session-share/tasks/claudescore-3.md
+resolved: .../claudescore-3.md → .../src/session-share
+AGENTS.md: created (tsift Code Navigation section added)
+.gitignore: added .tsift/
+```
+
+**Commits:** `btakita/tsift@9269260`. Session-share initialized (`0a5fa2a`). Agent-loop pointers + skill updated. All pushed.
+<!-- agent:boundary:33da373f -->
 <!-- /agent:exchange -->
 
 <!--

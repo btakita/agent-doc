@@ -661,6 +661,8 @@ Diff output now uses a 5-line context radius (unified diff with 5 lines of surro
 
 For fresh auto-starts, route now fails closed instead of silently idling when prompt readiness is missed. If the initial 30s readiness wait times out, route performs one bounded fallback trigger injection. Success logs `fresh_route_trigger_recovered`; failure logs `fresh_route_trigger_missing` and returns an error so the caller can surface the missed start explicitly.
 
+Fresh auto-start also requires a real per-document cycle acknowledgment after trigger injection. Accepting the typed command in the pane is not sufficient. After the trigger is sent, route polls the target document's persisted cycle state and only treats the start as successful once it observes a new cycle for that file (for example `preflight_started`, `response_captured`, `write_applied`, or `committed`). Success logs `fresh_route_start_acknowledged`; absence of a new cycle within the bounded wait logs `fresh_route_start_missing` and fails closed.
+
 ## is_tracked FFI Export
 
 `agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.

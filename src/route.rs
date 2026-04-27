@@ -28,7 +28,8 @@
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
 //!   new agent pane and sends `agent-doc start`. Waits for the agent's idle prompt before
-//!   sending the initial command. Called by `sync.rs` for unresolved files.
+//!   sending the initial command, then requires a real document-cycle acknowledgment before
+//!   treating the fresh start as successful. Called by `sync.rs` for unresolved files.
 //! - **`provision_pane(tmux, file, session_id, file_path, context_session, col_args)`**: Like
 //!   `auto_start` but skips waiting for the agent to be ready. Used by sync when only pane
 //!   existence is needed (agent will start asynchronously). Computes `split_before` via
@@ -77,6 +78,10 @@
 //!   from spawning a new pane. The call returns `Err` with a descriptive message.
 //! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
 //!   the routing flow. The command is still sent even if focus fails.
+//! - **Fresh-start acknowledgment**: Fresh auto-start success is not inferred from pane input
+//!   acceptance alone. After sending the initial trigger, route must observe a new
+//!   per-document cycle state before considering the start successful; otherwise it fails
+//!   closed.
 //! - **Split direction determinism**: `is_first_column` requires ≥ 2 `col_args` entries to
 //!   return true, ensuring a single-column layout never triggers a left-split.
 //!
@@ -476,6 +481,40 @@ fn send_command_checked(
         enter_retries
     );
     Ok(CommandDispatchStatus::TimedOut)
+}
+
+fn cycle_state_advances_start_ack(
+    current: &crate::cycle_state::CycleState,
+    baseline: Option<&crate::cycle_state::CycleState>,
+) -> bool {
+    match baseline {
+        None => true,
+        Some(previous) => {
+            current.cycle_id != previous.cycle_id
+                || current.updated_at != previous.updated_at
+                || current.phase != previous.phase
+                || current.last_event != previous.last_event
+        }
+    }
+}
+
+fn wait_for_start_ack(
+    file: &Path,
+    baseline: Option<&crate::cycle_state::CycleState>,
+    timeout: Duration,
+) -> Option<crate::cycle_state::CycleState> {
+    let start = std::time::Instant::now();
+    let poll = Duration::from_millis(200);
+
+    while start.elapsed() < timeout {
+        if let Ok(Some(state)) = crate::cycle_state::load(file)
+            && cycle_state_advances_start_ack(&state, baseline)
+        {
+            return Some(state);
+        }
+        std::thread::sleep(poll);
+    }
+    None
 }
 
 fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
@@ -997,6 +1036,8 @@ fn auto_start_in_session(
         &session_id[..std::cmp::min(8, session_id.len())]
     );
 
+    let cycle_baseline = crate::cycle_state::load(file).unwrap_or(None);
+
     if skip_wait {
         eprintln!(
             "[route] skip_wait=true — pane created, {} starting (sync path)",
@@ -1004,9 +1045,14 @@ fn auto_start_in_session(
         );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
-        if wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness) {
+        let dispatch = if wait_for_agent_ready(
+            tmux,
+            &new_pane,
+            std::time::Duration::from_secs(30),
+            harness,
+        ) {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command(tmux, &new_pane, &start_path, harness)?;
+            send_command_checked(tmux, &new_pane, &start_path, harness)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
@@ -1027,6 +1073,7 @@ fn auto_start_in_session(
                         "[route] Fallback trigger injection recovered the fresh {} start for {}",
                         harness.binary, file_path
                     );
+                    CommandDispatchStatus::Accepted
                 }
                 CommandDispatchStatus::TimedOut => {
                     crate::ops_log::log_op(
@@ -1044,6 +1091,60 @@ fn auto_start_in_session(
                         file.display()
                     );
                 }
+            }
+        };
+
+        if dispatch != CommandDispatchStatus::Accepted {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "fresh_route_trigger_missing file={} pane={} harness={}",
+                    file.display(),
+                    new_pane,
+                    harness.binary
+                ),
+            );
+            anyhow::bail!(
+                "{} accepted input did not confirm the fresh trigger dispatch for {}",
+                harness.binary,
+                file.display()
+            );
+        }
+
+        match wait_for_start_ack(file, cycle_baseline.as_ref(), Duration::from_secs(15)) {
+            Some(state) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={}",
+                        file.display(),
+                        new_pane,
+                        harness.binary,
+                        state.cycle_id,
+                        match state.phase {
+                            crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+                            crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+                            crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+                            crate::cycle_state::CyclePhase::Committed => "committed",
+                        }
+                    ),
+                );
+            }
+            None => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "fresh_route_start_missing file={} pane={} harness={}",
+                        file.display(),
+                        new_pane,
+                        harness.binary
+                    ),
+                );
+                anyhow::bail!(
+                    "fresh {} start for {} never acknowledged with a document cycle after trigger injection",
+                    harness.binary,
+                    file.display()
+                );
             }
         }
     }
@@ -1629,6 +1730,92 @@ history line
 
         let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
         assert_eq!(status, CommandDispatchStatus::Accepted);
+    }
+
+    #[test]
+    fn wait_for_start_ack_detects_new_preflight_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+                .unwrap();
+        });
+
+        let ack = wait_for_start_ack(&doc, None, Duration::from_secs(1));
+        assert!(
+            ack.is_some(),
+            "fresh start should acknowledge a new preflight cycle"
+        );
+        assert_eq!(
+            ack.unwrap().phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
+    fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+                .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
+            .expect("new committed cycle should count as startup acknowledgment");
+        assert_ne!(ack.cycle_id, baseline.cycle_id);
+        assert_eq!(ack.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn wait_for_start_ack_times_out_without_cycle_change() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250));
+        assert!(
+            ack.is_none(),
+            "unchanged cycle state must not count as a fresh-start ack"
+        );
     }
 
     #[test]

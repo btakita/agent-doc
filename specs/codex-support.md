@@ -118,6 +118,7 @@ Key differences from Claude Code:
    - Trigger command uses `harness.trigger_command()`
    - `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by `supports_*` flags
    - Fresh-route timeout no longer silently idles: `route.rs` now attempts one bounded fallback trigger injection before logging `fresh_route_trigger_missing` and failing closed
+   - Fresh Codex startup now requires a real cycle ack after trigger injection: route does not treat pane input acceptance as success by itself; it waits for a new per-document cycle state and logs `fresh_route_start_acknowledged` or `fresh_route_start_missing`
 
 4. ✅ Commit-boundary recovery distinguishes missed-start vs missed-commit:
    - `session-check` treats `ipc_write_consumed` / `snapshot_saved_file_ipc` without later `commit_*` as “write landed, commit missing”

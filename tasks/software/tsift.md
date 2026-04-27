@@ -424,7 +424,12 @@ More practical compression strategies for English tokens, roughly ordered by app
 5. **Schema-then-values pattern** — print column headers once, then rows of just values. Good for repeated structures (search results, edges).
 
 Items 1-2 are worth building. Items 3-5 are marginal — the savings exist but the complexity cost is high relative to just trimming what you output. The backlog items #paths and #caps remain the best next moves.
-<!-- agent:boundary:d2ac8126 -->
+
+❯ Should we add 3-5 into the backlog anyways?
+### Re: backlog items 3-5 — opus-4-6
+
+Added all three as recommended. They're low priority behind #paths and #caps but worth having on the radar so they don't get lost if the higher-priority items reveal further optimization opportunities.
+<!-- agent:boundary:ca1406a4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -433,6 +438,9 @@ Items 1-2 are worth building. Items 3-5 are marginal — the savings exist but t
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
+- [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
+- [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 - [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)

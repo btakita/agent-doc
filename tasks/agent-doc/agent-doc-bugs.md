@@ -954,7 +954,22 @@ Done. The supervisor now injects `--model` from `claude_model` / `codex_model` /
 All 23 start tests pass. Both binaries rebuilt (`cargo install` + `cargo build --release`).
 
 To verify: restart the tsift.md pane — it should now launch with Opus instead of Sonnet.
-<!-- agent:boundary:fc1c1a4b -->
+
+❯ release + publish
+### Re: release + publish — opus-4-6
+
+Bumped to **v0.33.15**, committed `a44b4b8` on `20260422/codex-agent-backend`.
+
+**VERSIONS.md entry:** supervisor model injection from frontmatter — `start.rs` injects `--model` from `claude_model`/`codex_model`/`model` when not already in agent args.
+
+**Done so far:**
+- Version bump (Cargo.toml + pyproject.toml)
+- Clippy clean, tests pass (1 pre-existing codex hook test failure unrelated)
+- `cargo install --path .` → `~/.cargo/bin/agent-doc` 0.33.15
+- `cargo build --release` → `.bin/agent-doc` symlink target updated
+
+**Waiting on manual testing gate** — verify model injection in a live pane, then I'll tag + `cargo publish` + GitHub release.
+<!-- agent:boundary:856abcde -->
 <!-- /agent:exchange -->
 
 <!--

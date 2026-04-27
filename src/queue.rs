@@ -37,6 +37,7 @@ pub struct QueuePrompt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct QueueComponent {
     pub auto: bool,
     pub entries: Vec<QueueEntry>,
@@ -156,9 +157,9 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             continue;
         }
 
-        if line.starts_with("- ") {
+        if let Some(rest) = line.strip_prefix("- ") {
             entries.push(QueueEntry::Prompt(QueuePrompt {
-                text: line[2..].to_string(),
+                text: rest.to_string(),
                 multiline: false,
             }));
             continue;
@@ -179,7 +180,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             let closer = fence_closer(trimmed);
             let mut prompt_lines = Vec::new();
             let mut found_close = false;
-            while let Some(inner) = lines.next() {
+            for inner in lines.by_ref() {
                 if inner.trim() == closer {
                     found_close = true;
                     break;
@@ -202,7 +203,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         if is_bare_fence_open(trimmed) {
             let mut prompt_lines = Vec::new();
             let mut found_close = false;
-            while let Some(inner) = lines.next() {
+            for inner in lines.by_ref() {
                 if inner.trim() == "---" {
                     found_close = true;
                     break;
@@ -322,11 +323,9 @@ pub fn remove_first_prompt(entries: &[QueueEntry]) -> Vec<QueueEntry> {
     let mut result = Vec::with_capacity(entries.len());
     let mut removed = false;
     for entry in entries {
-        if !removed {
-            if let QueueEntry::Prompt(_) = entry {
-                removed = true;
-                continue;
-            }
+        if !removed && matches!(entry, QueueEntry::Prompt(_)) {
+            removed = true;
+            continue;
         }
         result.push(entry.clone());
     }
@@ -335,6 +334,7 @@ pub fn remove_first_prompt(entries: &[QueueEntry]) -> Vec<QueueEntry> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum QueueHaltReason {
     StopFence,
     ItemModified,

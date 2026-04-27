@@ -842,8 +842,8 @@ fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<St
     if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) = (
         crate::template::parse_patches(full),
         crate::template::parse_patches(streamed),
-    ) {
-        if full_unmatched.trim().is_empty()
+    )
+        && full_unmatched.trim().is_empty()
             && streamed_unmatched.trim().is_empty()
             && full_patches.len() == streamed_patches.len()
         {
@@ -868,7 +868,6 @@ fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<St
                 return Some(delta);
             }
         }
-    }
     None
 }
 
@@ -1239,7 +1238,7 @@ fn fence_open(trimmed: &str) -> Option<(char, usize)> {
 }
 
 fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
-    if trimmed.chars().next() != Some(fence_char) {
+    if !trimmed.starts_with(fence_char) {
         return false;
     }
     let close_len = trimmed.chars().take_while(|ch| *ch == fence_char).count();

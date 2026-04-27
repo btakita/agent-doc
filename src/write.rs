@@ -383,11 +383,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     // Phase 3: consume queue prompt after successful write, before commit.
     // Included in the same commit as the response for atomicity.
-    if write_result.is_ok() && commit_mode != CommitMode::None {
-        if let Err(e) = consume_queue_prompt(file) {
+    if write_result.is_ok() && commit_mode != CommitMode::None
+        && let Err(e) = consume_queue_prompt(file) {
             eprintln!("[queue] warning: consumption failed: {}", e);
         }
-    }
 
     let commit_result = finalize_commit(file, commit_mode);
 
@@ -511,14 +510,14 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
     // Update snapshot in sync
     if let Ok(Some(snap)) = snapshot::load(file) {
         let mut new_snap = snap.clone();
-        if let Ok(snap_comps) = component::parse(&new_snap) {
-            if let Some(sq) = snap_comps.iter().find(|c| c.name == "queue") {
+        if let Ok(snap_comps) = component::parse(&new_snap)
+            && let Some(sq) = snap_comps.iter().find(|c| c.name == "queue") {
                 new_snap = sq.replace_content(&new_snap, &new_body);
 
                 if drained {
-                    if has_auto {
-                        if let Ok(sc2) = component::parse(&new_snap) {
-                            if let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
+                    if has_auto
+                        && let Ok(sc2) = component::parse(&new_snap)
+                            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
                                 let raw = &new_snap[sq2.open_start..sq2.open_end];
                                 let new_tag = crate::queue::strip_auto_from_tag(raw);
                                 if new_tag != raw {
@@ -529,8 +528,6 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
                                     new_snap = rebuilt;
                                 }
                             }
-                        }
-                    }
                     if let Ok(merged) =
                         frontmatter::merge_fields(&new_snap, "queue_active: false")
                     {
@@ -542,7 +539,6 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
                     snapshot::save(file, &new_snap)?;
                 }
             }
-        }
     }
 
     eprintln!(

@@ -1299,23 +1299,19 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
 /// Strip ephemeral guard markers from the snapshot and working-tree file on disk.
 /// Best-effort: logs warnings on failure but does not propagate errors.
 fn strip_guard_markers_from_disk(file: &Path) {
-    if let Ok(snap) = crate::snapshot::load(file) {
-        if let Some(ref content) = snap {
-            let cleaned = strip_guard_markers(content);
-            if cleaned != *content {
-                if let Err(e) = crate::snapshot::save(file, &cleaned) {
-                    eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
-                }
+    if let Ok(Some(ref content)) = crate::snapshot::load(file) {
+        let cleaned = strip_guard_markers(content);
+        if cleaned != *content
+            && let Err(e) = crate::snapshot::save(file, &cleaned) {
+                eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
             }
-        }
     }
     if let Ok(content) = std::fs::read_to_string(file) {
         let cleaned = strip_guard_markers(&content);
-        if cleaned != content {
-            if let Err(e) = std::fs::write(file, &cleaned) {
+        if cleaned != content
+            && let Err(e) = std::fs::write(file, &cleaned) {
                 eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
             }
-        }
     }
 }
 

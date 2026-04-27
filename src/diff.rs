@@ -954,7 +954,7 @@ fn parse_prompt_preset_directive(line: &str) -> Option<Vec<String>> {
         for part in segment.split(" and ") {
             let name = part
                 .trim()
-                .trim_end_matches(|c: char| matches!(c, '.' | ':' | ';'))
+                .trim_end_matches(['.', ':', ';'])
                 .trim();
             if !name.is_empty() {
                 names.push(name.to_string());

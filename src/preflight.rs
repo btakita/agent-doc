@@ -1335,12 +1335,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
             if let Ok(Some(snap)) = snapshot::load(file) {
                 let mut new_snap = snap.clone();
-                if let Ok(sc) = crate::component::parse(&new_snap) {
-                    if let Some(sq) = sc.iter().find(|c| c.name == "queue") {
+                if let Ok(sc) = crate::component::parse(&new_snap)
+                    && let Some(sq) = sc.iter().find(|c| c.name == "queue") {
                         new_snap = sq.replace_content(&new_snap, &new_body);
-                        if has_auto {
-                            if let Ok(sc2) = crate::component::parse(&new_snap) {
-                                if let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
+                        if has_auto
+                            && let Ok(sc2) = crate::component::parse(&new_snap)
+                                && let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
                                     let raw = &new_snap[sq2.open_start..sq2.open_end];
                                     let new_tag = crate::queue::strip_auto_from_tag(raw);
                                     if new_tag != raw {
@@ -1352,22 +1352,17 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                                         new_snap = rebuilt;
                                     }
                                 }
-                            }
-                        }
-                        if persisted_active {
-                            if let Ok(m) =
+                        if persisted_active
+                            && let Ok(m) =
                                 frontmatter::merge_fields(&new_snap, "queue_active: false")
                             {
                                 new_snap = m;
                             }
-                        }
-                        if new_snap != snap {
-                            if let Err(e) = snapshot::save(file, &new_snap) {
+                        if new_snap != snap
+                            && let Err(e) = snapshot::save(file, &new_snap) {
                                 eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
                             }
-                        }
                     }
-                }
             }
             return Ok(QueueState {
                 queue_prompts: vec![],
@@ -1393,12 +1388,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
 
         // Change detection: compare head prompt between snapshot and file
-        if let Ok(Some(snap_content)) = snapshot::load(file) {
-            if let Ok(snap_comps) = crate::component::parse(&snap_content) {
-                if let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
+        if let Ok(Some(snap_content)) = snapshot::load(file)
+            && let Ok(snap_comps) = crate::component::parse(&snap_content)
+                && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
                     let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
-                    if let Ok(snap_entries) = crate::queue::parse(snap_body) {
-                        if crate::queue::detect_head_prompt_modified(
+                    if let Ok(snap_entries) = crate::queue::parse(snap_body)
+                        && crate::queue::detect_head_prompt_modified(
                             &snap_entries,
                             &activation.entries_after,
                         ) {
@@ -1433,9 +1428,9 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                             // Update snapshot
                             if let Ok(Some(snap2)) = snapshot::load(file) {
                                 let mut ns = snap2.clone();
-                                if has_auto {
-                                    if let Ok(sc) = crate::component::parse(&ns) {
-                                        if let Some(sq) =
+                                if has_auto
+                                    && let Ok(sc) = crate::component::parse(&ns)
+                                        && let Some(sq) =
                                             sc.iter().find(|c| c.name == "queue")
                                         {
                                             let raw = &ns[sq.open_start..sq.open_end];
@@ -1450,24 +1445,20 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                                                 ns = rebuilt;
                                             }
                                         }
-                                    }
-                                }
-                                if persisted_active {
-                                    if let Ok(m) = frontmatter::merge_fields(
+                                if persisted_active
+                                    && let Ok(m) = frontmatter::merge_fields(
                                         &ns,
                                         "queue_active: false",
                                     ) {
                                         ns = m;
                                     }
-                                }
-                                if ns != snap2 {
-                                    if let Err(e) = snapshot::save(file, &ns) {
+                                if ns != snap2
+                                    && let Err(e) = snapshot::save(file, &ns) {
                                         eprintln!(
                                             "[preflight] queue halt: snapshot sync warning: {}",
                                             e
                                         );
                                     }
-                                }
                             }
                             return Ok(QueueState {
                                 queue_prompts: vec![],
@@ -1478,10 +1469,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                                 queue_halted: Some("item_modified".into()),
                             });
                         }
-                    }
                 }
-            }
-        }
     }
 
     // Handle queue drain: if active but no prompts, clear queue_active and strip auto
@@ -1528,50 +1516,45 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             let mut new_snap = snap_content.clone();
 
             // Apply queue body change to snapshot
-            if activation.consumed_start_fence || need_strip_auto {
-                if let Ok(snap_comps) = crate::component::parse(&new_snap) {
-                    if let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
-                        let new_body = crate::queue::render(&activation.entries_after);
-                        new_snap = snap_q.replace_content(&new_snap, &new_body);
+            if (activation.consumed_start_fence || need_strip_auto)
+                && let Ok(snap_comps) = crate::component::parse(&new_snap)
+                && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+            {
+                let new_body = crate::queue::render(&activation.entries_after);
+                new_snap = snap_q.replace_content(&new_snap, &new_body);
 
-                        // Re-parse to get updated offsets for auto stripping
-                        if need_strip_auto {
-                            if let Ok(snap_comps2) = crate::component::parse(&new_snap) {
-                                if let Some(snap_q2) =
-                                    snap_comps2.iter().find(|c| c.name == "queue")
-                                {
-                                    let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
-                                    let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
-                                    if new_tag != raw_tag {
-                                        let mut rebuilt =
-                                            String::with_capacity(new_snap.len());
-                                        rebuilt.push_str(&new_snap[..snap_q2.open_start]);
-                                        rebuilt.push_str(&new_tag);
-                                        rebuilt.push_str(&new_snap[snap_q2.open_end..]);
-                                        new_snap = rebuilt;
-                                    }
-                                }
-                            }
-                        }
+                if need_strip_auto
+                    && let Ok(snap_comps2) = crate::component::parse(&new_snap)
+                    && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
+                {
+                    let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
+                    let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+                    if new_tag != raw_tag {
+                        let mut rebuilt = String::with_capacity(new_snap.len());
+                        rebuilt.push_str(&new_snap[..snap_q2.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&new_snap[snap_q2.open_end..]);
+                        new_snap = rebuilt;
                     }
                 }
             }
 
             // Apply frontmatter change to snapshot
-            if need_set_active {
-                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true") {
-                    new_snap = merged;
-                }
-            } else if need_clear_active {
-                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false") {
-                    new_snap = merged;
-                }
+            if need_set_active
+                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
+            {
+                new_snap = merged;
+            } else if need_clear_active
+                && let Ok(merged) =
+                    frontmatter::merge_fields(&new_snap, "queue_active: false")
+            {
+                new_snap = merged;
             }
 
-            if new_snap != snap_content {
-                if let Err(e) = snapshot::save(file, &new_snap) {
-                    eprintln!("[preflight] queue: snapshot sync warning: {}", e);
-                }
+            if new_snap != snap_content
+                && let Err(e) = snapshot::save(file, &new_snap)
+            {
+                eprintln!("[preflight] queue: snapshot sync warning: {}", e);
             }
         }
     }

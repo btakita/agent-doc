@@ -343,14 +343,12 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
             continue;
         }
         // Read and parse frontmatter
-        if let Ok(snap_content) = std::fs::read_to_string(&path) {
-            if let Ok((snap_fm, _)) = crate::frontmatter::parse(&snap_content) {
-                if snap_fm.session.as_deref() == Some(&session_uuid) {
+        if let Ok(snap_content) = std::fs::read_to_string(&path)
+            && let Ok((snap_fm, _)) = crate::frontmatter::parse(&snap_content)
+                && snap_fm.session.as_deref() == Some(&session_uuid) {
                     old_hash = Some(stem);
                     break;
                 }
-            }
-        }
     }
 
     let old_hash = match old_hash {
@@ -421,9 +419,9 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     let doc_path_str = doc.to_string_lossy().to_string();
     let canonical_str = canonical.to_string_lossy().to_string();
     let registry_path = crate::sessions::registry_path();
-    if registry_path.exists() {
-        if let Ok(_lock) = crate::sessions::RegistryLock::acquire(&registry_path) {
-            if let Ok(mut registry) = crate::sessions::load() {
+    if registry_path.exists()
+        && let Ok(_lock) = crate::sessions::RegistryLock::acquire(&registry_path)
+            && let Ok(mut registry) = crate::sessions::load() {
                 let mut updated = 0u32;
                 for (_sid, entry) in registry.iter_mut() {
                     // Match by session UUID — the file field may have the old path
@@ -440,8 +438,6 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
                     eprintln!("[init] updated {} session registry entry(ies)", updated);
                 }
             }
-        }
-    }
 
     eprintln!(
         "[init] rename migration complete — {} state file(s) migrated",

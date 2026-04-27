@@ -126,8 +126,8 @@ fn migrate_comment(comment: &str) -> String {
     }
 
     // Open tag: <!-- agent:pending ... -->
-    if let Some(rest) = comment.strip_prefix("<!-- agent:pending") {
-        if let Some(inner) = rest.strip_suffix("-->") {
+    if let Some(rest) = comment.strip_prefix("<!-- agent:pending")
+        && let Some(inner) = rest.strip_suffix("-->") {
             let trimmed = inner.trim();
             if trimmed.is_empty() {
                 return "<!-- agent:backlog -->".to_string();
@@ -146,7 +146,6 @@ fn migrate_comment(comment: &str) -> String {
             }
             return format!("<!-- agent:backlog {} -->", tokens.join(" "));
         }
-    }
 
     comment.to_string()
 }
@@ -192,13 +191,12 @@ fn walk_for_session_docs(dir: &Path, docs: &mut Vec<PathBuf>, depth: usize) -> R
             walk_for_session_docs(&path, docs, depth + 1)?;
         } else if name_str.ends_with(".md") {
             // Quick check: does this file contain agent:pending?
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("<!-- agent:pending")
-                    || content.contains("<!-- /agent:pending")
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && (content.contains("<!-- agent:pending")
+                    || content.contains("<!-- /agent:pending"))
                 {
                     docs.push(path);
                 }
-            }
         }
     }
 
@@ -245,7 +243,7 @@ fn compute_code_ranges(content: &str) -> Vec<CodeRange> {
                 .count();
             let after_open = abs_start + tick_count;
             // Find matching close
-            let close_pattern: String = std::iter::repeat('`').take(tick_count).collect();
+            let close_pattern: String = std::iter::repeat_n('`', tick_count).collect();
             if let Some(close_rel) = content[after_open..].find(&close_pattern) {
                 let abs_end = after_open + close_rel + tick_count;
                 ranges.push(CodeRange {

@@ -6,7 +6,37 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.14
 
-- **Code formatting cleanup.** Applied rustfmt across 8 source files (claude.rs, codex.rs, compact.rs, ffi.rs, preflight.rs, template.rs, write.rs, Cargo.lock). No functional changes — purely whitespace and line-wrapping normalization.
+- **Inline guard marker stripping.** `strip_guard_markers` now removes `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->` from within content lines (not just standalone lines where the entire trimmed line equals the marker). Trailing whitespace is trimmed after removal. Previously, inline markers like `**Bold text** <!-- no-pending-capture -->` survived into committed blobs.
+
+- **Rename `agent:pending` → `agent:backlog`.** The component is now canonically `<!-- agent:backlog -->` with `agent:pending` accepted as a backward-compatible alias. `patch=replace` attribute on backlog/pending tags is deprecated and auto-stripped. Added `agent:icebox` component to template scaffold for parked items.
+
+- **`agent-doc migrate` command.** New subcommand for deprecated component name/attribute migrations (e.g., `pending` → `backlog`).
+
+- **Per-harness model override.** Frontmatter `claude_model` and `codex_model` fields allow different model selections per harness, resolved through the existing tier/config precedence chain.
+
+- **Snapshot auto-migration on document rename.** State files (snapshots, baselines, captures, CRDT) now follow when a document path changes, preventing orphaned state after renames.
+
+- **Pane eviction guard.** `route.rs` now skips tmux pane eviction when an agent process is still active, preventing mid-response pane recycling.
+
+- **Route trigger path resolution.** Trigger paths are now resolved to absolute paths, preventing submodule CWD misrouting when the working directory differs from the document's repo root.
+
+- **Pending-capture heuristic fix.** Detects unconditional follow-up patterns that were false-positive-triggering the recommendation batch guard.
+
+- **Queue component (Phase 1–3).** Parser, data model, template scaffold, preflight integration, trigger resolution, consumption, dispatch, and halt detection for `<!-- agent:queue -->` orchestration.
+
+- **Prompt preset expansion in orchestrate.** Frontmatter `prompt_presets` are now resolved during orchestrate task expansion, and `--plan` flag previews expanded prompts without execution.
+
+- **Post-preflight planning command.** `agent-doc plan <FILE>` emits a structured planning record (prompt targets, repo actions, required commands, pending mutations, blockers, handoff) for the skill to execute against.
+
+- **Compound task steering runbook.** Bundled guidance for normalizing multi-clause directives into explicit sequential steps.
+
+- **Orchestrate synonym dispatch runbook.** Natural-language phrasing like "run these in order" maps to `orchestrate --mode sequential|parallel|dag`.
+
+- **Orphaned supervisor socket GC.** Stale supervisor sockets are cleaned up automatically.
+
+- **IPC snapshot integrity validation.** `start` now validates snapshot integrity before launching the IPC listener.
+
+- **Code formatting cleanup.** Applied rustfmt across 8 source files.
 
 ## 0.33.13
 

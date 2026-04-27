@@ -451,15 +451,15 @@ impl Iterator for StreamIterator {
                     self.done = true;
                     let stderr = self.collect_stderr();
                     let exit_status = self.child.wait().ok();
-                    if let Some(status) = exit_status {
-                        if !status.success() {
-                            let msg = if stderr.trim().is_empty() {
-                                format!("claude subprocess exited with {status}")
-                            } else {
-                                format!("claude subprocess exited with {status}: {}", stderr.trim())
-                            };
-                            return Some(Err(anyhow::anyhow!(msg)));
-                        }
+                    if let Some(status) = exit_status
+                        && !status.success()
+                    {
+                        let msg = if stderr.trim().is_empty() {
+                            format!("claude subprocess exited with {status}")
+                        } else {
+                            format!("claude subprocess exited with {status}: {}", stderr.trim())
+                        };
+                        return Some(Err(anyhow::anyhow!(msg)));
                     }
                     if !stderr.trim().is_empty() {
                         eprintln!("[agent] claude subprocess stderr: {}", stderr.trim());

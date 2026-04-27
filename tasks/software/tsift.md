@@ -78,7 +78,7 @@ Both agent-loop and the tsift repo itself already have `.tsift/` in their `.giti
 **Tests:** +3 → 239 total. Covers: create new `.gitignore`, append to existing, skip when already present.
 
 **Commit:** `btakita/tsift@60ab0d3`. Pushed. Submodule pointer updated.
-<!-- agent:boundary:c31bee72 -->
+<!-- agent:boundary:8e2a9bea -->
 <!-- /agent:exchange -->
 
 <!--
@@ -87,7 +87,6 @@ Both agent-loop and the tsift repo itself already have `.tsift/` in their `.giti
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#giti] [recommended] tsift init should add .tsift/ to .gitignore (index + summaries are local artifacts)
 <!-- /agent:backlog -->
 
 <!--

@@ -448,7 +448,24 @@ RTK output filtering is now active for verbose tsift commands.
 **Hook** (`~/.claude/hooks/tsift-rewrite.sh` v2): phase 2 routes `tsift {communities,explain,graph,index,search}` → `rtk tsift ...` when RTK is installed. Non-verbose commands (`status`, `init`, `route`, `sql`) pass through unchanged. Handles `--compact` and `--pretty` flag variants.
 
 **Spec:** SPEC.md + CLAUDE.md updated with RTK integration docs. Tests: 257 passed. Commit: `btakita/tsift@951a28a`. Pushed. Submodule pointer updated.
-<!-- agent:boundary:48c30812 -->
+
+❯ Add **Reduce semantic content** and **Shorter field names in JSON** into the backlog.
+❯ If **Reduce semantic content** is safe to do, i.e. not lossy...do **Reduce semantic content**. spec-test-build-install-commit-push
+### Re: reduce semantic content + backlog — opus-4-6
+
+Added both to the backlog. "Reduce semantic content" is safe and implemented; "Shorter field names in JSON" is recommended but deferred.
+
+**Implemented (safe, not lossy):**
+- `--compact communities`: dropped per-community Q scores. Overall Q stays in header. Agents use communities for code grouping, not modularity quality assessment. Saves ~3 tokens × N communities per call.
+- `--compact explain`: dropped language annotation from symbol defs — `(function, rust)` → `(function)`. File extension already conveys language. Saves ~3 tokens per definition.
+- Full data always available via `--json` for any agent that needs it.
+
+**Why these are safe:** both changes only affect `--compact` mode, which is an explicit opt-in for terse output. The non-compact format retains all fields. Agents using `--json` are unaffected.
+
+**What's NOT safe to reduce further:** #paths (path prefix stripping) and #caps (output line limits) are the remaining high-impact reductions. Both require more design work — #paths needs project-root detection, #caps needs per-command default limits. They stay as separate backlog items.
+
+**Tests:** 257 passed. **Commit:** `btakita/tsift@5b050af`. Pushed. Submodule pointer updated.
+<!-- agent:boundary:dfb68d19 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -459,6 +476,8 @@ do **Reduce semantic content**. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [x] [#semred] Reduce semantic content — compact mode drops agent-irrelevant data
+- [ ] [#bags] [recommended] Shorter field names in JSON — --terse mode with schema header
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions

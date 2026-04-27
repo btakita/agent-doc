@@ -936,7 +936,25 @@ So claude gets `--dangerously-skip-permissions` but no `--model` — it defaults
 ```yaml
 claude_args: --dangerously-skip-permissions --model claude-opus-4-6
 ```
-<!-- agent:boundary:30512c44 -->
+
+❯ Can we have the supervisor start claude code with the arguments?
+### Re: supervisor model injection from frontmatter — opus-4-6
+
+Done. The supervisor now injects `--model` from `claude_model` / `codex_model` / `model` frontmatter when the freeform args (`claude_args`, `agent_args`, etc.) don't already contain `--model`.
+
+**Change** (`start.rs:655–664`): after building `base_args` from `resolve_agent_args`, checks if `--model` is present. If not, resolves the harness-specific model via `fm.resolve_harness_model()` (precedence: `claude_model` > `model` for Claude, `codex_model` > `model` for Codex) and pushes `["--model", value]`.
+
+**Tests added** (5 new tests in `start::tests`):
+- `model_injected_from_claude_model_frontmatter` — `claude_model: claude-opus-4-6` → `--model claude-opus-4-6` injected alongside `--dangerously-skip-permissions`
+- `model_not_injected_when_already_in_claude_args` — explicit `--model sonnet` in `claude_args` takes precedence
+- `model_injected_from_codex_model_frontmatter` — `codex_model: o3-pro` → `--model o3-pro`
+- `model_injected_from_generic_model_when_no_harness_specific` — falls back to `model:` field
+- `no_model_injected_when_none_in_frontmatter` — no model fields → no injection
+
+All 23 start tests pass. Both binaries rebuilt (`cargo install` + `cargo build --release`).
+
+To verify: restart the tsift.md pane — it should now launch with Opus instead of Sonnet.
+<!-- agent:boundary:fc1c1a4b -->
 <!-- /agent:exchange -->
 
 <!--

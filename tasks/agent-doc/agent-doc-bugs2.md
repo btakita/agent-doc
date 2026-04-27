@@ -431,7 +431,7 @@ Verification:
 
 Commit / push:
 - `src/agent-doc`: `4372093` (`fix: keep boundary-only preflight cycle-free`)
-<!-- agent:boundary:9173ffef -->
+<!-- agent:boundary:265e282f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -440,8 +440,6 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#head7] Fix post-commit (HEAD) response-heading drift from being treated as a fresh user-visible document cycle in template docs; reuse the agent-owned drift-repair path before a stale preflight_started lock can escape. Evidence: cycle-1777327057314 in .agent-doc/logs/ops.log.
-- [x] [#pflock1] Add regression coverage for the exact #pcap shape on tasks/agent-doc/agent-doc-bugs2.md: successful commit at snap_len=30243, then a 7-byte local heading drift (file_len=30250) must self-heal without session-check ever reporting an open preflight_started cycle.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`

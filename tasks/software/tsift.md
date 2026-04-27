@@ -296,7 +296,32 @@ So the root cause is narrower now:
 **Verification:**
 - `cargo test` passed: 297 unit tests + 6 integration tests.
 - `make check` still fails on the pre-existing clippy debt in `src/main.rs`: `clippy::collapsible-if` around lines 1043-1046 plus the existing `clippy::too_many_arguments` findings on command helpers. I did not change those warning surfaces in this cycle.
-<!-- agent:boundary:108da4c2 -->
+
+❯ The current turn on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md got the following error. Why?
+```
+• Ran tsift search sdig2arch
+  └ Error: tsift search timed out after 30s (strategy: lexical). The index may be stale — run `tsift index .` to
+    rebuild, or use `--timeout 0` to disable the timeout.
+```
+### Re: session-share timeout — gpt-5
+
+That specific failure in `src/session-share` is a stale-index timeout, not the root-repo lock bug.
+
+I checked it directly in `/home/brian/work/btakita/agent-loop/src/session-share`:
+
+- `tsift status` succeeds there and reports `index: stale (last indexed 14h ago, 700 files tracked, 51 stale)`.
+- Re-running `tsift search sdig2arch --strategy lexical --timeout 5` in that submodule reproduces the same timeout message.
+- The timeout text comes from `run_search_with_timeout()` in `src/tsift/src/main.rs`: the sift engine call runs in a worker thread, and if it does not return before the timeout, tsift emits the generic `The index may be stale` guidance.
+
+So the immediate reason for that turn is: lexical sift search in `session-share` did not finish within the timeout window, and the local `session-share/.tsift/index.db` is stale enough that the stale-index explanation is credible.
+
+That is different from the current root `agent-loop` failure mode. At the repo root, `tsift status` / `tsift search` are now hitting `database is locked`, and there is an active `tsift index .` plus `.tsift/index.db-journal`, which is the separate #vxtz investigation.
+
+So, short version:
+
+- `src/session-share` timeout: stale local index; rebuild that submodule with `tsift index .` there.
+- root `agent-loop` lock/journal issue: separate writer/locking problem still under #vxtz.
+<!-- agent:boundary:312959ae -->
 <!-- /agent:exchange -->
 
 <!--

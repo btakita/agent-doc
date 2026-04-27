@@ -216,12 +216,38 @@ Commit / push:
 Scope note:
 - This closes the remaining `#nostate` gap around silent missed-start / no-new-cycle states for prompt-bearing document edits.
 - The fix path is binary-owned: either `session-check`/Stop recovers deterministically, or the turn fails closed instead of exiting with an out-of-document answer.
-<!-- agent:boundary:78ec17cb -->
+
+❯ do [#] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
+
+❯ spec-test-build-install-commit-push
+### Re: do `#headdrift` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `400a540` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- JetBrains post-commit reposition now prefers the just-committed disk document when an unsaved editor buffer only differs by agent-owned `### Re:` heading attribution and/or boundary churn, preventing stale `codex (HEAD)` text from being written back over the committed model line.
+- `git::commit` now treats response-heading-attribution drift as repairable post-commit churn and restores clean `HEAD` instead of leaving a repeated rerun loop.
+- Added JetBrains regression coverage for the prefer-disk decision and Rust closeout coverage for historical heading-attribution repair.
+- Updated `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the stronger post-commit editor cleanup invariant.
+
+Verification:
+- `cargo test`
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `400a540` (`fix: prevent post-commit response heading drift`)
+
+Scope note:
+- `src/git.rs` already had same-file local formatting churn in this branch; the fix commit includes the targeted repair plus those same-file formatting deltas.
+<!-- agent:boundary:72ec767a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#we9v] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
+- [x] [#we9v] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
+- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 - [ ] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
 <!-- /agent:pending -->

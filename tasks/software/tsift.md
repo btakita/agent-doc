@@ -383,7 +383,7 @@ That scope was:
 - opt-in `tsift search --autoindex` for unhooked sessions
 
 The remaining open item is `#vxtz`, which is separate repo-root indexing/lock behavior, not an unfinished part of `#stal`.
-<!-- agent:boundary:9bb648be -->
+<!-- agent:boundary:540ee5eb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -392,7 +392,6 @@ The remaining open item is `#vxtz`, which is separate repo-root indexing/lock be
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#stal] [recommended] Add built-in stale precheck and opt-in auto-reindex path for unhooked tsift sessions
 - [ ] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 

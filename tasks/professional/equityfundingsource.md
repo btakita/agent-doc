@@ -395,12 +395,27 @@ I manually corrected the four merged-speaker spans in `mail/contacts/robert-wald
 Yes, this should go into corky, but as a deterministic recovery path, not a vague post-hoc AI fix. The failure here is specific: a bad 30-minute span inside a 90-minute mono call is still only about 33% of total duration, so the current `MAX_SPAN_RATIO = 0.6` gate can let a clearly broken diarization pass. The next corky iteration should do three things: keep diarization confidence separate from whisper confidence, tighten or localize the bad-span detector for long mono calls, and add a repair mode that forces smaller-window re-diarization on flagged spans before any optional LLM assistance.
 
 If you want, the next step is to implement that in `src/corky` and rerun this call through the binary so the repair lives in the tool instead of only in this transcript.
-<!-- agent:boundary:61f92e42 -->
+
+❯ Please look at the Cloudflare account used to serve https://equityfundingsource.pages.dev/.
+❯ Make sure btak.dev@gmail.com has full permissions to develop the app.
+### Re: Cloudflare account access — gpt-5
+
+I checked the live Cloudflare account behind `equityfundingsource.pages.dev` directly.
+
+- The Pages project `equityfundingsource` is in `Brian.takita@gmail.com's Account` (`1e7e194ff8da4ad9e40ce041aea84f76`), not the Monsterrodholder account.
+- `btak.dev@gmail.com` is already an accepted member on that account, but its current role is only `Domain Administrator`.
+- That role is not enough for full development of this app. Cloudflare’s current role docs describe `Domain Administrator` as full access to domains but only read access to account-wide Worker resources. For this app, the least-privilege developer role is `Workers Platform Admin`, which covers Workers, Pages, and the usual developer-platform resources including R2.
+
+I attempted to promote `btak.dev@gmail.com` programmatically, but every Cloudflare credential available locally can only read membership state. Cloudflare rejected the member-update call with an authentication error, so I could verify the current access but could not change it from this session.
+
+To finish this, a Cloudflare super admin on the Brian account needs to update `btak.dev@gmail.com` to at least `Workers Platform Admin`. If you want literal full account control instead of full app-development access, assign `Super Administrator - All Privileges`.
+<!-- agent:boundary:908c5e6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (retain Domain Administrator if domain management is still needed; use Super Administrator only if full account control is intended)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

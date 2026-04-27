@@ -107,7 +107,30 @@ Implemented `--absolute` global flag. All output paths are now project-relative 
 - Threaded through `cmd_graph`, `cmd_explain`, `cmd_search`, `cmd_index` via `absolute` parameter
 
 **Commit:** `btakita/tsift@357af45`. 268 tests pass (7 new). Built + installed.
-<!-- agent:boundary:218b1821 -->
+
+❯ do #caps. #spec-test-build-install-commit-push
+### Re: do #caps — opus-4-6
+
+Implemented `--limit N` flag for `graph`, `communities`, and `explain` commands.
+
+**What it does:**
+- `graph --limit N` (default 20): caps edges per direction (callers/callees separately)
+- `communities --limit N` (default 10): caps number of communities displayed
+- `explain --limit N` (default 15): caps callers and callees lists each
+- `--limit 0` disables the cap (show everything)
+- Short flag: `-l N`
+
+**Truncation indicators:**
+- Text output: `(+N more)` suffix with hint to use `--limit 0`
+- JSON output: `truncated: true` boolean + `total` / `callers_total` / `callees_total` counts
+
+**Implementation:**
+- Truncation applied after query, before display — no database changes
+- JSON combined mode (`graph` with both directions) includes per-direction truncation fields
+- Communities truncation applied after `min_size` filtering
+
+**Commit:** `btakita/tsift@e72e982`. 277 tests pass (9 new limit tests). Built + installed.
+<!-- agent:boundary:b854c378 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -116,7 +139,7 @@ Implemented `--absolute` global flag. All output paths are now project-relative 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
+- [x] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)

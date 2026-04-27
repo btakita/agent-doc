@@ -244,7 +244,12 @@ fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult>
     }
 
     let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
-    if signal.estimated_count < 2 || signal.confidence < 0.5 {
+    let skip = match signal.estimated_count {
+        0 => true,
+        1 => signal.confidence < 0.7,
+        _ => signal.confidence < 0.5,
+    };
+    if skip {
         return Ok(PendingCaptureGuardResult::None);
     }
 
@@ -899,6 +904,22 @@ mod tests {
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_warns_on_unconditional_followup_remaining_work() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            None,
+            "### Re: transfer status — opus-4-6\n\nCompleted 5 of 23 diagrams. 18 remaining to transfer.\n\nOptions to continue:\n1. Retry with rate limiting\n2. Use manual upload\n3. Wait for quota reset\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(!report.warnings.is_empty());
+        assert!(report.warnings[0].contains("recommendation-like items"));
     }
 
     #[test]

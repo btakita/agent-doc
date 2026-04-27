@@ -6,6 +6,7 @@ pub enum PatternKind {
     NumberedActionList,
     RecommendationHeader,
     ImperativeAfterRecommend,
+    UnconditionalFollowUp,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +51,7 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
     let mut imperative_after_recommend = 0usize;
     let mut saw_header = false;
     let mut recommend_window = 0usize;
+    let mut followup_count = 0usize;
 
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
@@ -76,10 +78,18 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
             imperative_after_recommend += 1;
         }
 
+        if has_quantified_remaining_work(trimmed) {
+            followup_count += 1;
+        }
+
         recommend_window = recommend_window.saturating_sub(1);
     }
 
-    if priority_count == 0 && numbered_count == 0 && imperative_after_recommend == 0 && !saw_header
+    if priority_count == 0
+        && numbered_count == 0
+        && imperative_after_recommend == 0
+        && followup_count == 0
+        && !saw_header
     {
         return RecommendationSignal::none();
     }
@@ -107,8 +117,16 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
             0.3
         });
     }
+    if followup_count > 0 {
+        patterns.push(PatternKind::UnconditionalFollowUp);
+        confidence = confidence.max(if followup_count >= 2 { 0.85 } else { 0.7 });
+    }
 
-    if saw_header && (priority_count >= 2 || numbered_count >= 2 || imperative_after_recommend >= 2)
+    if saw_header
+        && (priority_count >= 2
+            || numbered_count >= 2
+            || imperative_after_recommend >= 2
+            || followup_count >= 1)
     {
         confidence = confidence.max(0.85);
     }
@@ -119,10 +137,26 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
     RecommendationSignal {
         estimated_count: priority_count
             .max(numbered_count)
-            .max(imperative_after_recommend),
+            .max(imperative_after_recommend)
+            .max(followup_count),
         patterns_matched: patterns,
         confidence: confidence.min(1.0),
     }
+}
+
+fn has_quantified_remaining_work(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let keywords = [" remaining", " left to ", " outstanding", " unfinished"];
+    for kw in keywords {
+        if let Some(pos) = lower.find(kw) {
+            let start = pos.saturating_sub(30);
+            let prefix = &lower[start..pos];
+            if prefix.chars().any(|c| c.is_ascii_digit() && c != '0') {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn is_priority_label(line: &str) -> bool {
@@ -313,5 +347,71 @@ mod tests {
             "Options:\n1. Option A keeps the current behavior\n2. Option B defers the change\nChoose one.\n",
         );
         assert!(signal.estimated_count < 2 || signal.confidence < 0.5);
+    }
+
+    #[test]
+    fn unconditional_followup_with_quantified_remaining_work() {
+        let signal = detect_uncaptured_recommendations(
+            "Completed 5 of 23 diagrams. 18 remaining to transfer.\n\nOptions to continue:\n1. Retry with rate limiting\n2. Use manual upload\n3. Wait for quota reset\n",
+        );
+        assert!(signal.estimated_count >= 1);
+        assert!(signal.confidence >= 0.7);
+        assert!(
+            signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn unconditional_followup_standalone_remaining() {
+        let signal = detect_uncaptured_recommendations(
+            "Transfer hit rate limit after 5 diagrams. 18 remaining items need processing.\n",
+        );
+        assert!(signal.estimated_count >= 1);
+        assert!(signal.confidence >= 0.7);
+        assert!(
+            signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn zero_remaining_does_not_trigger_followup() {
+        let signal = detect_uncaptured_recommendations(
+            "All diagrams transferred. 0 remaining.\n",
+        );
+        assert!(
+            !signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn quantified_left_to_triggers_followup() {
+        let signal = detect_uncaptured_recommendations(
+            "Processed 10 pages. 15 left to migrate before cutover.\n",
+        );
+        assert!(signal.estimated_count >= 1);
+        assert!(signal.confidence >= 0.7);
+        assert!(
+            signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn options_without_remaining_work_no_followup() {
+        let signal = detect_uncaptured_recommendations(
+            "Here are your options:\n- Option A: keep current approach\n- Option B: switch to new API\n",
+        );
+        assert!(
+            !signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
     }
 }

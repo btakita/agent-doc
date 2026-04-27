@@ -828,7 +828,23 @@ Root cause: `route.rs` sends trigger commands to tmux panes using the caller's r
 **Tests:** 4 new tests — `resolve_absolute_file_path_returns_absolute_for_existing_relative`, `resolve_absolute_file_path_preserves_absolute_input`, `resolve_absolute_file_path_returns_relative_when_not_found`, `run_with_tmux_resolves_file_path_to_absolute`.
 
 Committed as `f846940` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:9b983b80 -->
+
+❯ do #4wa1. #spec-test-build-install-commit-push
+### Re: do #4wa1 — opus-4-6
+
+Root cause: `detect_uncaptured_recommendations` in `heuristics.rs` only recognized numbered action lists, priority labels, recommendation headers, and imperative-after-recommend patterns. When a response identifies quantified remaining work (e.g., "18 remaining diagrams") but frames continuation as mutually exclusive options, none of those patterns fire — the options don't start with action verbs, and the underlying task isn't a "recommendation."
+
+**Fix:** Added `UnconditionalFollowUp` pattern to `PatternKind` that detects quantified remaining work — lines matching `N remaining`, `N left to`, `N outstanding`, `N unfinished` where N > 0. Also adjusted the guard threshold in `session_check.rs` from a flat `count >= 2 AND confidence >= 0.5` to a tiered check: count=1 requires confidence >= 0.7 (only reachable via the new `UnconditionalFollowUp` pattern), while count >= 2 keeps the existing 0.5 threshold. Existing patterns (PriorityLabel, NumberedActionList, etc.) max at 0.4/0.35/0.3 for single items, so they can't accidentally trigger at count=1.
+
+**Changes:**
+- **`heuristics.rs`** — added `UnconditionalFollowUp` variant and `has_quantified_remaining_work()` scanner; integrated into `detect_uncaptured_recommendations` with confidence 0.7 (single) / 0.85 (multiple); boosted header+followup combo to 0.85
+- **`session_check.rs`** — replaced flat threshold with tiered match: count=0→skip, count=1→need confidence>=0.7, count>=2→need confidence>=0.5
+- **`SPEC.md`** — added invariant: pending-capture heuristic must detect unconditional follow-up even when framed as options
+
+**Tests:** 5 new heuristic tests (`unconditional_followup_with_quantified_remaining_work`, `unconditional_followup_standalone_remaining`, `zero_remaining_does_not_trigger_followup`, `quantified_left_to_triggers_followup`, `options_without_remaining_work_no_followup`) + 1 new session_check integration test (`session_check_warns_on_unconditional_followup_remaining_work`). All 11 heuristic + 25 session_check tests pass; full suite clean (1 pre-existing unrelated failure in codex hook artifact test).
+
+Committed as `ea98fbc` on `20260422/codex-agent-backend`, pushed.
+<!-- agent:boundary:7329a396 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -837,7 +853,7 @@ Committed as `f846940` on `20260422/codex-agent-backend`, pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
+- [x] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

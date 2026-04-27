@@ -424,7 +424,22 @@ The patent covers the intelligence that reads and writes through the infrastruct
 #### The bottom line for Rob
 
 Fully proprietary means Dreamable builds everything, maintains everything, and competes on features with a 6-person team against well-funded competitors. Open infrastructure + proprietary intelligence means Dreamable defines the category, shares maintenance costs, eliminates vendor lock-in objections in enterprise sales, and focuses 100% of engineering on the revenue-generating layer that the patent protects. The ecosystem does the distribution. Sidekick does the thinking.
-<!-- agent:boundary:526dd7b8 -->
+
+❯ Please write the analysis into a directory with sidekick-agent-doc-integration.md and plan-sidekick-backend.md. Rename plan-sidekick-backend.md to agent-doc-realtime.md or another more appropriate name.
+### Re: reorganize analysis documents — opus-4-6
+
+Done. Created `tasks/agent-doc/sidekick/` with all three documents co-located:
+
+| File | Content |
+|------|---------|
+| [agent-doc-platform.md](sidekick/agent-doc-platform.md) | Vendor-independent daemon extensions plan (renamed from `plan-sidekick-backend.md`) |
+| [sidekick-agent-doc-integration.md](sidekick/sidekick-agent-doc-integration.md) | How Sidekick registers as an agent-doc plugin, feature-to-component mapping |
+| [business-case-open-platform.md](sidekick/business-case-open-platform.md) | Business case for Robert Ross — open infrastructure + proprietary intelligence model |
+
+The business case is a standalone document extracted from the exchange response, with a `Related documents` section linking to its two companion files. Cross-references between the three are updated.
+
+Naming choice: `agent-doc-platform.md` rather than `agent-doc-realtime.md` because the plan covers more than real-time — virtual documents, plugin API, multi-tool export, tsift integration. "Platform" captures agent-doc evolving from a CLI tool into an extensible platform with a plugin ecosystem.
+<!-- agent:boundary:e479287f -->
 <!-- /agent:exchange -->
 
 <!--

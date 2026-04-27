@@ -417,7 +417,7 @@ So this was not a tsift-status ambiguity. It was an `agent-doc` closeout gap: th
 I treated your `#agent-doc-bug` note as actionable and recorded that follow-up in `tasks/agent-doc/agent-doc-bugs2.md` as `#pdone1`, with plan file `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`.
 
 I am closing `#vxtz` in this cycle via the binary-owned pending mutation path now.
-<!-- agent:boundary:20b25412 -->
+<!-- agent:boundary:74e3f596 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -426,7 +426,6 @@ I am closing `#vxtz` in this cycle via the binary-owned pending mutation path no
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 
 <!--

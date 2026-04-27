@@ -264,22 +264,42 @@ Current state:
 - The previous locked DB is preserved in `.tsift/recovery-20260427-180342/` if we need to inspect it later.
 
 The right follow-up remains #vxtz: investigate why `tsift index .` is entering `D` state and leaving a journal file on this host. That is the root cause behind both the earlier lock error and the failed rebuild.
-<!-- agent:boundary:af8998f8 -->
+
+❯ do #vxtz
+### Re: do #vxtz — gpt-5
+
+I investigated #vxtz in the code, not just the host state, and there were two distinct issues.
+
+First, several read/query paths were still opening the index with writer-capable SQLite handles. I fixed that in `src/tsift/src/main.rs`:
+
+- `search` now uses `IndexDb::open_read_only()` in both the default and `--scope` symbol-query paths.
+- `graph` and `communities` now go through the shared read-only `open_index_db()` path, matching `path` / `explain`.
+- Added regression tests that hold a write lock open and assert `cmd_search` and `cmd_graph` still succeed.
+
+Second, the writer side was trusting `PRAGMA journal_mode=WAL` without verifying that SQLite actually accepted it. I tightened both writable DB opens:
+
+- `src/tsift/src/index.rs` now queries `PRAGMA journal_mode` after setup and fails closed unless the mode is actually `wal`.
+- `src/tsift/src/summarize.rs` now does the same for `summaries.db`.
+
+That matters because the live root DB is still reproducing the bad state:
+
+- `cargo run -- sql /home/brian/work/btakita/agent-loop/.tsift/index.db --query "SELECT COUNT(*) AS count FROM symbols"` still returns `database is locked`.
+- `cargo run -- search pending_capture --strategy lexical --timeout 5 --path /home/brian/work/btakita/agent-loop` still returns `database is locked`.
+- `tsift status` still succeeds because it only needs `file_state` / staleness checks, while the locked reads are hitting the symbol/call-edge side of the DB.
+- The presence of `.tsift/index.db-journal` instead of a WAL file is the key signal: the currently running index writer is still in rollback-journal mode, so concurrent readers can block even with read-only opens.
+
+So the root cause is narrower now:
+
+- Part of the earlier lock behavior was a real tsift bug: some query commands were still opening write-capable handles.
+- The deeper remaining problem is that the active writer on this host is not actually running in WAL mode, and tsift previously allowed that to happen silently. New writers will now fail fast instead of partially indexing and leaving a misleadingly "configured" but lock-prone DB behind.
+
+**Verification:**
+- `cargo test` passed: 297 unit tests + 6 integration tests.
+- `make check` still fails on the pre-existing clippy debt in `src/main.rs`: `clippy::collapsible-if` around lines 1043-1046 plus the existing `clippy::too_many_arguments` findings on command helpers. I did not change those warning surfaces in this cycle.
+<!-- agent:boundary:108da4c2 -->
 <!-- /agent:exchange -->
 
 <!--
-If index.db is locked, please attempt to recover. Should we use a local file db that does not lock?
-This happened in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md:
-```
-• Explored
-  └ Search pending_capture|pending capture|backlog-capture|#pcap|recommended in agent-doc
-
-• Ran tsift search pending_capture
-  └ Error: database is locked
-
-    Caused by:
-        Error code 5: The database file is locked
-```
 -->
 
 ## Pending / Not Built

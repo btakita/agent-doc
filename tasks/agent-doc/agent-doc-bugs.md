@@ -844,7 +844,7 @@ Root cause: `detect_uncaptured_recommendations` in `heuristics.rs` only recogniz
 **Tests:** 5 new heuristic tests (`unconditional_followup_with_quantified_remaining_work`, `unconditional_followup_standalone_remaining`, `zero_remaining_does_not_trigger_followup`, `quantified_left_to_triggers_followup`, `options_without_remaining_work_no_followup`) + 1 new session_check integration test (`session_check_warns_on_unconditional_followup_remaining_work`). All 11 heuristic + 25 session_check tests pass; full suite clean (1 pre-existing unrelated failure in codex hook artifact test).
 
 Committed as `ea98fbc` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:7329a396 -->
+<!-- agent:boundary:86b37bc0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -853,7 +853,6 @@ Committed as `ea98fbc` on `20260422/codex-agent-backend`, pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

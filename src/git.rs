@@ -59,7 +59,8 @@
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
 //! - strip_guard_markers_removes_standalone_lines: lines containing only `<!-- no-pending-capture -->` or `<!-- no-pending-done-guard -->` → removed; surrounding content preserved
-//! - strip_guard_markers_preserves_inline_content: guard markers embedded in non-standalone lines → preserved verbatim
+//! - strip_guard_markers_strips_inline_content: guard markers embedded in content lines → marker text removed, trailing whitespace trimmed
+//! - strip_guard_markers_strips_trailing_on_content_line: guard marker appended to end of content line → marker removed, content preserved
 //! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob and post-commit cleanup leaves the working tree/snapshot clean
 //! - commit_retries_full_transaction_when_stage_hits_index_lock: `update-index` index.lock contention retries the full stage+commit transaction until the lock clears
 //! - commit_serializes_closeout_per_git_root: two different docs in the same repo contend on one repo-scoped lock and both close out cleanly
@@ -1482,13 +1483,21 @@ fn strip_guard_markers(content: &str) -> String {
         "<!-- no-pending-capture -->",
         "<!-- no-pending-done-guard -->",
     ];
-    let mut result_lines: Vec<&str> = Vec::new();
+    let mut result_lines: Vec<String> = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
         if MARKERS.contains(&trimmed) {
             continue;
         }
-        result_lines.push(line);
+        if MARKERS.iter().any(|m| line.contains(m)) {
+            let mut cleaned = line.to_string();
+            for marker in MARKERS {
+                cleaned = cleaned.replace(marker, "");
+            }
+            result_lines.push(cleaned.trim_end().to_string());
+        } else {
+            result_lines.push(line.to_string());
+        }
     }
     let result = result_lines.join("\n");
     if content.ends_with('\n') {
@@ -1953,12 +1962,22 @@ mod tests {
     }
 
     #[test]
-    fn strip_guard_markers_preserves_inline_content() {
+    fn strip_guard_markers_strips_inline_content() {
         let input = "Text with <!-- no-pending-capture --> inline.\nNormal line.\n";
         let result = strip_guard_markers(input);
         assert_eq!(
-            result, input,
-            "inline guard markers should be preserved:\n{result}"
+            result, "Text with  inline.\nNormal line.\n",
+            "inline guard markers should be stripped:\n{result}"
+        );
+    }
+
+    #[test]
+    fn strip_guard_markers_strips_trailing_on_content_line() {
+        let input = "**All 39 variable products now have defaults set.** <!-- no-pending-capture -->\nNext line.\n";
+        let result = strip_guard_markers(input);
+        assert_eq!(
+            result, "**All 39 variable products now have defaults set.**\nNext line.\n",
+            "trailing guard marker should be stripped with trailing whitespace trimmed:\n{result}"
         );
     }
 

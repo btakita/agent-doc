@@ -413,7 +413,7 @@ So the concrete root cause is: agent-owned post-commit heading drift still manag
 I added the next actionable backlog items for:
 - `#head7` — stop ` (HEAD)` heading churn from opening a new visible cycle.
 - `#pflock1` — add a regression for this exact `#pcap` / 7-byte-drift / stale-preflight sequence.
-<!-- agent:boundary:c8cb37df -->
+<!-- agent:boundary:c95af88a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -428,8 +428,8 @@ Why did the last agent-doc turn on this document have this tool issue? Please ad
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#head7] Fix post-commit  response-heading drift from being treated as a fresh user-visible document cycle in template docs; reuse the agent-owned drift-repair path before a stale  lock can escape. Evidence:  in .
-- [ ] [#pflock1] Add regression coverage for the exact  shape on : successful commit at , then a 7-byte local heading drift () must self-heal without  ever reporting an open  cycle.
+- [ ] [#head7] Fix post-commit (HEAD) response-heading drift from being treated as a fresh user-visible document cycle in template docs; reuse the agent-owned drift-repair path before a stale preflight_started lock can escape. Evidence: cycle-1777327057314 in .agent-doc/logs/ops.log.
+- [ ] [#pflock1] Add regression coverage for the exact #pcap shape on tasks/agent-doc/agent-doc-bugs2.md: successful commit at snap_len=30243, then a 7-byte local heading drift (file_len=30250) must self-heal without session-check ever reporting an open preflight_started cycle.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

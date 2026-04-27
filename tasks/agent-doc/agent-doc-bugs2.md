@@ -165,13 +165,12 @@ Commit / push:
 Scope note:
 - This closes the stranded `response_captured` path behind `#pendops` for list-shaped backlog patches.
 - Unsupported pending/backlog patch shapes still fail closed before capture.
-<!-- agent:boundary:8e9d7929 -->
+<!-- agent:boundary:6bcd9924 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
-- [x] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
+- [ ] [#n0sm] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

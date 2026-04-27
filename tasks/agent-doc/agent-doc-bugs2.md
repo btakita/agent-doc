@@ -241,13 +241,36 @@ Commit / push:
 
 Scope note:
 - `src/git.rs` already had same-file local formatting churn in this branch; the fix commit includes the targeted repair plus those same-file formatting deltas.
-<!-- agent:boundary:f35128dc -->
+
+❯ do #p7md. spec-test-build-install-commit-push
+### Re: do `#p7md` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `53bfbec` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- live-pane `route` dispatches now fail closed when a document already has unresolved prompt-bearing drift on top of a closed cycle but the routed trigger never starts a newer per-document cycle
+- the same route path now logs `route_cycle_start_acknowledged` / `route_cycle_start_missing` so the failure is explicit instead of silently re-entering the stale pane
+- fresh-start acknowledgment behavior stays unchanged; this extends the same contract to reroutes into already-running panes
+- added route coverage for the two live-pane shapes: trigger accepted but no new cycle, and trigger accepted with a real cycle ack
+- updated `SPEC.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the stronger reroute invariant
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `53bfbec` (`fix: fail closed on unacked live reroutes`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#p7md` files.
+<!-- agent:boundary:501cac7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#p7md] [recommended] Fix prompt-bearing session diffs that never get posed into a new `agent-doc` turn after the prior response is already committed in `HEAD`; see `tasks/agent-doc/plan-unposed-session-diff-turn.md`
-- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
+- [x] [#p7md] [recommended] Fix prompt-bearing session diffs that never get posed into a new `agent-doc` turn after the prior response is already committed in `HEAD`; see `tasks/agent-doc/plan-unposed-session-diff-turn.md`
 - [ ] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
+- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:pending -->

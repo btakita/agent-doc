@@ -409,7 +409,22 @@ Not useful here. The consumers of tsift's `--json` output are LLM agents (Claude
 The real compression lever for agent consumption is what we're already doing: compact JSON (done), plus the remaining backlog items — path prefix stripping (#paths) and output caps (#caps) — which reduce the *semantic* content the agent has to ingest, not just the encoding overhead.
 
 Binary protocols make sense for machine-to-machine pipelines (e.g., tsift feeding data to graphify's ingest). If that becomes a use case, `rmp-serde` (msgpack for Rust) is the natural choice — it's a drop-in `Serialize`/`Deserialize` backend, same as `serde_json`. But for agent-facing output, text JSON is the right format.
-<!-- agent:boundary:7b23738c -->
+
+❯ I heard that translating to Chinese saves tokens. Would there be too much drift for this strategy? Is there another way to compress english to use less tokens?
+### Re: Chinese tokens and English compression — opus-4-6
+
+The Chinese token savings are real but don't apply to tsift output. CJK characters pack more meaning per token in BPE tokenizers — a Chinese sentence can use 30-50% fewer tokens than its English equivalent. But tsift output is mostly **identifiers** (file paths, symbol names, JSON keys) that can't be translated, plus short structural labels. The translatable prose is a tiny fraction of the output. The drift risk is high and the savings negligible.
+
+More practical compression strategies for English tokens, roughly ordered by applicability to tsift:
+
+1. **Reduce semantic content** — don't output what the agent doesn't need. This is what #paths (strip common path prefixes) and #caps (limit result counts) do. Highest ROI by far.
+2. **Shorter field names in JSON** — `"total_files"` → `"tf"`, `"last_indexed_secs_ago"` → `"age_s"`. Saves ~15-25% on JSON but kills human readability. Could be a `--terse` mode paired with a schema header.
+3. **Tabular output over prose** — `--compact` already does this for human mode. Could go further: `search` results as TSV instead of formatted blocks.
+4. **Abbreviation conventions** — `fn` for function, `mod` for modified, `unch` for unchanged. `--compact` already uses some of these.
+5. **Schema-then-values pattern** — print column headers once, then rows of just values. Good for repeated structures (search results, edges).
+
+Items 1-2 are worth building. Items 3-5 are marginal — the savings exist but the complexity cost is high relative to just trimming what you output. The backlog items #paths and #caps remain the best next moves.
+<!-- agent:boundary:d2ac8126 -->
 <!-- /agent:exchange -->
 
 <!--

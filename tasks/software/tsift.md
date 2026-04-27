@@ -371,7 +371,19 @@ Verification:
 Commit: `btakita/tsift@f017c4d` pushed to `origin/main`.
 
 I committed and pushed from a clean local clone because the checked-out `src/tsift` submodule inside `agent-loop` already had unrelated in-flight edits; that avoided folding those local changes into the `#stal` commit.
-<!-- agent:boundary:5bf34fac -->
+
+❯ Is #stal complete?
+### Re: #stal completion — gpt-5
+
+Yes. `#stal` is complete in `btakita/tsift@f017c4d`.
+
+That scope was:
+- fast stale precheck before `tsift search`
+- immediate stale-index failure instead of waiting for the timeout path
+- opt-in `tsift search --autoindex` for unhooked sessions
+
+The remaining open item is `#vxtz`, which is separate repo-root indexing/lock behavior, not an unfinished part of `#stal`.
+<!-- agent:boundary:9bb648be -->
 <!-- /agent:exchange -->
 
 <!--
@@ -380,7 +392,7 @@ I committed and pushed from a clean local clone because the checked-out `src/tsi
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#stal] [recommended] Add built-in stale precheck and opt-in auto-reindex path for unhooked tsift sessions
+- [x] [#stal] [recommended] Add built-in stale precheck and opt-in auto-reindex path for unhooked tsift sessions
 - [ ] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 

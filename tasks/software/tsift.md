@@ -107,7 +107,7 @@ Implemented `--absolute` global flag. All output paths are now project-relative 
 - Threaded through `cmd_graph`, `cmd_explain`, `cmd_search`, `cmd_index` via `absolute` parameter
 
 **Commit:** `btakita/tsift@357af45`. 268 tests pass (7 new). Built + installed.
-<!-- agent:boundary:285e4b2b -->
+<!-- agent:boundary:218b1821 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -116,7 +116,6 @@ Implemented `--absolute` global flag. All output paths are now project-relative 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)

@@ -684,7 +684,17 @@ recommendations:
   use: search, explain, graph
   run: tsift index .  (16 stale files)
 ```
-<!-- agent:boundary:5d3365ca -->
+
+❯ Is #mext still relevant?
+### Re: #mext relevance — opus-4-6
+
+No. #mext was already recommended for closure — it's a single-command Makefile wrapper (`tsift summarize --extract src/`) with no real value beyond discoverability. That discoverability gap is now closed two ways:
+
+1. `tsift init` puts the commands in AGENTS.md every session
+2. `tsift status` (just shipped) prints a `run:` recommendation when summaries are missing or stale
+
+Closing #mext.
+<!-- agent:boundary:143e29df -->
 <!-- /agent:exchange -->
 
 <!--
@@ -693,7 +703,7 @@ recommendations:
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
+- [x] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 
 <!--

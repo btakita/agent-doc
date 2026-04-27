@@ -786,7 +786,15 @@ Two problems compounded:
 **Next steps:**
 1. Profile `tsift search` to find the bottleneck (likely in `src/tsift/src/search/` BM25 scoring or file-content loading)
 2. Until fixed, use `tsift explain <symbol>` and `tsift graph` for navigation — they query the symbol/call-edge tables directly and return instantly
-<!-- agent:boundary:0dda18ff -->
+
+❯ Add next steps to backlog. Why did agent-doc fail to add the next steps to the backlog?
+### Re: add next steps to backlog — opus-4-6
+
+
+Done — both items added to backlog.
+
+**Why they weren't added last cycle:** I violated the promotion heuristic. The skill says: when a response ends with a numbered list of actionable recommendations and backlog is empty, promote them in the same cycle. Backlog was empty and the response ended with exactly that pattern. I just didn't include `--pending-add` flags on the finalize command. Pure skill-execution miss on my part.
+<!-- agent:boundary:3aa1de90 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -808,6 +816,8 @@ In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#srch] Profile and fix tsift search hang (BM25 scoring or file-content loading bottleneck)
+- [ ] [#wrka] Until search is fixed, use tsift explain/graph for navigation
 <!-- /agent:backlog -->
 
 <!--

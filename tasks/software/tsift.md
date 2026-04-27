@@ -155,11 +155,79 @@ AGENTS.md: created (tsift Code Navigation section added)
 - Force-pushed all branches and tags to `origin`.
 
 No other submodules were affected.
-<!-- agent:boundary:249fb403 -->
+
+❯ Please investigate ways that tsift can save on token usage. You may look through as much of my session history + git history as needed. Also note that I'm using Codex so look through Codex history as well.
+### Re: tsift token savings investigation — opus-4-6
+
+Investigated across Claude Code sessions (30 recent), Codex sessions (227), tsift source, git history, and RTK integration. Here's what I found, ordered by impact.
+
+#### Critical: two showstoppers
+
+1. **`tsift search` hangs on stale index.** The rewrite hook transparently converts `rg`/`grep -r` → `tsift search --strategy lexical`. When the index is stale (14K+ files currently), search blocks indefinitely. The agent has no idea why its grep stopped responding. Fix: fail fast with an error when index staleness exceeds a threshold, or add a timeout to the sift engine.
+
+2. **`tsift index --check` dumps 1.7MB (433K tokens).** It lists every stale file path. The autoindex hook redirects to `/dev/null`, but any agent calling it directly would inject 433K tokens into context. Even `--exit-code` doesn't suppress the list. JSON variant is worse at 2.6MB. Fix: add `--quiet`/`--summary` that only outputs the summary line; make `--exit-code` suppress the file list.
+
+#### High: global compact mode
+
+No `--compact` flag exists on any command today. Adding a global `--compact` to the `Cli` struct would cut 40-60% of human-readable output across all commands:
+
+| Command | Current tokens | Compact estimate | Savings |
+|---------|---------------|-----------------|---------|
+| search (10 results) | 300-800 | 120-300 | ~60% |
+| explain (typical) | 200-4,700 | 100-1,500 | ~50-70% |
+| communities | 9,300 | 2,800 | ~70% |
+| graph --callees | 4,400 | 1,800 | ~60% |
+| path (multi-hop) | 50-100 | 25-50 | ~50% |
+
+Specific cuts: drop score precision to 2 decimals, drop `Strategy: X | Indexed: N | Skipped: N` metadata line, cap community member lists at 5 with `(+N more)`, group explain callees by file, remove blank separator lines.
+
+#### High: JSON is 1.5-2.7x larger than human output
+
+Every `--json` call uses `serde_json::to_string_pretty()`. Switching to `to_string()` (compact JSON) saves 30-50% of JSON tokens. There are ~19 call sites in `main.rs`. Add `--pretty` flag for human debugging, make compact the default.
+
+#### Medium: path prefix stripping
+
+All file paths in output are absolute. Stripping the common project root saves ~15-20 tokens per path occurrence. `explain main` lists 232 callees each with a full path — that's ~3,500 tokens just in path prefixes.
+
+#### Medium: Codex has zero tsift integration
+
+Across 227 Codex sessions: **zero** tsift commands, **1,894** raw `rg` invocations, **184** `find` calls. The tsift rewrite hook only runs in Claude Code (`PreToolUse` in `~/.claude/settings.json`). Codex doesn't benefit at all. Options:
+- Add a Codex `UserPromptSubmit` hook that rewrites rg/grep-r
+- Or add tsift to `.codex/AGENTS.md` instructions so Codex calls tsift directly
+
+#### Medium: output caps for high-connectivity symbols
+
+`explain main` → 18.9KB (4,726 tokens, 232 callees). `graph Some --callers` → 20.5KB (5,128 tokens). `communities` → 37KB (9,303 tokens, 1,532 members). Add `--limit N` to explain/graph/communities to cap result lists. Default to 20 for explain/graph, 10 communities with top-5 members each.
+
+#### Low: RTK integration
+
+RTK saves 87.6% across 16K commands but has no tsift awareness (`~/.config/rtk/filters.toml` is empty). Volume is low (35 tsift invocations in 30 sessions) so ROI is limited, but adding filters for the verbose commands would be a safety net.
+
+#### Already efficient (no action needed)
+
+- `tsift status` — 43 tokens, well-designed
+- `tsift route` — 14 tokens, minimal
+- `tsift init` — 33 tokens when no-op
+- `tsift sql` — ~87 tokens average
+
+#### Context: summarize savings are theoretical
+
+The "78% savings" claim in the compacted summary is projected from the formula `1925 saved tokens per summary lookup × N lookups`. No summaries have been built on any project yet (`summaries: none` on agent-loop). Activating summarize would provide actual measured data.
+
+#### Recommended priority order
+
+1. Fix search hang on stale index (blocks sessions via rewrite hook)
+2. Fix `index --check` output flood (433K token risk)
+3. Global `--compact` flag (40-60% savings across all commands)
+4. Compact JSON default (30-50% savings on JSON paths)
+5. Path prefix stripping (cross-cutting, ~15-20 tokens per path)
+6. Output caps for explain/graph/communities (`--limit`)
+7. Codex rewrite hook or AGENTS.md instructions
+8. RTK filters (safety net)
+<!-- agent:boundary:5feda2e8 -->
 <!-- /agent:exchange -->
 
 <!--
-Please investigate ways that tsift can save on token usage. You may look through as much of my session history as needed. Also note that I'm using Codex so look through Codex history as well.
 -->
 
 ## Pending / Not Built

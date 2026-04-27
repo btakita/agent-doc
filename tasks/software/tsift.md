@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -325,7 +325,24 @@ On the original 14K stale files scenario, this cuts output from 1.7MB (433K toke
 **Tests:** +3 → 249 total. Covers: quiet suppresses file list, exit-code implies quiet, quiet JSON omits changes.
 
 **Commit:** `btakita/tsift@936b2da`. Pushed. Submodule pointer updated (`83d9942ac`).
-<!-- agent:boundary:d593f931 -->
+
+❯ Please ensure that codex can use tsift on src/tsift.
+### Re: Codex tsift on src/tsift — gpt-5
+
+Done. The gap was that `tsift init` only updated `CLAUDE.md` when a repo had no `AGENTS.md`, so repos like `src/tsift` left Codex without any local tsift navigation instructions.
+
+**Changes:**
+- `src/tsift/src/init.rs` — `tsift init` now always ensures `AGENTS.md` exists, and still updates `CLAUDE.md` when present. Added tests for Claude-only repos and dual-file sync.
+- `src/tsift/src/main.rs` — `tsift init` now reports each instruction file it updated.
+- `src/tsift/SPEC.md` and `src/tsift/CLAUDE.md` — docs updated to describe the Codex-visible init behavior.
+- Ran `cargo run -- init .` in `src/tsift`, which created `src/tsift/AGENTS.md` and appended the Code Navigation section to `src/tsift/CLAUDE.md`.
+
+**Verification:**
+- `cargo test` in `src/tsift`: passed (`243` unit tests + `6` integration tests).
+- `make check` in `src/tsift`: still fails on pre-existing Clippy errors outside this change (`src/audit.rs` and several existing spots in `src/main.rs`), so the repo is not fully green yet.
+
+Codex should now pick up tsift usage instructions directly from `src/tsift/AGENTS.md`.
+<!-- agent:boundary:01952288 -->
 <!-- /agent:exchange -->
 
 <!--

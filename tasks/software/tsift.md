@@ -55,7 +55,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 - Alternative tools to graphify: LightRAG, GraphRAG, sift-kg (Python, CLI-ready); EdgeQuake, Rig, petgraph (Rust, incomplete pipelines). No Rust tool ships the full ingest→extract→cluster→export pipeline as a CLI today.
 - Token savings from `tsift summarize`: ~78% per bug-fix session (~25k → ~5.5k tokens), ~$73/month at Opus pricing for 8 sessions/day.
 - Markdown is first-class: indexing extracts headings + code block languages via tree-sitter-md; search + lint work on .md/.mdx; call-graph intentionally skipped.
-<!-- agent:boundary:27bda9ce -->
+
+❯ Does `tsift init` or install add `.tsift/` to .gitignore?
+### Re: .gitignore handling — opus-4-6
+
+No. Neither `tsift init` nor `tsift index` adds `.tsift/` to `.gitignore`. It's a manual step today.
+
+Both agent-loop and the tsift repo itself already have `.tsift/` in their `.gitignore`, but that was added by hand. A new project using tsift for the first time would need to add it manually or risk committing the index database, summary cache, and config.
+
+`tsift init` is the natural place to add this — it already creates/modifies project files and is idempotent. The check would be: if `.gitignore` exists and doesn't contain `.tsift/`, append it; if no `.gitignore`, create one with `.tsift/`. Same pattern as `cargo init` adding `/target` or `npm init` adding `node_modules`.
+<!-- agent:boundary:5e6e8760 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -77,6 +86,7 @@ In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#giti] [recommended] tsift init should add .tsift/ to .gitignore (index + summaries are local artifacts)
 <!-- /agent:backlog -->
 
 <!--

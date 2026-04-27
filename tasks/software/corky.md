@@ -132,10 +132,11 @@ The 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a bug in `get_access_token_for_user
 All 293 tests pass, clippy clean, both binaries rebuilt (`cargo install` + `cargo build --release`).
 
 **To fix your current token:** re-run the same `corky sheets write` command. It will detect the insufficient scope, print a message, and open the browser for OAuth consent with the full `spreadsheets` scope. After authorizing, the write should succeed.
-<!-- agent:boundary:a3ee4097 -->
+<!-- agent:boundary:9a7a3441 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#1bgy] Codex Gmail support plan — implement [tasks/software/corky/plan-codex-gmail-support.md](/home/brian/work/btakita/agent-loop/tasks/software/corky/plan-codex-gmail-support.md): fix Gmail reply/thread correctness, add connector-grade JSON/auth-status CLI surfaces, then build the Codex adapter outside `corky`
 <!-- /agent:pending -->

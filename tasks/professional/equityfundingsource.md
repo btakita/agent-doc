@@ -422,7 +422,57 @@ I tried again with every Cloudflare credential available in this session.
 So the state has not changed yet: `btak.dev@gmail.com` still does **not** have `Workers Platform Admin` on the Brian Cloudflare account.
 
 The remaining step is outside what this session can do with its current credentials: a Cloudflare super admin needs to open the Brian account dashboard and update `btak.dev@gmail.com` from `Domain Administrator` to `Workers Platform Admin`, or provide a credential with `Account Settings Write` so the role can be changed by API.
-<!-- agent:boundary:3f68b326 -->
+
+❯ Please give me steps on creating a `CLOUDFLARE_API_TOKEN_FULL` for the brian.takita@gmail.com CF account
+### Re: creating `CLOUDFLARE_API_TOKEN_FULL` — gpt-5
+
+Use the Brian Cloudflare account in the dashboard, not the Monsterrodholder account.
+
+1. Log into Cloudflare as `brian.takita@gmail.com`.
+2. Make sure that user is a **Super Administrator** on `Brian.takita@gmail.com's Account` and that the email is verified.
+3. In the dashboard, switch to account `Brian.takita@gmail.com's Account` (`1e7e194ff8da4ad9e40ce041aea84f76`).
+4. Go to **Manage Account -> API Tokens**.
+5. Click **Create Token**.
+6. Create a **custom token**.
+7. Name it `CLOUDFLARE_API_TOKEN_FULL` if you want it to match the local env-var naming. If you want better hygiene, use a more precise name like `brian-account-membership-admin` and still store it locally as `CLOUDFLARE_API_TOKEN_FULL`.
+8. Under permissions, add at least:
+   - **Account -> Account Settings -> Edit**
+9. Scope the token to only:
+   - **Include -> Account -> Brian.takita@gmail.com's Account**
+10. Leave IP/time restrictions empty unless you specifically want to lock it down.
+11. Continue to summary, review, and click **Create Token**.
+12. Copy the token immediately. Cloudflare only shows the raw value once.
+
+Then store it locally as:
+
+```bash
+CLOUDFLARE_API_TOKEN_FULL="<token>"
+CLOUDFLARE_ACCOUNT_ID="1e7e194ff8da4ad9e40ce041aea84f76"
+```
+
+If you want to put it in `passage`, the local naming pattern would be:
+
+```bash
+passage insert btak/CLOUDFLARE_API_TOKEN_FULL
+passage insert btak/CLOUDFLARE_ACCOUNT_ID
+```
+
+After that, verify the token before trying the role update:
+
+```bash
+TOKEN="$(passage btak/CLOUDFLARE_API_TOKEN_FULL | tr -d '\r\n')"
+ACCOUNT="$(passage btak/CLOUDFLARE_ACCOUNT_ID | tr -d '\r\n')"
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/members" | jq '{success, count: (.result|length)}'
+```
+
+If that works, the next step is the member role update call.
+
+Current Cloudflare docs I checked:
+- Create token: https://developers.cloudflare.com/fundamentals/api/get-started/create-token/
+- Manage account members: https://developers.cloudflare.com/fundamentals/manage-members/manage/
+- Token permissions reference: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+<!-- agent:boundary:2ddb3582 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

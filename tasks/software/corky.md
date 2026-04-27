@@ -222,7 +222,33 @@ What actually blocked that send was the Gmail auth/runtime path for the `persona
 So both things are true at once: the Codex Gmail fix is present, and this particular send still failed. The fix covered connector/threading correctness; it did not remove the need for a live Gmail compose token or bypass that session's DNS/OAuth callback restrictions.
 
 Operationally, the next step is to retry the `personal` send path from a normal shell/session that can reach Google and complete the OAuth callback, or refresh that `personal` Gmail send token there first.
-<!-- agent:boundary:bbd3c179 -->
+
+❯ Why does sending gmail via corky work with Claude Code but not with Codex?
+### Re: why Gmail via `corky` worked with Claude Code but not with Codex — gpt-5
+
+The evidence here points to **runtime state**, not a fundamental Claude-vs-Codex difference.
+
+What we know from the session logs:
+- the earlier Claude Code-side send in `monsterrodholders.md` succeeded on **April 26, 2026** and sent two Ron emails from `brian.takita@gmail.com`
+- the later Codex-side retry failed on **April 27, 2026** when `corky` tried to send a standalone draft through the same `personal` account
+- the cached `gmail:personal` compose token is now expired (`2026-04-27T03:12:02Z`), so that later send required refresh or re-auth
+- in the failing session, refresh hit DNS failure for `oauth2.googleapis.com`, and fallback re-auth failed because the local OAuth callback server could not bind (`Operation not permitted`)
+
+So the most defensible explanation is:
+- **Claude Code worked because the send happened in a session/runtime where the token path was still usable**
+- **Codex failed because that later session needed live refresh/re-auth and its runtime could not complete it**
+
+In other words, this does **not** look like "`corky` works in Claude but not in Codex" at the application level. It looks like:
+- same `corky`
+- same mail config
+- different live session conditions at send time
+
+The two concrete differences that matter are:
+1. **Token state** — the later session hit an expired Gmail compose token for `personal`
+2. **Runtime permissions/network** — that later session could not reliably resolve Google endpoints and could not open the local OAuth callback listener needed for re-auth
+
+So if you want a precise answer: **Claude Code did not win because it is Claude Code. It won because that send happened before the auth/runtime path broke for the later Codex attempt.**
+<!-- agent:boundary:596b19a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

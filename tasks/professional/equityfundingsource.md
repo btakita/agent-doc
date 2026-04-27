@@ -2,8 +2,9 @@
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
 links:
   - ./judith-krug.md
   - ./robert-waldman.md
@@ -535,13 +536,35 @@ If it still does not, check these in order:
 4. There is no partially-open `Edit policy` modal still waiting for confirmation.
 
 But based on the screenshots, the missing token name is the main thing I would fix first.
-<!-- agent:boundary:840c3fea -->
+
+❯ The token name is not empty. Please use chromium-bridge to configure the key.
+### Re: Cloudflare token via chromium-bridge — opus-4-6
+
+Used chromium-bridge to inspect the Cloudflare API token creation page. The "Review token" button was disabled because there was a **second, empty policy row** open in the editor (showing "At least one permission is required"). Deleted the empty policy, which enabled the button.
+
+Created the token:
+- **Name:** `CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN`
+- **Permissions:** Account API Tokens Write, Account Settings Write
+- **Scope:** Brian.takita@gmail.com's Account
+- **Expiration:** None
+
+Token stored in `passage btak/CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN`.
+
+Then used the token to promote `btak.dev@gmail.com` via the Cloudflare API:
+
+```
+PUT /accounts/{account_id}/members/{member_id}
+roles: [{ id: "57280df9f1a5806e04f065b07bbdd17a" }]
+```
+
+**Result:** `btak.dev@gmail.com` is now **Workers Platform Admin** on the Brian Cloudflare account (was Domain Administrator).
+<!-- agent:boundary:ea47455d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (blocked: requires Cloudflare Super Administrator access in the dashboard or a credential with Account Settings Write)
+- [x] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (blocked: requires Cloudflare Super Administrator access in the dashboard or a credential with Account Settings Write)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

@@ -175,7 +175,7 @@ Implemented abbreviation conventions in `--compact` mode for shorter human-reada
 - Applied in search, explain, graph, and communities compact output
 
 **Commit:** `btakita/tsift@ea59263`. 291 tests pass (2 new abbreviation tests). Built + installed.
-<!-- agent:boundary:c7ab815c -->
+<!-- agent:boundary:aff6d041 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -184,7 +184,6 @@ Implemented abbreviation conventions in `--compact` mode for shorter human-reada
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->
 

@@ -165,12 +165,40 @@ Commit / push:
 Scope note:
 - This closes the stranded `response_captured` path behind `#pendops` for list-shaped backlog patches.
 - Unsupported pending/backlog patch shapes still fail closed before capture.
-<!-- agent:boundary:6bcd9924 -->
+
+❯ do [#] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state;
+
+❯ spec-test-build-install-commit-push
+### Re: do `#doccommit` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `b323dd1` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `write --commit` now upgrades to the same fail-closed commit-boundary contract as `finalize` when it is writing a response into a real session document (`agent_doc_session` / legacy `session`).
+- The strict upgrade is intentionally limited to response writes; non-session docs and `--pending-only` keep best-effort `--commit` behavior.
+- Added CLI integration coverage for three cases: gitless session docs fail before mutation, git-backed session docs commit cleanly, and non-session docs remain best-effort.
+- Updated the command spec, commit runbook, README, SKILL, and VERSIONS surfaces to match the new contract.
+
+Verification:
+- `cargo test --test finalize_integration`
+- `cargo build`
+- `cargo install --path . --force`
+
+Full-suite note:
+- `cargo test` still has 3 unrelated existing failures in `autoclaim` (`autoclaim_focuses_pane_with_claim`, `autoclaim_syncs_layout_with_multiple_files`, `autoclaim_no_claim_skips_focus`).
+
+Commit / push:
+- `src/agent-doc`: `b323dd1` (`fix: require strict closeout for session write-commit`)
+
+Scope note:
+- This closes the `#doccommit` gap for active session-document response patchbacks by making the documented manual-repair path binary-owned and fail-closed.
+- It does not claim the broader `#nostate` invariant is finished; that remaining item is still about eliminating every silent open-cycle state class.
+<!-- agent:boundary:7fe91bf6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#n0sm] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
+- [x] [#n0sm] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

@@ -472,7 +472,20 @@ Current Cloudflare docs I checked:
 - Create token: https://developers.cloudflare.com/fundamentals/api/get-started/create-token/
 - Manage account members: https://developers.cloudflare.com/fundamentals/manage-members/manage/
 - Token permissions reference: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
-<!-- agent:boundary:2ddb3582 -->
+
+❯ on this page (https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/api-tokens)?
+### Re: API tokens page — gpt-5
+
+Yes. `https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/api-tokens` is the right **account-level API Tokens** page for `Brian.takita@gmail.com's Account`.
+
+From there:
+1. Click **Create Token**.
+2. Choose **Custom token**.
+3. Scope it to that same Brian account.
+4. Add **Account -> Account Settings -> Edit**.
+
+If the page instead drops you into **My Profile** or shows user-level tokens rather than account-level tokens, switch back to the Brian account context first and then return to that URL.
+<!-- agent:boundary:0ecdee88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -662,7 +662,29 @@ The plan covers:
 - Updated `tsift init` directive that references `tsift status` at session start
 - 6 test cases covering all combinations of index/summary state
 - ~200-300 lines, no new dependencies
-<!-- agent:boundary:cc0e723e -->
+
+❯ do #stat. spec-test-build-install-commit-push
+### Re: do #stat — opus-4-6
+
+Implemented `tsift status` per plan. `btakita/tsift@9f4a111`.
+
+**What shipped:**
+- `src/status.rs` — `check_status()`, `format_human()`, `StatusReport` with JSON serialization
+- `Status` subcommand in main.rs with `--json` flag
+- Updated `tsift init` section to reference `tsift status` at session start
+- Updated SPEC.md with Status section (output format, JSON schema, recommendation logic table)
+- Updated CLAUDE.md command table + test count (236)
+- 6 new tests: no-index, fresh-no-summaries, stale-index, fresh-with-summaries, json-roundtrip, human-format
+
+**Live output:**
+```
+index: stale (last indexed 1d ago, 8 files tracked, 16 stale)
+summaries: none
+recommendations:
+  use: search, explain, graph
+  run: tsift index .  (16 stale files)
+```
+<!-- agent:boundary:ca91c0e0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -671,7 +693,7 @@ The plan covers:
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#stat] tsift status — session-start health check with machine-parseable use: list. Plan: src/tsift/plans/tsift-status.md
+- [x] [#stat] tsift status — session-start health check with machine-parseable use: list. Plan: src/tsift/plans/tsift-status.md
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

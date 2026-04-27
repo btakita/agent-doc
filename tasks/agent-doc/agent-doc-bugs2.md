@@ -478,7 +478,30 @@ Commit / push:
 Scope note:
 - this closes the duplicate live start path behind `#cork1`.
 - the broader tmux swap/recovery and root-cause items remain separate backlog items.
-<!-- agent:boundary:f6d805a8 -->
+
+❯ do #swap1. spec-test-build-install-commit-push
+### Re: do `#swap1` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `4b04ec9` (`fix: rescue stashed panes without swap eviction`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- stash rescue in `route.rs` / `sync.rs` now uses guarded `join-pane` instead of preferring `swap-pane`, so recovering a stashed pane no longer ejects another visible live pane into stash
+- rescue placement now respects the requested column edge (`-dbh` for left, `-dh` for right), so recovered panes reappear at the intended side of the `agent-doc` window
+- added route/sync regressions that prove the original visible pane stays in the window during rescue
+- updated `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md`
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `4b04ec9` (`fix: rescue stashed panes without swap eviction`)
+
+Scope note:
+- this closes the remaining `#swap1` tmux swap/recovery path from `src/session-share/tasks/claudescore-3.md`
+- the broader tmux-instability investigation remains under `#tmuxr1`
+<!-- agent:boundary:84a54fd2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -488,7 +511,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
+- [x] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
 - [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`

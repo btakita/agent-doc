@@ -107,6 +107,12 @@ use crate::harness::HarnessConfig;
 use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandDispatchStatus {
+    Accepted,
+    TimedOut,
+}
+
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -402,6 +408,16 @@ fn rescue_from_stash(
 /// Send the trigger command to a pane and focus it.
 /// Shows a brief tmux display-message on the target pane for immediate feedback.
 fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfig) -> Result<()> {
+    let _ = send_command_checked(tmux, pane, file_path, harness)?;
+    Ok(())
+}
+
+fn send_command_checked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<CommandDispatchStatus> {
     let short_name = std::path::Path::new(file_path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -444,7 +460,7 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfi
                     start.elapsed().as_secs_f64(),
                     enter_retries
                 );
-                return Ok(());
+                return Ok(CommandDispatchStatus::Accepted);
             }
 
             // Command text still in input — retry Enter
@@ -459,7 +475,7 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfi
         start.elapsed().as_secs_f64(),
         enter_retries
     );
-    Ok(())
+    Ok(CommandDispatchStatus::TimedOut)
 }
 
 fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
@@ -993,9 +1009,42 @@ fn auto_start_in_session(
             send_command(tmux, &new_pane, &start_path, harness)?;
         } else {
             eprintln!(
-                "[route] Timed out waiting for {}. Run `agent-doc route {}` to retry.",
-                harness.binary, file_path
+                "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
+                harness.binary
             );
+            match send_command_checked(tmux, &new_pane, &start_path, harness)? {
+                CommandDispatchStatus::Accepted => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "fresh_route_trigger_recovered file={} pane={} harness={}",
+                            file.display(),
+                            new_pane,
+                            harness.binary
+                        ),
+                    );
+                    eprintln!(
+                        "[route] Fallback trigger injection recovered the fresh {} start for {}",
+                        harness.binary, file_path
+                    );
+                }
+                CommandDispatchStatus::TimedOut => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "fresh_route_trigger_missing file={} pane={} harness={}",
+                            file.display(),
+                            new_pane,
+                            harness.binary
+                        ),
+                    );
+                    anyhow::bail!(
+                        "timed out waiting for {} prompt and fallback trigger injection was not accepted for {}",
+                        harness.binary,
+                        file.display()
+                    );
+                }
+            }
         }
     }
 
@@ -1565,6 +1614,24 @@ history line
     }
 
     #[test]
+    fn send_command_checked_reports_accepted_when_command_is_consumed() {
+        let iso = IsolatedTmux::new("route-test-send-checked");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
+
+        let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
+        assert_eq!(status, CommandDispatchStatus::Accepted);
+    }
+
+    #[test]
     fn pane_has_prompt_detects_unicode() {
         let iso = IsolatedTmux::new("route-test-has-prompt");
         let session = "test";
@@ -2033,8 +2100,7 @@ history line
             ])?;
 
             // Poll until pane_current_command changes from the shell
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let out = iso
@@ -2047,8 +2113,7 @@ history line
                         "#{pane_current_command}",
                     ])
                     .output()?;
-                let cmd =
-                    String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if cmd == "agent-doc" {
                     break;
                 }
@@ -2699,7 +2764,8 @@ history line
         let prev_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(&root).unwrap();
 
-        let resolved = crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
+        let resolved =
+            crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
         assert!(
             resolved.is_absolute(),
             "route must send absolute paths to avoid submodule CWD misrouting"

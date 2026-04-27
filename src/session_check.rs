@@ -7,6 +7,9 @@
 //!   `write_applied`).
 //! - Falls back to the last `ops.log` event only when no cycle-state file
 //!   exists yet, preserving compatibility for older repos.
+//! - Distinguishes "cycle started but no write/commit followed" from
+//!   "response write landed but no commit followed" in both cycle-state and
+//!   ops-log fallback paths.
 //! - Also fails closed when the current document diverges from its snapshot in
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
@@ -52,6 +55,8 @@ use crate::component::is_backlog_component;
 /// started but may have been abandoned. If this is the final entry in
 /// ops.log, the previous cycle did not complete.
 pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
+pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
+pub const SNAPSHOT_SAVED_FILE_IPC_EVENT: &str = "snapshot_saved_file_ipc";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCheckStatus {
@@ -133,11 +138,7 @@ pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
 fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is still `{}` — no terminal commit followed",
-                state.cycle_id,
-                phase_name(state.phase)
-            )));
+            return Ok(SessionCheckStatus::Interrupted(open_cycle_message(&state)));
         }
         if let Some(marker) = detect_bypassed_response_write(file)? {
             if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
@@ -183,8 +184,14 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         }
         Some(event) if event.starts_with(PREFLIGHT_START_EVENT) => {
             Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: last ops.log entry is `{}` — no write/commit followed",
+                "[session-check] INTERRUPTED: last ops.log entry is `{}` — cycle started but no write/commit followed",
                 PREFLIGHT_START_EVENT
+            )))
+        }
+        Some(event) if is_write_completed_commit_missing_event(&event) => {
+            Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: last ops.log entry is `{}` — response write landed but no commit followed",
+                event_name(&event)
             )))
         }
         Some(event) => {
@@ -492,6 +499,28 @@ fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
+fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
+    let detail = match state.phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => {
+            "cycle started but no write/commit followed"
+        }
+        crate::cycle_state::CyclePhase::ResponseCaptured => {
+            "response was captured but no write/commit followed"
+        }
+        crate::cycle_state::CyclePhase::WriteApplied => {
+            "response write landed but no terminal commit followed"
+        }
+        crate::cycle_state::CyclePhase::Committed => "no terminal commit followed",
+    };
+    format!(
+        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}",
+        state.cycle_id,
+        phase_name(state.phase),
+        state.last_event,
+        detail
+    )
+}
+
 /// Return the message portion of the last non-empty line in `ops.log`,
 /// stripped of the `[epoch_secs] ` timestamp prefix.
 ///
@@ -509,9 +538,17 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     let content = std::fs::read_to_string(&log_path)?;
+    let canonical_display = canonical.display().to_string();
+    let requested_display = file.display().to_string();
     let last = content
         .lines()
-        .rfind(|l| !l.trim().is_empty())
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| {
+            line.contains(&format!("file={canonical_display}"))
+                || line.contains(&format!("file={requested_display}"))
+        })
+        .next_back()
+        .or_else(|| content.lines().rfind(|l| !l.trim().is_empty()))
         .map(|l| strip_timestamp_prefix(l).to_string());
     Ok(last)
 }
@@ -524,6 +561,18 @@ fn strip_timestamp_prefix(line: &str) -> &str {
         return &rest[close + 2..];
     }
     line
+}
+
+pub(crate) fn detect_write_completed_commit_missing(file: &Path) -> Result<Option<String>> {
+    Ok(last_ops_event(file)?.filter(|event| is_write_completed_commit_missing_event(event)))
+}
+
+fn is_write_completed_commit_missing_event(event: &str) -> bool {
+    event.starts_with(IPC_WRITE_CONSUMED_EVENT) || event.starts_with(SNAPSHOT_SAVED_FILE_IPC_EVENT)
+}
+
+fn event_name(event: &str) -> &str {
+    event.split_whitespace().next().unwrap_or(event)
 }
 
 pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
@@ -699,12 +748,54 @@ mod tests {
     }
 
     #[test]
+    fn last_ops_event_prefers_matching_file_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let other = tmp.path().join("other.md");
+        fs::write(&other, "body").unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_write_consumed file={} patches=1\n[101] preflight_diff_start file={}\n",
+                doc.display(),
+                other.display()
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            last_ops_event(&doc).unwrap().unwrap(),
+            format!("ipc_write_consumed file={} patches=1", doc.display())
+        );
+    }
+
+    #[test]
+    fn detect_write_completed_commit_missing_returns_last_write_event() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            "[100] snapshot_saved_file_ipc file=x snap_len=10\n",
+        )
+        .unwrap();
+        assert_eq!(
+            detect_write_completed_commit_missing(&doc)
+                .unwrap()
+                .unwrap(),
+            "snapshot_saved_file_ipc file=x snap_len=10"
+        );
+    }
+
+    #[test]
     fn session_check_open_cycle_state_exits_one() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
         crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert!(state.is_open());
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("cycle started but no write/commit followed"));
+            }
+            other => panic!("expected interrupted state, got {other:?}"),
+        }
     }
 
     #[test]
@@ -773,6 +864,24 @@ mod tests {
         let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
         assert!(marker.contains("### Re: test — gpt-5"));
         assert!(marker.contains("Why was this missed?"));
+    }
+
+    #[test]
+    fn session_check_reports_missing_commit_after_ipc_write() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            "[100] ipc_write_consumed file=x patches=1\n",
+        )
+        .unwrap();
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("response write landed but no commit followed"));
+                assert!(message.contains("ipc_write_consumed"));
+            }
+            other => panic!("expected interrupted state, got {other:?}"),
+        }
     }
 
     #[test]

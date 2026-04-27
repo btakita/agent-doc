@@ -619,8 +619,12 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 `agent-doc session-check <FILE>` — verify that the previous cycle reached a terminal committed state and that no likely assistant patchback bypassed `agent-doc write` / `finalize`.
 
 - Primary source of truth: `.agent-doc/state/cycles/<doc-hash>.json`
-- Fallback for older repos: last non-empty `.agent-doc/logs/ops.log` line
+- Fallback for older repos: the last matching non-empty `.agent-doc/logs/ops.log` line for that file (falling back to the global tail only when no file-qualified line exists yet)
 - Exit `1` when the current cycle state is still open (`preflight_started`, `response_captured`, or `write_applied`)
+- Interrupted-state messaging distinguishes:
+  - `preflight_started` / `preflight_diff_start`: the cycle started but no write/commit followed
+  - `response_captured`: the response was captured but no write/commit followed
+  - `write_applied` / `ipc_write_consumed` / `snapshot_saved_file_ipc`: the response write landed but no commit followed
 - Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
 - When that bypassed patchback leaves bare `prompt_target` lines in the same changed exchange tail, report the missing-`❯ ` prompt target in the failure marker so repair can route through the binary path instead of silently accepting transcript drift
 - Narrow self-heal: if that marker is only historical drift already committed in `HEAD`, and the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers, `session-check` repairs the stale snapshot first and exits `0`
@@ -634,6 +638,8 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 - A cycle closed by `agent-doc commit` as `commit_already_current` counts as terminal / committed: it means the staged snapshot was already identical to `HEAD`, so no duplicate git commit was necessary
 - Exit `0` when the cycle state is committed or no state/log file exists
 - Intended skill/runbook use: the Codex/direct-exec path runs `agent-doc session-check <FILE>` immediately after `agent-doc finalize <FILE> ...` or manual `agent-doc write --commit <FILE> ...`; if the check exits nonzero, the cycle is still open and the agent must fail closed instead of reporting success.
+
+`preflight` also treats the write-completed/no-commit case as recoverable commit-boundary drift. When the last relevant state for a file is `write_applied`, `ipc_write_consumed`, or `snapshot_saved_file_ipc` with no later `commit_*`, preflight records `write_completed_commit_missing`, attempts `resume_commit_attempt`, and logs either `resume_commit_success` or `resume_commit_blocked_drift`.
 
 **URL link processing:**
 - URLs (`http://`/`https://`) in `links` frontmatter are fetched with a 10s timeout
@@ -652,6 +658,8 @@ Diff output now uses a 5-line context radius (unified diff with 5 lines of surro
 ## Route --debounce
 
 `agent-doc route <FILE> [--debounce MS]` — optional debounce flag to coalesce rapid editor triggers. When set, route will skip execution if another route call for the same file completed within the debounce window.
+
+For fresh auto-starts, route now fails closed instead of silently idling when prompt readiness is missed. If the initial 30s readiness wait times out, route performs one bounded fallback trigger injection. Success logs `fresh_route_trigger_recovered`; failure logs `fresh_route_trigger_missing` and returns an error so the caller can surface the missed start explicitly.
 
 ## is_tracked FFI Export
 

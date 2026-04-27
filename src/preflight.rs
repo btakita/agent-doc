@@ -498,7 +498,73 @@ fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
 fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let state = crate::cycle_state::load(file)?;
+    let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
+        None
+    } else {
+        crate::session_check::detect_write_completed_commit_missing(file)?
+    };
+    if let Some(event) = missing_commit_event.as_deref() {
+        eprintln!(
+            "[preflight] WARNING: previous cycle wrote the response but no commit followed ({}) — attempting commit-boundary recovery before diff",
+            event
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "write_completed_commit_missing file={} last_event={}",
+                file.display(),
+                event
+            ),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "resume_commit_attempt file={} last_event={}",
+                file.display(),
+                event
+            ),
+        );
+
+        let recovered = repair::run(file)
+            .unwrap_or_else(|e| {
+                eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
+                repair::RepairOutcome::Noop
+            })
+            .repaired();
+
+        let committed = match git::commit(file) {
+            Ok(did_commit) => did_commit,
+            Err(e) => {
+                eprintln!("[preflight] interrupted-cycle commit warning: {}", e);
+                false
+            }
+        };
+
+        match crate::session_check::inspect(file)? {
+            crate::session_check::SessionCheckStatus::Ok(_) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!("resume_commit_success file={}", file.display()),
+                );
+                return Ok((recovered, committed));
+            }
+            crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+                let reason = reason.replace('\n', " ");
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "resume_commit_blocked_drift file={} reason={}",
+                        file.display(),
+                        reason
+                    ),
+                );
+                anyhow::bail!("{}", reason);
+            }
+        }
+    }
+
+    let Some(state) = state else {
         return Ok((false, false));
     };
     if !state.is_open() {
@@ -526,6 +592,16 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             state.last_event
         ),
     );
+    if matches!(state.phase, crate::cycle_state::CyclePhase::WriteApplied) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "resume_commit_attempt file={} cycle_id={}",
+                file.display(),
+                state.cycle_id
+            ),
+        );
+    }
 
     let recovered = repair::run(file)
         .unwrap_or_else(|e| {
@@ -566,6 +642,13 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             },
             after.last_event,
             marker_note
+        );
+    }
+
+    if matches!(state.phase, crate::cycle_state::CyclePhase::WriteApplied) {
+        crate::ops_log::log_op(
+            file,
+            &format!("resume_commit_success file={}", file.display()),
         );
     }
 
@@ -1117,7 +1200,10 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         Ok(cs) => cs,
         Err(_) => return Ok((false, 0)),
     };
-    let comp = match components.into_iter().find(|c| is_backlog_component(&c.name)) {
+    let comp = match components
+        .into_iter()
+        .find(|c| is_backlog_component(&c.name))
+    {
         Some(c) => c,
         None => return Ok((false, 0)),
     };
@@ -1275,12 +1361,8 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
-    let activation = crate::queue::resolve_activation(
-        &entries,
-        has_auto,
-        exchange_triggered,
-        persisted_active,
-    );
+    let activation =
+        crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
 
     let mut mutated = false;
     let mut current_content = content.clone();
@@ -1303,8 +1385,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
             eprintln!("[preflight] queue: halt — stop fence at head");
             // Consume the stop fence
-            let after_stop: Vec<crate::queue::QueueEntry> =
-                activation.entries_after[1..].to_vec();
+            let after_stop: Vec<crate::queue::QueueEntry> = activation.entries_after[1..].to_vec();
             let new_body = crate::queue::render(&after_stop);
             current_content = {
                 let comps = crate::component::parse(&current_content)?;
@@ -1336,33 +1417,34 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             if let Ok(Some(snap)) = snapshot::load(file) {
                 let mut new_snap = snap.clone();
                 if let Ok(sc) = crate::component::parse(&new_snap)
-                    && let Some(sq) = sc.iter().find(|c| c.name == "queue") {
-                        new_snap = sq.replace_content(&new_snap, &new_body);
-                        if has_auto
-                            && let Ok(sc2) = crate::component::parse(&new_snap)
-                                && let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
-                                    let raw = &new_snap[sq2.open_start..sq2.open_end];
-                                    let new_tag = crate::queue::strip_auto_from_tag(raw);
-                                    if new_tag != raw {
-                                        let mut rebuilt =
-                                            String::with_capacity(new_snap.len());
-                                        rebuilt.push_str(&new_snap[..sq2.open_start]);
-                                        rebuilt.push_str(&new_tag);
-                                        rebuilt.push_str(&new_snap[sq2.open_end..]);
-                                        new_snap = rebuilt;
-                                    }
-                                }
-                        if persisted_active
-                            && let Ok(m) =
-                                frontmatter::merge_fields(&new_snap, "queue_active: false")
-                            {
-                                new_snap = m;
-                            }
-                        if new_snap != snap
-                            && let Err(e) = snapshot::save(file, &new_snap) {
-                                eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
-                            }
+                    && let Some(sq) = sc.iter().find(|c| c.name == "queue")
+                {
+                    new_snap = sq.replace_content(&new_snap, &new_body);
+                    if has_auto
+                        && let Ok(sc2) = crate::component::parse(&new_snap)
+                        && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                    {
+                        let raw = &new_snap[sq2.open_start..sq2.open_end];
+                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        if new_tag != raw {
+                            let mut rebuilt = String::with_capacity(new_snap.len());
+                            rebuilt.push_str(&new_snap[..sq2.open_start]);
+                            rebuilt.push_str(&new_tag);
+                            rebuilt.push_str(&new_snap[sq2.open_end..]);
+                            new_snap = rebuilt;
+                        }
                     }
+                    if persisted_active
+                        && let Ok(m) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+                    {
+                        new_snap = m;
+                    }
+                    if new_snap != snap
+                        && let Err(e) = snapshot::save(file, &new_snap)
+                    {
+                        eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                    }
+                }
             }
             return Ok(QueueState {
                 queue_prompts: vec![],
@@ -1390,86 +1472,75 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         // Change detection: compare head prompt between snapshot and file
         if let Ok(Some(snap_content)) = snapshot::load(file)
             && let Ok(snap_comps) = crate::component::parse(&snap_content)
-                && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") {
-                    let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
-                    if let Ok(snap_entries) = crate::queue::parse(snap_body)
-                        && crate::queue::detect_head_prompt_modified(
-                            &snap_entries,
-                            &activation.entries_after,
-                        ) {
-                            eprintln!(
-                                "[preflight] queue: halt — head prompt modified between cycles"
-                            );
-                            // Strip auto and clear queue_active
-                            if has_auto {
-                                let comps = crate::component::parse(&current_content)?;
-                                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                                    let raw = &current_content[q.open_start..q.open_end];
-                                    let new_tag = crate::queue::strip_auto_from_tag(raw);
-                                    if new_tag != raw {
-                                        let mut rebuilt =
-                                            String::with_capacity(current_content.len());
-                                        rebuilt.push_str(&current_content[..q.open_start]);
-                                        rebuilt.push_str(&new_tag);
-                                        rebuilt.push_str(&current_content[q.open_end..]);
-                                        current_content = rebuilt;
-                                    }
-                                }
-                            }
-                            if persisted_active {
-                                current_content = frontmatter::merge_fields(
-                                    &current_content,
-                                    "queue_active: false",
-                                )?;
-                            }
-                            std::fs::write(file, &current_content).with_context(|| {
-                                format!("queue halt: failed to write {}", file.display())
-                            })?;
-                            // Update snapshot
-                            if let Ok(Some(snap2)) = snapshot::load(file) {
-                                let mut ns = snap2.clone();
-                                if has_auto
-                                    && let Ok(sc) = crate::component::parse(&ns)
-                                        && let Some(sq) =
-                                            sc.iter().find(|c| c.name == "queue")
-                                        {
-                                            let raw = &ns[sq.open_start..sq.open_end];
-                                            let new_tag =
-                                                crate::queue::strip_auto_from_tag(raw);
-                                            if new_tag != raw {
-                                                let mut rebuilt =
-                                                    String::with_capacity(ns.len());
-                                                rebuilt.push_str(&ns[..sq.open_start]);
-                                                rebuilt.push_str(&new_tag);
-                                                rebuilt.push_str(&ns[sq.open_end..]);
-                                                ns = rebuilt;
-                                            }
-                                        }
-                                if persisted_active
-                                    && let Ok(m) = frontmatter::merge_fields(
-                                        &ns,
-                                        "queue_active: false",
-                                    ) {
-                                        ns = m;
-                                    }
-                                if ns != snap2
-                                    && let Err(e) = snapshot::save(file, &ns) {
-                                        eprintln!(
-                                            "[preflight] queue halt: snapshot sync warning: {}",
-                                            e
-                                        );
-                                    }
-                            }
-                            return Ok(QueueState {
-                                queue_prompts: vec![],
-                                queue_active: Some(false),
-                                queue_deferred: false,
-                                queue_start_at: None,
-                                queue_trigger: activation.trigger,
-                                queue_halted: Some("item_modified".into()),
-                            });
+            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+        {
+            let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
+            if let Ok(snap_entries) = crate::queue::parse(snap_body)
+                && crate::queue::detect_head_prompt_modified(
+                    &snap_entries,
+                    &activation.entries_after,
+                )
+            {
+                eprintln!("[preflight] queue: halt — head prompt modified between cycles");
+                // Strip auto and clear queue_active
+                if has_auto {
+                    let comps = crate::component::parse(&current_content)?;
+                    if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                        let raw = &current_content[q.open_start..q.open_end];
+                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        if new_tag != raw {
+                            let mut rebuilt = String::with_capacity(current_content.len());
+                            rebuilt.push_str(&current_content[..q.open_start]);
+                            rebuilt.push_str(&new_tag);
+                            rebuilt.push_str(&current_content[q.open_end..]);
+                            current_content = rebuilt;
                         }
+                    }
                 }
+                if persisted_active {
+                    current_content =
+                        frontmatter::merge_fields(&current_content, "queue_active: false")?;
+                }
+                std::fs::write(file, &current_content)
+                    .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
+                // Update snapshot
+                if let Ok(Some(snap2)) = snapshot::load(file) {
+                    let mut ns = snap2.clone();
+                    if has_auto
+                        && let Ok(sc) = crate::component::parse(&ns)
+                        && let Some(sq) = sc.iter().find(|c| c.name == "queue")
+                    {
+                        let raw = &ns[sq.open_start..sq.open_end];
+                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        if new_tag != raw {
+                            let mut rebuilt = String::with_capacity(ns.len());
+                            rebuilt.push_str(&ns[..sq.open_start]);
+                            rebuilt.push_str(&new_tag);
+                            rebuilt.push_str(&ns[sq.open_end..]);
+                            ns = rebuilt;
+                        }
+                    }
+                    if persisted_active
+                        && let Ok(m) = frontmatter::merge_fields(&ns, "queue_active: false")
+                    {
+                        ns = m;
+                    }
+                    if ns != snap2
+                        && let Err(e) = snapshot::save(file, &ns)
+                    {
+                        eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                    }
+                }
+                return Ok(QueueState {
+                    queue_prompts: vec![],
+                    queue_active: Some(false),
+                    queue_deferred: false,
+                    queue_start_at: None,
+                    queue_trigger: activation.trigger,
+                    queue_halted: Some("item_modified".into()),
+                });
+            }
+        }
     }
 
     // Handle queue drain: if active but no prompts, clear queue_active and strip auto
@@ -1545,8 +1616,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             {
                 new_snap = merged;
             } else if need_clear_active
-                && let Ok(merged) =
-                    frontmatter::merge_fields(&new_snap, "queue_active: false")
+                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
             {
                 new_snap = merged;
             }
@@ -2003,6 +2073,72 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
+    }
+
+    #[test]
+    fn preflight_resumes_commit_when_write_landed_without_open_cycle_state() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let patched =
+            "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
+        std::fs::write(&doc, patched).unwrap();
+        snapshot::save(&doc, patched).unwrap();
+        let ops = root.join(".agent-doc/logs/ops.log");
+        std::fs::write(
+            &ops,
+            format!(
+                "[100] snapshot_saved_file_ipc file={} snap_len={}\n",
+                doc.display(),
+                patched.len()
+            ),
+        )
+        .unwrap();
+
+        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        assert!(
+            !recovered,
+            "no replay should be needed when file already has the response"
+        );
+        assert!(
+            committed,
+            "commit boundary should resume and create a commit"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed_doc = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed_doc.contains("Recovered answer"),
+            "HEAD should include the resumed response closeout:\n{committed_doc}"
+        );
+
+        let log = std::fs::read_to_string(ops).unwrap();
+        assert!(
+            log.contains("resume_commit_success file="),
+            "resume commit success should be logged:\n{log}"
+        );
     }
 
     #[test]

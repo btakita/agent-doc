@@ -117,6 +117,11 @@ Key differences from Claude Code:
    - Prompt detection uses `harness.matches_prompt()`
    - Trigger command uses `harness.trigger_command()`
    - `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by `supports_*` flags
+   - Fresh-route timeout no longer silently idles: `route.rs` now attempts one bounded fallback trigger injection before logging `fresh_route_trigger_missing` and failing closed
+
+4. ✅ Commit-boundary recovery distinguishes missed-start vs missed-commit:
+   - `session-check` treats `ipc_write_consumed` / `snapshot_saved_file_ipc` without later `commit_*` as “write landed, commit missing”
+   - `preflight` auto-attempts `resume_commit_attempt` for that state and logs `resume_commit_success` or `resume_commit_blocked_drift`
 
 4. 14 unit tests covering defaults, resolution, restart behavior, prompt matching, trigger substitution
 

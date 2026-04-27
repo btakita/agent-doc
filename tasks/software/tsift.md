@@ -78,7 +78,19 @@ Both agent-loop and the tsift repo itself already have `.tsift/` in their `.giti
 **Tests:** +3 → 239 total. Covers: create new `.gitignore`, append to existing, skip when already present.
 
 **Commit:** `btakita/tsift@60ab0d3`. Pushed. Submodule pointer updated.
-<!-- agent:boundary:8e2a9bea -->
+
+❯ If I run `/tsift init` on a repo twice, will the second time reindex everything?
+### Re: tsift init idempotency — opus-4-6
+
+No. `tsift init` does not index anything — it only touches two files:
+
+1. **`.gitignore`** — checks if `.tsift/` is already present, skips if so
+2. **`AGENTS.md` / `CLAUDE.md`** — checks if the `<!-- tsift:code-navigation -->` marker exists, skips if the section matches
+
+Running it twice produces "already present (no changes needed)" on the second run. There's a dedicated test for this (`init_is_idempotent`).
+
+`tsift init` and `tsift index` are separate commands with no overlap. Init sets up project instructions; index builds the AST symbol database. Neither calls the other.
+<!-- agent:boundary:d183a089 -->
 <!-- /agent:exchange -->
 
 <!--

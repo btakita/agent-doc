@@ -248,7 +248,28 @@ The two concrete differences that matter are:
 2. **Runtime permissions/network** — that later session could not reliably resolve Google endpoints and could not open the local OAuth callback listener needed for re-auth
 
 So if you want a precise answer: **Claude Code did not win because it is Claude Code. It won because that send happened before the auth/runtime path broke for the later Codex attempt.**
-<!-- agent:boundary:596b19a2 -->
+
+❯ Can corky create a fresh token?
+### Re: whether `corky` can create a fresh token — gpt-5
+
+Yes, but only by completing the normal Google OAuth flow.
+
+`corky` does two things when it needs a token:
+- if there is an expired token with a usable refresh token, it tries to **refresh** it
+- if refresh fails or the stored scope is wrong, it falls back to a full **re-auth** flow and then writes the new token into the local token store
+
+So in principle, yes: `corky` can create a fresh token for Gmail.
+
+The important constraint is that it cannot invent one offline. The session still needs to be able to:
+- reach Google (`oauth2.googleapis.com` and related endpoints)
+- open the local OAuth callback listener so the browser auth flow can return
+
+For this repo, the practical paths are:
+- `corky filter auth` for the general Gmail OAuth path
+- or just retry the Gmail action that needs the token, such as `corky draft send ...`, because that path will also trigger re-auth when needed for `gmail.compose`
+
+So the answer is: **yes, `corky` can create a fresh token, but not from a session that cannot reach Google or complete the OAuth callback bind.**
+<!-- agent:boundary:1f2870b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

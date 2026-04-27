@@ -78,7 +78,7 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
             imperative_after_recommend += 1;
         }
 
-        if has_quantified_remaining_work(trimmed) {
+        if has_unconditional_followup_signal(trimmed) {
             followup_count += 1;
         }
 
@@ -144,6 +144,10 @@ pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
     }
 }
 
+fn has_unconditional_followup_signal(line: &str) -> bool {
+    has_quantified_remaining_work(line) || has_unresolved_issue_followup(line)
+}
+
 fn has_quantified_remaining_work(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     let keywords = [" remaining", " left to ", " outstanding", " unfinished"];
@@ -157,6 +161,75 @@ fn has_quantified_remaining_work(line: &str) -> bool {
         }
     }
     false
+}
+
+fn has_unresolved_issue_followup(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    if !contains_issue_or_followup_noun(&lower) {
+        return false;
+    }
+    if contains_resolved_marker(&lower) {
+        return false;
+    }
+    contains_unresolved_marker(&lower)
+}
+
+fn contains_issue_or_followup_noun(line: &str) -> bool {
+    const ISSUE_NOUNS: &[&str] = &[
+        " bug",
+        " issue",
+        " regression",
+        " failure",
+        " problem",
+        " gap",
+        " follow-up",
+        " follow up",
+        " backlog item",
+        " pending item",
+        " fix",
+    ];
+
+    ISSUE_NOUNS.iter().any(|marker| line.contains(marker))
+}
+
+fn contains_resolved_marker(line: &str) -> bool {
+    const RESOLVED_MARKERS: &[&str] = &[
+        "already fixed",
+        "was fixed",
+        "is fixed",
+        "fixed in ",
+        "resolved in ",
+        "no longer reproducible",
+        "closed by ",
+    ];
+
+    RESOLVED_MARKERS
+        .iter()
+        .any(|marker| line.contains(marker))
+}
+
+fn contains_unresolved_marker(line: &str) -> bool {
+    const UNRESOLVED_MARKERS: &[&str] = &[
+        "still ",
+        " remains ",
+        " remain ",
+        " unresolved",
+        " still open",
+        " remains open",
+        " outstanding",
+        " needs ",
+        " need to ",
+        " should ",
+        " must ",
+        " meant to close",
+        " not fixed",
+        " not resolved",
+        " missing",
+    ];
+
+    UNRESOLVED_MARKERS
+        .iter()
+        .any(|marker| line.contains(marker))
 }
 
 fn is_priority_label(line: &str) -> bool {
@@ -379,9 +452,7 @@ mod tests {
 
     #[test]
     fn zero_remaining_does_not_trigger_followup() {
-        let signal = detect_uncaptured_recommendations(
-            "All diagrams transferred. 0 remaining.\n",
-        );
+        let signal = detect_uncaptured_recommendations("All diagrams transferred. 0 remaining.\n");
         assert!(
             !signal
                 .patterns_matched
@@ -407,6 +478,32 @@ mod tests {
     fn options_without_remaining_work_no_followup() {
         let signal = detect_uncaptured_recommendations(
             "Here are your options:\n- Option A: keep current approach\n- Option B: switch to new API\n",
+        );
+        assert!(
+            !signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn unresolved_bug_signal_triggers_followup() {
+        let signal = detect_uncaptured_recommendations(
+            "Because that session was still hitting the older tmux route/sync cleanup bug that #4qgx was meant to close.\n",
+        );
+        assert!(signal.estimated_count >= 1);
+        assert!(signal.confidence >= 0.7);
+        assert!(
+            signal
+                .patterns_matched
+                .contains(&PatternKind::UnconditionalFollowUp)
+        );
+    }
+
+    #[test]
+    fn resolved_bug_does_not_trigger_followup() {
+        let signal = detect_uncaptured_recommendations(
+            "The tmux cleanup bug was fixed in f4e646d and is no longer reproducible.\n",
         );
         assert!(
             !signal

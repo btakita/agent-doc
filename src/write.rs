@@ -6539,4 +6539,19 @@ mod precommit_pending_capture_tests {
         super::precommit_pending_capture_check(&doc)
             .expect("should pass when suppression marker present");
     }
+
+    #[test]
+    fn precommit_blocks_single_unresolved_bug_without_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: tmux pane closure — opus-4-6\n\nBecause that session was still hitting the older tmux route/sync cleanup bug that #4qgx was meant to close.\n",
+            false,
+        );
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("[finalize] pre-commit gate"));
+        assert!(err.to_string().contains("--pending-add"));
+    }
 }

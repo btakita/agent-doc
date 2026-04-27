@@ -1221,6 +1221,22 @@ mod tests {
     }
 
     #[test]
+    fn session_check_warns_on_single_unresolved_bug_without_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            None,
+            "### Re: tmux pane closure — gpt-5\n\nBecause that session was still hitting the older tmux route/sync cleanup bug that #4qgx was meant to close.\n",
+            false,
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(!report.warnings.is_empty());
+        assert!(report.warnings[0].contains("recommendation-like items"));
+    }
+
+    #[test]
     fn session_check_warns_on_missing_pending_done_for_completed_task() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_committed_capture_with_pending(

@@ -26,6 +26,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Fix Codex submodule handoff.** `codex exec resume` does not accept `--add-dir`, but `append_resume_args` was passing it through from `base_args`. The Codex backend now strips `--add-dir` (both `--add-dir <DIR>` and `--add-dir=<DIR>` forms) from resume args. Resumed sessions inherit writable roots from the original `exec`, so stripping is correct behavior. Specs updated to document backend-specific handling.
 
+- **Pending-capture guard now catches single unresolved bug/follow-up prose.** The recommendation heuristic no longer requires a numbered batch when the response clearly identifies a current issue as still needing follow-up (for example, "still hitting the older ... bug that X was meant to close"). Strict `finalize` now blocks those uncaptured single-item responses before commit, and `session-check` warns on the same shape post-commit. Added regression coverage for unresolved-vs-resolved bug prose.
+
 ## 0.33.15
 
 - **Supervisor model injection from frontmatter.** `start.rs` now injects `--model` from `claude_model` / `codex_model` / `model` frontmatter when the freeform args (`claude_args`, `agent_args`, etc.) don't already contain `--model`. Precedence: harness-specific field (`claude_model` for Claude, `codex_model` for Codex) > generic `model` field.

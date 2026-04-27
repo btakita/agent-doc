@@ -822,7 +822,22 @@ Created `tasks/agent-doc/plan-pending-capture-precommit.md` with a two-phase pla
 Phase 1 ships first (concrete signal, zero false positives). Phase 2 follows after validation (advisory, may need tuning).
 
 The plan file references `spec-pending-capture-guard.md` which documents the existing implementation. Both items belong in agent-doc-feat.md's backlog — I'll note the transfer but those items should be added to that doc in its next session cycle.
-<!-- agent:boundary:776d78d9 -->
+
+❯ do #srch. spec-test-build-install-commit-push
+### Re: do #srch — opus-4-6
+
+**Root cause:** `cmd_search` defaulted to sift's `hybrid` strategy (BM25 + vector embedding), which triggers a full embedding model pass on every query. On 24 files: ~8.4 seconds. Additionally, `--scope` restricted only the symbol search (SQLite) but still let sift scan the entire workspace root.
+
+**Fix (two changes):**
+1. **Default strategy → `lexical`** when no `--strategy` flag is passed. Lexical BM25 is instant (~0.05s). Hybrid/vector remain available via explicit `--strategy hybrid`.
+2. **Scope narrows sift path:** When `--scope <name>` is used, resolve the submodule directory via `Config::submodule_dirs()` and pass that to sift instead of the workspace root.
+
+**Result:** `tsift search "test" --scope tsift` went from 8.4s → 0.047s (~180x).
+
+Committed `btakita/tsift@882421d`, pushed. Submodule pointer updated in agent-loop. SPEC.md updated. 236 tests pass.
+
+`#wrka` ("until search is fixed, use explain/graph") is now obsolete — search works.
+<!-- agent:boundary:7ff8d429 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -844,8 +859,8 @@ In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#srch] Profile and fix tsift search hang (BM25 scoring or file-content loading bottleneck)
-- [ ] [#wrka] Until search is fixed, use tsift explain/graph for navigation
+- [x] [#srch] Profile and fix tsift search hang (BM25 scoring or file-content loading bottleneck)
+- [x] [#wrka] Until search is fixed, use tsift explain/graph for navigation
 <!-- /agent:backlog -->
 
 <!--

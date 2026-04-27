@@ -97,7 +97,25 @@ Phase 1 (pre-commit pending capture gate) is already implemented, spec'd, tested
 - **Push**: `origin/20260422/codex-agent-backend` up to date
 
 Added Phase 1 (`#pcg1`) to backlog and marked done. Phase 2 (`#pcg2`) was already in backlog as gated.
-<!-- agent:boundary:e17d740d -->
+
+❯ Is phase 2 done?
+### Re: phase 2 status — opus-4-6
+
+Partially. The infrastructure is in place but the core heuristic is missing.
+
+**What's done:**
+- `pending_mutations` field exists in the `PlanRecord` struct (`plan.rs:47`)
+- `PendingMutationPlan` struct with `kind`, `id`, `text` fields
+- `ResolveExisting` kind — detects `do #id` in repo actions and matches against open backlog items
+- Test: `build_plan_includes_finalize_placeholder_for_template_docs` covers the `do #id` → `ResolveExisting` path
+
+**What's missing (the actual Phase 2 from the plan):**
+- `ExpectAdd` variant in `PendingMutationKind` — signals "this prompt will likely generate recommendations"
+- Heuristic in `pending_mutations_for_doc()` to detect recommendation-generating prompts: user asks for "tasks", "todo", "backlog", "what's next", "recommendations"
+- Tests from the plan: `test_plan_detects_backlog_request`, `test_plan_detects_recommendation_request`, `test_plan_no_false_positive_on_questions`
+
+The `ResolveExisting` kind that exists now is an adjacent feature (resolve `do #id` against pending) rather than the Phase 2 `expect_add` heuristic. `#pcg2` should stay gated.
+<!-- agent:boundary:d56c4c67 -->
 <!-- /agent:exchange -->
 
 <!--

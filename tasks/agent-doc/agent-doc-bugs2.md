@@ -142,12 +142,36 @@ Commit / push:
 Scope note:
 - This closes the specific fresh-start acknowledgment gap behind `#cdxstart`.
 - It does not claim the separate pending/backlog mutation issue is fixed; that remains under the other tracked items.
-<!-- agent:boundary:2a097f03 -->
+
+❯ do #pendops. spec-test-build-install-commit-push
+### Re: do `#pendops` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `b3a37fd` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `write` / `finalize` / `stream` / `ipc` now normalize one list-shaped `replace:pending` / `patch:pending` block into granular pending mutations before durable capture, then drop that pending patch from the captured response body.
+- explicit `--allow-replace-pending` / legacy env+flag escape hatches still bypass normalization and preserve the raw replace path.
+- `repair` now replays historical captured pending-patch responses through the same normalization path instead of failing again on the forbidden pending block.
+- updated `specs/07-commands.md`, `runbooks/pending-ops.md`, and `VERSIONS.md`; added live-write and repair regressions.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `b3a37fd` (`fix: normalize pending patches before capture`)
+
+Scope note:
+- This closes the stranded `response_captured` path behind `#pendops` for list-shaped backlog patches.
+- Unsupported pending/backlog patch shapes still fail closed before capture.
+<!-- agent:boundary:8e9d7929 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
+- [ ] [#] [#doccommit] [recommended] Enforce a binary-owned commit boundary for active session-document patchbacks: if a response lands in the target document, `agent-doc` must either commit it in the owning repo/submodule or fail closed with resumable state; `src/session-share/tasks/claudescore-3.md` should not be able to end in a manual uncommitted patchback.
+- [x] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

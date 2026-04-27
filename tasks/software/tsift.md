@@ -224,7 +224,30 @@ The "78% savings" claim in the compacted summary is projected from the formula `
 6. Output caps for explain/graph/communities (`--limit`)
 7. Codex rewrite hook or AGENTS.md instructions
 8. RTK filters (safety net)
-<!-- agent:boundary:99bb24a3 -->
+
+❯ do #hang. spec-test-build-install-commit-push
+### Re: do #hang — opus-4-6
+
+`tsift search` now has a 30-second timeout (configurable via `--timeout`).
+
+**Problem:** The sift engine's `search()` call blocks indefinitely on large/stale repos. The rewrite hook transparently converts `rg`/`grep -r` → `tsift search`, so agents hang silently with no error or progress.
+
+**Fix:** Wrapped `engine.search()` in a spawned thread with `mpsc::recv_timeout`. On timeout, exits with a clear error:
+
+```
+tsift search timed out after 30s (strategy: lexical). The index may be stale — run `tsift index .` to rebuild, or use `--timeout 0` to disable the timeout.
+```
+
+**Changes:**
+- `src/main.rs` — `--timeout` flag on Search (default 30, 0 = disabled). New `run_search_with_timeout()` function wraps the sift call in a thread+channel with configurable timeout.
+- `SPEC.md` — new "Search Timeout" section documenting the flag and behavior.
+
+**Tests:** +3 → 246 total. Covers: normal search completes within timeout, timeout=0 disables, channel timeout mechanism.
+
+**Verified:** `tsift search "main" --timeout 5` on the stale agent-loop repo correctly times out with the error message. Small directories complete normally.
+
+**Commit:** `btakita/tsift@91aaab0`. Pushed. Submodule pointer updated (`205e7dea5`).
+<!-- agent:boundary:43190077 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -233,7 +256,7 @@ The "78% savings" claim in the compacted summary is projected from the formula `
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#hang] [recommended] Fix search hang on stale index — fail fast or add timeout
+- [x] [#hang] [recommended] Fix search hang on stale index — fail fast or add timeout
 - [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)

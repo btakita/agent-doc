@@ -330,11 +330,24 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the six `#cxr1` files.
-<!-- agent:boundary:7294db41 -->
+
+❯ The active tmux pane was force closed in a recent src/session-share/tasks/claudescore-3.md session. Why?
+### Re: why the active tmux pane was force closed in `src/session-share/tasks/claudescore-3.md` — gpt-5
+
+Because that session was still hitting the older tmux route/sync cleanup bug that `#4qgx` was meant to close.
+
+What I can show directly from the repo:
+- `tasks/agent-doc/plan-tmux-session-spawn-guard.md` names the exact failure class: unexpected tmux session spawn plus live pane eviction, with a requirement that `agent-doc` must never kill a live agent pane merely because session/registry state drifted.
+- `src/agent-doc/VERSIONS.md` for `f4e646d` says the fix was to stop inventing fallback tmux sessions, re-register an already-running pane for the same document before lazy-claim/auto-start, preserve prior stash panes unless cleanup has explicit provenance, and refuse cross-session stash rescue that would displace a live pane.
+- The code change in `src/agent-doc/src/route.rs` removed automatic stash-pane eviction and changed it to: preserve the previous stash pane unless there is explicit provenance. The paired `src/agent-doc/src/sync.rs` change refuses cross-session stash rescue instead of moving the pane.
+
+So the concrete answer is: the pane was force closed because pre-`f4e646d` tmux routing/cleanup was too destructive under session drift. `agent-doc` could miss the already-live pane, fall back toward a different tmux target, and then treat the older live/stashed pane as disposable recovery state. That is an `agent-doc` bug, not expected Codex behavior.
+
+One evidence boundary: I do not see a per-pane tmux lifecycle log entry in the session-share ops log that literally says "kill-pane %X for claudescore-3". Those logs are mainly document-cycle logs, not full tmux mutation traces. So the exact pane id / kill command for that run is not proven from the session log alone; the root cause comes from the tracked bug, the plan, and the fix commit that removed the destructive path.
+<!-- agent:boundary:66ce0a08 -->
 <!-- /agent:exchange -->
 
-<!--
-The active tmux pane was force closed in a recent src/session-share/tasks/claudescore-3.md session. Why? 
+<!-- 
 -->
 
 ## Pending / Not Built

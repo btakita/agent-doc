@@ -451,16 +451,44 @@ I added three new backlog items:
 - root-cause analysis for the recurring tmux pane instability behind these incidents
 
 I folded the mid-run crash note into the root-cause item because it reads like the same instability family rather than a clearly separate accepted fix item.
-<!-- agent:boundary:15352ca0 -->
+
+❯ do cork1. spec-test-build-install-commit-push
+### Re: do `#cork1` — gpt-5
+
+Implemented in `src/agent-doc` and committed as `058e7e2` (`fix: reject duplicate live session starts`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `start.rs` now fails closed if the same session UUID is already registered to a different alive tmux pane, instead of re-registering and spawning a second live harness.
+- added regression coverage for the three start-level cases: other alive pane, same pane, and dead registered pane.
+- updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` to make the one-live-pane-per-session invariant explicit.
+
+Why this matches the `corky.md` failure:
+- the local session log for `tasks/software/corky.md` shows the same session id being started repeatedly on `%194`, `%196`, `%197`, `%198`, and `%199`.
+- this fix blocks that duplicate-live-start shape at the `agent-doc start` boundary instead of letting restart churn destabilize other active panes.
+
+Verification:
+- `cargo test` still has 6 pre-existing route failures (`send_keys_*`, `wait_for_agent_ready_*`, and two `resolve_or_create_pane_*` tests).
+- `cargo test conflicting_live_session_pane`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `058e7e2` (`fix: reject duplicate live session starts`)
+
+Scope note:
+- this closes the duplicate live start path behind `#cork1`.
+- the broader tmux swap/recovery and root-cause items remain separate backlog items.
+<!-- agent:boundary:fc0838ca -->
 <!-- /agent:exchange -->
 
 <!--
+Why is there Codex permission prompts when `codex_args: -s danger-full-access` frontmatter is set?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cork1] Investigate/fix restarted `agent-doc` force-closing the tmux pane for `tasks/software/corky.md`.
+- [x] [#cork1] Investigate/fix restarted `agent-doc` force-closing the tmux pane for `tasks/software/corky.md`.
 - [ ] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
 - [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.

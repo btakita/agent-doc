@@ -98,10 +98,32 @@ What I changed there:
 - split the fix scope into three parts: document-first reporting, supported pending mutation handling on write/repair, and deterministic recovery plus regression coverage
 
 No code changed in this cycle; this was a planning/doc update only.
-<!-- agent:boundary:b250348f -->
+
+❯ How can we ensure that agent-doc with Codex does not fall into a bad state? This should be an agent-doc fix.
+### Re: preventing bad Codex `agent-doc` state — gpt-5
+
+Yes, this should be an `agent-doc` fix. The right target is not "Codex never hits a bug"; it is "Codex cannot get stuck in a silent or ambiguous state." In other words, every failure must collapse into one of two outcomes: either the cycle commits, or `agent-doc` leaves an explicit recoverable state that `preflight`/`session-check` can close deterministically.
+
+The main fixes I would require are:
+
+1. **Acked startup, not best-effort startup.** Fresh Codex launch should not count as successful just because the process started. `agent-doc run` should require evidence that the route trigger actually produced the target document cycle, for example a real `preflight_started` or equivalent ack for that file. If that ack never appears, the run should fail closed and log the exact startup failure instead of idling.
+
+2. **Typed pending mutations before write-back.** The `claudescore-3.md` failure happened because a captured response still contained a raw pending/backlog patch. That class of mutation should be normalized into supported `--pending-*` ops before write/commit, or rejected before the cycle advances to `response_captured`. The bad state here is not the rejection itself; it is letting rejection happen after capture with no typed recovery path.
+
+3. **Single binary-owned state machine across startup, write, and commit.** Codex should never be able to produce an external reply or a plugin-delivered patchback that is invisible to the cycle state. If the response exists, the cycle must record where it is: `response_captured`, `write_applied`, or `committed`, with enough file/hash metadata for deterministic repair.
+
+4. **No silent exit from open phases.** `preflight_started`, `response_captured`, and `write_applied` should all be treated as resumable checkpoints, not vague drift. `preflight`, `repair`, `session-check`, and the Stop hook should all enforce the same rule: recover automatically when hashes prove safety; otherwise fail closed with a specific phase-labelled error.
+
+5. **Document-first reporting should be enforced, not advisory.** If the active surface is a session document and the agent promises "I’ll report back", the next substantive report should be required to land in that document before any external completion path is considered clean. That is a workflow invariant, but it still belongs in `agent-doc` because the binary owns the session boundary.
+
+So the short answer is: ensure Codex cannot enter a *silent* bad state by making startup acked, pending mutations typed, cycle phases explicit, recovery deterministic, and document-first reporting enforceable.
+<!-- agent:boundary:52e98260 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#cdxstart] [recommended] Make fresh Codex startup fail closed unless the initial route trigger is acknowledged by a real preflight start for the target document
+- [ ] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
+- [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

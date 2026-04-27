@@ -733,7 +733,12 @@ The command computes the current diff against the saved snapshot and emits JSON 
 - `handoff`
 - `blockers`
 
-The intent is to give the skill/orchestrator an explicit, binary-owned execution contract before repo work starts. The first implementation is deterministic and reuses the same diff classifiers that back preflight (`prompt_bearing_changes`, imperative directives, slash-command parsing, orchestration detection) rather than hiding planning in skill prose.
+The intent is to give the skill/orchestrator an explicit, binary-owned execution contract before repo work starts. The implementation is deterministic and reuses the same diff classifiers that back preflight (`prompt_bearing_changes`, imperative directives, slash-command parsing, orchestration detection) rather than hiding planning in skill prose.
+
+`pending_mutations` includes two kinds:
+
+- `resolve_existing` — emitted when a `do #id` directive in `repo_actions` matches an open backlog item. Tells the skill the finalize command must include `--pending-done <id>` if the work completes.
+- `expect_add` — emitted when prompt targets contain signals that the response will likely generate recommendations (e.g., user asks for "tasks", "todo", "backlog", "what's next", "recommendations", "next steps", "action items"). Tells the skill the finalize command should include `--pending-add` flags for any actionable items in the response.
 
 ## orchestrate
 

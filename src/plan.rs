@@ -27,6 +27,9 @@
 //! ## Evals
 //! - `build_plan_detects_orchestration_handoff_and_existing_pending_item`
 //! - `build_plan_includes_finalize_placeholder_for_template_docs`
+//! - `test_plan_detects_backlog_request`
+//! - `test_plan_detects_recommendation_request`
+//! - `test_plan_no_false_positive_on_questions`
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -62,6 +65,7 @@ pub struct PendingMutationPlan {
 #[serde(rename_all = "snake_case")]
 pub enum PendingMutationKind {
     ResolveExisting,
+    ExpectAdd,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,7 +117,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let repo_actions = diff::extract_imperative_directives(&diff_text);
     let orchestration_request = diff::detect_orchestration_request(&diff_text);
     let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
-    let pending_mutations = pending_mutations_for_doc(&content, &repo_actions)?;
+    let pending_mutations = pending_mutations_for_doc(&content, &repo_actions, &prompt_targets)?;
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
@@ -195,16 +199,23 @@ fn finalize_placeholder_commands(file: &Path, fm: &frontmatter::Frontmatter) -> 
 fn pending_mutations_for_doc(
     content: &str,
     repo_actions: &[String],
+    prompt_targets: &[String],
 ) -> Result<Vec<PendingMutationPlan>> {
     let components = component::parse(content).context("failed to parse document components")?;
-    let Some(pending_component) = components
+    let has_backlog = components
+        .iter()
+        .any(|component| is_backlog_component(&component.name));
+
+    if !has_backlog {
+        return Ok(Vec::new());
+    }
+
+    let backlog_component = components
         .iter()
         .find(|component| is_backlog_component(&component.name))
-    else {
-        return Ok(Vec::new());
-    };
+        .unwrap();
 
-    let (_, items, _) = pending::parse_items(pending_component.content(content));
+    let (_, items, _) = pending::parse_items(backlog_component.content(content));
     let mut pending_mutations: Vec<PendingMutationPlan> = Vec::new();
 
     for action in repo_actions {
@@ -229,7 +240,44 @@ fn pending_mutations_for_doc(
         });
     }
 
+    if prompt_requests_backlog_work(prompt_targets) {
+        pending_mutations.push(PendingMutationPlan {
+            kind: PendingMutationKind::ExpectAdd,
+            id: String::new(),
+            text: "user requested backlog/recommendations".to_string(),
+        });
+    }
+
     Ok(pending_mutations)
+}
+
+fn prompt_requests_backlog_work(prompt_targets: &[String]) -> bool {
+    const BACKLOG_SIGNALS: &[&str] = &[
+        "tasks",
+        "todo",
+        "backlog",
+        "what's next",
+        "what should we do",
+        "what do we need",
+        "recommendations",
+        "recommend",
+        "next steps",
+        "action items",
+        "what's left",
+        "what remains",
+        "what else",
+        "add to backlog",
+        "add to pending",
+    ];
+    for target in prompt_targets {
+        let lower = target.to_ascii_lowercase();
+        for signal in BACKLOG_SIGNALS {
+            if lower.contains(signal) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn extract_do_pending_id(action: &str) -> Option<String> {
@@ -371,5 +419,198 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    #[test]
+    fn test_plan_detects_backlog_request() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#abc1] Existing item
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+
+add to backlog: what tasks remain?
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#abc1] Existing item
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd);
+        assert!(
+            expect_add.is_some(),
+            "expected ExpectAdd mutation, got: {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn test_plan_detects_recommendation_request() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+
+What should we do next? Any recommendations?
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd);
+        assert!(
+            expect_add.is_some(),
+            "expected ExpectAdd for recommendation request, got: {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn test_plan_no_false_positive_on_questions() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#xyz1] Some item
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+
+How does the CRDT merge work?
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#xyz1] Some item
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd);
+        assert!(
+            expect_add.is_none(),
+            "should not emit ExpectAdd for a plain question, got: {:?}",
+            plan.pending_mutations
+        );
     }
 }

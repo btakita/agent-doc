@@ -295,7 +295,37 @@ vendor/**
 **Caveat:** this won't fix the search timeout today. Sift's `collect_file_paths()` uses `WalkDir` which still traverses every directory entry before filtering against `.siftignore` patterns — it can't prune subtrees. With 1.87M files, just the walk takes >40 seconds regardless of filtering.
 
 The `.siftignore` will become effective when the upstream fix ([rupurt/sift#2](https://github.com/rupurt/sift/issues/2)) replaces `WalkDir` with `ignore::WalkBuilder`, which prunes entire directories from the walk. Until then, the `--timeout 30` wrapper remains the active defense, and scoped searches (`--scope <submodule>`) work fine on individual submodules.
-<!-- agent:boundary:e54d11a7 -->
+
+❯ do #iflood. spec-test-build-install-commit-push
+### Re: do #iflood — opus-4-6
+
+`tsift index` now has `--quiet` (`-q`) which suppresses the per-file change list.
+
+**Changes:**
+- `src/main.rs` — `--quiet` flag on Index command. `--exit-code` implies `--quiet`. In human mode, suppresses the per-file list. In JSON mode, omits the `changes` array and uses compact serialization. Both single-repo and workspace paths updated.
+- `SPEC.md` — new "Index Quiet Mode" section, updated subcommand reference.
+
+**Before/after on tsift submodule (3 stale files):**
+```
+# Without --quiet: summary + 3 file paths
+Index (check): 17 files tracked
+  new: 0  modified: 3  deleted: 0  unchanged: 14
+
+  ~ .../SPEC.md [markdown]
+  ~ .../src/init.rs [rust]
+  ~ .../src/main.rs [rust]
+
+# With --quiet: summary only
+Index (check): 17 files tracked
+  new: 0  modified: 3  deleted: 0  unchanged: 14
+```
+
+On the original 14K stale files scenario, this cuts output from 1.7MB (433K tokens) to ~80 bytes. JSON goes from 2.6MB to ~120 bytes.
+
+**Tests:** +3 → 249 total. Covers: quiet suppresses file list, exit-code implies quiet, quiet JSON omits changes.
+
+**Commit:** `btakita/tsift@936b2da`. Pushed. Submodule pointer updated (`83d9942ac`).
+<!-- agent:boundary:7f7b6557 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -304,7 +334,7 @@ The `.siftignore` will become effective when the upstream fix ([rupurt/sift#2](h
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
+- [x] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute

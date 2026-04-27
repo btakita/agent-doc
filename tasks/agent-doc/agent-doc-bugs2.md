@@ -344,7 +344,20 @@ What I can show directly from the repo:
 So the concrete answer is: the pane was force closed because pre-`f4e646d` tmux routing/cleanup was too destructive under session drift. `agent-doc` could miss the already-live pane, fall back toward a different tmux target, and then treat the older live/stashed pane as disposable recovery state. That is an `agent-doc` bug, not expected Codex behavior.
 
 One evidence boundary: I do not see a per-pane tmux lifecycle log entry in the session-share ops log that literally says "kill-pane %X for claudescore-3". Those logs are mainly document-cycle logs, not full tmux mutation traces. So the exact pane id / kill command for that run is not proven from the session log alone; the root cause comes from the tracked bug, the plan, and the fix commit that removed the destructive path.
-<!-- agent:boundary:66ce0a08 -->
+
+❯ Add above item to the backlog. Why did you not already add to the backlog? Please create another backlog item to fix not adding to the backlog as well.
+### Re: add the tmux-pane item to backlog, and why it was not already there — gpt-5
+
+Added both backlog items.
+
+Why I did not already add the first one: that was a miss on my side. The prior response identified concrete unresolved follow-up work, so under the document's pending-capture rule I should have recorded it into backlog in the same cycle. Instead I treated that turn as answer-only analysis and stopped after the exchange write-back.
+
+What I added:
+1. `#tmev` — the actual `claudescore-3.md` tmux session spawn / live pane eviction fix item, pointing at `tasks/agent-doc/plan-tmux-session-spawn-guard.md`.
+2. `#pcap` — a separate backlog item for the backlog-capture miss itself, so this class of "actionable issue described in exchange but not promoted into backlog" gets closed systematically.
+
+So the short answer is: it was not omitted because the issue was resolved; it was omitted because the cycle failed to promote pending-worthy work into backlog, and that omission itself is now tracked.
+<!-- agent:boundary:f4d6dc0e -->
 <!-- /agent:exchange -->
 
 <!-- 
@@ -352,7 +365,9 @@ One evidence boundary: I do not see a per-pane tmux lifecycle log entry in the s
 
 ## Pending / Not Built
 
-<!-- agent:pending -->
+<!-- agent:backlog -->
+- [ ] [#tmev] Fix unexpected tmux session spawn and live pane eviction for src/session-share/tasks/claudescore-3.md; ensure route/sync never treat a live pane as disposable recovery state under session drift. See tasks/agent-doc/plan-tmux-session-spawn-guard.md
+- [ ] [#pcap] Fix backlog-capture misses for explanatory responses: when a response identifies concrete unresolved follow-up work, the cycle must record a matching backlog item instead of leaving it only in exchange prose. Repro: the tmux-pane root-cause answer in tasks/agent-doc/agent-doc-bugs2.md was committed without adding the item to backlog. See tasks/agent-doc/spec-pending-capture-guard.md
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
-<!-- /agent:pending -->
+<!-- /agent:backlog -->

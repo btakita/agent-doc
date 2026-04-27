@@ -501,7 +501,7 @@ Commit / push:
 Scope note:
 - this closes the remaining `#swap1` tmux swap/recovery path from `src/session-share/tasks/claudescore-3.md`
 - the broader tmux-instability investigation remains under `#tmuxr1`
-<!-- agent:boundary:84a54fd2 -->
+<!-- agent:boundary:988dec8e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -511,7 +511,6 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
 - [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`

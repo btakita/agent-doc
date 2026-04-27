@@ -401,7 +401,7 @@ Implemented `--exit-code` flag for `tsift index --check` and shipped an auto-rei
   }
 }
 ```
-<!-- agent:boundary:9efc7f3c -->
+<!-- agent:boundary:5a261c7d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -411,7 +411,6 @@ Please add "check tsift first".
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#hidx] Add UserPromptSubmit hook for tsift index --check (auto-reindex on stale)
 - [ ] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->

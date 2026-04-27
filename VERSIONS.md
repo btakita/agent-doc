@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.33.16
 
+- **Normalize accidental pending patches before capture/replay.** When a response still contains a single list-shaped `replace:pending` / `patch:pending` block, the write path now translates it into granular pending mutations before durable capture instead of capturing first and then failing on `replace:pending block forbidden`. That closes the `response_captured` orphan path behind `#pendops`. `repair` replays the same historical capture shape through the same normalization path, while unsupported pending/backlog patch shapes still fail closed before capture. Added live-write and repair regression coverage.
+
 - **Fresh Codex start now requires real cycle acknowledgment.** `route.rs` no longer treats a consumed `agent-doc <file>` trigger as sufficient proof that a fresh pane started successfully. After trigger injection, route now waits for a new per-document cycle state (`preflight_started` or later) before declaring success, logs `fresh_route_start_acknowledged` / `fresh_route_start_missing`, and fails closed if the file never enters a real cycle. Added route unit coverage for fresh-cycle, fast-commit, and timeout shapes. Specs updated to document the stronger startup contract.
 
 - **Fix Codex submodule handoff.** `codex exec resume` does not accept `--add-dir`, but `append_resume_args` was passing it through from `base_args`. The Codex backend now strips `--add-dir` (both `--add-dir <DIR>` and `--add-dir=<DIR>` forms) from resume args. Resumed sessions inherit writable roots from the original `exec`, so stripping is correct behavior. Specs updated to document backend-specific handling.

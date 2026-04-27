@@ -407,9 +407,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     if use_template_write
         && let crate::replay_guard::ReplayPayloadClassification::Blocked(reason) =
             crate::replay_guard::classify_replay_payload(&response)
-        {
-            fail_closed_on_blocked_template_replay(file, &response, &reason)?;
-        }
+    {
+        fail_closed_on_blocked_template_replay(file, &response, &reason)?;
+    }
     if use_template_write {
         write::apply_template_from_string(file, &response)?;
     } else {
@@ -639,6 +639,43 @@ mod tests {
             !result[exchange_close..].contains("## Assistant"),
             "template recovery must not append inline assistant blocks after exchange:\n{result}"
         );
+    }
+
+    #[test]
+    fn recover_normalizes_captured_replace_pending_patch() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#aaaa] existing\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Recovered.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- replace:pending -->\n",
+            "- [x] [#aaaa] existing\n",
+            "- [ ] [#bbbb] add regression coverage\n",
+            "<!-- /replace:pending -->\n"
+        );
+        save_pending(&doc, response).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("### Re: topic — gpt-5"));
+        assert!(result.contains("- [x] [#aaaa] existing"));
+        assert!(result.contains("- [ ] [#bbbb] add regression coverage"));
+        assert!(!result.contains("replace:pending"));
     }
 
     #[test]

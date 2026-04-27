@@ -226,6 +226,32 @@ fn write_pending_add_accepts_bracketed_custom_id_prefix() {
 }
 
 #[test]
+fn write_normalizes_replace_pending_block_into_pending_ops() {
+    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
+    let payload = concat!(
+        "<!-- patch:exchange -->\n",
+        "### Re: topic — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /patch:exchange -->\n",
+        "<!-- replace:pending -->\n",
+        "- [x] [#aaaa] existing\n",
+        "- [ ] [#bbbb] add regression coverage\n",
+        "<!-- /replace:pending -->\n",
+    );
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(payload)
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: topic — gpt-5"));
+    assert!(content.contains("- [x] [#aaaa] existing"));
+    assert!(content.contains("- [ ] [#bbbb] add regression coverage"));
+    assert!(!content.contains("replace:pending"));
+}
+
+#[test]
 fn write_rejects_replace_pending_block() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
     let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
@@ -237,7 +263,7 @@ fn write_rejects_replace_pending_block() {
     let output = assert_result.get_output();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("replace:pending block forbidden"),
+        stderr.contains("no patch blocks or content found in response"),
         "stderr was: {}",
         stderr
     );
@@ -256,7 +282,7 @@ fn write_rejects_legacy_patch_pending_block() {
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("replace:pending block forbidden"),
+        stderr.contains("no patch blocks or content found in response"),
         "stderr was: {}",
         stderr
     );
@@ -554,7 +580,7 @@ fn write_rejects_replace_pending_via_library_default() {
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("replace:pending block forbidden"),
+        stderr.contains("no patch blocks or content found in response"),
         "stderr: {}",
         stderr
     );

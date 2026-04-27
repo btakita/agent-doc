@@ -3,7 +3,9 @@
 When a template-mode document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, the agent mutates it
 through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:backlog -->`
 (or the deprecated `<!-- patch:pending -->` / `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
-binary rejects those blocks with a clear error. See `src/agent-doc/specs/pending-system.md`
+binary rejects those blocks with a clear error. Compatibility note: the binary may normalize one accidental
+list-shaped `replace:pending` / `patch:pending` block internally before capture/replay so the cycle is not stranded,
+but agents must still treat that as a recovery backstop rather than a supported authoring path. See `src/agent-doc/specs/pending-system.md`
 for the full contract.
 
 ## Item shape

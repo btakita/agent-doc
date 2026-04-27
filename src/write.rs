@@ -203,12 +203,16 @@
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::snapshot::find_project_root;
-use crate::{component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot, template};
+use crate::{
+    component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot,
+    template,
+};
 
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
@@ -383,10 +387,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     // Phase 3: consume queue prompt after successful write, before commit.
     // Included in the same commit as the response for atomicity.
-    if write_result.is_ok() && commit_mode != CommitMode::None
-        && let Err(e) = consume_queue_prompt(file) {
-            eprintln!("[queue] warning: consumption failed: {}", e);
-        }
+    if write_result.is_ok()
+        && commit_mode != CommitMode::None
+        && let Err(e) = consume_queue_prompt(file)
+    {
+        eprintln!("[queue] warning: consumption failed: {}", e);
+    }
 
     // Phase 3b: pre-commit pending capture gate (strict mode only).
     if write_result.is_ok() && commit_mode == CommitMode::Required {
@@ -463,8 +469,7 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let response_text =
-        crate::session_check::response_text_for_guards(&capture.response_body);
+    let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
         return Ok(());
     }
@@ -565,34 +570,34 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
     if let Ok(Some(snap)) = snapshot::load(file) {
         let mut new_snap = snap.clone();
         if let Ok(snap_comps) = component::parse(&new_snap)
-            && let Some(sq) = snap_comps.iter().find(|c| c.name == "queue") {
-                new_snap = sq.replace_content(&new_snap, &new_body);
+            && let Some(sq) = snap_comps.iter().find(|c| c.name == "queue")
+        {
+            new_snap = sq.replace_content(&new_snap, &new_body);
 
-                if drained {
-                    if has_auto
-                        && let Ok(sc2) = component::parse(&new_snap)
-                            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue") {
-                                let raw = &new_snap[sq2.open_start..sq2.open_end];
-                                let new_tag = crate::queue::strip_auto_from_tag(raw);
-                                if new_tag != raw {
-                                    let mut rebuilt = String::with_capacity(new_snap.len());
-                                    rebuilt.push_str(&new_snap[..sq2.open_start]);
-                                    rebuilt.push_str(&new_tag);
-                                    rebuilt.push_str(&new_snap[sq2.open_end..]);
-                                    new_snap = rebuilt;
-                                }
-                            }
-                    if let Ok(merged) =
-                        frontmatter::merge_fields(&new_snap, "queue_active: false")
-                    {
-                        new_snap = merged;
+            if drained {
+                if has_auto
+                    && let Ok(sc2) = component::parse(&new_snap)
+                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                {
+                    let raw = &new_snap[sq2.open_start..sq2.open_end];
+                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(new_snap.len());
+                        rebuilt.push_str(&new_snap[..sq2.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&new_snap[sq2.open_end..]);
+                        new_snap = rebuilt;
                     }
                 }
-
-                if new_snap != snap {
-                    snapshot::save(file, &new_snap)?;
+                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false") {
+                    new_snap = merged;
                 }
             }
+
+            if new_snap != snap {
+                snapshot::save(file, &new_snap)?;
+            }
+        }
     }
 
     eprintln!(
@@ -641,6 +646,206 @@ pub(crate) fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Re
         );
     }
     Ok(())
+}
+
+struct NormalizedTemplateResponse {
+    response_for_capture: Option<String>,
+    patches: Vec<template::PatchBlock>,
+    unmatched: String,
+}
+
+fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
+    left.trim_end_matches('\n') == right.trim_end_matches('\n')
+}
+
+fn serialize_template_response(patches: &[template::PatchBlock], unmatched: &str) -> String {
+    let mut out = String::new();
+    for patch in patches {
+        out.push_str("<!-- patch:");
+        out.push_str(&patch.name);
+        if !patch.attrs.is_empty() {
+            let mut attrs: Vec<_> = patch.attrs.iter().collect();
+            attrs.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (key, value) in attrs {
+                out.push(' ');
+                out.push_str(key);
+                out.push_str("=\"");
+                out.push_str(&value.replace('"', "&quot;"));
+                out.push('"');
+            }
+        }
+        out.push_str(" -->\n");
+        out.push_str(&patch.content);
+        if !patch.content.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("<!-- /patch:");
+        out.push_str(&patch.name);
+        out.push_str(" -->\n");
+    }
+    if !unmatched.trim().is_empty() {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(unmatched.trim());
+        out.push('\n');
+    }
+    out
+}
+
+fn normalize_backlog_patch_response(
+    file: &Path,
+    current_content: &str,
+    mut patches: Vec<template::PatchBlock>,
+    unmatched: String,
+) -> Result<NormalizedTemplateResponse> {
+    let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let allow_legacy = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if allow_canonical || allow_legacy {
+        return Ok(NormalizedTemplateResponse {
+            response_for_capture: None,
+            patches,
+            unmatched,
+        });
+    }
+
+    let backlog_indexes: Vec<usize> = patches
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, patch)| is_backlog_component(&patch.name).then_some(idx))
+        .collect();
+
+    if backlog_indexes.is_empty() {
+        return Ok(NormalizedTemplateResponse {
+            response_for_capture: None,
+            patches,
+            unmatched,
+        });
+    }
+    if backlog_indexes.len() > 1 {
+        anyhow::bail!(
+            "ERR: multiple pending/backlog patches in one response are not supported — use --pending-* flags"
+        );
+    }
+
+    let components = component::parse(current_content)
+        .with_context(|| format!("failed to parse components in {}", file.display()))?;
+    let backlog_component = components
+        .iter()
+        .find(|component| is_backlog_component(&component.name))
+        .with_context(|| {
+            format!(
+                "document has no pending/backlog component: {}",
+                file.display()
+            )
+        })?;
+    let current_body = backlog_component.content(current_content);
+    let (current_prelude, current_items, current_postlude) =
+        crate::pending::parse_items(current_body);
+    let current_ids: HashSet<String> = current_items
+        .iter()
+        .filter(|item| !item.id.is_empty())
+        .map(|item| item.id.clone())
+        .collect();
+    let current_states: HashMap<String, crate::pending::PendingState> = current_items
+        .iter()
+        .map(|item| (item.id.clone(), item.state))
+        .collect();
+
+    let backlog_index = backlog_indexes[0];
+    let doc_id = crate::pending_cmd::doc_id_for(file);
+    let (target_body, _) =
+        crate::pending::backfill(&patches[backlog_index].content, &doc_id, &current_ids);
+    let (target_prelude, target_items, target_postlude) = crate::pending::parse_items(&target_body);
+    let rendered_target =
+        crate::pending::render_items(&target_prelude, &target_items, &target_postlude);
+    if !same_ignoring_trailing_newlines(&rendered_target, &target_body) {
+        anyhow::bail!(
+            "ERR: pending/backlog patch could not be normalized into supported --pending-* operations"
+        );
+    }
+    if !same_ignoring_trailing_newlines(&current_prelude, &target_prelude)
+        || !same_ignoring_trailing_newlines(&current_postlude, &target_postlude)
+    {
+        anyhow::bail!(
+            "ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead"
+        );
+    }
+
+    if !same_ignoring_trailing_newlines(current_body, &target_body) {
+        let mut normalized_body = crate::pending::op_clear(current_body)?;
+        let mut saw_pending_add = false;
+        let mut pending_done_ids = Vec::new();
+
+        for item in target_items.iter().rev() {
+            let add_text = if item.id.is_empty() {
+                item.text.clone()
+            } else {
+                format!("id={} {}", item.id, item.text)
+            };
+            let (new_body, assigned_id) =
+                crate::pending::op_add(&normalized_body, &add_text, &doc_id, false)?;
+            normalized_body = new_body;
+
+            if item.state == crate::pending::PendingState::Gated {
+                normalized_body = crate::pending::op_gate(&normalized_body, &assigned_id)?;
+                if let Some(gate_type) = item.gate_type.as_deref() {
+                    normalized_body = crate::pending::op_set_gate_type(
+                        &normalized_body,
+                        &assigned_id,
+                        gate_type,
+                    )?;
+                }
+            } else if item.state == crate::pending::PendingState::Done {
+                normalized_body = crate::pending::op_done(&normalized_body, &assigned_id)?;
+            }
+
+            if !current_ids.contains(&assigned_id) {
+                saw_pending_add = true;
+            }
+            if item.state == crate::pending::PendingState::Done
+                && current_states.get(&assigned_id).copied()
+                    != Some(crate::pending::PendingState::Done)
+            {
+                pending_done_ids.push(assigned_id);
+            }
+        }
+
+        let rewritten_doc = backlog_component.replace_content(current_content, &normalized_body);
+        std::fs::write(file, &rewritten_doc).with_context(|| {
+            format!(
+                "failed to write normalized pending state {}",
+                file.display()
+            )
+        })?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "normalize_pending_patch file={} added={} done={}",
+                file.display(),
+                saw_pending_add,
+                pending_done_ids.len()
+            ),
+        );
+        if saw_pending_add {
+            crate::cycle_state::mark_pending_mutations(file)?;
+        }
+        if !pending_done_ids.is_empty() {
+            crate::cycle_state::record_pending_done_ids(file, &pending_done_ids)?;
+        }
+    }
+
+    patches.remove(backlog_index);
+    let response_for_capture = Some(serialize_template_response(&patches, &unmatched));
+    Ok(NormalizedTemplateResponse {
+        response_for_capture,
+        patches,
+        unmatched,
+    })
 }
 
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
@@ -1769,6 +1974,13 @@ pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
+    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    if let Some(response_override) = normalized.response_for_capture {
+        response = response_override;
+    }
+    let patches = normalized.patches;
+    let unmatched = normalized.unmatched;
+
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
     enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
@@ -1915,6 +2127,13 @@ pub fn run_stream(
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
+
+    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    if let Some(response_override) = normalized.response_for_capture {
+        response = response_override;
+    }
+    let patches = normalized.patches;
+    let unmatched = normalized.unmatched;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
@@ -2440,14 +2659,22 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
-
     // Parse patch blocks from response
     let (mut patches, unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
+
+    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    if let Some(response_override) = normalized.response_for_capture {
+        response = response_override;
+    }
+    let patches = normalized.patches;
+    let unmatched = normalized.unmatched;
+
+    // Save response to pending store (survives context compaction)
+    repair::save_pending(file, &response)?;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
@@ -2622,6 +2849,10 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
+
+    let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched)?;
+    let patches = normalized.patches;
+    let unmatched = normalized.unmatched;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
@@ -6123,7 +6354,13 @@ mod precommit_pending_capture_tests {
         if had_pending_mutations {
             crate::cycle_state::mark_pending_mutations(&doc).unwrap();
         }
-        crate::cycle_state::mark_write_applied(&doc, "write_template", Some(&content), Some(&content)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
         doc
     }
 
@@ -6180,8 +6417,7 @@ mod precommit_pending_capture_tests {
             false,
         );
 
-        super::precommit_pending_capture_check(&doc)
-            .expect("should pass in default (warn) mode");
+        super::precommit_pending_capture_check(&doc).expect("should pass in default (warn) mode");
     }
 
     #[test]

@@ -234,7 +234,37 @@ On the design question: no, a different "local file DB" is not the right fix. `.
 **Verification:**
 - `cargo test` passed: 295 unit tests + 6 integration tests.
 - `make check` still fails on existing clippy debt in `src/main.rs`: `clippy::collapsible-if` around lines 1043-1046 and the pre-existing `clippy::too_many_arguments` helper warnings. I did not change those APIs in this cycle.
-<!-- agent:boundary:4726e4c8 -->
+
+❯ If index.db is locked, please attempt to recover. Should we use a local file db that does not lock?
+❯ This happened in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md:
+```
+• Explored
+  └ Search pending_capture|pending capture|backlog-capture|#pcap|recommended in agent-doc
+
+• Ran tsift search pending_capture
+  └ Error: database is locked
+
+    Caused by:
+        Error code 5: The database file is locked
+```
+### Re: index.db recovery + locking — gpt-5
+
+I attempted recovery directly.
+
+- I quarantined the locked index files to `.tsift/recovery-20260427-180342/` and started a fresh rebuild at `.tsift/index.db`.
+- That cleared the immediate SQLite lock symptom: `tsift status` now works again instead of failing with `database is locked`.
+- The rebuild itself is still not healthy. The new `tsift index .` process also entered `D` state in `jbd2_l`, so the remaining blocker is a kernel / filesystem write stall, not ordinary SQLite contention.
+
+So the answer to "should we use a local file DB that does not lock?" is no. SQLite already is a local file DB, and this failure is below the database layer: a blocked filesystem write can wedge any embedded file-backed store. Swapping SQLite for another local-file database would not remove a `D`-state I/O stall.
+
+Current state:
+
+- `tsift status` succeeds and reports a partial fresh rebuild instead of a lock failure.
+- `tsift search pending_capture` no longer errors with `database is locked`; it now times out because the index rebuild is incomplete/stale.
+- The previous locked DB is preserved in `.tsift/recovery-20260427-180342/` if we need to inspect it later.
+
+The right follow-up remains #vxtz: investigate why `tsift index .` is entering `D` state and leaving a journal file on this host. That is the root cause behind both the earlier lock error and the failed rebuild.
+<!-- agent:boundary:af8998f8 -->
 <!-- /agent:exchange -->
 
 <!--

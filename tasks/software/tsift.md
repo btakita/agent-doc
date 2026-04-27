@@ -694,7 +694,7 @@ No. #mext was already recommended for closure — it's a single-command Makefile
 2. `tsift status` (just shipped) prints a `run:` recommendation when summaries are missing or stale
 
 Closing #mext.
-<!-- agent:boundary:143e29df -->
+<!-- agent:boundary:2cad0f80 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -703,7 +703,6 @@ Closing #mext.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 
 <!--

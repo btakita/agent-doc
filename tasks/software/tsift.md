@@ -794,7 +794,21 @@ Two problems compounded:
 Done — both items added to backlog.
 
 **Why they weren't added last cycle:** I violated the promotion heuristic. The skill says: when a response ends with a numbered list of actionable recommendations and backlog is empty, promote them in the same cycle. Backlog was empty and the response ended with exactly that pattern. I just didn't include `--pending-add` flags on the finalize command. Pure skill-execution miss on my part.
-<!-- agent:boundary:3aa1de90 -->
+
+❯ How can agent-doc ensure that you don't miss the heuristic?
+### Re: enforcing the pending-capture heuristic — opus-4-6
+
+
+The mechanism already exists — it just wasn't strict here. Three layers, from what's already built to what could be added:
+
+**1. `pending_capture_guard: strict` (exists, opt-in).** Set in frontmatter or project `[guards] pending_capture = "strict"`. `session-check` (which `finalize` runs internally) scans the committed response for numbered recommendation lists. If it finds them and no `--pending-add` was recorded for that cycle, `finalize` fails — the LLM must recover with a follow-up `write --commit` that includes the missing `--pending-add` flags. This catches the exact failure from two cycles ago.
+
+**2. Pre-commit gate in `finalize` (not yet built).** Currently `session-check` runs post-commit, so the response is already committed without the pending items. Moving the recommendation-list scan into `finalize`'s pre-commit validation would block the commit entirely until `--pending-add` flags are present. Cleaner than post-commit recovery.
+
+**3. `agent-doc plan` could emit `pending_mutations` (not yet built).** If `plan` detects that the diff includes a response with numbered recommendations, it could include those as `pending_mutations` in the planning record — making them part of the execution contract before the LLM even starts composing. This is the strongest enforcement because it catches the pattern before response generation, not after.
+
+For immediate improvement: add `pending_capture_guard: strict` to this document's frontmatter. That turns a silent miss into a hard failure.
+<!-- agent:boundary:c3d8eb4f -->
 <!-- /agent:exchange -->
 
 <!--

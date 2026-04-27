@@ -115,18 +115,37 @@ Partially. The infrastructure is in place but the core heuristic is missing.
 - Tests from the plan: `test_plan_detects_backlog_request`, `test_plan_detects_recommendation_request`, `test_plan_no_false_positive_on_questions`
 
 The `ResolveExisting` kind that exists now is an adjacent feature (resolve `do #id` against pending) rather than the Phase 2 `expect_add` heuristic. `#pcg2` should stay gated.
-<!-- agent:boundary:d56c4c67 -->
+
+❯ Please complete #pcg2. spec-test-build-install-commit-push
+### Re: complete #pcg2 — opus-4-6
+
+Done. Phase 2 implemented, tested, built, installed, committed, and pushed.
+
+**What was added:**
+
+- `ExpectAdd` variant in `PendingMutationKind` — signals that the upcoming response will likely generate recommendations
+- `prompt_requests_backlog_work()` heuristic in `pending_mutations_for_doc()` — detects when prompt targets contain backlog/recommendation signals ("tasks", "todo", "backlog", "what's next", "recommendations", "next steps", "action items", etc.)
+- When detected, plan emits `{"kind": "expect_add", "id": "", "text": "user requested backlog/recommendations"}` in `pending_mutations`
+
+**Tests (3 new, all pass):**
+
+- `test_plan_detects_backlog_request` — "add to backlog" prompt → `ExpectAdd`
+- `test_plan_detects_recommendation_request` — "What should we do next? Any recommendations?" → `ExpectAdd`
+- `test_plan_no_false_positive_on_questions` — "How does the CRDT merge work?" → no `ExpectAdd`
+
+**Spec:** updated `specs/07-commands.md` plan section — documents both `resolve_existing` and `expect_add` mutation kinds.
+
+**Verification:** clippy clean, 5/5 plan tests pass, full suite clean (1 pre-existing failure in codex hook test). Release built + installed. Commit `f67049e`, pushed to `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:6f9ad7ea -->
 <!-- /agent:exchange -->
 
 <!--
-Please add both phase 1 and 2 from tasks/agent-doc/plan-pending-capture-precommit.md to backlog
-do phase 1. #spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
+- [x] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

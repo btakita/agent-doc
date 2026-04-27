@@ -175,11 +175,26 @@ The `draft-new.sh` wrapper specifically blocks the bad threading path this task 
 I also validated the adapter locally: both JSON manifests parse cleanly, all wrapper scripts pass `bash -n`, the `draft-new.sh` guard rejects the wrong thread-id flow, and `auth-status.sh` resolves to the local `corky` binary correctly.
 
 I did not make the requested root-repo commit or push. The blocker is the current `agent-loop` repo state: `main` is already ahead of `origin/main` by 10 commits and the worktree is dirty across many unrelated tracked and untracked paths, so a clean adapter-only `commit + push` from here is not safe.
-<!-- agent:boundary:ce15d1c5 -->
+
+❯ Is #1bgy complete?
+### Re: Codex Gmail support plan — gpt-5
+
+Not under the exact meaning of `#1bgy` as written.
+
+The implementation part is complete:
+- Gmail reply/thread correctness in `src/corky`
+- connector-grade JSON/auth-status CLI surfaces in `src/corky`
+- the repo-local Codex adapter outside `corky` in `plugins/corky-gmail/`
+- spec/test/build/install verification
+
+What is still not complete is the final `commit + push` part for the root `agent-loop` repo. Those adapter files are present locally, but this repo is still dirty across many unrelated paths and `main` is already ahead of `origin/main`, so I do not consider `#1bgy` fully done yet in the operational sense.
+
+So the right status is: implementation complete, delivery boundary still blocked. I gated `#1bgy` instead of closing it.
+<!-- agent:boundary:36549284 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#1bgy] Codex Gmail support plan - commit and push the repo-local corky-gmail adapter once the root repo boundary is clarified; src/corky is already shipped and the plugin is implemented and verified locally
+- [/] [#1bgy] Codex Gmail support plan - implementation, verification, and repo-local adapter are complete; blocked only on deciding a safe root-repo commit/push boundary for plugins/corky-gmail and .agents/plugins/marketplace.json
 <!-- /agent:pending -->

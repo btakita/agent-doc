@@ -477,7 +477,25 @@ Only read full source files when tsift results are insufficient.
 **Tests:** +7 → 229 total. Covers: create from scratch, append to existing, AGENTS.md priority, CLAUDE.md fallback, idempotent re-run, stale section update, surrounding content preservation.
 
 **Commit:** `btakita/tsift@d9af2b0`. Pushed.
-<!-- agent:boundary:2ea0782c -->
+
+❯ re #mext: Please describe more why do we want to have a Makefile target for tsift summarize. Why would we want the hook on every run?
+### Re: #mext rationale — opus-4-6
+
+The Makefile target is NOT a hook — it's a one-time setup step. The confusion is fair because the original backlog item sits next to #hidx (which IS a hook). Let me separate the two:
+
+**#hidx (hook, every prompt):** `tsift index --check --exit-code .` — free, ~50ms, no API calls. Makes sense to run on every prompt because it's fast and keeps the AST index fresh.
+
+**#mext (Makefile target, run once):** `tsift summarize --extract src/` — costs API tokens (haiku-class, ~$0.01/file). You run it once per project to build the summary cache, then queries are free local SQLite lookups forever. The Makefile target is just a wrapper:
+
+```makefile
+tsift-extract:
+	tsift summarize --extract src/
+```
+
+Honestly, this is thin. It's a single command. The value of a Makefile target is discoverability in a `make help` listing, but you already know the command. And `tsift init` now puts the commands in AGENTS.md where they're visible every session.
+
+I'd recommend closing #mext — it's not worth a dedicated implementation. If you want a project setup sequence, `tsift init` + `tsift index .` + `tsift summarize --extract src/` in a README "Getting Started" section covers it. Or a future `tsift init --full` could chain all three.
+<!-- agent:boundary:a61008d1 -->
 <!-- /agent:exchange -->
 
 <!--

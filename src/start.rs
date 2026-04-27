@@ -650,6 +650,17 @@ pub fn run(file: &Path) -> Result<()> {
     if let Some(ref args) = resolved_agent_args {
         base_args.extend(args.split_whitespace().map(String::from));
     }
+    // Inject --model from claude_model/codex_model frontmatter when not already in args
+    if !base_args.iter().any(|a| a == "--model") {
+        let harness_key = match harness.binary.as_str() {
+            "claude" => "claude-code",
+            other => other,
+        };
+        if let Some(model) = fm.resolve_harness_model(harness_key) {
+            base_args.push("--model".into());
+            base_args.push(model.to_string());
+        }
+    }
     crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, &canonical);
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
@@ -1182,6 +1193,94 @@ mod tests {
         let harness = crate::harness::HarnessConfig::codex();
         let resolved = resolve_agent_args(&fm, &cfg, &harness);
         assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+
+    // --- model injection from frontmatter tests ---
+
+    /// Helper: simulates the base_args construction logic from run() for testing
+    /// model injection without spawning a real process.
+    fn build_base_args_for_test(fm: &Frontmatter, harness: &crate::harness::HarnessConfig) -> Vec<String> {
+        let cfg = Config::default();
+        let resolved_agent_args = resolve_agent_args(fm, &cfg, harness);
+        let mut base_args: Vec<String> = Vec::new();
+        if let Some(ref args) = resolved_agent_args {
+            base_args.extend(args.split_whitespace().map(String::from));
+        }
+        if !base_args.iter().any(|a| a == "--model") {
+            let harness_key = match harness.binary.as_str() {
+                "claude" => "claude-code",
+                other => other,
+            };
+            if let Some(model) = fm.resolve_harness_model(harness_key) {
+                base_args.push("--model".into());
+                base_args.push(model.to_string());
+            }
+        }
+        base_args
+    }
+
+    #[test]
+    fn model_injected_from_claude_model_frontmatter() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            claude_model: Some("claude-opus-4-6".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"claude-opus-4-6".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn model_not_injected_when_already_in_claude_args() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions --model sonnet".into()),
+            claude_model: Some("claude-opus-4-6".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        // Should use the explicit --model from claude_args, not inject from claude_model
+        assert!(args.contains(&"sonnet".to_string()));
+        assert!(!args.contains(&"claude-opus-4-6".to_string()));
+    }
+
+    #[test]
+    fn model_injected_from_codex_model_frontmatter() {
+        let fm = Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            codex_model: Some("o3-pro".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"o3-pro".to_string()));
+    }
+
+    #[test]
+    fn model_injected_from_generic_model_when_no_harness_specific() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"gpt-5".to_string()));
+    }
+
+    #[test]
+    fn no_model_injected_when_none_in_frontmatter() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(!args.contains(&"--model".to_string()));
     }
 
     // --- relocate_if_wrong_session tests ---

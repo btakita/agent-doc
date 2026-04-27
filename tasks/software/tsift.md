@@ -837,7 +837,7 @@ The plan file references `spec-pending-capture-guard.md` which documents the exi
 Committed `btakita/tsift@882421d`, pushed. Submodule pointer updated in agent-loop. SPEC.md updated. 236 tests pass.
 
 `#wrka` ("until search is fixed, use explain/graph") is now obsolete — search works.
-<!-- agent:boundary:7ff8d429 -->
+<!-- agent:boundary:1603fb05 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -859,8 +859,6 @@ In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#srch] Profile and fix tsift search hang (BM25 scoring or file-content loading bottleneck)
-- [x] [#wrka] Until search is fixed, use tsift explain/graph for navigation
 <!-- /agent:backlog -->
 
 <!--

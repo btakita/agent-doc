@@ -828,7 +828,7 @@ Root cause: `route.rs` sends trigger commands to tmux panes using the caller's r
 **Tests:** 4 new tests — `resolve_absolute_file_path_returns_absolute_for_existing_relative`, `resolve_absolute_file_path_preserves_absolute_input`, `resolve_absolute_file_path_returns_relative_when_not_found`, `run_with_tmux_resolves_file_path_to_absolute`.
 
 Committed as `f846940` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:a47cf9d8 -->
+<!-- agent:boundary:9b983b80 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -837,7 +837,6 @@ Committed as `f846940` on `20260422/codex-agent-backend`, pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#route1] Submodule routing bug: relative path resolves to submodule file when same relative path exists in both main repo and submodule. Fix: in route.rs submodule_route(), prefer the file under CWD's git root when the absolute resolved path is already inside the main repo worktree. Currently the binary finds src/session-share/tasks/... and claims the file belongs there, even though the user's CWD-relative path points to the main repo's tasks/. Workaround: use absolute paths.
 - [ ] [#4wa1] [recommended] Pending-capture regression: mermaid→FigJam transfer task was not added to agent:backlog when the rate-limit response identified concrete follow-up work (18 remaining diagrams). The skill composed a response listing 3 options to continue but issued no --pending-add flag. Root cause: promotion heuristic missed the case where options are listed but the underlying task (finish the transfer) is unconditional follow-up regardless of which option the user picks. Plan: tighten the heuristic so unconditional follow-up work is captured even when the response frames it as blocked-with-options.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

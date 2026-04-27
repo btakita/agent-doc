@@ -374,7 +374,34 @@ Added three items to backlog from the previous recommendation:
 1. **#hidx** — UserPromptSubmit hook for auto-reindex
 2. **#cmdx** — CLAUDE.md integration with tsift commands
 3. **#mext** — Makefile target for summarize extraction
-<!-- agent:boundary:2a5be876 -->
+
+❯ do #hidx. spec-test-build-install-commit-push
+### Re: do #hidx — opus-4-6
+
+Implemented `--exit-code` flag for `tsift index --check` and shipped an auto-reindex hook.
+
+**Code changes:**
+
+- `src/index.rs` — `IndexSummary::has_changes()` helper (true when new/modified/deleted > 0)
+- `src/main.rs` — `--exit-code` flag on `Index` command; when combined with `--check`, exits 1 if stale files exist, 0 if fresh. Works in both single-repo and workspace modes
+- `examples/hooks/tsift-autoindex.sh` — UserPromptSubmit hook that runs `tsift index --check --exit-code .` silently on every prompt, auto-reindexes when stale
+- `tests/exit_code.rs` — 6 integration tests (fresh→0, stale→1, modified→1, deleted→1, no-index→1, check-without-exit-code→0)
+- `SPEC.md` — new "Hook Integration" section with auto-reindex and search rewrite docs
+- `CLAUDE.md` — updated `tsift index` description and hook section
+
+**Tests:** 211 → 222 (+11: 5 unit + 6 integration). `btakita/tsift@1c712f7`. Pushed.
+
+**Install hook:** add to `.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "matcher": "", "command": "examples/hooks/tsift-autoindex.sh" }
+    ]
+  }
+}
+```
+<!-- agent:boundary:9efc7f3c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -384,7 +411,7 @@ Please add "check tsift first".
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#hidx] Add UserPromptSubmit hook for tsift index --check (auto-reindex on stale)
+- [x] [#hidx] Add UserPromptSubmit hook for tsift index --check (auto-reindex on stale)
 - [ ] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->

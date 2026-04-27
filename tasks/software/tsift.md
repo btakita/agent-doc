@@ -195,13 +195,40 @@ Done. Added `## Summarize (Cached LLM Analysis)` section to `src/tsift/SPEC.md` 
 **Boundary rule:** extraction is batch-only, queries are local DB lookups. No live LLM calls at query time, no visualization.
 
 Added `#summ` to backlog.
-<!-- agent:boundary:337a4500 -->
+
+❯ do #summ. spec-test-build-install-commit-push
+### Re: do #summ — opus-4-6
+
+Implemented `tsift summarize` — cached LLM analysis with batch extraction and local SQLite cache.
+
+**New module: `src/summarize.rs`** (660 lines)
+
+- `SummaryDb` — SQLite wrapper for `summaries.db` with CRUD operations
+- `content_hash()` — blake3 content hashing for cache invalidation
+- `extract_for_file()` — calls Anthropic Messages API (haiku-class), parses structured JSON response into entities, relationships, concept labels, and summaries
+- `ExtractionReport` — tracks files processed, symbols extracted, tokens spent
+- `SummarizeConfig` — reads from `[summarize]` section of `.tsift/config.toml`
+
+**Three modes:**
+
+1. **Query** — `tsift summarize <symbol>` or `tsift summarize --file <path>`: instant local SQLite lookups, zero API calls
+2. **Extract** — `tsift summarize --extract <path>` or `--extract --diff`: one-time LLM extraction via Anthropic API. `--diff` mode uses `git diff --name-only HEAD` for incremental re-extraction
+3. **Stats** — `tsift summarize --stats`: summaries count, files covered, tokens spent, estimated savings
+
+**Storage:** `summaries.db` with `blake3(file_content)` cache key. Extraction stores file-level and per-entity summaries. Automatic invalidation when source changes.
+
+**Dependencies added:** `blake3` (content hashing), `ureq` (sync HTTP for Anthropic API).
+
+**Tests:** +14 → 211 total. Covers DB CRUD, entity roundtrip, content hashing, large file rejection, API key validation, prompt construction.
+
+**Commit:** `btakita/tsift@5801090`. Pushed.
+<!-- agent:boundary:49bc14bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#summ] tsift summarize: cached LLM analysis — batch extraction via Anthropic API, local SQLite cache, token-free queries
+- [x] [#summ] tsift summarize: cached LLM analysis — batch extraction via Anthropic API, local SQLite cache, token-free queries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)

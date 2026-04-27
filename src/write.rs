@@ -429,9 +429,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         eprintln!("[queue] warning: consumption failed: {}", e);
     }
 
-    // Phase 3b: pre-commit pending capture gate (strict mode only).
+    // Phase 3b: pre-commit pending closeout gates (strict mode only).
     if write_result.is_ok() && commit_mode == CommitMode::Required {
         precommit_pending_capture_check(file)?;
+        precommit_pending_done_check(file)?;
     }
 
     let commit_result = finalize_commit(file, commit_mode);
@@ -526,6 +527,58 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
          add <!-- no-pending-capture --> to suppress, \
          or set pending_capture_guard = \"warn\" to downgrade",
         signal.estimated_count
+    );
+}
+
+fn precommit_pending_done_check(file: &Path) -> Result<()> {
+    let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
+    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+        return Ok(());
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(());
+    };
+
+    let Some(capture) = crate::capture::load_active(file)? else {
+        return Ok(());
+    };
+    if capture
+        .response_body
+        .contains("<!-- no-pending-done-guard -->")
+    {
+        return Ok(());
+    }
+
+    let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
+    let missing = crate::session_check::detect_missing_pending_done_ids(
+        file,
+        &response_text,
+        &state.pending_done_ids,
+    )?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let ids = missing
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let hint = missing
+        .iter()
+        .map(|id| format!("--pending-done {}", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    anyhow::bail!(
+        "[finalize] pre-commit gate: response appears to complete existing pending {} \
+         but no matching `--pending-done` was recorded this cycle\n\
+         [finalize] hint: re-run finalize with {}, \
+         add <!-- no-pending-done-guard --> to suppress, \
+         or set pending_done_guard = \"warn\" to downgrade",
+        ids,
+        hint
     );
 }
 
@@ -2824,8 +2877,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let base = baseline.unwrap_or(&content_at_start);
-    let mode_overrides =
-        template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
+    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
     let mut content_ours =
         template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
             .context("failed to apply template patches")?;
@@ -4126,8 +4178,7 @@ mod tests {
         fs::write(&doc, current_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();
 
-        let response =
-            "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
+        let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
         apply_template_from_string(&doc, response).unwrap();
 
         let result = fs::read_to_string(&doc).unwrap();
@@ -6470,6 +6521,43 @@ mod precommit_pending_capture_tests {
         doc
     }
 
+    fn setup_precommit_with_pending(
+        root: &std::path::Path,
+        frontmatter: &str,
+        response: &str,
+        pending_body: &str,
+        pending_done_ids: &[&str],
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = format!(
+            "{frontmatter}<!-- agent:exchange -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n{pending_body}<!-- /agent:pending -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        if !pending_done_ids.is_empty() {
+            crate::cycle_state::record_pending_done_ids(
+                &doc,
+                &pending_done_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+        doc
+    }
+
     #[test]
     fn precommit_blocks_without_pending_add() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -6553,5 +6641,67 @@ mod precommit_pending_capture_tests {
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(err.to_string().contains("[finalize] pre-commit gate"));
         assert!(err.to_string().contains("--pending-add"));
+    }
+
+    #[test]
+    fn precommit_pending_done_blocks_by_default_for_session_docs() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &[],
+        );
+
+        let err = super::precommit_pending_done_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("[finalize] pre-commit gate"));
+        assert!(err.to_string().contains("#4qja"));
+        assert!(err.to_string().contains("--pending-done 4qja"));
+    }
+
+    #[test]
+    fn precommit_pending_done_passes_when_id_was_recorded() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &["4qja"],
+        );
+
+        super::precommit_pending_done_check(&doc)
+            .expect("should pass when matching pending-done was recorded");
+    }
+
+    #[test]
+    fn precommit_pending_done_warn_mode_skips_precommit_block() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_done_guard: warn\n---\n\n",
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &[],
+        );
+
+        super::precommit_pending_done_check(&doc)
+            .expect("warn mode should defer to post-commit session-check");
+    }
+
+    #[test]
+    fn precommit_pending_done_respects_suppression_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\n<!-- no-pending-done-guard -->\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &[],
+        );
+
+        super::precommit_pending_done_check(&doc)
+            .expect("suppression marker should disable the pre-commit pending-done gate");
     }
 }

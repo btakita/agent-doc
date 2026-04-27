@@ -106,8 +106,10 @@ cycle which concrete plan file exists and should be opened.
 - **Unaccepted recommendations** → `--pending-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
 - **Existing `do #id` work that completed this cycle** → `--pending-done <id>` in
-  the same closeout command. If the item is code-complete but blocked on an
-  external gate, prefer `--pending-gate <id>` instead of leaving it silently open.
+  the same closeout command. Session-doc closeouts now fail before commit when a
+  response clearly completes `#id` but omits the matching done mutation. If the
+  item is code-complete but blocked on an external gate, prefer
+  `--pending-gate <id>` instead of leaving it silently open.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step
   option in the same cycle unless the options are explicitly mutually exclusive and

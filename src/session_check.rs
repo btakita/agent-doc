@@ -320,7 +320,7 @@ pub(crate) fn resolve_pending_capture_guard_mode(
         .unwrap_or_default())
 }
 
-fn resolve_pending_done_guard_mode(
+pub(crate) fn resolve_pending_done_guard_mode(
     file: &Path,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
     let content = std::fs::read_to_string(file)?;
@@ -328,10 +328,20 @@ fn resolve_pending_done_guard_mode(
     if let Some(mode) = fm.pending_done_guard {
         return Ok(mode);
     }
-    Ok(crate::project_config::load_project_for_doc(file)
+    if let Some(mode) = crate::project_config::load_project_for_doc(file)
         .guards
         .pending_done
-        .unwrap_or_default())
+    {
+        return Ok(mode);
+    }
+    if fm
+        .session
+        .as_deref()
+        .is_some_and(|session| !session.trim().is_empty())
+    {
+        return Ok(crate::frontmatter::PendingCaptureGuardMode::Strict);
+    }
+    Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
 }
 
 fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
@@ -364,20 +374,7 @@ fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
     }
 
     let response_text = response_text_for_guards(&capture.response_body);
-    if response_text.trim().is_empty() {
-        return Ok(PendingCaptureGuardResult::None);
-    }
-
-    let open_ids = open_pending_ids(file)?;
-    if open_ids.is_empty() {
-        return Ok(PendingCaptureGuardResult::None);
-    }
-
-    let missing: Vec<String> = open_ids
-        .into_iter()
-        .filter(|id| response_clearly_completes_pending_id(&response_text, id))
-        .filter(|id| !state.pending_done_ids.iter().any(|done| done == id))
-        .collect();
+    let missing = detect_missing_pending_done_ids(file, &response_text, &state.pending_done_ids)?;
     if missing.is_empty() {
         return Ok(PendingCaptureGuardResult::None);
     }
@@ -414,6 +411,27 @@ fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
         }
         crate::frontmatter::PendingCaptureGuardMode::Off => PendingCaptureGuardResult::None,
     })
+}
+
+pub(crate) fn detect_missing_pending_done_ids(
+    file: &Path,
+    response_text: &str,
+    recorded_done_ids: &[String],
+) -> Result<Vec<String>> {
+    if response_text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let open_ids = open_pending_ids(file)?;
+    if open_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(open_ids
+        .into_iter()
+        .filter(|id| response_clearly_completes_pending_id(response_text, id))
+        .filter(|id| !recorded_done_ids.iter().any(|done| done == id))
+        .collect())
 }
 
 pub(crate) fn response_text_for_guards(response: &str) -> String {
@@ -1241,7 +1259,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_committed_capture_with_pending(
             tmp.path(),
-            None,
+            Some("---\nagent_doc_session: test\npending_done_guard: warn\n---\n\n"),
             "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
             false,
             Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
@@ -1253,6 +1271,29 @@ mod tests {
         assert_eq!(report.warnings.len(), 2);
         assert!(report.warnings[0].contains("#4qja"));
         assert!(report.warnings[1].contains("--pending-done 4qja"));
+    }
+
+    #[test]
+    fn session_check_pending_done_defaults_to_strict_for_session_docs() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#4qja] Stream orchestrate patchback\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("[session-check] error:"));
+                assert!(message.contains("--pending-done 4qja"));
+                assert!(message.contains("pending_done_guard = \"warn\""));
+            }
+            other => panic!("expected default strict-mode failure for session doc, got {other:?}"),
+        }
     }
 
     #[test]

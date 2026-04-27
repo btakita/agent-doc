@@ -76,6 +76,15 @@ fn enable_strict_pending_capture(doc: &Path) {
     fs::write(doc, updated).unwrap();
 }
 
+fn insert_pending_item(doc: &Path, item: &str) {
+    let current = fs::read_to_string(doc).unwrap();
+    let updated = current.replace(
+        "<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+        &format!("<!-- agent:pending -->\n{item}<!-- /agent:pending -->\n"),
+    );
+    fs::write(doc, updated).unwrap();
+}
+
 #[test]
 fn finalize_requires_git_repo_before_mutating_document() {
     let (_tmp, doc) = setup_template_doc();
@@ -338,6 +347,43 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
     assert!(
         !String::from_utf8_lossy(&head_blob.stdout).contains("### Re: recommendations �� gpt-5"),
         "HEAD blob should NOT contain the response — pre-commit gate blocked commit"
+    );
+}
+
+#[test]
+fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() {
+    let (tmp, doc) = setup_session_template_doc();
+    insert_pending_item(&doc, "- [ ] [#4qja] Stream orchestrate patchback\n");
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #4qja streaming orchestrate patchback — gpt-5\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
+        .stderr(predicates::str::contains("--pending-done 4qja"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: #4qja streaming orchestrate patchback — gpt-5"));
+    assert!(content.contains("- [ ] [#4qja] Stream orchestrate patchback"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head_text = String::from_utf8_lossy(&head_blob.stdout);
+    assert!(
+        !head_text.contains("### Re: #4qja streaming orchestrate patchback — gpt-5"),
+        "HEAD blob should NOT contain the response — pending-done pre-commit gate blocked commit"
+    );
+    assert!(
+        head_text.contains("- [ ] [#4qja] Stream orchestrate patchback"),
+        "HEAD backlog should remain open when pre-commit pending-done gate blocks commit"
     );
 }
 

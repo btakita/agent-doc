@@ -330,7 +330,7 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the six `#cxr1` files.
-<!-- agent:boundary:52c136f1 -->
+<!-- agent:boundary:7294db41 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -340,7 +340,6 @@ The active tmux pane was force closed in a recent src/session-share/tasks/claude
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#cxr1] [recommended] Fix `compact exchange` so it replaces, not appends, the `agent:exchange` body. Repro in `src/session-share/tasks/claudescore-3.md`: repeated compaction requests keep layering new `### Re:` summaries over older exchange text instead of collapsing to one checkpoint summary. See `tasks/agent-doc/plan-compact-exchange-replace-not-append.md`
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:pending -->

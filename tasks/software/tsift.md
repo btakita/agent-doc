@@ -401,7 +401,53 @@ Implemented `--exit-code` flag for `tsift index --check` and shipped an auto-rei
   }
 }
 ```
-<!-- agent:boundary:5a261c7d -->
+
+❯ re #cmdx: What is the best way ensure tsift is added to the AGENTS.md/CLAUDE.md? Should we document a good prompt to add try tsift first in AGENTS.md/CLAUDE.md?
+### Re: #cmdx — opus-4-6
+
+Best approach: a `tsift init` subcommand that injects a standardized section into the project's AGENTS.md (or CLAUDE.md). This way the user runs one command and every future session gets the directive automatically.
+
+#### What `tsift init` would do
+
+1. Find the project's AGENTS.md (or CLAUDE.md if no AGENTS.md exists)
+2. Check if a `## Code Navigation` / `## tsift` section already exists (idempotent)
+3. Append or update this block:
+
+```markdown
+## Code Navigation
+
+Before reading source files for understanding, check tsift:
+- `tsift search <query>` — AST-aware hybrid search (prefer over grep/rg)
+- `tsift summarize <symbol>` — cached summary (~50 tokens vs ~2000 for file read)
+- `tsift explain <symbol>` — callers, callees, community context
+- `tsift graph <symbol> --callers` / `--callees` — call graph navigation
+
+Only read full source files when tsift results are insufficient.
+```
+
+4. Print what was added so the user can review
+
+#### Why a command, not a documented prompt
+
+- **One step vs copy-paste**: `tsift init` in a Makefile or README setup section is discoverable and reproducible. A prompt snippet buried in docs gets forgotten.
+- **Idempotent**: running `tsift init` again after an upgrade can update the section with new commands (like `tsift lint`, `tsift communities`) without duplicating.
+- **AGENTS.md is canonical**: per your convention, content goes in AGENTS.md with CLAUDE.md as a symlink. The command respects that hierarchy.
+
+#### The "check tsift first" directive
+
+The key line is: **"Only read full source files when tsift results are insufficient."** This is what makes the agent prefer tsift transparently. Without that directive, the agent defaults to Read/Grep because those are built-in tools with zero friction. The directive flips the default.
+
+A softer alternative: "When exploring unfamiliar code, prefer `tsift search` and `tsift summarize` over reading full files." — less prescriptive but still shapes behavior.
+
+#### Implementation scope for #cmdx
+
+- New `Init` subcommand in `src/main.rs`
+- `src/init.rs` — find AGENTS.md/CLAUDE.md, detect existing section, append/update
+- Tests: creates section, idempotent on re-run, respects AGENTS.md > CLAUDE.md priority
+- Update SPEC.md + CLAUDE.md
+
+Want me to build this?
+<!-- agent:boundary:ed7dde5d -->
 <!-- /agent:exchange -->
 
 <!--

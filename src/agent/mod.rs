@@ -92,7 +92,7 @@ pub(crate) fn append_workspace_access_args(agent_name: &str, args: &mut Vec<Stri
         }
     }
 
-    for dir in crate::git::external_git_dirs_for_doc(file) {
+    for dir in crate::git::workspace_access_dirs_for_doc(file) {
         let dir = dir.to_string_lossy().into_owned();
         if existing.insert(dir.clone()) {
             args.push("--add-dir".into());
@@ -167,6 +167,14 @@ pub fn resolve_streaming_for_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn has_add_dir(args: &[String], dir: &Path) -> bool {
+        let dir = dir.to_string_lossy();
+        args.windows(2)
+            .any(|w| w[0] == "--add-dir" && w[1] == dir.as_ref())
+    }
 
     #[test]
     fn resolve_claude() {
@@ -231,5 +239,111 @@ mod tests {
         let streaming = resolve_streaming_for_file("junie", None, vec![], Path::new("doc.md"));
         assert!(streaming.is_ok());
         assert!(streaming.unwrap().is_none());
+    }
+
+    #[test]
+    fn append_workspace_access_args_adds_superproject_root_for_submodule_docs() {
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = outer.join("src/sub/session.md");
+        fs::write(&doc, "test\n").unwrap();
+
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+        ];
+        append_workspace_access_args("codex", &mut args, &doc);
+
+        assert!(has_add_dir(&args, outer));
+        assert!(has_add_dir(&args, &outer.join(".git/modules/src/sub")));
+        assert!(has_add_dir(&args, &outer.join(".git")));
     }
 }

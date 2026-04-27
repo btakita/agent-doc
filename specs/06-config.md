@@ -11,7 +11,7 @@ Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `[agents.{na
 Additional CLI arguments passed to the active agent process when spawned by `agent-doc start`.
 Space-separated string.
 
-For both Claude and Codex, `agent_args` is the harness-neutral override and takes precedence over harness-specific aliases. When the active document lives in a git submodule whose git metadata resolves outside the working tree, agent-doc supplements the resolved args with `--add-dir` entries for those external git directories. Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not — the Codex backend strips `--add-dir` entries from resume args since the resumed session inherits writable roots from the original `exec`.
+For both Claude and Codex, `agent_args` is the harness-neutral override and takes precedence over harness-specific aliases. When the active document lives in a git submodule, agent-doc supplements the resolved args with `--add-dir` entries for the superproject working tree plus any external git metadata directories needed outside the submodule root. That keeps submodule-rooted sessions able to patch parent-repo docs and complete the normal git lifecycle. Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not — the Codex backend strips `--add-dir` entries from resume args since the resumed session inherits writable roots from the original `exec`.
 
 ## claude_args
 

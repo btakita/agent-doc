@@ -192,7 +192,7 @@ fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
     )
 }
 
-fn push_external_git_dir(dirs: &mut Vec<PathBuf>, git_root: &Path, candidate: Option<PathBuf>) {
+fn push_workspace_access_dir(dirs: &mut Vec<PathBuf>, git_root: &Path, candidate: Option<PathBuf>) {
     let Some(dir) = candidate else {
         return;
     };
@@ -200,6 +200,29 @@ fn push_external_git_dir(dirs: &mut Vec<PathBuf>, git_root: &Path, candidate: Op
         return;
     }
     dirs.push(dir);
+}
+
+/// Return extra directories a workspace-scoped harness must be allowed to
+/// write when operating on `file`.
+///
+/// Ordinary repos return an empty list because the working tree and `.git/`
+/// both live under the repo root already. Submodule docs return the
+/// superproject working tree (so the harness can patch parent-repo docs such
+/// as shared backlog files) plus any external git metadata dirs needed for git
+/// lifecycle operations.
+pub(crate) fn workspace_access_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
+    let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
+        return Vec::new();
+    };
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    let mut dirs = Vec::new();
+    if in_submodule {
+        push_workspace_access_dir(&mut dirs, &git_root, Some(super_root.clone()));
+    }
+    for dir in external_git_dirs_for_doc(file) {
+        push_workspace_access_dir(&mut dirs, &git_root, Some(dir));
+    }
+    dirs
 }
 
 /// Return external git metadata directories a workspace-scoped harness must be
@@ -214,9 +237,9 @@ pub(crate) fn external_git_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
     };
     let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
     let mut dirs = Vec::new();
-    push_external_git_dir(&mut dirs, &git_root, absolute_git_dir_at(&git_root));
+    push_workspace_access_dir(&mut dirs, &git_root, absolute_git_dir_at(&git_root));
     if in_submodule {
-        push_external_git_dir(&mut dirs, &git_root, absolute_git_dir_at(&super_root));
+        push_workspace_access_dir(&mut dirs, &git_root, absolute_git_dir_at(&super_root));
     }
     dirs
 }
@@ -3894,7 +3917,10 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured
+        );
         assert_eq!(state.last_event, "response_captured");
 
         let head_doc = show_head(&doc).unwrap().unwrap();
@@ -4201,6 +4227,115 @@ mod tests {
         assert!(
             dirs.contains(&outer.join(".git")),
             "superproject gitdir should be exposed for pointer updates: {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn workspace_access_dirs_for_submodule_include_superproject_root_and_gitdirs() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(sub_origin)
+            .args(["commit", "-m", "init sub", "--no-verify"])
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .current_dir(outer)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "init outer", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &sub_url,
+                "src/sub",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git")
+            .current_dir(outer)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = outer.join("src/sub/session.md");
+        fs::write(&doc, "test\n").unwrap();
+
+        let dirs = workspace_access_dirs_for_doc(&doc);
+        assert!(
+            dirs.contains(&outer.to_path_buf()),
+            "superproject working tree should be writable for parent-repo patchback targets: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&outer.join(".git/modules/src/sub")),
+            "submodule gitdir should still be exposed: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&outer.join(".git")),
+            "superproject gitdir should still be exposed: {dirs:?}"
         );
     }
 

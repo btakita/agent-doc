@@ -222,13 +222,12 @@ Implemented `tsift summarize` — cached LLM analysis with batch extraction and 
 **Tests:** +14 → 211 total. Covers DB CRUD, entity roundtrip, content hashing, large file rejection, API key validation, prompt construction.
 
 **Commit:** `btakita/tsift@5801090`. Pushed.
-<!-- agent:boundary:49bc14bc -->
+<!-- agent:boundary:6beeaed5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#summ] tsift summarize: cached LLM analysis — batch extraction via Anthropic API, local SQLite cache, token-free queries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)

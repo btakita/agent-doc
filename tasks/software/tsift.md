@@ -312,8 +312,65 @@ This works because Claude Code loads CLAUDE.md at the start of every session and
 There's no hook point to intercept the native `Read` or `Grep` tool calls and substitute tsift. Those tools are hardwired in the harness. The CLAUDE.md directive is the closest you can get — it makes the agent _choose_ tsift first, but can't _force_ it.
 
 The practical gap: a new session with a fresh context window may still read files directly for the first few operations before the CLAUDE.md directive fully shapes behavior. After that, the pattern sticks for the session.
-<!-- agent:boundary:9fc299cb -->
+
+❯ How do we ensure that tsift has done the "one-time batch extraction"?
+### Re: ensuring one-time extraction — opus-4-6
+
+Two separate concerns: indexing (free, fast, fully automatable) and summarize extraction (costs API tokens, opt-in).
+
+#### Indexing (`tsift index`)
+
+Best automated via a Claude Code hook in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "command": "tsift index --check . 2>/dev/null | grep -q 'modified: 0' || tsift index ."
+      }
+    ]
+  }
+}
+```
+
+This runs on every prompt, checks if the index is stale, and re-indexes silently if needed. Fast for already-indexed repos (~50ms check).
+
+Alternatively, a Makefile target:
+
+```makefile
+tsift-setup:
+	tsift index .
+	@echo "Index ready. Run 'tsift summarize --extract src/' for LLM cache."
+```
+
+#### Summarize extraction (`tsift summarize --extract`)
+
+This calls the Anthropic API and costs tokens, so it shouldn't auto-run. Three options:
+
+1. **CLAUDE.md gate** — add to the project CLAUDE.md:
+   ```markdown
+   If `tsift summarize --stats` shows 0 summaries, tell the user:
+   "Run `tsift summarize --extract src/` to build the summary cache (~$0.01/file with haiku)."
+   ```
+   The agent checks at session start and prompts once.
+
+2. **Makefile** — `make tsift-extract` as an explicit user step after cloning.
+
+3. **CI/scheduled** — run extraction in CI or via a cron job (`/schedule`), commit `summaries.db` to the repo. Then every session gets the cache for free with no API call.
+
+#### Checking freshness
+
+`tsift summarize --stats` shows whether the cache exists and is populated. `tsift index --check .` reports stale files without modifying anything. Both are fast and side-effect free — safe for hooks or startup checks.
+
+The practical recommendation: hook the index check (free), gate the extraction behind a one-time prompt or Makefile target (costs money), and put both in CLAUDE.md so the agent knows the workflow.
+<!-- agent:boundary:ec18489e -->
 <!-- /agent:exchange -->
+
+<!--
+Please add "check tsift first". 
+-->
 
 ## Pending / Not Built
 

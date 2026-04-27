@@ -161,7 +161,7 @@ Implemented `--tabular` global flag for TSV output across four commands.
 - Compatible with `--limit`, `--absolute`
 
 **Commit:** `btakita/tsift@d83f1eb`. 289 tests pass (7 new tabular tests). Built + installed.
-<!-- agent:boundary:8b1af4e7 -->
+<!-- agent:boundary:f120fdba -->
 <!-- /agent:exchange -->
 
 <!--
@@ -170,7 +170,6 @@ Implemented `--tabular` global flag for TSV output across four commands.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->

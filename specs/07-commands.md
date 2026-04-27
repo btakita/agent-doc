@@ -307,6 +307,8 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 
 **Empty col_args filtering:** Before processing, empty strings in `col_args` are filtered out. The JetBrains plugin sometimes sends phantom empty columns when editor splits change rapidly.
 
+**Blank `--window` safety:** Empty or whitespace-only `--window` values are normalized to "unset" before layout repair, auto-start session scoping, stash rescue, and `tmux_router::sync`. A blank scope must never be treated as a real target window or session override, because that can widen reconcile scope beyond the intended IDE window.
+
 **Column memory:** `.agent-doc/last_layout.json` persists a column→agent-doc mapping across syncs. When a column has no agent doc (user switches to a non-session file), sync substitutes the last known agent doc for that column index. This preserves the 2-pane tmux layout when one editor column temporarily shows a non-agent file. The state file is written after each successful sync for columns that contain an agent doc.
 
 **No early exits:** The full reconcile path always runs regardless of how many panes resolve (0, 1, or 2+). The DETACH phase stashes excess panes from previous layouts. Previous versions had early exits for `resolved < 2` that bypassed stashing, leaving orphaned panes visible.
@@ -721,7 +723,7 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 
 **Set:** Updates config.toml, then moves the `agent-doc` window and `stash` window from the old session to the new one via `tmux move-window`. If the move fails (target session doesn't exist), config is still updated — subsequent route/claim operations will target the new session.
 
-**Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) context_session from sync --window, (2) config.toml if alive, (3) fallback to current session. Config is auto-updated only when the configured session is dead.
+**Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) non-empty `context_session` from sync --window, (2) config.toml if alive, (3) fallback to current session. Empty/whitespace-only overrides are ignored. Config is auto-updated only when the configured session is dead.
 
 ## migrate
 

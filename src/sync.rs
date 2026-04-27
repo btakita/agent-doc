@@ -536,6 +536,17 @@ fn sync_log(msg: &str) {
     }
 }
 
+fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
 /// Check if this binary is a new build and clear stale caches if so.
 /// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
 /// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
@@ -585,6 +596,8 @@ fn run_with_options(
     auto_start: bool,
     tmux: &Tmux,
 ) -> Result<()> {
+    let window = normalize_scope_arg(window);
+    let focus = normalize_scope_arg(focus);
     tracing::debug!(cols = ?col_args, window, focus, auto_start, "sync::run_with_options start");
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
@@ -1175,7 +1188,8 @@ fn run_with_options(
                                     target_sess,
                                     join_flag,
                                 )
-                                .is_ok() {
+                                .is_ok()
+                                {
                                     eprintln!(
                                         "[sync] rescued stashed pane {} via join-pane",
                                         existing
@@ -2071,6 +2085,15 @@ mod tests {
             .cloned()
             .collect();
         assert_eq!(filtered, vec!["file1.md", "file2.md"]);
+    }
+
+    #[test]
+    fn empty_window_arg_normalized_to_none() {
+        assert_eq!(normalize_scope_arg(None), None);
+        assert_eq!(normalize_scope_arg(Some("")), None);
+        assert_eq!(normalize_scope_arg(Some("   ")), None);
+        assert_eq!(normalize_scope_arg(Some("@12")), Some("@12"));
+        assert_eq!(normalize_scope_arg(Some("  @12  ")), Some("@12"));
     }
 
     /// Empty .md files should be auto-scaffolded by sync's resolve_file.

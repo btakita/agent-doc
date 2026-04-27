@@ -707,7 +707,7 @@ fn resolve_target_session(
     context_session: Option<&str>,
     harness: &HarnessConfig,
 ) -> String {
-    if let Some(ctx) = context_session {
+    if let Some(ctx) = normalize_context_session(context_session) {
         return ctx.to_string();
     }
 
@@ -735,7 +735,7 @@ fn ensure_auto_start_target_session(
     session_name: &str,
     harness: &HarnessConfig,
 ) -> Result<()> {
-    if context_session.is_some() {
+    if normalize_context_session(context_session).is_some() {
         return Ok(());
     }
 
@@ -764,6 +764,17 @@ fn ensure_auto_start_target_session(
         "refusing to auto-start in tmux session '{}' because it is not alive",
         session_name
     );
+}
+
+fn normalize_context_session(context_session: Option<&str>) -> Option<&str> {
+    context_session.and_then(|session| {
+        let trimmed = session.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
 }
 
 /// Find an active target pane for lazy claiming.
@@ -2837,6 +2848,31 @@ history line
         assert!(
             iso.session_exists("claude"),
             "fallback session should still be alive"
+        );
+    }
+
+    #[test]
+    fn resolve_target_session_ignores_blank_context_session() {
+        let iso = IsolatedTmux::new("route-test-blank-context");
+        let cwd = std::env::current_dir().unwrap();
+        let pane = iso.auto_start("claude", &cwd).unwrap();
+        let current_session = iso.pane_session(&pane).unwrap();
+
+        let resolved = resolve_target_session(&iso, Some("   "), &HarnessConfig::claude());
+        assert_eq!(
+            resolved, current_session,
+            "blank context_session should fall back to the live target session"
+        );
+    }
+
+    #[test]
+    fn blank_context_session_does_not_bypass_target_validation() {
+        let iso = IsolatedTmux::new("route-test-blank-context-validate");
+        let result =
+            ensure_auto_start_target_session(&iso, Some("   "), "claude", &HarnessConfig::claude());
+        assert!(
+            result.is_err(),
+            "blank context_session should not bypass implicit fallback validation"
         );
     }
 

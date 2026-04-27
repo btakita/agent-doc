@@ -136,7 +136,18 @@ Done. Phase 2 implemented, tested, built, installed, committed, and pushed.
 **Spec:** updated `specs/07-commands.md` plan section — documents both `resolve_existing` and `expect_add` mutation kinds.
 
 **Verification:** clippy clean, 5/5 plan tests pass, full suite clean (1 pre-existing failure in codex hook test). Release built + installed. Commit `f67049e`, pushed to `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:0d8e23d3 -->
+
+❯ release + publish
+### Re: release + publish — opus-4-6
+
+v0.33.15 released and published.
+
+- **VERSIONS.md** updated with all 0.33.15 changes (supervisor model injection, pre-commit pending capture gate, ExpectAdd pending mutations, post-preflight planning command)
+- **crates.io**: published
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.15
+- **Tag**: `v0.33.15` on `20260422/codex-agent-backend`
+- **PyPI**: publishes automatically via CI on the GitHub release event
+<!-- agent:boundary:0a117b9b -->
 <!-- /agent:exchange -->
 
 <!--

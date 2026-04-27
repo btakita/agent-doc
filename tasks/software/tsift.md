@@ -595,7 +595,61 @@ Not always. `tsift init` and `tsift summarize` serve different purposes and have
 **Practical implication for `tsift init`:** the current implementation always includes summarize in the AGENTS.md section. That's fine — if the cache is empty, the agent calls it once, gets "not extracted," and stops trying for the rest of the session. One wasted round-trip. But it could be cleaner: the directive could say "use `tsift summarize` when available" rather than listing it unconditionally. Or `tsift init` could check `summaries.db` and conditionally include it.
 
 The free commands (search, explain, graph) should always be in the directive. Summarize is opt-in based on whether you've paid the extraction cost.
-<!-- agent:boundary:27c7d201 -->
+
+❯ How can we make the AGENTS.md/CLAUDE.md or the skill/runbook make a proper judgement whether to use `tsift summarize` or not?
+### Re: conditional summarize usage — opus-4-6
+
+Three approaches, from simplest to most robust:
+
+#### Option A: Smarter directive text (no code changes)
+
+Update the `tsift init` injected section to include a conditional:
+
+```markdown
+## Code Navigation
+
+Before reading source files for understanding, check tsift:
+- `tsift search <query>` — AST-aware hybrid search (prefer over grep/rg)
+- `tsift explain <symbol>` — callers, callees, community context
+- `tsift graph <symbol> --callers` / `--callees` — call graph navigation
+
+If `tsift summarize --stats` shows cached summaries (run once per session):
+- `tsift summarize <symbol>` — cached summary (~50 tokens vs ~2000 for file read)
+
+Only read full source files when tsift results are insufficient.
+```
+
+The agent checks once at session start, then knows whether summarize is available. Cost: one Bash call per session (~50ms). No wasted round-trips after that.
+
+#### Option B: `tsift status` command (one check, all state)
+
+A new subcommand that reports everything the agent needs to know:
+
+```bash
+$ tsift status
+index: fresh (last indexed 2m ago, 0 stale files)
+summaries: 142/200 files cached (71%), 12 stale
+recommendations:
+  - use: search, explain, graph, summarize
+  - run: tsift summarize --extract --diff src/  (12 stale files)
+```
+
+The AGENTS.md directive becomes: "Run `tsift status` at session start. Follow its `use:` list." The agent gets one authoritative answer about what's available. If summaries aren't extracted, the `use:` line omits summarize.
+
+#### Option C: `/tsift` skill handles the routing
+
+The existing `/tsift` Claude Code skill could run `tsift summarize --stats` internally and route the query to either summarize (cache hit) or full file read (cache miss). The agent calls `/tsift explain <symbol>` and the skill decides the cheapest path. No directive needed beyond "use `/tsift` for code understanding."
+
+#### My recommendation
+
+**Option B (`tsift status`)** — it's the cleanest because:
+1. One command, one round-trip, complete picture
+2. The `use:` list is machine-parseable — the agent doesn't need to interpret "if/then" logic in markdown
+3. It naturally extends to future capabilities (lint status, audit status, etc.)
+4. It works across all harnesses (Claude Code, Codex, Cursor) without skill-specific routing
+
+Option A is a quick win you could ship today by just updating the init section text. Option B is the proper solution. They're not mutually exclusive — update the text now, build `tsift status` later.
+<!-- agent:boundary:59305a5b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -603,7 +657,7 @@ The free commands (search, explain, graph) should always be in the directive. Su
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

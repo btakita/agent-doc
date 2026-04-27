@@ -102,9 +102,17 @@ impl Codex {
                         cmd.arg(arg);
                     }
                 }
+                "--add-dir" => {
+                    // `codex exec resume` does not accept --add-dir; the resumed
+                    // session inherits writable roots from the original exec.
+                    let _ = args.next();
+                }
                 _ if arg.starts_with("--sandbox=") => {
                     let mode = &arg["--sandbox=".len()..];
                     cmd.arg("-c").arg(format!("sandbox_mode={mode:?}"));
+                }
+                _ if arg.starts_with("--add-dir=") => {
+                    // Same as --add-dir <DIR> above — strip for resume.
                 }
                 _ => {
                     cmd.arg(arg);
@@ -671,6 +679,121 @@ mod tests {
                 "--ignore-user-config",
                 "-m",
                 "gpt-5.4",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_command_exec_preserves_add_dir() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "-s".into(),
+                "workspace-write".into(),
+                "--add-dir".into(),
+                "/home/user/.git/modules/sub".into(),
+            ]),
+        );
+        let cmd = codex.build_command(None, false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "--json",
+                "-s",
+                "workspace-write",
+                "--add-dir",
+                "/home/user/.git/modules/sub",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_command_resume_strips_add_dir() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "-s".into(),
+                "workspace-write".into(),
+                "--add-dir".into(),
+                "/home/user/.git/modules/sub".into(),
+                "--skip-git-repo-check".into(),
+            ]),
+        );
+        let cmd = codex.build_command(Some("thread-456"), false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "resume",
+                "thread-456",
+                "--json",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
+                "--skip-git-repo-check",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_command_resume_strips_add_dir_equals_form() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "-s".into(),
+                "workspace-write".into(),
+                "--add-dir=/home/user/.git".into(),
+            ]),
+        );
+        let cmd = codex.build_command(Some("thread-789"), false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "resume",
+                "thread-789",
+                "--json",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_command_resume_strips_multiple_add_dirs() {
+        let codex = Codex::new(
+            Some("codex".into()),
+            Some(vec![
+                "exec".into(),
+                "--json".into(),
+                "-s".into(),
+                "workspace-write".into(),
+                "--add-dir".into(),
+                "/home/user/.git/modules/sub".into(),
+                "--add-dir".into(),
+                "/home/user/.git".into(),
+            ]),
+        );
+        let cmd = codex.build_command(Some("thread-abc"), false, None);
+
+        assert_eq!(
+            command_args(&cmd),
+            vec![
+                "exec",
+                "resume",
+                "thread-abc",
+                "--json",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]
         );
     }

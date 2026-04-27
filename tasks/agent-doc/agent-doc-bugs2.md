@@ -85,7 +85,20 @@ What I would not claim yet:
 - The earlier stash-pane eviction issue is still separate and still open.
 
 So the precise answer is: this specific bug family is fixed for Codex sessions in the current `src/agent-doc` code, but it is not a blanket claim that all Codex session bugs are resolved.
-<!-- agent:boundary:99156967 -->
+
+❯ Please do plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs-2.md
+❯ This came from the agent-doc session in src/session-share submodule, tasks/claudescore-3.md file.
+### Re: plan `agent-doc-bugs-2.md` — gpt-5
+
+Planned it in `tasks/agent-doc/agent-doc-bugs-2.md`. That file already existed, so I tightened it against the actual `src/session-share/tasks/claudescore-3.md` failure instead of creating a duplicate plan.
+
+What I changed there:
+- anchored the task to `src/session-share/tasks/claudescore-3.md`
+- made the failure chain explicit: promised in-document report-back, external reply instead, captured response with a direct pending/backlog patch, `replace:pending block forbidden`, then a stranded `response_captured` cycle
+- split the fix scope into three parts: document-first reporting, supported pending mutation handling on write/repair, and deterministic recovery plus regression coverage
+
+No code changed in this cycle; this was a planning/doc update only.
+<!-- agent:boundary:b250348f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

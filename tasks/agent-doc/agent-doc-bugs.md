@@ -269,6 +269,8 @@ The practitioner never opens this document. The VS Code extension or CLI reads f
 
 **Vector store and knowledge graph.** Semantic session search and the codebase knowledge graph are query-optimized data structures. They need a proper store (SQLite + embedded vectors). But agent-doc could be the write-back surface — when the knowledge graph detects a new pattern, it materializes as a component update in the virtual document.
 
+❯ Could tsift help here?
+
 **Cross-developer aggregation.** Team-level pattern mining aggregates across multiple developers' session data. This is a server-side concern (or a local aggregation daemon in local-only mode). Agent-doc operates per-document. But: each developer's virtual Sidekick document could be the data source that feeds the aggregator.
 
 #### The revised architecture
@@ -293,7 +295,45 @@ The key difference from my first analysis: agent-doc moves from "integration lay
 
 Building toward this makes agent-doc a credible full backend for Sidekick — not just the write side, but the state management and real-time observation layer too. The only pieces that stay external are the heavyweight analytics (batch pipeline, vector store) that any system would separate.
 
-<!-- agent:boundary:24fa3e9f -->
+❯ Please create a running plan document.
+❯ One requirement of Sidekick is to not pollute the git repo with commits. agent-doc is currently has many commits and the lifecycle uses commits. Can we have an option to use snapshots only?
+### Re: tsift for knowledge layer + plan + snapshot-only mode — opus-4-6
+
+#### tsift as knowledge component
+
+Yes — tsift is a natural fit for Sidekick's knowledge layer. It already has the two hardest pieces built:
+
+1. **Hybrid BM25 + vector search** → powers "How did we implement rate limiting?" style queries over session history. If transcripts are indexed as a new content type alongside code, tsift handles semantic session search directly.
+
+2. **Community graph** → the AST-derived community clusters already show which files/symbols cluster together. This IS the "codebase knowledge graph" that Sidekick defines as a Phase 4 feature. The difference: tsift builds it from code structure, while Sidekick's version builds it from behavioral observation (which files get accessed together in sessions). The ideal is both signals merged — structural communities weighted by behavioral access patterns.
+
+3. **Discovery-lag scoring** — tsift's search relevance naturally encodes "how easy is this fact to find." A fact with high BM25 relevance (appears in filenames, common terms) has low discovery-lag potential. A fact that only appears deep in an implementation file with non-obvious naming → high discovery-lag candidate. This could feed Sidekick's prioritization of which facts belong in AGENTS.md.
+
+The integration path: tsift indexes session transcripts (or pre-processed segments) as a parallel corpus alongside code. The virtual Sidekick document's `sidekick:knowledge` component materializes from tsift graph queries.
+
+#### Plan document created
+
+Created [plan-sidekick-backend.md](plan-sidekick-backend.md) with the full architecture, phased implementation, and requirements. The plan covers 5 phases: snapshot-only mode → event channel → tsift integration → analysis pipeline → multi-tool export.
+
+#### Snapshot-only mode
+
+This is the right requirement. Here's how it works:
+
+**The insight:** agent-doc's diffing already works against snapshots, not git commits. The commit step in `finalize` is a separate phase that happens *after* the document write + snapshot update. Removing it is architecturally clean.
+
+**Implementation:**
+
+A `commit: false` frontmatter setting (or global config for virtual documents) would:
+- `finalize` writes the document and updates the snapshot → stops there (no `git add`, no `git commit`)
+- Preflight diffs against the snapshot file (already does this)
+- Session-check verifies snapshot consistency instead of requiring HEAD match
+- The document stays as an uncommitted working-tree file, or better: lives in `.agent-doc/virtual/` which is gitignored entirely
+
+**For virtual Sidekick documents specifically:** they'd live in `.agent-doc/virtual/{project-hash}/sidekick.md` — completely outside the git working tree. No commits, no staging, no repo pollution. The snapshot system provides the same diff/state-tracking guarantees that git normally provides, just without the VCS overhead.
+
+**What you lose:** git history of the document's evolution, and the ability to recover state from git if the snapshot is lost. For a daemon's internal state document, this is an acceptable tradeoff — the source of truth is the live session data, not the historical document state.
+
+<!-- agent:boundary:8f2063bc -->
 <!-- /agent:exchange -->
 
 <!--

@@ -684,7 +684,7 @@ recommendations:
   use: search, explain, graph
   run: tsift index .  (16 stale files)
 ```
-<!-- agent:boundary:ca91c0e0 -->
+<!-- agent:boundary:5d3365ca -->
 <!-- /agent:exchange -->
 
 <!--
@@ -693,7 +693,6 @@ recommendations:
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#stat] tsift status — session-start health check with machine-parseable use: list. Plan: src/tsift/plans/tsift-status.md
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

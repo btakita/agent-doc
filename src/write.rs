@@ -388,6 +388,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             eprintln!("[queue] warning: consumption failed: {}", e);
         }
 
+    // Phase 3b: pre-commit pending capture gate (strict mode only).
+    if write_result.is_ok() && commit_mode == CommitMode::Required {
+        precommit_pending_capture_check(file)?;
+    }
+
     let commit_result = finalize_commit(file, commit_mode);
 
     match (write_result, commit_result) {
@@ -433,6 +438,55 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn precommit_pending_capture_check(file: &Path) -> Result<()> {
+    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
+    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+        return Ok(());
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(());
+    };
+    if state.had_pending_mutations {
+        return Ok(());
+    }
+
+    let Some(capture) = crate::capture::load_active(file)? else {
+        return Ok(());
+    };
+    if capture
+        .response_body
+        .contains("<!-- no-pending-capture -->")
+    {
+        return Ok(());
+    }
+
+    let response_text =
+        crate::session_check::response_text_for_guards(&capture.response_body);
+    if response_text.trim().is_empty() {
+        return Ok(());
+    }
+
+    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    let skip = match signal.estimated_count {
+        0 => true,
+        1 => signal.confidence < 0.7,
+        _ => signal.confidence < 0.5,
+    };
+    if skip {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "[finalize] pre-commit gate: response contains ~{} recommendation-like items \
+         but no --pending-add flags were used this cycle\n\
+         [finalize] hint: re-run finalize with --pending-add flags, \
+         add <!-- no-pending-capture --> to suppress, \
+         or set pending_capture_guard = \"warn\" to downgrade",
+        signal.estimated_count
+    );
 }
 
 fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
@@ -6045,5 +6099,102 @@ mod verify_sidecar_normalization_tests {
         let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
         enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .expect("exchange-only orchestrate patch should be accepted");
+    }
+}
+
+#[cfg(test)]
+mod precommit_pending_capture_tests {
+    use std::fs;
+
+    fn setup_precommit(
+        root: &std::path::Path,
+        frontmatter: &str,
+        response: &str,
+        had_pending_mutations: bool,
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = format!("{frontmatter}## Exchange\n\nHello\n");
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        if had_pending_mutations {
+            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        }
+        crate::cycle_state::mark_write_applied(&doc, "write_template", Some(&content), Some(&content)).unwrap();
+        doc
+    }
+
+    #[test]
+    fn precommit_blocks_without_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("[finalize] pre-commit gate"));
+        assert!(err.to_string().contains("--pending-add"));
+    }
+
+    #[test]
+    fn precommit_passes_with_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            true,
+        );
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("should pass when pending mutations were recorded");
+    }
+
+    #[test]
+    fn precommit_inactive_in_warn_mode() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("should pass in warn mode — only post-commit session-check fires");
+    }
+
+    #[test]
+    fn precommit_inactive_in_default_mode() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("should pass in default (warn) mode");
+    }
+
+    #[test]
+    fn precommit_respects_suppression_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n<!-- no-pending-capture -->\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("should pass when suppression marker present");
     }
 }

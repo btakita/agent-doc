@@ -229,6 +229,7 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
     enable_strict_pending_capture(&doc);
     init_git_repo(tmp.path(), &doc);
 
+    // Pre-commit gate now catches uncaptured recommendations before commit
     agent_doc()
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap()])
@@ -237,9 +238,10 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains("[session-check] error:"))
+        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
         .stderr(predicates::str::contains("recommendation-like items"));
 
+    // Response is written to disk but NOT committed (pre-commit gate blocked)
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: recommendations — gpt-5"));
 
@@ -249,8 +251,8 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
         .output()
         .unwrap();
     assert!(
-        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: recommendations — gpt-5"),
-        "HEAD blob should still contain the committed response when internal session-check fails"
+        !String::from_utf8_lossy(&head_blob.stdout).contains("### Re: recommendations �� gpt-5"),
+        "HEAD blob should NOT contain the response — pre-commit gate blocked commit"
     );
 }
 

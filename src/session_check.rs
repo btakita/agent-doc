@@ -275,7 +275,7 @@ fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult>
     })
 }
 
-fn resolve_pending_capture_guard_mode(
+pub(crate) fn resolve_pending_capture_guard_mode(
     file: &Path,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
     let content = std::fs::read_to_string(file)?;
@@ -385,7 +385,7 @@ fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
     })
 }
 
-fn response_text_for_guards(response: &str) -> String {
+pub(crate) fn response_text_for_guards(response: &str) -> String {
     let Ok((patches, unmatched)) = crate::template::parse_patches(response) else {
         return response.to_string();
     };

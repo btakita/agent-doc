@@ -75,7 +75,8 @@
 //!   when the registered pane is dead. Strategy 1 (alive registered pane) does NOT apply
 //!   this guard: the registration is trusted as the source of truth for routing.
 //! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
-//!   automatically rescued back into the `agent-doc` window before routing.
+//!   automatically rejoined into the `agent-doc` window before routing, without
+//!   swapping another visible pane back into stash.
 //! - **Auto-start inhibit**: Setting `AGENT_DOC_NO_AUTOSTART` prevents `auto_start_in_session`
 //!   from spawning a new pane. The call returns `Err` with a descriptive message.
 //! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
@@ -112,7 +113,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::HarnessConfig;
-use crate::sessions::{PaneMoveOp, Tmux};
+use crate::sessions::Tmux;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,7 +317,14 @@ fn resolve_or_create_pane(
     // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
+            rescue_from_stash(
+                tmux,
+                registered_pane,
+                session_id,
+                file_path,
+                target_session,
+                is_first_column(file, col_args),
+            );
             eprintln!("[route] Pane {} is alive, sending command", registered_pane);
             send_command(tmux, registered_pane, file_path, harness)?;
             require_routed_cycle_ack(
@@ -411,6 +419,7 @@ fn rescue_from_stash(
     session_id: &str,
     file_path: &str,
     target_session: &str,
+    split_before: bool,
 ) {
     // Session guard: only rescue within the target session
     let pane_session = pane_session_name(tmux, pane_id).unwrap_or_default();
@@ -434,13 +443,16 @@ fn rescue_from_stash(
         let target_panes = tmux
             .list_window_panes(&agent_doc_window)
             .unwrap_or_default();
-        if let Some(target) = target_panes.first() {
-            match sessions::swap_pane_guarded(tmux, pane_id, target, target_session) {
-                Ok(()) => eprintln!("[route] Rescued pane {} via swap-pane", pane_id),
-                Err(e) => {
-                    eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);
-                    let _ = PaneMoveOp::new(tmux, pane_id, target).join("-dh");
-                }
+        let target = if split_before {
+            target_panes.first()
+        } else {
+            target_panes.last()
+        };
+        if let Some(target) = target {
+            let join_flag = if split_before { "-dbh" } else { "-dh" };
+            match sessions::join_pane_guarded(tmux, pane_id, target, target_session, join_flag) {
+                Ok(()) => eprintln!("[route] Rescued pane {} via join-pane", pane_id),
+                Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
             }
         }
         if let Err(e) = sessions::register(session_id, pane_id, file_path) {
@@ -2844,7 +2856,8 @@ history line
     #[test]
     fn pane_in_stash_rescued_to_agent_doc() {
         // When a registered pane ends up in a stash window, route should
-        // rescue it back to the agent-doc window via swap-pane.
+        // rescue it back to the agent-doc window without ejecting the
+        // currently visible pane into stash.
         let iso = IsolatedTmux::new("route-test-stash-rescue");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
@@ -2866,7 +2879,7 @@ history line
         let pane_win = iso.pane_window(&stashed_pane).unwrap();
         assert_eq!(pane_win, stash_win.unwrap(), "pane should be in stash");
 
-        // Now rescue: swap the stashed pane with a pane in the agent-doc window
+        // Now rescue: join the stashed pane back into the agent-doc window.
         let agent_doc_window = format!("{}:agent-doc", session);
         let target_panes = iso.list_window_panes(&agent_doc_window).unwrap_or_default();
         assert!(
@@ -2875,62 +2888,66 @@ history line
         );
 
         if let Some(target) = target_panes.first() {
-            // This is the same swap logic as route.rs:88
-            match iso.swap_pane(&stashed_pane, target) {
-                Ok(()) => {
-                    // Verify the stashed pane is now in the agent-doc window
-                    let _rescued_win = iso.pane_window(&stashed_pane).unwrap();
-                    let _agent_doc_win_id = iso.pane_window(&pane1).unwrap_or_default();
-                    // After swap, the stashed pane should be in agent-doc window
-                    // and pane1 should be in stash
-                    assert!(
-                        iso.pane_alive(&stashed_pane),
-                        "rescued pane should be alive"
-                    );
-                }
-                Err(_e) => {
-                    // Fallback to join-pane (same as route.rs:94)
-                    iso.join_pane(&stashed_pane, target, "-dh").unwrap();
-                    assert!(
-                        iso.pane_alive(&stashed_pane),
-                        "pane should survive join rescue"
-                    );
-                }
-            }
+            sessions::join_pane_guarded(&iso, &stashed_pane, target, session, "-dh").unwrap();
+            let rescued_win = iso.pane_window(&stashed_pane).unwrap();
+            let visible_win = iso.pane_window(&pane1).unwrap();
+            assert_eq!(
+                rescued_win, visible_win,
+                "rescued pane should rejoin the visible agent-doc window"
+            );
+            let agent_doc_panes = iso.list_window_panes(&agent_doc_window).unwrap();
+            assert!(
+                agent_doc_panes.contains(&pane1),
+                "existing visible pane should stay in agent-doc window, got: {:?}",
+                agent_doc_panes
+            );
+            assert!(
+                agent_doc_panes.contains(&stashed_pane),
+                "rescued pane should be in agent-doc window, got: {:?}",
+                agent_doc_panes
+            );
+            assert!(
+                iso.pane_alive(&stashed_pane),
+                "rescued pane should be alive"
+            );
         }
     }
 
     #[test]
-    fn swap_failure_falls_back_to_join_pane() {
-        // When swap-pane fails during rescue, join-pane should be used as fallback.
-        let iso = IsolatedTmux::new("route-test-swap-fallback");
+    fn join_pane_rescue_places_left_of_target_when_requested() {
+        let iso = IsolatedTmux::new("route-test-join-left");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
         // Create session with agent-doc window
-        let _pane1 = iso.auto_start(session, &cwd).unwrap();
+        let pane1 = iso.auto_start(session, &cwd).unwrap();
         let _ = iso
             .cmd()
             .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
             .status();
 
-        // Create a second pane in its own window
+        // Create a second pane in its own window and rescue it to the left edge.
         let pane2 = iso.auto_start(session, &cwd).unwrap();
-        let _win_before = iso.pane_window(&pane2).unwrap();
-
-        // Use join_pane to move pane2 into agent-doc window (the fallback path)
         let agent_doc_window = format!("{}:agent-doc", session);
         let target_panes = iso.list_window_panes(&agent_doc_window).unwrap();
         let target = &target_panes[0];
 
-        iso.join_pane(&pane2, target, "-dh").unwrap();
+        sessions::join_pane_guarded(&iso, &pane2, target, session, "-dbh").unwrap();
 
-        // Verify pane2 is now in the agent-doc window
-        let _win_after = iso.pane_window(&pane2).unwrap();
-        let agent_doc_panes = iso.list_window_panes(&agent_doc_window).unwrap();
+        let agent_doc_panes = iso.list_panes_ordered(&agent_doc_window).unwrap();
         assert!(
             agent_doc_panes.contains(&pane2),
             "pane should be in agent-doc window after join, got: {:?}",
+            agent_doc_panes
+        );
+        assert_eq!(
+            agent_doc_panes.first().unwrap(),
+            &pane2,
+            "split-before rescue should place the pane on the left edge"
+        );
+        assert!(
+            agent_doc_panes.contains(&pane1),
+            "original pane should remain visible after rescue, got: {:?}",
             agent_doc_panes
         );
         assert!(iso.pane_alive(&pane2), "pane should be alive after join");

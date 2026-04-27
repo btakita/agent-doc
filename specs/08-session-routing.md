@@ -65,7 +65,7 @@ The stash system preserves running Claude sessions when the user switches editor
 | — | target selection | Targets the LARGEST pane in the stash (by height) to avoid "pane too small" errors |
 | — | overflow | If join fails, `break_pane_to_stash()` creates an overflow stash window (also named `"stash"`) |
 | ATTACH | `reconcile()` | Joins a stashed pane back into `@0` when needed again |
-| RESCUE | `sync` pre-resolution | Rescues same-session stashed panes back to agent-doc window via `swap-pane`/`join-pane` before layout; cross-session stash rescue fails closed and preserves the live pane in place |
+| RESCUE | `sync` pre-resolution | Rescues same-session stashed panes back to agent-doc window via guarded `join-pane` before layout; cross-session stash rescue fails closed and preserves the live pane in place |
 
 **Discovery:** `find_all_stash_windows()` returns all stash windows — both the primary stash and any overflow windows. All windows named `"stash"` or matching `"stash-*"` (tmux auto-deduplication) are treated as stash windows by `is_stash_window_name()`.
 
@@ -108,7 +108,7 @@ When the user navigates to a document in the editor:
 3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`.
 4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
    - Pane exists for this session → **focus it** (Binding found)
-   - Pane in stash → **rescue it** (swap-pane back to agent-doc window)
+   - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane)
    - No pane exists → trigger **Provisioning**
 5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
    - Splits alongside an existing pane in the agent-doc window

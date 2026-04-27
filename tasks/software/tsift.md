@@ -257,7 +257,7 @@ Forking sift would let us fix the root cause inside the engine (why it blocks on
 
 **When to reconsider:** if fresh-index searches on agent-loop-sized repos (~6K files) regularly hit the 30s timeout, fork and investigate the sift internals. Until then, the thread+timeout wrapper is the right layer to fix this at.
 
-❯ Please create a bug report with a repoducible case to the sift github repo.
+❯ Please create a bug report with a reproducible case to the sift github repo.
 ### Re: sift bug report — opus-4-6
 
 Filed: [rupurt/sift#2](https://github.com/rupurt/sift/issues/2) — "search() hangs on large repos — walkdir doesn't respect .gitignore"
@@ -267,7 +267,35 @@ Filed: [rupurt/sift#2](https://github.com/rupurt/sift/issues/2) — "search() ha
 **Suggested fix in the issue:** replace `WalkDir` with the `ignore` crate's `WalkBuilder` (already a dependency), which natively respects `.gitignore` at every tree level. The `Ignore` struct would layer `.siftignore` on top.
 
 **Our workaround:** the `--timeout 30` wrapper from the previous cycle prevents the hang. If the upstream fix lands, the timeout becomes a safety net rather than the primary defense.
-<!-- agent:boundary:d7deefad -->
+
+❯ Add `.siftignore` with appropriate files.
+### Re: .siftignore — opus-4-6
+
+Created `.siftignore` at the agent-loop root:
+
+```
+target/**
+dist/**
+build/**
+.next/**
+__pycache__/**
+node_modules/**
+.venv/**
+vendor/**
+.agent-doc/**
+.idea/**
+.wrangler/**
+*.db
+*.wasm
+*.so
+*.dylib
+*.lock
+```
+
+**Caveat:** this won't fix the search timeout today. Sift's `collect_file_paths()` uses `WalkDir` which still traverses every directory entry before filtering against `.siftignore` patterns — it can't prune subtrees. With 1.87M files, just the walk takes >40 seconds regardless of filtering.
+
+The `.siftignore` will become effective when the upstream fix ([rupurt/sift#2](https://github.com/rupurt/sift/issues/2)) replaces `WalkDir` with `ignore::WalkBuilder`, which prunes entire directories from the walk. Until then, the `--timeout 30` wrapper remains the active defense, and scoped searches (`--scope <submodule>`) work fine on individual submodules.
+<!-- agent:boundary:e54d11a7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -275,7 +303,7 @@ Filed: [rupurt/sift#2](https://github.com/rupurt/sift/issues/2) — "search() ha
 
 ## Pending / Not Built
 
-<!-- agent:backlog -->
+<!-- agent:backlog patch=replace -->
 - [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)

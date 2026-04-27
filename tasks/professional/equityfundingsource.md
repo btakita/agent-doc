@@ -2,7 +2,7 @@
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 links:
@@ -599,7 +599,23 @@ To fix:
 That should resolve the `code: 10042` / "Please enable R2" error. Let me know if you hit anything else.
 
 ---
-<!-- agent:boundary:7cb3e6c7 -->
+❯ Please draft a text message to robert-waldman for reminders of his todo list to get TMO keys and other things we discussed. Read the phone call transcript with robert-waldman.
+### Re: text message for Robert — gpt-5
+
+Here’s a tight draft you can send:
+
+> Hi Robert — quick reminder on the items we discussed for EFS:
+> 
+> 1. Please send the Google Workspace / admin login info so I can wire up SMTP and calendar reminders.
+> 2. Please let me know what you hear back from Mortgage Office on API / outbound webhook support.
+> 3. When you have them, please send the logo files, the FDL reference/code zip, and any hero images you want me to use.
+> 
+> Once I have those, I can keep moving on the next build steps. Thanks.
+
+If you want it a little warmer / more casual, use this version instead:
+
+> Hi Robert — just wanted to follow up on the EFS items from our call. When you get a chance, can you send over the Google Workspace admin/login details for SMTP + calendar, let me know what TMO says about API/webhook support, and forward the logo / FDL reference files / any hero images? Once I have those, I can keep pushing the next phase forward. Thanks.
+<!-- agent:boundary:c0503620 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

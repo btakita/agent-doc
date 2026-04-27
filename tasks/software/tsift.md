@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -343,7 +343,7 @@ Done. The gap was that `tsift init` only updated `CLAUDE.md` when a repo had no 
 
 Codex should now pick up tsift usage instructions directly from `src/tsift/AGENTS.md`.
 
-❯ do #compact. spec-test-build-install-commit-push
+❯ do #compact. spec-test-build-install-commit-push 
 ### Re: do #compact — gpt-5
 
 Done. `tsift` now accepts a global `--compact` flag for terse human-readable output across the CLI, and the earlier Codex-visible `tsift init` / `AGENTS.md` work is now actually committed in the submodule instead of only living in the worktree.
@@ -363,7 +363,44 @@ Done. `tsift` now accepts a global `--compact` flag for terse human-readable out
 
 **Commit:** `btakita/tsift@e01e680` — pushed.
 The parent repo now has the updated `src/tsift` submodule pointer staged for the session commit.
-<!-- agent:boundary:b4d50640 -->
+
+❯ do #json. spec-test-build-install-commit-push
+### Re: do #json — opus-4-6
+
+All `--json` output now uses compact (single-line) serialization by default. Added global `--pretty` flag for indented output when human readability is needed.
+
+**Changes:**
+- `src/main.rs` — added `--pretty` global flag to `Cli` struct. New `to_json()` helper dispatches between `serde_json::to_string` (default) and `serde_json::to_string_pretty` (when `--pretty`). Replaced 22 `to_string_pretty` call sites across all commands. Threaded `pretty: bool` through all `cmd_*` functions.
+- `src/status.rs` — updated test to use compact JSON.
+- `SPEC.md` — new "Compact JSON Default" section documenting `--pretty` flag and usage.
+- `CLAUDE.md` — updated global flags description.
+
+**Before/after:**
+```
+# default (compact) — 1 line
+{"index":{"state":"stale","total_files":17,...},"summaries":{"state":"none"},...}
+
+# --pretty — indented
+{
+  "index": {
+    "state": "stale",
+    "total_files": 17,
+    ...
+  }
+}
+```
+
+**Tests:** +3 → 257 total. Covers: compact default has no newlines, pretty has indentation, compact is shorter than pretty.
+
+**Verification:**
+- `cargo test` — 257 passed
+- `cargo install --path .`
+- `cargo build --release`
+- `tsift status src/tsift --json` — compact output confirmed
+- `tsift --pretty status src/tsift --json` — indented output confirmed
+
+**Commit:** `btakita/tsift@ce4855f` — pushed. Submodule pointer updated.
+<!-- agent:boundary:ea615f83 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -371,12 +408,12 @@ The parent repo now has the updated `src/tsift` submodule pointer staged for the
 
 ## Pending / Not Built
 
-<!-- agent:backlog -->
-- [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
+<!-- agent:backlog patch=replace -->
+- [x] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
+- [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
-- [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 <!-- /agent:backlog -->
 
 <!--

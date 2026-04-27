@@ -898,7 +898,7 @@ Commits:
 - `382306d` in `src/boost-client` — retroactive marker cleanup
 
 Both pushed.
-<!-- agent:boundary:d93f7239 -->
+<!-- agent:boundary:f79428e8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -907,7 +907,6 @@ Both pushed.
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#npc1] Strip inline `` and `` from committed blobs: change `strip_guard_markers` in `src/agent-doc/src/git.rs` to remove inline occurrences (not just standalone lines), trim trailing whitespace, update the `strip_guard_markers_preserves_inline_content` test to expect stripping, add a new test for trailing-on-content-line case. Also retroactively strip from monsterrodholders.md committed history via interactive rebase or filter-branch.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

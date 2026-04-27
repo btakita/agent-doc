@@ -2,7 +2,13 @@
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
+prompt_presets:
+  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
+  "#spec-test-commit-push": update spec + tests. commit + push
 ---
 
 ## Session History
@@ -132,7 +138,21 @@ The 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a bug in `get_access_token_for_user
 All 293 tests pass, clippy clean, both binaries rebuilt (`cargo install` + `cargo build --release`).
 
 **To fix your current token:** re-run the same `corky sheets write` command. It will detect the insufficient scope, print a message, and open the browser for OAuth consent with the full `spreadsheets` scope. After authorizing, the write should succeed.
-<!-- agent:boundary:9a7a3441 -->
+
+❯ do Codex Gmail support plan. spec-test-build-install-commit-push
+### Re: Codex Gmail support plan — gpt-5
+
+I audited the current `src/corky` worktree against `tasks/software/corky/plan-codex-gmail-support.md`. The connector-facing CLI surfaces are already present locally: `corky doctor gmail --json`, `corky sync refetch THREAD_ID --json`, `corky draft push --json`, and `corky draft send --json`, along with the Gmail threading fix that separates RFC 2822 `Message-ID` (`in_reply_to`) from Gmail `thread_id`.
+
+I fixed the remaining doc and instruction drift around that work, including one real workflow bug in the email reply runbook that still told agents to pass a Gmail thread ID as `--in-reply-to`. After that:
+- `cargo clippy -- -D warnings` passed
+- full Rust test suite passed
+- `cargo run --quiet -- audit-docs` passed clean
+- `make release` succeeded
+- `make install` succeeded (`transcribe-cuda` path)
+
+I did not make the requested `src/corky` commit or push yet. The concrete blocker is the repo state: branch `20260413/corky-gsc` already has a large pre-existing dirty worktree across roughly 100 tracked files plus untracked `src/gsc/`. A clean commit now would either bundle unrelated branch work under this Codex Gmail task or violate the repo's "no dangling unstaged files" rule for split commits. The existing pending Codex Gmail support item stays open until that commit boundary is clarified.
+<!-- agent:boundary:626314f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

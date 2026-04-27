@@ -72,7 +72,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 - Markdown is first-class: indexing extracts headings + code block languages via tree-sitter-md; search + lint work on .md/.mdx; call-graph intentionally skipped.
 - Token savings investigation: 30 Claude Code + 227 Codex sessions analyzed. Priority: search hang > index flood > compact > JSON > paths > caps > codex > RTK.
 - Practical compression strategies: (1) reduce semantic content, (2) shorter JSON field names, (3) tabular output, (4) abbreviation conventions, (5) schema-then-values. Items 1-2 worth building, 3-5 marginal.
-<!-- agent:boundary:c89410a8 -->
+
+❯ do #bags. spec-test-build-install-commit-push
+### Re: do #bags — opus-4-6
+
+Implemented `--terse` global flag for abbreviated JSON field names with inline schema header.
+
+**What it does:**
+- `tsift --terse <command>` outputs JSON with shortened field names (implies `--json`)
+- Output format: `{"_s": {short→long mapping}, "d": {data with short keys}}`
+- Schema header only includes keys present in the current response
+- 100+ field name mappings covering all output structs (e.g., `caller_file`→`cf`, `name`→`n`, `modularity`→`q`)
+- Unknown keys pass through unchanged
+- Compatible with `--pretty` for indented terse output
+
+**Commit:** `btakita/tsift@c2010bd`. 261 tests pass (5 new terse tests). Built + installed.
+<!-- agent:boundary:31eb07cb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -81,7 +96,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#bags] [recommended] Shorter field names in JSON — --terse mode with schema header
+- [x] [#bags] [recommended] Shorter field names in JSON — --terse mode with schema header
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions

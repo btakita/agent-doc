@@ -142,13 +142,12 @@ Commit / push:
 Scope note:
 - This closes the specific fresh-start acknowledgment gap behind `#cdxstart`.
 - It does not claim the separate pending/backlog mutation issue is fixed; that remains under the other tracked items.
-<!-- agent:boundary:0e35fcb7 -->
+<!-- agent:boundary:2a097f03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#cdxstart] [recommended] Make fresh Codex startup fail closed unless the initial route trigger is acknowledged by a real preflight start for the target document
 - [ ] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

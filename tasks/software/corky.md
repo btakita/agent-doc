@@ -269,7 +269,28 @@ For this repo, the practical paths are:
 - or just retry the Gmail action that needs the token, such as `corky draft send ...`, because that path will also trigger re-auth when needed for `gmail.compose`
 
 So the answer is: **yes, `corky` can create a fresh token, but not from a session that cannot reach Google or complete the OAuth callback bind.**
-<!-- agent:boundary:1f2870b4 -->
+
+❯ I did not see a browser window popup for oauth when I attempted to send an email.
+### Re: why no OAuth browser popup appeared — gpt-5
+
+That is consistent with how `corky` is written.
+
+In `run_auth_flow_with_scope`, `corky` does this in order:
+1. prints `Opening browser for Gmail authorization...`
+2. calls `open::that(url)` as a **best-effort** browser launch
+3. prints the fallback URL (`If the browser doesn't open, visit: ...`)
+4. only after that, tries to start the local callback server on `127.0.0.1:8484`
+
+So if you did **not** see a browser window, the likely explanation is not that OAuth never started. It is that the browser-launch step did not visibly succeed in that runtime. `corky` already tolerates that case and continues by printing the URL and waiting for callback.
+
+Then, in your failing session, the next step also broke: the callback server bind failed with `Operation not permitted`. So you had **two** problems in sequence:
+- no visible browser auto-open
+- then no usable local callback listener
+
+That is why you saw neither a popup nor a completed OAuth flow.
+
+So the precise answer is: **`corky` probably did attempt to open OAuth, but browser launch is non-guaranteed, and that session then failed on the callback-server step anyway.**
+<!-- agent:boundary:66aed381 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

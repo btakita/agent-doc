@@ -117,13 +117,38 @@ The main fixes I would require are:
 5. **Document-first reporting should be enforced, not advisory.** If the active surface is a session document and the agent promises "I’ll report back", the next substantive report should be required to land in that document before any external completion path is considered clean. That is a workflow invariant, but it still belongs in `agent-doc` because the binary owns the session boundary.
 
 So the short answer is: ensure Codex cannot enter a *silent* bad state by making startup acked, pending mutations typed, cycle phases explicit, recovery deterministic, and document-first reporting enforceable.
-<!-- agent:boundary:52e98260 -->
+
+❯ do #cdxstart. spec-test-build-install-commit-push
+### Re: do `#cdxstart` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `6248cff` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- fresh `route` auto-start no longer treats pane-input acceptance as success by itself
+- after trigger injection, route now waits for a real per-document cycle acknowledgment before considering the start successful
+- success now logs `fresh_route_start_acknowledged` with cycle/phase details
+- missing acknowledgment now logs `fresh_route_start_missing` and fails closed instead of leaving Codex in a silent startup state
+- added route coverage for three cases: fresh preflight ack, fast commit after ack, and timeout when the cycle never changes
+- updated `SPEC.md`, `specs/07-commands.md`, `specs/codex-support.md`, and `VERSIONS.md`
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `6248cff` (`fix: require fresh route cycle ack`)
+
+Scope note:
+- This closes the specific fresh-start acknowledgment gap behind `#cdxstart`.
+- It does not claim the separate pending/backlog mutation issue is fixed; that remains under the other tracked items.
+<!-- agent:boundary:0e35fcb7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#cdxstart] [recommended] Make fresh Codex startup fail closed unless the initial route trigger is acknowledged by a real preflight start for the target document
+- [x] [#cdxstart] [recommended] Make fresh Codex startup fail closed unless the initial route trigger is acknowledged by a real preflight start for the target document
 - [ ] [#pendops] [recommended] Normalize backlog/pending mutations into supported --pending-* operations before write, and reject unsupported pending patches before response capture
 - [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
 <!-- /agent:pending -->

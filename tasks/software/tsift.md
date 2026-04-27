@@ -146,7 +146,7 @@ Implemented `tsift init --codex` for Codex hook integration.
 **Why not the rewrite hook?** Codex doesn't support `PreToolUse` hooks, so the `grep`/`rg` → `tsift search` rewrite can't be ported. The AGENTS.md code-navigation instructions already tell Codex agents to prefer tsift over grep/rg.
 
 **Commit:** `btakita/tsift@474ef45`. 282 tests pass (5 new Codex hook tests). Built + installed.
-<!-- agent:boundary:10cbab24 -->
+<!-- agent:boundary:1eb9876e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -155,7 +155,6 @@ Implemented `tsift init --codex` for Codex hook integration.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
 - [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)

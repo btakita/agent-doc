@@ -837,7 +837,16 @@ The plan file references `spec-pending-capture-guard.md` which documents the exi
 Committed `btakita/tsift@882421d`, pushed. Submodule pointer updated in agent-loop. SPEC.md updated. 236 tests pass.
 
 `#wrka` ("until search is fixed, use explain/graph") is now obsolete — search works.
-<!-- agent:boundary:1603fb05 -->
+❯ Does tsift work on markdown files?
+### Re: markdown support — opus-4-6
+
+Yes. Markdown is a first-class language in tsift (`lang-markdown` feature, on by default):
+
+- **Indexing** — `tsift index` extracts headings (h1–h6) and fenced code block language tags as symbols via `tree-sitter-md`. So a file with `## Architecture` and ` ```rust ` yields a `heading` symbol "Architecture" and a `code_block` symbol "rust".
+- **Search** — both lexical (sift) and symbol search cover `.md` / `.mdx` files. `tsift search "heading"` returns matches from markdown content.
+- **Lint** — `tsift lint` is markdown-specific: it detects unannotated concepts (symbols, headings, bold terms) cross-referenced against the graph entity set.
+- **Graph** — call-graph extraction is intentionally skipped for markdown (no meaningful call patterns), same as Bash.
+<!-- agent:boundary:6271e5f5 -->
 <!-- /agent:exchange -->
 
 <!--

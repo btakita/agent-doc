@@ -566,7 +566,36 @@ At Opus pricing ($15/M input), that's roughly **$73/month saved**. At Sonnet pri
 #### Caveat
 
 These numbers assume the agent actually uses tsift instead of defaulting to Read/Grep. That's what the `tsift init` AGENTS.md directive is for — without it, the agent has no reason to prefer tsift over built-in tools. The directive + cached summaries together produce the savings; either one alone gives partial benefit.
-<!-- agent:boundary:10689ef5 -->
+
+❯ It seems that we should **always** use `tsift summarize` when `tsift init` is called. Correct?
+❯ Are there scenarios where we would not want to use `tsift summarize`?
+### Re: always use summarize? — opus-4-6
+
+Not always. `tsift init` and `tsift summarize` serve different purposes and have different prerequisites.
+
+**`tsift init`** injects the AGENTS.md directive — free, instant, no dependencies. Should always run. The directive includes `tsift search`, `tsift explain`, `tsift graph`, and `tsift summarize`. The first three work immediately after `tsift index` (free AST parsing). Summarize only works after extraction (costs API tokens).
+
+**When summarize adds no value:**
+
+1. **No extraction done** — if `tsift summarize --extract` hasn't run, every `tsift summarize <symbol>` returns "not extracted" and the agent wastes a round-trip before falling back to a file read. Net negative.
+
+2. **Small codebases** (~20 files, ~5k lines) — the agent can read everything into context cheaply. The overhead of querying summaries and sometimes needing the full file anyway may cost more round-trips than it saves tokens.
+
+3. **Heavy active development** — if you're changing 10+ files per hour, summaries go stale constantly. You'd need frequent `--extract --diff` runs. The free commands (search, graph, explain) stay fresh because they use the auto-reindexing hook.
+
+4. **No API key available** — extraction requires an Anthropic API key. Offline or CI environments can't run it.
+
+**When summarize is high-value:**
+
+- Large codebases (100+ files) where exploration dominates editing
+- Onboarding sessions — new developer or new area of the code
+- Architecture review / refactoring — reading many files to understand structure
+- Stable code that changes infrequently — summaries stay fresh longer
+
+**Practical implication for `tsift init`:** the current implementation always includes summarize in the AGENTS.md section. That's fine — if the cache is empty, the agent calls it once, gets "not extracted," and stops trying for the rest of the session. One wasted round-trip. But it could be cleaner: the directive could say "use `tsift summarize` when available" rather than listing it unconditionally. Or `tsift init` could check `summaries.db` and conditionally include it.
+
+The free commands (search, explain, graph) should always be in the directive. Summarize is opt-in based on whether you've paid the extraction cost.
+<!-- agent:boundary:27c7d201 -->
 <!-- /agent:exchange -->
 
 <!--

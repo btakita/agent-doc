@@ -70,7 +70,22 @@ Verification:
 
 Note:
 - The `src/agent-doc` worktree still has unrelated local formatting-only changes in other files from `cargo fmt`; I did not include those in commit `92b8df7`.
-<!-- agent:boundary:16dfb395 -->
+
+❯ Is this bug currently fixed for codex sessions?
+### Re: is this bug currently fixed for Codex sessions? — gpt-5
+
+Yes for the two concrete Codex failure modes in this document.
+
+What is fixed now:
+- Fresh Codex starts no longer silently stall when the first route trigger is missed. That path now does one bounded fallback injection and fails closed with explicit `fresh_route_trigger_*` logging instead of idling with no patchback cycle.
+- Write-landed / commit-missing Codex IPC closes are now recognized and resumed by `preflight` / `session-check` instead of being left as ambiguous drift.
+
+What I would not claim yet:
+- I would not call all Codex session reliability bugs fixed in general. This closes the specific missed-trigger and interrupted-commit family we traced here.
+- The earlier stash-pane eviction issue is still separate and still open.
+
+So the precise answer is: this specific bug family is fixed for Codex sessions in the current `src/agent-doc` code, but it is not a blanket claim that all Codex session bugs are resolved.
+<!-- agent:boundary:99156967 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -14,7 +14,7 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-✅ Fixed the frontmatter body-slice bug in `src/agent-doc/src/frontmatter.rs` so repeated frontmatter rewrites no longer accumulate blank lines before the first body heading. Added regression coverage for exact body preservation across repeated parse/write cycles, then verified the crate with `cargo test`, `cargo build --release`, and `cargo install --path .`. The code change is committed and pushed in `src/agent-doc` as `f4b9f59` on `20260422/codex-agent-backend`.
+Prior frontmatter bug fix remains complete. New work this cycle is planning only: added a concrete reliability plan for the “response patchback not committed / no patchback cycle ran” failure family. The current diagnosis is that two bugs can surface as the same symptom: (1) fresh Codex sessions can miss the initial route trigger entirely, so `preflight -> write -> commit` never starts; (2) a write/IPC + snapshot save can succeed, but the cycle can still die before `commit_*`, leaving a visible uncommitted assistant patchback in the working tree.
 <!-- /agent:status -->
 
 ## Exchange
@@ -520,7 +520,7 @@ Updated the analysis and business-case framing to name the `agent-doc` superviso
 That makes the open/proprietary split cleaner: the supervisor, daemon lifecycle, event channel, virtual documents, CRDT merge, snapshots, plugin API, and export layer stay open; Sidekick's proprietary value remains the analysis pipeline, scoring, aggregation, and coaching that run on top.
 
 ❯ Please describe how the virtual document compares with the daemon.
-### Re: virtual document compared with the daemon — gpt-5
+### Re: virtual document compared with the daemon — gpt-5 (HEAD)
 
 Added the comparison directly to the Sidekick analysis docs.
 
@@ -529,7 +529,74 @@ Added the comparison directly to the Sidekick analysis docs.
 **sidekick-agent-doc-integration.md** now has a matching `Virtual document vs supervisor` section framed in Sidekick terms. It says the supervisor answers "how does the system run?" while the virtual document answers "what state is the system in?" That also sharpens the business case: the supervisor is what makes Sidekick continuous and tool-agnostic, while the virtual document is what makes it legible, reviewable, and portable.
 
 So the clean comparison is not one replacing the other. The daemon is the active coordinator. The virtual document is the inspectable state surface the daemon keeps current.
-<!-- agent:boundary:134ff14b -->
+
+❯ Why is the response patchback not committed?
+
+❯ Please create a plan for agent-doc to fix the issue and backlog item in agent-loop/tasks/agent-doc/agent-doc-bugs.md
+### Re: fix plan for uncommitted / missing response patchback — codex
+
+Yes. The right plan is to treat this as one reliability bug family with **two concrete entry points** that need separate guards:
+
+1. **Fresh-start trigger miss**  
+   The Codex session starts, but `route.rs` never injects the first `agent-doc <file>` trigger, so there is no `preflight_diff_start`, `write_origin`, or `commit_*` at all.
+
+2. **Post-write / pre-commit interruption**  
+   The response is already visible in the document and the snapshot save has happened, but the process dies before `commit_staging` / `commit_success`, leaving an uncommitted patchback in the working tree.
+
+#### Proposed implementation plan
+
+**Phase 1 — make fresh Codex start fail closed instead of silently idle**
+
+- Audit the fresh-start path across `start.rs` and `route.rs`, specifically where `auto_trigger = false` hands responsibility to prompt-readiness detection.
+- Add an explicit **first-trigger watchdog** for fresh Codex launches:
+  - if `codex_start mode=fresh` occurs,
+  - and no `preflight_diff_start` / trigger dispatch follows within a bounded window,
+  - record a hard failure in cycle state / ops log instead of silently leaving the document idle.
+- Add a deterministic fallback trigger path:
+  - either a second injection attempt once readiness stabilizes,
+  - or a recoverable “route never triggered” state that `preflight` / `repair` can surface immediately on the next run.
+- Regression coverage:
+  - fresh Codex start where readiness prompt is delayed / noisy,
+  - fresh Codex start where first detection fails once then succeeds,
+  - fresh Codex start where no readiness ever appears and the run fails closed with a clear reason.
+
+**Phase 2 — close the gap between successful write/IPC and commit completion**
+
+- Treat `write_origin` + `ipc_write_consumed` / `snapshot_saved_file_ipc` without later `commit_*` as a first-class interrupted state, not just generic open-cycle drift.
+- Extend `preflight` / `repair` to recognize this state and prefer **resume-commit** over generic recovery when:
+  - the captured response body exists,
+  - the baseline hash still matches,
+  - the working file already contains the intended assistant patchback.
+- Tighten `codex_hook.rs` Stop-hook recovery so that when `last_assistant_message` is empty or unusable but the binary can prove the write already landed, it attempts to finish only the **commit boundary** rather than reclassifying the whole turn as “missing response”.
+- Regression coverage:
+  - IPC write succeeds, commit never starts,
+  - commit starts but does not finish,
+  - next preflight auto-recovers by finishing commit,
+  - recovery refuses to commit if the file drifted after the interrupted write.
+
+**Phase 3 — improve operator visibility**
+
+- Add explicit ops-log markers for:
+  - `fresh_route_trigger_missing`
+  - `write_completed_commit_missing`
+  - `resume_commit_attempt`
+  - `resume_commit_success`
+  - `resume_commit_blocked_drift`
+- Update `session-check` messaging so the two failure classes are distinguishable:
+  - “no patchback cycle ever started”
+  - “patchback landed but commit boundary was interrupted”
+- Update `SKILL.md`, `runbooks/commit.md`, and direct-exec/Codex instructions so the user-facing contract matches the binary recovery behavior.
+
+#### Why this shape
+
+The important thing is not to treat all uncommitted patchbacks as the same bug. A **route-trigger miss** is a startup/routing failure. A **visible uncommitted response** is a commit-boundary interruption. They need different invariants, different logs, and different repair paths.
+
+#### Backlog item to add
+
+I’d track this as one umbrella item with phase wording so the fix stays coherent:
+
+- `[#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted`
+<!-- agent:boundary:3f6a8fa0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -539,6 +606,7 @@ I want sidekick to have the option to use git commits as well.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

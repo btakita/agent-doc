@@ -175,16 +175,37 @@ graphify already has the extraction logic. Adding a persistent cache layer (SQLi
 **My recommendation:** Option A fits the tsift philosophy (single Rust binary, zero runtime deps, deterministic queries after one-time extraction). It reuses the existing `symbols.db` infrastructure. The batch extraction could use the Anthropic batch API for 50% cost reduction.
 
 Want me to spec this out as a `tsift summarize` feature?
-<!-- agent:boundary:92d14039 -->
+
+❯ Yes. spec + add to backlog
+### Re: spec + backlog for tsift summarize — opus-4-6
+
+Done. Added `## Summarize (Cached LLM Analysis)` section to `src/tsift/SPEC.md` and updated `CLAUDE.md`.
+
+**What the spec defines:**
+
+- `tsift summarize <symbol>` — instant cached lookup (no LLM call at query time)
+- `tsift summarize --extract <path>` — one-time batch extraction via Anthropic batch API (haiku, 50% cost reduction)
+- `tsift summarize --extract --diff` — incremental: only re-extracts git-changed files
+- `tsift summarize --stats` — cache hit rate, staleness, estimated token savings
+
+**Storage:** new `summaries.db` with entities, relationships, concept labels, 2-sentence summaries. Cache key is `blake3(file_content) + symbol_name` — invalidates automatically on source changes.
+
+**Token savings model:** ~2000 tokens per 500-line file read vs ~50-100 tokens for cached summary. Extraction cost is one-time and amortized by the batch API discount.
+
+**Boundary rule:** extraction is batch-only, queries are local DB lookups. No live LLM calls at query time, no visualization.
+
+Added `#summ` to backlog.
+<!-- agent:boundary:337a4500 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:backlog patch=replace -->
+- [ ] [#summ] tsift summarize: cached LLM analysis — batch extraction via Anthropic API, local SQLite cache, token-free queries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- /agent:pending -->
+<!-- /agent:backlog -->
 
 <!--
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

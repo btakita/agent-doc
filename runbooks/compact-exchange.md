@@ -23,4 +23,5 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - Replaces exchange content with archive pointer (uses `replace_content()`, not the patch pipeline)
    - Updates snapshot atomically
    - Closes out via the binary-owned `agent-doc commit` path and verifies the VCS refresh signal when available
+   - If a live template/CRDT session already has a bare `compact exchange` user directive in the diff, later write-back also forces `agent:exchange` replacement semantics so the checkpoint summary cannot silently append over old exchange content
    - Pass `--message "summary text"` to include a custom summary instead of the default archive pointer

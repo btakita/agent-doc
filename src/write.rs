@@ -1362,6 +1362,27 @@ pub(crate) fn enforce_imperative_response_contract_for_diff(
     );
 }
 
+fn template_mode_overrides_for_current_doc(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+) -> std::collections::HashMap<String, String> {
+    let mut overrides = std::collections::HashMap::new();
+    let baseline_owned = baseline
+        .map(ToOwned::to_owned)
+        .or_else(|| snapshot::load(file).ok().flatten());
+    let Some(base) = baseline_owned.as_deref() else {
+        return overrides;
+    };
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(base, current_content) else {
+        return overrides;
+    };
+    if crate::diff::detect_exchange_compaction_request(&diff_text) {
+        overrides.insert("exchange".to_string(), "replace".to_string());
+    }
+    overrides
+}
+
 fn response_satisfies_imperative_contract(response: &str) -> bool {
     let lower = response.to_ascii_lowercase();
     if contains_any_signal(&lower, IMPERATIVE_BLOCKER_SIGNALS) {
@@ -2001,6 +2022,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse patch blocks from response
     let (mut patches, unmatched) =
@@ -2042,8 +2064,9 @@ pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -
     snapshot::save_pre_response(file, base)?;
 
     // Apply patches to baseline
-    let content_ours = template::apply_patches(base, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    let content_ours =
+        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
+            .context("failed to apply template patches")?;
     let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     // Re-read file to check for user edits since lock acquisition
@@ -2152,6 +2175,7 @@ pub fn run_stream(
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Lint: warn if response contains future-work signals without --pending-add
     warn_future_work_signals(&response);
@@ -2227,7 +2251,6 @@ pub fn run_stream(
             let content_at_start = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {}", file.display()))?;
             let base = baseline.unwrap_or(&content_at_start);
-            let mode_overrides = std::collections::HashMap::new();
             let t_apply = std::time::Instant::now();
             let mut content_ours = template::apply_patches_with_overrides(
                 base,
@@ -2541,7 +2564,6 @@ pub fn run_stream(
     // Apply patches using the mode resolution chain:
     // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
     // The skill sends delta content for append-mode components.
-    let mode_overrides = std::collections::HashMap::new();
     let t_apply2 = std::time::Instant::now();
     let mut content_ours =
         template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
@@ -2802,8 +2824,11 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let base = baseline.unwrap_or(&content_at_start);
-    let mut content_ours = template::apply_patches(base, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    let mode_overrides =
+        template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
+    let mut content_ours =
+        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
+            .context("failed to apply template patches")?;
     content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     // Apply frontmatter patch if present
@@ -2892,8 +2917,15 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches)?;
 
-    let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
+    let content_ours = template::apply_patches_with_overrides(
+        &content,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+    )
+    .context("failed to apply template patches")?;
     let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
 
     let doc_lock = acquire_doc_lock(file)?;
@@ -4063,6 +4095,45 @@ mod tests {
         fs::write(&snap_abs, content).unwrap();
         let loaded = fs::read_to_string(&snap_abs).unwrap();
         assert_eq!(loaded, content);
+    }
+
+    #[test]
+    fn apply_template_from_string_compact_exchange_replaces_exchange_body() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n\n",
+            "compact exchange\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n",
+        );
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let response =
+            "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("Compacted summary.\n"));
+        assert!(!result.contains("Old progress."));
+        assert!(!result.contains("compact exchange"));
     }
 
     #[test]

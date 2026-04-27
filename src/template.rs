@@ -650,6 +650,7 @@ pub fn apply_patches_with_overrides(
 
     // Merge overflow (from missing-component patches) with unmatched content
     let mut all_unmatched = String::new();
+    let exchange_patch_present = patches.iter().any(|patch| patch.name == "exchange");
     if !overflow.is_empty() {
         all_unmatched.push_str(&overflow);
     }
@@ -678,8 +679,17 @@ pub fn apply_patches_with_overrides(
                 all_unmatched.clone()
             };
             let unmatched = &stripped;
-            // Try boundary-aware append first (preserves prompt ordering)
-            if let Some(bid) = find_boundary_in_component(&result, output_comp) {
+            let force_replace = output_comp.name == "exchange"
+                && mode_overrides
+                    .get("exchange")
+                    .map(|mode| mode == "replace")
+                    .unwrap_or(false)
+                && !exchange_patch_present;
+            if force_replace {
+                let new_content = format!("{}\n", unmatched.trim_end());
+                result = output_comp.replace_content(&result, &new_content);
+            } else if let Some(bid) = find_boundary_in_component(&result, output_comp) {
+                // Try boundary-aware append first (preserves prompt ordering)
                 eprintln!(
                     "[template] unmatched content: using boundary {} for insertion",
                     &bid[..bid.len().min(8)]
@@ -1923,6 +1933,46 @@ Interstitial text.
             apply_patches_with_overrides(doc, &patches, "", &doc_path, &overrides).unwrap();
         // Stream override (replace) should win over inline attr (append)
         assert!(result.contains("new\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn exchange_replace_override_replaces_unmatched_content() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange patch=append -->\nold\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("exchange".to_string(), "replace".to_string());
+        let result =
+            apply_patches_with_overrides(doc, &[], "Compacted summary.\n", &doc_path, &overrides)
+                .unwrap();
+
+        assert!(result.contains("Compacted summary.\n"));
+        assert!(!result.contains("old\n"));
+    }
+
+    #[test]
+    fn exchange_replace_override_keeps_explicit_exchange_patch_authoritative() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:exchange patch=append -->\nold\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "Compacted summary.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("exchange".to_string(), "replace".to_string());
+        let result =
+            apply_patches_with_overrides(doc, &patches, "trailing note", &doc_path, &overrides)
+                .unwrap();
+
+        assert!(result.contains("Compacted summary.\n"));
+        assert!(result.contains("trailing note"));
         assert!(!result.contains("old\n"));
     }
 

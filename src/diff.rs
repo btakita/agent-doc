@@ -1287,6 +1287,67 @@ pub fn diff_contains_imperative_directive(diff: &str) -> bool {
     matches!(classify_diff(diff).diff_type, DiffType::Approval)
 }
 
+/// Detect whether the user explicitly requested exchange compaction in added
+/// diff lines.
+///
+/// This only matches direct imperative forms that start with `compact exchange`
+/// (or `compact the exchange`) after prompt/pending normalization.
+pub fn detect_exchange_compaction_request(diff: &str) -> bool {
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+        let trimmed = content.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                    continue;
+                }
+            }
+        }
+
+        if !line.starts_with('+') || line.starts_with("+++") || in_fence || content.starts_with('>')
+        {
+            continue;
+        }
+
+        let Some(normalized) = normalize_imperative_candidate(content) else {
+            continue;
+        };
+        let lower = normalized.to_ascii_lowercase();
+        if lower.starts_with("compact exchange") || lower.starts_with("compact the exchange") {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Extract ordered user-authored request blocks from added diff lines.
 ///
 /// This is a prompt-building helper, not a semantic proof that every request
@@ -3335,6 +3396,25 @@ Please fix the bug.\n\
     fn diff_contains_imperative_directive_for_approval_word() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+go\n";
         assert!(diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_matches_bare_directive() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange\n";
+        assert!(detect_exchange_compaction_request(diff));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_matches_prompt_prefixed_variant() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+❯ compact exchange...do not add...summarize the content and delete the rest\n";
+        assert!(detect_exchange_compaction_request(diff));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_ignores_non_directive_mentions() {
+        let diff =
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+I failed to compact exchange earlier.\n";
+        assert!(!detect_exchange_compaction_request(diff));
     }
 
     #[test]

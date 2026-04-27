@@ -439,7 +439,57 @@ Done. Created `tasks/agent-doc/sidekick/` with all three documents co-located:
 The business case is a standalone document extracted from the exchange response, with a `Related documents` section linking to its two companion files. Cross-references between the three are updated.
 
 Naming choice: `agent-doc-platform.md` rather than `agent-doc-realtime.md` because the plan covers more than real-time — virtual documents, plugin API, multi-tool export, tsift integration. "Platform" captures agent-doc evolving from a CLI tool into an extensible platform with a plugin ecosystem.
-<!-- agent:boundary:e479287f -->
+
+❯ Does the virtual document concept have prior art? Is it cover under a patent? Is there open source prior art?
+### Re: virtual document prior art — opus-4-6
+
+#### Short answer
+
+Every individual building block has extensive prior art. The specific combination — markdown as a CRDT-backed, daemon-managed, plugin-extensible materialized view of AI agent state — appears novel.
+
+#### Open-source prior art by component
+
+| Component | Prior art | Year |
+|-----------|-----------|------|
+| Daemon-managed files (no user editing) | Plan 9 synthetic files, `/proc`, FUSE, VS Code `TextDocumentContentProvider` | 1992+ |
+| Programmatic IPC creation/update | Jupyter kernel protocol (ZeroMQ), MCP (Anthropic → Linux Foundation), Plan 9 ctl files | 2001+ |
+| Structured components in documents | Org-mode (headings, properties drawers, babel blocks), Obsidian Dataview (YAML frontmatter + inline fields) | 2003+ |
+| State outside git working tree | `.git/` itself, LSP virtual documents, AgentFS (Turso, SQLite-backed) | ongoing |
+| Snapshot-based state tracking | Automerge (Ink & Switch), AgentFS, Jupyter checkpoints | 2017+ |
+| CRDT merge for concurrent writes | Yjs, Automerge, Loro (Rust), Peritext (rich text CRDTs), Jupyter Real-Time Collaboration (pycrdt) | 2015+ |
+| Plugin API with event subscriptions | VS Code Extension API, Obsidian Plugin API, Yjs providers (Y-Sweet) | ongoing |
+| Materialized view of system state | CQRS + Event Sourcing, Riffle (MIT/Ink & Switch, UIST 2023), ksqlDB materialized views | well-established |
+
+All of these are well-documented, open-source, and unencumbered.
+
+#### Patent landscape
+
+| Patent | Year | Status | What it covers |
+|--------|------|--------|----------------|
+| US5787449A (IBM) | 1994 | **Expired** | Separating document architecture from content; multiple views from same components |
+| EP1642208A2 (Edgar Online) | 2004 | Active (some jurisdictions) | "Virtual document architecture" — reusable paragraph-level components, version control, collaborative editing for financial/legal docs |
+| US20160048486A1 | 2014 | Application | Multi-user stream collaborative editing with per-user revision streams |
+
+EP1642208 is the closest patent using the term "virtual document," but it targets human-collaborative publishing (financial/legal documents). It has no CRDT, no daemon lifecycle, no AI agent context. Its "virtual document" means "document composed from reusable component fragments" — different from agent-doc's meaning of "document managed by a daemon without direct user editing."
+
+No patents were found combining CRDT merge + daemon management + AI agent session state + structured components + plugin API.
+
+#### What's actually novel
+
+The individual pieces are all prior art. The novelty is in the composition applied to AI agent session management:
+
+1. **Markdown-as-materialized-view of AI agent state.** No existing system uses a structured markdown document as a live materialized view that a daemon keeps synchronized with system state. AgentFS uses SQLite. Devin uses sandbox state. Codex uses JSON memories. The "document IS the state surface" idiom applied to daemon-managed (not user-managed) documents is new.
+
+2. **CRDT merge on a non-interactive document.** All existing CRDT collaborative editing work targets human-to-human or human-to-system collaboration where users actively edit. Using CRDTs for daemon-to-daemon concurrent writes on a document no human directly edits is an unusual application — the CRDT serves plugin conflict resolution, not user collaboration.
+
+3. **Plugin API over structured markdown components via IPC.** The ability for external tools to `read_component(doc_id, "sidekick:health")` and `subscribe_changes(doc_id, "sidekick:metrics")` where the storage is a markdown document with named `&lt;!-- agent:name --&gt;` component markers has no analog. Obsidian Dataview reads structured markdown but is query-only, not writable. VS Code virtual documents are programmatic but unstructured.
+
+4. **The closest analog is Plan 9 synthetic files** — daemon-managed structured state exposed as files with a protocol for reading/writing — but applied to a markdown document format with CRDT merge semantics and AI agent session management as the domain.
+
+#### Implications for the patent
+
+The virtual document *infrastructure* is a composition of well-established open-source patterns. Attempting to patent the infrastructure concept would face prior art challenges on every individual component. This reinforces the business case: the infrastructure should be open (it's built on open primitives), while the patent should cover the intelligence layer — the scoring algorithms, analysis pipeline, discovery-lag heuristics, and team aggregation that *use* virtual documents but aren't *about* virtual documents.
+<!-- agent:boundary:487ba909 -->
 <!-- /agent:exchange -->
 
 <!--

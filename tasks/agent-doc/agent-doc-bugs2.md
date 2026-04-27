@@ -374,7 +374,26 @@ Verification this cycle:
 - `cargo install --path . --force`
 
 No new `src/agent-doc` source patch was needed, so there is no new source commit or push from this cycle. The branch already contains the fix and the pushed history already includes it.
-<!-- agent:boundary:5d4f17fd -->
+
+❯ do #pcap. spec-test-build-install-commit-push
+### Re: do `#pcap` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `931e556` (`fix: catch uncaptured unresolved follow-up bugs`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- broadened `src/heuristics.rs` so a single high-confidence unresolved current bug/follow-up line counts as pending-worthy work, instead of only numbered recommendation batches or quantified remaining-work prose
+- strict `finalize` now blocks that single-item shape before commit, and `session-check` warns on the same committed-response shape
+- added regression coverage in `src/write.rs` and `src/session_check.rs`, plus heuristic unit tests for unresolved-vs-resolved bug prose
+- updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `931e556` (`fix: catch uncaptured unresolved follow-up bugs`)
+<!-- agent:boundary:0e9ecdbe -->
 <!-- /agent:exchange -->
 
 <!-- 
@@ -383,7 +402,7 @@ No new `src/agent-doc` source patch was needed, so there is no new source commit
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pcap] Fix backlog-capture misses for explanatory responses: when a response identifies concrete unresolved follow-up work, the cycle must record a matching backlog item instead of leaving it only in exchange prose. Repro: the tmux-pane root-cause answer in tasks/agent-doc/agent-doc-bugs2.md was committed without adding the item to backlog. See tasks/agent-doc/spec-pending-capture-guard.md
+- [x] [#pcap] Fix backlog-capture misses for explanatory responses: when a response identifies concrete unresolved follow-up work, the cycle must record a matching backlog item instead of leaving it only in exchange prose. Repro: the tmux-pane root-cause answer in tasks/agent-doc/agent-doc-bugs2.md was committed without adding the item to backlog. See tasks/agent-doc/spec-pending-capture-guard.md
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

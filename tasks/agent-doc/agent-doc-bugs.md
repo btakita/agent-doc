@@ -912,7 +912,31 @@ Released and published **agent-doc v0.33.14**.
 - crates.io: https://crates.io/crates/agent-doc/0.33.14
 - GitHub Releases: https://github.com/btakita/agent-doc/releases/tag/v0.33.14 (with prebuilt binary)
 - PyPI: auto-publishes via CI workflow
-<!-- agent:boundary:a197d660 -->
+
+❯ I autostarted a tmux pane for tasks/software/tsift.md. `claude_model: claude-opus-4-6` was set in the frontmatter but the claude agent started with Sonnet. Why?
+### Re: claude_model not passed to spawned agent — opus-4-6
+
+`claude_model` is parsed by `frontmatter.rs` and used for two things:
+
+1. **Model attribution** — the `— opus-4-6` suffix on response headers via `resolve_harness_model()`
+2. **Tier gating** — `model_tier.rs` uses it for effective tier composition
+
+But `start.rs` never injects it as `--model` into the CLI args. The `base_args` at line 648–656 are built from `resolve_agent_args()`, which reads the freeform `agent_args` / `claude_args` / config / env chain — none of which know about the structured `claude_model` field. Your tsift.md has:
+
+```yaml
+claude_args: --dangerously-skip-permissions
+claude_model: claude-opus-4-6
+```
+
+So claude gets `--dangerously-skip-permissions` but no `--model` — it defaults to Sonnet.
+
+**Fix:** after building `base_args` from `resolve_agent_args`, check whether `--model` is already present. If not, call `fm.resolve_harness_model(&harness_name)` and push `["--model", resolved_model]` into `base_args`. This gives `claude_model` / `codex_model` actual behavioral effect without breaking the existing `claude_args: --model opus` escape hatch.
+
+**Workaround (immediate):** add `--model claude-opus-4-6` to `claude_args`:
+```yaml
+claude_args: --dangerously-skip-permissions --model claude-opus-4-6
+```
+<!-- agent:boundary:30512c44 -->
 <!-- /agent:exchange -->
 
 <!--

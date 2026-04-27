@@ -7,6 +7,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -402,7 +403,21 @@ Verification:
 - `cargo install --path .` passed
 
 Commit: `btakita/tsift@48a4c31` pushed to `origin/main`.
-<!-- agent:boundary:c729c338 -->
+### Re: `#vxtz` completion + backlog miss — gpt-5
+
+Yes, `#vxtz` is done.
+
+The previous turn already established completion: the work landed in `btakita/tsift@48a4c31`, verification passed, and the binary install succeeded. The reason the backlog item stayed open is narrower: that cycle wrote and committed the response, but it did **not** record the matching pending mutation (`--pending-done vxtz`). `agent-doc session-check` recognized that exact mismatch and warned:
+
+- the response appeared to complete existing pending `#vxtz`
+- no matching `--pending-done` was recorded that cycle
+
+So this was not a tsift-status ambiguity. It was an `agent-doc` closeout gap: the system knew the backlog item was resolved, but the closeout path only warned instead of auto-resolving it or failing closed before commit.
+
+I treated your `#agent-doc-bug` note as actionable and recorded that follow-up in `tasks/agent-doc/agent-doc-bugs2.md` as `#pdone1`, with plan file `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`.
+
+I am closing `#vxtz` in this cycle via the binary-owned pending mutation path now.
+<!-- agent:boundary:20b25412 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -411,7 +426,7 @@ Commit: `btakita/tsift@48a4c31` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
+- [x] [#vxtz] [recommended] Investigate why `tsift index .` enters D-state and leaves `.tsift/index.db-journal` on agent-loop root
 <!-- /agent:backlog -->
 
 <!--

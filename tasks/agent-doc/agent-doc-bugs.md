@@ -54,18 +54,39 @@ prompt_presets:
 ### Open / gated
 
 - v0.33.15 publish gated on manual testing confirmation
-<!-- agent:boundary:3305dd7a -->
+
+Please use agent-doc to migrate the current document
+### Re: migrate + pre-commit pending capture gate — opus-4-6
+
+Ran `agent-doc migrate` — document updated to canonical format.
+
+**Phase 1 implemented:** pre-commit pending capture gate in `finalize`. When `pending_capture_guard: strict`, `finalize` now scans the response for uncaptured recommendations *before* committing. If recommendation-like items are detected without `--pending-add` flags, finalize exits non-zero before the commit step — the agent can retry with `--pending-add` without needing a follow-up commit.
+
+Changes:
+- `src/session_check.rs` — made `resolve_pending_capture_guard_mode` and `response_text_for_guards` `pub(crate)` for reuse
+- `src/write.rs` — added `precommit_pending_capture_check()` between write and commit phases, 5 unit tests
+- `tests/finalize_integration.rs` — updated integration test for new pre-commit gate behavior (response written to disk but not committed)
+- `specs/07-commands.md` — documented pre-commit gate contract under `finalize`
+
+Tests: 5/5 new pass, full suite clean (autoclaim cascade is pre-existing). Clippy clean. Release built + installed. Committed + pushed.
+
+Both phases added to backlog. Phase 2 (plan emits `pending_mutations`) is gated on Phase 1 validation.
+<!-- agent:boundary:7c73992c -->
 <!-- /agent:exchange -->
 
 <!--
+Please add both phase 1 and 2 from tasks/agent-doc/plan-pending-capture-precommit.md to backlog
+do phase 1. #spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
-- [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
+<!-- agent:backlog -->
+- [/] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
+- [x] [#pcg1] Pre-commit pending capture gate in finalize (Phase 1) — plan-pending-capture-precommit.md
+- [x] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
-<!-- /agent:pending -->
+<!-- /agent:backlog -->
 
 <!--
 - [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item

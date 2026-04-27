@@ -383,7 +383,26 @@ That scope was:
 - opt-in `tsift search --autoindex` for unhooked sessions
 
 The remaining open item is `#vxtz`, which is separate repo-root indexing/lock behavior, not an unfinished part of `#stal`.
-<!-- agent:boundary:540ee5eb -->
+
+❯ do #vxtz. spec-test-build-install-commit-push
+### Re: do #vxtz — gpt-5
+
+Implemented `#vxtz` in a clean `origin/main` worktree and pushed `btakita/tsift@48a4c31`.
+
+What changed:
+- query/status paths now use read-only SQLite opens with a 5-second busy timeout (`search`, `graph`, `communities`, `path`, `explain`, `status`, and summary-status checks)
+- writable index/summary opens now require `PRAGMA journal_mode=WAL` and fail closed if SQLite does not actually enter WAL mode
+- added regression coverage for search/graph succeeding while a writer lock is held, plus WAL/busy-timeout assertions
+- updated `SPEC.md` with the SQLite concurrency contract
+
+While porting the patch onto `origin/main`, `make check` exposed an upstream regression on the root `tsift index` path: the non-workspace code path was opening `.tsift/index.db` read-only, which broke fresh index creation. I fixed that in the same commit because the `#vxtz` verification run could not pass otherwise.
+
+Verification:
+- `make check` passed in the clean worktree: 301 unit tests + 6 exit-code tests
+- `cargo install --path .` passed
+
+Commit: `btakita/tsift@48a4c31` pushed to `origin/main`.
+<!-- agent:boundary:c729c338 -->
 <!-- /agent:exchange -->
 
 <!--

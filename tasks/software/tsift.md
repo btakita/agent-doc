@@ -64,29 +64,30 @@ No. Neither `tsift init` nor `tsift index` adds `.tsift/` to `.gitignore`. It's 
 Both agent-loop and the tsift repo itself already have `.tsift/` in their `.gitignore`, but that was added by hand. A new project using tsift for the first time would need to add it manually or risk committing the index database, summary cache, and config.
 
 `tsift init` is the natural place to add this — it already creates/modifies project files and is idempotent. The check would be: if `.gitignore` exists and doesn't contain `.tsift/`, append it; if no `.gitignore`, create one with `.tsift/`. Same pattern as `cargo init` adding `/target` or `npm init` adding `node_modules`.
-<!-- agent:boundary:5e6e8760 -->
+
+❯ do #giti. spec-test-build-install-commit-push
+### Re: do #giti — opus-4-6
+
+`tsift init` now adds `.tsift/` to `.gitignore` automatically.
+
+**Changes:**
+- `src/init.rs` — `ensure_gitignore()` runs before the AGENTS.md injection. Creates `.gitignore` if missing, appends `.tsift/` if absent, skips if already present. `InitResult.gitignore_added` field for reporting.
+- `src/main.rs` — `cmd_init` prints `.gitignore: added .tsift/` when the entry was added.
+- `SPEC.md` — updated Init behavior list (gitignore is now step 1).
+
+**Tests:** +3 → 239 total. Covers: create new `.gitignore`, append to existing, skip when already present.
+
+**Commit:** `btakita/tsift@60ab0d3`. Pushed. Submodule pointer updated.
+<!-- agent:boundary:c31bee72 -->
 <!-- /agent:exchange -->
 
 <!--
-In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift init`
-```
-❯ /tsift init
-
-● Bash(tsift status 2>&1)
-  ⎿  index: stale (last indexed 18s ago, 481 files tracked, 323 stale)
-     summaries: none
-     recommendations:
-     … +2 lines (ctrl+o to expand)
-
-● tsift index is stale — 323 of 481 files need re-indexing. Available commands: search, explain, graph. Run tsift index
-   . to refresh if needed.
-```
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#giti] [recommended] tsift init should add .tsift/ to .gitignore (index + summaries are local artifacts)
+- [x] [#giti] [recommended] tsift init should add .tsift/ to .gitignore (index + summaries are local artifacts)
 <!-- /agent:backlog -->
 
 <!--

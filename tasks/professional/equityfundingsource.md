@@ -409,13 +409,26 @@ I checked the live Cloudflare account behind `equityfundingsource.pages.dev` dir
 I attempted to promote `btak.dev@gmail.com` programmatically, but every Cloudflare credential available locally can only read membership state. Cloudflare rejected the member-update call with an authentication error, so I could verify the current access but could not change it from this session.
 
 To finish this, a Cloudflare super admin on the Brian account needs to update `btak.dev@gmail.com` to at least `Workers Platform Admin`. If you want literal full account control instead of full app-development access, assign `Super Administrator - All Privileges`.
-<!-- agent:boundary:908c5e6d -->
+
+❯ Please give btak.dev `Workers Platform Admin` privileges.
+### Re: Workers Platform Admin grant — gpt-5
+
+I tried again with every Cloudflare credential available in this session.
+
+- The Brian-account Cloudflare token can read the Pages project and membership state.
+- The alternate `CLOUDFLARE_API_TOKEN_FULL` from the local secret store can read its own account membership state, but it cannot authenticate against the Brian account for this change.
+- Every direct `PUT /accounts/{account_id}/members/{member_id}` attempt still fails with Cloudflare `10000 Authentication error`.
+
+So the state has not changed yet: `btak.dev@gmail.com` still does **not** have `Workers Platform Admin` on the Brian Cloudflare account.
+
+The remaining step is outside what this session can do with its current credentials: a Cloudflare super admin needs to open the Brian account dashboard and update `btak.dev@gmail.com` from `Domain Administrator` to `Workers Platform Admin`, or provide a credential with `Account Settings Write` so the role can be changed by API.
+<!-- agent:boundary:3f68b326 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (retain Domain Administrator if domain management is still needed; use Super Administrator only if full account control is intended)
+- [/] [#efme] Promote btak.dev@gmail.com to Workers Platform Admin on Brian Cloudflare account (blocked: requires Cloudflare Super Administrator access in the dashboard or a credential with Account Settings Write)
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

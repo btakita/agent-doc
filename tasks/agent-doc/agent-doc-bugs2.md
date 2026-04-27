@@ -393,7 +393,7 @@ Verification:
 
 Commit / push:
 - `src/agent-doc`: `931e556` (`fix: catch uncaptured unresolved follow-up bugs`)
-<!-- agent:boundary:0e9ecdbe -->
+<!-- agent:boundary:6fe29ea9 -->
 <!-- /agent:exchange -->
 
 <!-- 
@@ -402,7 +402,6 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pcap] Fix backlog-capture misses for explanatory responses: when a response identifies concrete unresolved follow-up work, the cycle must record a matching backlog item instead of leaving it only in exchange prose. Repro: the tmux-pane root-cause answer in tasks/agent-doc/agent-doc-bugs2.md was committed without adding the item to backlog. See tasks/agent-doc/spec-pending-capture-guard.md
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

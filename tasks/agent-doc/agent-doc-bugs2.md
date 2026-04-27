@@ -70,11 +70,10 @@ Verification:
 
 Note:
 - The `src/agent-doc` worktree still has unrelated local formatting-only changes in other files from `cargo fmt`; I did not include those in commit `92b8df7`.
-<!-- agent:boundary:a7dd5f86 -->
+<!-- agent:boundary:16dfb395 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
 <!-- /agent:pending -->

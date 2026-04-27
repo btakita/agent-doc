@@ -922,6 +922,39 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     let mut snapshot_content = crate::snapshot::load(file)?;
     let file_content = std::fs::read_to_string(file).unwrap_or_default();
     let head_doc = show_head(file)?;
+    let snapshot_matched_head_before_absorb = snapshot_content
+        .as_deref()
+        .zip(head_doc.as_deref())
+        .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
+    let bypassed_response_write = snapshot_matched_head_before_absorb
+        .then(|| crate::session_check::detect_bypassed_response_write(file))
+        .transpose()?
+        .flatten();
+    let safe_out_of_band_mutation = snapshot_content
+        .as_deref()
+        .and_then(|snapshot| classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content));
+    let only_heading_attribution_drift = head_doc.as_deref().is_some_and(|head| {
+        normalize_post_commit_re_heading_drift(&file_content)
+            == normalize_post_commit_re_heading_drift(head)
+    });
+    if let Some(marker) = bypassed_response_write
+        && safe_out_of_band_mutation.is_none()
+        && !only_heading_attribution_drift
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_blocked_bypassed_patchback file={} basis=head marker={}",
+                file.display(),
+                marker.replace('\n', " ")
+            ),
+        );
+        anyhow::bail!(
+            "refusing to treat {} as already committed: found likely direct response patchback without agent-doc cycle: {}",
+            file.display(),
+            marker
+        );
+    }
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     crate::ops_log::log_op(
@@ -3669,7 +3702,10 @@ mod tests {
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(snap, committed, "snapshot should also return to committed HEAD");
+        assert_eq!(
+            snap, committed,
+            "snapshot should also return to committed HEAD"
+        );
     }
 
     #[test]
@@ -3763,6 +3799,114 @@ mod tests {
         assert!(
             !log.contains("drift_warning file="),
             "post-commit local drift should not be mislabeled as a generic out-of-band write:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_bypassed_response_patchback_on_head_current() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: state\n\
+            clean committed response\n\
+            <!-- agent:boundary:head-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let bypassed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: state\n\
+            clean committed response\n\
+            \n\
+            do #later. spec-test-build-install-commit-push\n\
+            \n\
+            ### Re: bypassed\n\
+            landed outside agent-doc\n\
+            <!-- agent:boundary:live-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, bypassed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(bypassed)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(committed),
+            Some(bypassed),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let err = commit(&doc).expect_err("bypassed response patchback should fail closed");
+        let message = err.to_string();
+        assert!(
+            message.contains("direct response patchback without agent-doc cycle"),
+            "error should explain the bypassed patchback:\n{message}"
+        );
+        assert!(
+            message.contains("### Re: bypassed"),
+            "error should surface the offending heading:\n{message}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert_eq!(state.last_event, "response_captured");
+
+        let head_doc = show_head(&doc).unwrap().unwrap();
+        assert!(
+            !head_doc.contains("### Re: bypassed"),
+            "HEAD must stay on the last binary-owned patchback:\n{head_doc}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_bypassed_patchback file="),
+            "ops log should record the blocked bypassed patchback:\n{log}"
         );
     }
 

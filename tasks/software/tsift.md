@@ -342,7 +342,28 @@ Done. The gap was that `tsift init` only updated `CLAUDE.md` when a repo had no 
 - `make check` in `src/tsift`: still fails on pre-existing Clippy errors outside this change (`src/audit.rs` and several existing spots in `src/main.rs`), so the repo is not fully green yet.
 
 Codex should now pick up tsift usage instructions directly from `src/tsift/AGENTS.md`.
-<!-- agent:boundary:01952288 -->
+
+❯ do #compact. spec-test-build-install-commit-push
+### Re: do #compact — gpt-5
+
+Done. `tsift` now accepts a global `--compact` flag for terse human-readable output across the CLI, and the earlier Codex-visible `tsift init` / `AGENTS.md` work is now actually committed in the submodule instead of only living in the worktree.
+
+**Changes:**
+- `src/tsift/src/main.rs` — added global `--compact`; compact human-output renderers for `search`, `index`, `graph`, `communities`, `path`, `explain`, `audit`, `summarize`, `lint`, `sql`, and `status`.
+- `src/tsift/src/status.rs` — compact status formatter + regression coverage.
+- `src/tsift/src/audit.rs` / `src/tsift/examples/dump_ast.rs` — clippy cleanup needed to keep `make check` green.
+- `src/tsift/SPEC.md` and `src/tsift/CLAUDE.md` — documented `--compact`; retained the Codex `tsift init` / `AGENTS.md` setup behavior from the previous local change set.
+- `src/tsift/AGENTS.md` — now tracked in git.
+
+**Verification:**
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `./target/debug/tsift --compact status .`
+
+**Commit:** `btakita/tsift@e01e680` — pushed.
+The parent repo now has the updated `src/tsift` submodule pointer staged for the session commit.
+<!-- agent:boundary:275b41b7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -350,7 +371,7 @@ Codex should now pick up tsift usage instructions directly from `src/tsift/AGENT
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute

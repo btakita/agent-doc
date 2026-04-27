@@ -531,7 +531,29 @@ Commit / push:
 Scope note:
 - this closes `#tmuxr1` as the root-cause item behind the recent cross-document tmux instability.
 - I would still treat future pane issues as separate until they reproduce without the empty-window scope path.
-<!-- agent:boundary:05348f97 -->
+
+❯ Why did the previous agent-doc session on this document crash?kkkk
+### Re: why the previous session on this document crashed — gpt-5
+
+From the retained `agent-doc` logs, the `#tmuxr1` turn itself did not crash. It committed cleanly at **2026-04-27 19:11:29 EDT** (`commit_success` for this file in `.agent-doc/logs/ops.log`).
+
+What failed happened immediately after that:
+- at **2026-04-27 19:11:33 EDT**, a new cycle opened for this file (`preflight_diff_start`, later recovered as `cycle-1777331493212`)
+- there is no later `write_origin`, `ipc_write_attempt`, or `commit_*` for that cycle
+- the next session start for this document is a fresh Codex pane at **2026-04-27 19:14:23 EDT** (`pane=%210` in `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`)
+- when I ran `preflight` now, it recovered that stale lock as `interrupted_cycle_detected ... phase=PreflightStarted`
+
+So the precise answer is:
+- the previous visible response cycle completed
+- a follow-on cycle then got stuck at `preflight_started`, and the prior Codex/tmux session disappeared before any write/commit phase began
+
+What I can and cannot prove from the current evidence:
+- I can prove the stale `preflight_started` cycle and the later fresh session restart.
+- I cannot prove the exact death mode of the old pane from these repo-local logs alone. There is no panic/error entry in the session log, so I cannot distinguish "Codex process crashed" from "pane/session was restarted or killed outside the binary".
+- Because `e295a9e` had already committed before this happened, this specific failure does not look like the earlier blank tmux sync-scope bug. It looks like a separate `agent-doc` lifecycle bug that allowed a new cycle to remain stranded in `preflight_started`.
+
+Your new `#pdone1` backlog item also fits the evidence here: the binary detected an apparently completed item in another doc but only warned instead of closing it deterministically.
+<!-- agent:boundary:5d242461 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -541,6 +563,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pdone1] [recommended] Fix resolved existing backlog items being left open after a successful response commit when the cycle omitted the matching `--pending-done`. Repro in `tasks/software/tsift.md`: `#vxtz` was implemented, verified, committed, and pushed, `session-check` warned that the response appeared to complete `#vxtz`, but the item remained open because closeout was warn-only. See `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`

@@ -232,6 +232,8 @@ The "78% savings" claim in the compacted summary is projected from the formula `
 
 **Problem:** The sift engine's `search()` call blocks indefinitely on large/stale repos. The rewrite hook transparently converts `rg`/`grep -r` → `tsift search`, so agents hang silently with no error or progress.
 
+❯ Should we fork sift to not exhibit this behavior or is our current fix good enough?
+
 **Fix:** Wrapped `engine.search()` in a spawned thread with `mpsc::recv_timeout`. On timeout, exits with a clear error:
 
 ```
@@ -247,7 +249,14 @@ tsift search timed out after 30s (strategy: lexical). The index may be stale —
 **Verified:** `tsift search "main" --timeout 5` on the stale agent-loop repo correctly times out with the error message. Small directories complete normally.
 
 **Commit:** `btakita/tsift@91aaab0`. Pushed. Submodule pointer updated (`205e7dea5`).
-<!-- agent:boundary:ba7fd0bc -->
+### Re: fork sift? — opus-4-6
+
+The current fix is good enough. The timeout wrapper solves the user-facing problem — agents no longer hang silently — with zero maintenance overhead.
+
+Forking sift would let us fix the root cause inside the engine (why it blocks on large/stale directories), but it adds ongoing burden to track upstream changes from rupurt/sift. That tradeoff only makes sense if the 30-second timeout triggers frequently on **legitimate** searches with a fresh index. That would mean the engine itself is fundamentally too slow for the workload, not just blocking on stale data.
+
+**When to reconsider:** if fresh-index searches on agent-loop-sized repos (~6K files) regularly hit the 30s timeout, fork and investigate the sift internals. Until then, the thread+timeout wrapper is the right layer to fix this at.
+<!-- agent:boundary:6b40c8ad -->
 <!-- /agent:exchange -->
 
 <!--

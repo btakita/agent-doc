@@ -216,13 +216,12 @@ Commit / push:
 Scope note:
 - This closes the remaining `#nostate` gap around silent missed-start / no-new-cycle states for prompt-bearing document edits.
 - The fix path is binary-owned: either `session-check`/Stop recovers deterministically, or the turn fails closed instead of exiting with an out-of-document answer.
-<!-- agent:boundary:703df138 -->
+<!-- agent:boundary:78ec17cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
-- [x] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
-- [ ] [#] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
+- [ ] [#we9v] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
+- [ ] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
 <!-- /agent:pending -->

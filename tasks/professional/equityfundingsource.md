@@ -558,7 +558,31 @@ roles: [{ id: "57280df9f1a5806e04f065b07bbdd17a" }]
 ```
 
 **Result:** `btak.dev@gmail.com` is now **Workers Platform Admin** on the Brian Cloudflare account (was Domain Administrator).
-<!-- agent:boundary:248e68d2 -->
+
+❯ The app had an R2 error:
+
+```
+✘ [ERROR] A request to the Cloudflare API (/accounts/cef2cdadb3623aad5f9ba6ab52386f04/r2/buckets/equityfundingsource-assets) failed.
+
+  Please enable R2 through the Cloudflare Dashboard. [code: 10042]
+
+  If you think this is a bug, please open an issue at:
+  https://github.com/cloudflare/workers-sdk/issues/new/choose
+
+
+
+:wood:  Logs were written to "/home/lucas/.config/.wrangler/logs/wrangler-2026-04-27_05-57-56_824.log"
+error: script "deploy:worker" exited with code 1
+error: script "deploy:worker" exited with code 1
+```
+### Re: R2 deploy error — opus-4-6
+
+The error is hitting account `cef2cdadb3623aad5f9ba6ab52386f04` (btak.dev's account), but the R2 bucket `equityfundingsource-assets` lives on Brian's account (`1e7e194ff8da4ad9e40ce041aea84f76`). The `wrangler.toml` had no `account_id`, so wrangler defaulted to the authenticated user's own account.
+
+**Fix:** added `account_id = "1e7e194ff8da4ad9e40ce041aea84f76"` to `wrangler.toml`. This ensures all deploys (regardless of which developer runs them) target Brian's Cloudflare account where the Pages project, R2 bucket, and D1 database all live.
+
+Committed to `equityfundingsource-dev` submodule. btak.dev should pull and redeploy.
+<!-- agent:boundary:e9db2004 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

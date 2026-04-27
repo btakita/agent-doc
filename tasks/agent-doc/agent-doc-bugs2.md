@@ -576,7 +576,28 @@ Commit / push:
 Scope note:
 - this closes `#pdone1` by moving missing `--pending-done` from a warn-only post-commit audit into a binary-owned pre-commit closeout gate for session documents.
 - I did not include the unrelated pre-existing local edits already present in other `src/agent-doc` files.
-<!-- agent:boundary:9455ff1c -->
+
+❯ do #pbypass1. spec-test-build-install-commit-push
+### Re: do `#pbypass1` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `9e9e899` (`fix: fail closed on bypassed head-current patchbacks`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `git::commit` now fails closed when the live session doc shows a likely direct assistant patchback on top of committed `HEAD`, instead of downgrading that state to ordinary post-commit working-tree drift or a false `commit_already_current` closeout.
+- The guard stays narrow: safe missed-mutation absorption (`exchange` / `status` / `pending`) still commits, and pure response-heading attribution / `(HEAD)` cleanup still self-heals as an already-committed no-op.
+- Added a regression for the exact prompt-plus-response bypass shape and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `9e9e899` (`fix: fail closed on bypassed head-current patchbacks`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `src/git.rs`, `specs/07-commands.md`, and `VERSIONS.md`.
+<!-- agent:boundary:48f69625 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -586,7 +607,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pbypass1] [recommended] Prevent active session-doc turns from degrading into ordinary dirty-worktree edits after the owning `agent-doc` closeout has already been treated as complete. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and a later reproduction in the same document patched the response back in but stopped at “Nothing has been committed,” leaving the session doc updated without a binary-owned commit boundary. Required invariant: if a substantive response lands in the active session document, `agent-doc` must either commit in the owning repo/submodule or fail closed with explicit resumable state. See `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`.
+- [x] [#pbypass1] [recommended] Prevent active session-doc turns from degrading into ordinary dirty-worktree edits after the owning `agent-doc` closeout has already been treated as complete. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and a later reproduction in the same document patched the response back in but stopped at “Nothing has been committed,” leaving the session doc updated without a binary-owned commit boundary. Required invariant: if a substantive response lands in the active session document, `agent-doc` must either commit in the owning repo/submodule or fail closed with explicit resumable state. See `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

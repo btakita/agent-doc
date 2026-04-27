@@ -193,11 +193,36 @@ Commit / push:
 Scope note:
 - This closes the `#doccommit` gap for active session-document response patchbacks by making the documented manual-repair path binary-owned and fail-closed.
 - It does not claim the broader `#nostate` invariant is finished; that remaining item is still about eliminating every silent open-cycle state class.
-<!-- agent:boundary:95e2d770 -->
+
+❯ do #nostate. spec-test-build-install-commit-push
+### Re: do `#nostate` — gpt-5
+
+Implemented and pushed in `src/agent-doc` as commit `b11efc2` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `session-check` now fails closed when a session document still has unresolved prompt-bearing user edits (`prompt_target` / `content_edit`) but no newer `agent-doc` cycle ever started. That closes the silent "startup missed, external answer only" state instead of treating it as clean.
+- The Codex `Stop` hook now inherits that signal and can auto-close the missed-start case from a replayable `last_assistant_message` through the normal repair/write/commit path.
+- Added regression coverage for both shapes: `session-check` on prompt-bearing drift without a new cycle, and Stop-hook recovery when the cycle never started.
+- Updated `README.md`, `SPEC.md`, `VERSIONS.md`, and `runbooks/harness-invocation.md` so the stronger fail-closed contract is part of the documented surface.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `b11efc2` (`fix: fail closed on missed session starts`)
+
+Scope note:
+- This closes the remaining `#nostate` gap around silent missed-start / no-new-cycle states for prompt-bearing document edits.
+- The fix path is binary-owned: either `session-check`/Stop recovers deterministically, or the turn fails closed instead of exiting with an out-of-document answer.
+<!-- agent:boundary:703df138 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
+- [ ] [#] [#headdrift] [recommended] Fix repeated post-commit `codex (HEAD)` / boundary working-tree drift after successful `agent-doc` patchbacks in `src/session-share/tasks/claudescore-3.md`; see `tasks/agent-doc/plan-claudescore-3-post-commit-head-boundary-drift.md`
+- [x] [#nostate] [recommended] Enforce a no-silent-bad-state invariant: every open cycle phase must either auto-recover deterministically or block exit via preflight/session-check/Stop
+- [ ] [#] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
 <!-- /agent:pending -->

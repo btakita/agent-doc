@@ -478,7 +478,7 @@ Commit / push:
 Scope note:
 - this closes the duplicate live start path behind `#cork1`.
 - the broader tmux swap/recovery and root-cause items remain separate backlog items.
-<!-- agent:boundary:fc0838ca -->
+<!-- agent:boundary:f6d805a8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -488,7 +488,6 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#cork1] Investigate/fix restarted `agent-doc` force-closing the tmux pane for `tasks/software/corky.md`.
 - [ ] [#swap1] Investigate/fix the tmux pane being swapped out of the window and later recovered in `src/session-share/tasks/claudescore-3.md`.
 - [ ] [#tmuxr1] Identify root causes behind recurring tmux pane instability across restart, reroute, swap/recovery, and crash cases.
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.

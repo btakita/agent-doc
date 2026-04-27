@@ -224,7 +224,7 @@ The "78% savings" claim in the compacted summary is projected from the formula `
 6. Output caps for explain/graph/communities (`--limit`)
 7. Codex rewrite hook or AGENTS.md instructions
 8. RTK filters (safety net)
-<!-- agent:boundary:5feda2e8 -->
+<!-- agent:boundary:99bb24a3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -233,6 +233,14 @@ The "78% savings" claim in the compacted summary is projected from the formula `
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#hang] [recommended] Fix search hang on stale index — fail fast or add timeout
+- [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
+- [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
+- [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)
+- [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
+- [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
+- [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions
+- [ ] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 <!-- /agent:backlog -->
 
 <!--

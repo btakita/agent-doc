@@ -2,7 +2,7 @@
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -500,7 +500,14 @@ Updated both documents:
 **sidekick-agent-doc-integration.md** — added an "IP Boundary" section above Open Questions that establishes the line: virtual document infrastructure is open-source, patent scope covers intelligence running on top. Cross-links to the business case.
 
 The tone is factual, not adversarial — it presents the prior art reality and the strategic logic without framing it as "you can't patent this." The emphasis is on where the patent is *strongest* (intelligence layer) rather than where it's *weakest* (infrastructure).
-<!-- agent:boundary:9530d5cf -->
+
+❯ Explore the novelty and utility of the virtual document. Explore how the virtual document is also editable on a local machine and is traceable. Explore how making the virtual document and agent-doc editing itself is useful from a marketing and productivity perspective.
+### Re: virtual document novelty, utility, and traceability — gpt-5
+
+Updated the sidekick docs to make this case directly, not just imply it.
+
+**business-case-open-platform.md** now has a new section, Why
+<!-- agent:boundary:b6f19fea -->
 <!-- /agent:exchange -->
 
 <!--

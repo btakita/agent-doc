@@ -518,7 +518,18 @@ Updated the analysis and business-case framing to name the `agent-doc` superviso
 **sidekick-agent-doc-integration.md** now includes the supervisor/runtime in the separation-of-concerns section and in the IP boundary. I also tightened the utility section so it states that the virtual document is the visible state surface, while the supervisor is the open runtime that keeps that surface synchronized and observable.
 
 That makes the open/proprietary split cleaner: the supervisor, daemon lifecycle, event channel, virtual documents, CRDT merge, snapshots, plugin API, and export layer stay open; Sidekick's proprietary value remains the analysis pipeline, scoring, aggregation, and coaching that run on top.
-<!-- agent:boundary:123e0135 -->
+
+❯ Please describe how the virtual document compares with the daemon.
+### Re: virtual document compared with the daemon — gpt-5
+
+Added the comparison directly to the Sidekick analysis docs.
+
+**agent-doc-platform.md** now has a `Virtual document vs daemon` section that makes the distinction explicit: the daemon/supervisor is the live runtime that receives events, coordinates plugins, manages lifecycle, and decides when state changes; the virtual document is the durable markdown artifact that materializes that state so humans and tools can inspect, diff, export, and sometimes edit it. The short version is: the daemon is the engine, the document is the visible interface.
+
+**sidekick-agent-doc-integration.md** now has a matching `Virtual document vs supervisor` section framed in Sidekick terms. It says the supervisor answers "how does the system run?" while the virtual document answers "what state is the system in?" That also sharpens the business case: the supervisor is what makes Sidekick continuous and tool-agnostic, while the virtual document is what makes it legible, reviewable, and portable.
+
+So the clean comparison is not one replacing the other. The daemon is the active coordinator. The virtual document is the inspectable state surface the daemon keeps current.
+<!-- agent:boundary:134ff14b -->
 <!-- /agent:exchange -->
 
 <!--

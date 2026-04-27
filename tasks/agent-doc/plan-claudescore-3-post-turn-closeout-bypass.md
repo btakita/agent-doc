@@ -1,0 +1,32 @@
+# Plan — fix post-turn closeout bypass for `claudescore-3.md`
+
+- [ ] Reconstruct the exact failure chain for `src/session-share/tasks/claudescore-3.md` from the local `agent-doc` evidence:
+  - `commit_success` lands for the last binary-owned patchback
+  - later edits hit the file as `out_of_band_write`
+  - `post_commit_local_drift kind=user_follow_up` is recorded
+  - no new binary-owned `write --commit` / `finalize` cycle runs for those edits
+- [ ] Trace which active-session paths in `src/agent-doc` can let a Codex turn mutate the target session document without reopening the closeout state machine:
+  - direct document edits in the workspace
+  - Stop-hook / repair paths
+  - `session-check` clean/dirty classification
+  - route ownership of the active document after a successful commit
+- [ ] Define the invariant for active session documents:
+  - if the document changes during the assistant turn after the last committed patchback, the turn is not clean until a new binary-owned closeout either commits the owning repo/submodule or fails closed with resumable state
+- [ ] Distinguish legitimate human follow-up edits from assistant-authored post-turn edits:
+  - human follow-up after the turn should remain dirty and require a new cycle
+  - assistant-authored edits produced during the same turn must not be silently downgraded to `user_follow_up`
+- [ ] Tighten post-commit drift classification so `out_of_band_write` on the active target document can carry enough provenance to decide whether the binary must reopen closeout, block success, or treat the edit as a real next-turn user change
+- [ ] Add deterministic detection in `preflight` / `session-check` / Stop recovery for:
+  - active target document changed after the last commit
+  - current turn produced a final answer
+  - no matching new commit acknowledgment exists for the changed document
+- [ ] Implement the minimal binary-owned recovery path:
+  - reopen the closeout / repair path when hashes prove the document mutation belongs to the just-finished assistant turn
+  - otherwise fail closed with a specific phase-labelled error instead of exiting with a dirty target doc
+- [ ] Verify submodule behavior explicitly: the owning repo for `src/session-share/tasks/claudescore-3.md` is the session-share submodule, while the parent `agent-loop` repo may remain intentionally dirty
+- [ ] Add regression coverage in `src/agent-doc` for:
+  - active session doc patched after a successful commit during the same turn
+  - no false reopen for a real later human edit
+  - submodule-owned session doc closeout remains binary-owned
+  - `session-check` blocks a false clean state when the target doc changed after final answer
+- [ ] Patch the outcome back into `tasks/agent-doc/agent-doc-bugs3.md` and reduce the backlog to any remaining unresolved closeout-bypass state classes

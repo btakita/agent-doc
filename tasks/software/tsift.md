@@ -87,7 +87,7 @@ Implemented `--terse` global flag for abbreviated JSON field names with inline s
 - Compatible with `--pretty` for indented terse output
 
 **Commit:** `btakita/tsift@c2010bd`. 261 tests pass (5 new terse tests). Built + installed.
-<!-- agent:boundary:31eb07cb -->
+<!-- agent:boundary:1fa427da -->
 <!-- /agent:exchange -->
 
 <!--
@@ -96,7 +96,6 @@ Implemented `--terse` global flag for abbreviated JSON field names with inline s
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#bags] [recommended] Shorter field names in JSON — --terse mode with schema header
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions

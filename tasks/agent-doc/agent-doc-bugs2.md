@@ -553,7 +553,30 @@ What I can and cannot prove from the current evidence:
 - Because `e295a9e` had already committed before this happened, this specific failure does not look like the earlier blank tmux sync-scope bug. It looks like a separate `agent-doc` lifecycle bug that allowed a new cycle to remain stranded in `preflight_started`.
 
 Your new `#pdone1` backlog item also fits the evidence here: the binary detected an apparently completed item in another doc but only warned instead of closing it deterministically.
-<!-- agent:boundary:5d242461 -->
+
+❯ do #pdone1. spec-test-build-install-commit-push
+### Re: do `#pdone1` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `d7b48d9` (`fix: fail closed on missing pending-done`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `write`/`finalize` now run a pre-commit pending-done gate, so a response that clearly completes an existing `#id` backlog item cannot commit while omitting the matching `--pending-done <id>` mutation.
+- session docs now default `pending_done_guard` to `strict` unless frontmatter or project config explicitly downgrades it; non-session docs keep the previous warn default.
+- `session_check` now shares the missing-pending-done detection logic with the pre-commit gate, so the closeout contract and the post-commit audit use the same completion signal.
+- updated `SPEC.md`, `specs/07-commands.md`, `runbooks/pending-ops.md`, and `VERSIONS.md` to document the fail-closed session-doc behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `d7b48d9` (`fix: fail closed on missing pending-done`)
+
+Scope note:
+- this closes `#pdone1` by moving missing `--pending-done` from a warn-only post-commit audit into a binary-owned pre-commit closeout gate for session documents.
+- I did not include the unrelated pre-existing local edits already present in other `src/agent-doc` files.
+<!-- agent:boundary:8f7cdb95 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -563,7 +586,7 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pdone1] [recommended] Fix resolved existing backlog items being left open after a successful response commit when the cycle omitted the matching `--pending-done`. Repro in `tasks/software/tsift.md`: `#vxtz` was implemented, verified, committed, and pushed, `session-check` warned that the response appeared to complete `#vxtz`, but the item remained open because closeout was warn-only. See `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`
+- [x] [#pdone1] [recommended] Fix resolved existing backlog items being left open after a successful response commit when the cycle omitted the matching `--pending-done`. Repro in `tasks/software/tsift.md`: `#vxtz` was implemented, verified, committed, and pushed, `session-check` warned that the response appeared to complete `#vxtz`, but the item remained open because closeout was warn-only. See `tasks/agent-doc/plan-resolve-existing-backlog-closeout.md`
 - [ ] [#pbypass1] [recommended] Prevent active session-doc turns from closing with an out-of-document Codex final response plus direct file patchback after the owning `agent-doc` cycle is already committed. Repro in `src/session-share/tasks/claudescore-3.md`: cycle `cycle-1777318807990` was `committed`, then a later direct patch edited prompt-bearing content with no newer cycle start, and `session-check` surfaced the drift instead of a binary-owned recovery/closeout path.
 - [ ] [#wroot1] [recommended] Fix false `outside the writable root` refusals for parent-repo backlog writes. Repro in `src/session-share/tasks/claudescore-3.md`: `agent-doc` claimed it could not update `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` because the path was outside the writable root, even though this session already had write access to the parent repo and had successfully created/edited files there. See `tasks/agent-doc/plan-false-writable-root-refusal.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`

@@ -448,7 +448,7 @@ RTK output filtering is now active for verbose tsift commands.
 **Hook** (`~/.claude/hooks/tsift-rewrite.sh` v2): phase 2 routes `tsift {communities,explain,graph,index,search}` → `rtk tsift ...` when RTK is installed. Non-verbose commands (`status`, `init`, `route`, `sql`) pass through unchanged. Handles `--compact` and `--pretty` flag variants.
 
 **Spec:** SPEC.md + CLAUDE.md updated with RTK integration docs. Tests: 257 passed. Commit: `btakita/tsift@951a28a`. Pushed. Submodule pointer updated.
-<!-- agent:boundary:4adf5a87 -->
+<!-- agent:boundary:48c30812 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -459,7 +459,6 @@ do **Reduce semantic content**. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#rtk] [recommended] RTK filters for verbose tsift commands (safety net)
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)
 - [ ] [#codex] [recommended] Codex tsift integration — rewrite hook or AGENTS.md instructions

@@ -477,7 +477,7 @@ Only read full source files when tsift results are insufficient.
 **Tests:** +7 → 229 total. Covers: create from scratch, append to existing, AGENTS.md priority, CLAUDE.md fallback, idempotent re-run, stale section update, surrounding content preservation.
 
 **Commit:** `btakita/tsift@d9af2b0`. Pushed.
-<!-- agent:boundary:deda5f86 -->
+<!-- agent:boundary:2ea0782c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -486,7 +486,6 @@ Only read full source files when tsift results are insufficient.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#cmdx] Add tsift commands to project CLAUDE.md for transparent session usage
 - [ ] [#mext] Add Makefile target for tsift summarize --extract (one-time LLM cache)
 <!-- /agent:backlog -->
 

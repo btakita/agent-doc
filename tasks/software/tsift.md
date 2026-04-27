@@ -495,7 +495,38 @@ tsift-extract:
 Honestly, this is thin. It's a single command. The value of a Makefile target is discoverability in a `make help` listing, but you already know the command. And `tsift init` now puts the commands in AGENTS.md where they're visible every session.
 
 I'd recommend closing #mext — it's not worth a dedicated implementation. If you want a project setup sequence, `tsift init` + `tsift index .` + `tsift summarize --extract src/` in a README "Getting Started" section covers it. Or a future `tsift init --full` could chain all three.
-<!-- agent:boundary:a61008d1 -->
+
+❯ Please describe how `tsift summarize` saves tokens.
+### Re: how tsift summarize saves tokens — opus-4-6
+
+The savings come from replacing full file reads with cached summaries. Here's the concrete math:
+
+#### Without tsift summarize
+
+When the agent needs to understand `resolve_edges` in `src/graph.rs`, it calls the Read tool on the file. That file is 620 lines = ~2500 tokens loaded into context. If the agent later needs to understand `extract_call_sites` in the same file, it reads the file again — another ~2500 tokens. Over a session that explores 10 files, that's ~20,000-25,000 tokens just on file reads, most of which is irrelevant boilerplate surrounding the few symbols the agent actually cares about.
+
+#### With tsift summarize
+
+Instead of `Read src/graph.rs`, the agent runs `tsift summarize resolve_edges`. The CLI returns a 2-3 sentence summary + entity list + relationships from a local SQLite lookup. That's ~50-100 tokens. The agent gets "resolve_edges matches call sites to enclosing functions using innermost-wins scoping, takes a symbol list and call site list, returns edge pairs" — enough to decide whether it needs the full source or can proceed.
+
+**Token comparison per lookup:**
+
+| Operation | Tokens | Cost |
+|-----------|--------|------|
+| Read full file | ~2000-3000 | every time |
+| `tsift summarize <symbol>` | ~50-100 | free (local SQLite) |
+| `tsift explain <symbol>` | ~150-300 | free (callers + callees + community) |
+
+**Session-level savings:** A typical 20-minute coding session might read 15-30 files. If half of those reads could be replaced by summary lookups, that's 15 reads x ~2000 tokens = ~30,000 tokens saved per session. At current API pricing, that's real money on high-volume usage.
+
+#### Where it doesn't help
+
+- **Editing files** — you still need to read the full source to make changes. Summaries help with triage (which file to edit), not the edit itself.
+- **First extraction** — `tsift summarize --extract` calls the Anthropic API (haiku-class) once per file. That's the upfront cost. After that, all queries are free.
+- **Stale cache** — if the source changed since extraction, the summary may be outdated. `--extract --diff` re-extracts only changed files.
+
+The fundamental insight: most file reads during exploration are for understanding, not editing. The agent reads a file, extracts ~5% of the information, and discards the rest. Summaries pre-extract that 5% once and serve it at 1/40th the token cost.
+<!-- agent:boundary:4fa15635 -->
 <!-- /agent:exchange -->
 
 <!--

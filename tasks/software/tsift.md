@@ -146,7 +146,22 @@ Implemented `tsift init --codex` for Codex hook integration.
 **Why not the rewrite hook?** Codex doesn't support `PreToolUse` hooks, so the `grep`/`rg` → `tsift search` rewrite can't be ported. The AGENTS.md code-navigation instructions already tell Codex agents to prefer tsift over grep/rg.
 
 **Commit:** `btakita/tsift@474ef45`. 282 tests pass (5 new Codex hook tests). Built + installed.
-<!-- agent:boundary:1eb9876e -->
+
+❯ do #tabular. spec-test-build-install-commit-push
+### Re: do #tabular — opus-4-6
+
+Implemented `--tabular` global flag for TSV output across four commands.
+
+**What it does:**
+- `tsift --tabular search <query>` — two TSV tables: symbols (`match_type`, `kind`, `name`, `file`, `line`, `score`) then hits (`rank`, `path`, `confidence`, `score`)
+- `tsift --tabular graph <sym>` — edges table (`direction`, `name`, `file`, `line`) with `caller`/`callee` direction values
+- `tsift --tabular communities` — table (`id`, `size`, `members`) where members are comma-separated
+- `tsift --tabular explain <sym>` — definition table, then caller/callee edges, then community summary
+- Truncation: `# (+N more)` comment lines; sections separated by blank lines
+- Compatible with `--limit`, `--absolute`
+
+**Commit:** `btakita/tsift@d83f1eb`. 289 tests pass (7 new tabular tests). Built + installed.
+<!-- agent:boundary:8b1af4e7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -155,7 +170,7 @@ Implemented `tsift init --codex` for Codex hook integration.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
+- [x] [#tabular] [recommended] Tabular output for repeated structures (search results as TSV, edges as columns)
 - [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->

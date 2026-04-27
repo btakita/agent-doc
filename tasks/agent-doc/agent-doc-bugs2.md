@@ -264,13 +264,12 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#p7md` files.
-<!-- agent:boundary:501cac7b -->
+<!-- agent:boundary:22112e02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#p7md] [recommended] Fix prompt-bearing session diffs that never get posed into a new `agent-doc` turn after the prior response is already committed in `HEAD`; see `tasks/agent-doc/plan-unposed-session-diff-turn.md`
 - [ ] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:pending -->

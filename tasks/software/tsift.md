@@ -764,10 +764,45 @@ tsift index --workspace --check --exit-code . 2>/dev/null && exit 0; tsift index
 But `--workspace` re-checks every submodule on every prompt, which may be slower than single-project indexing (~50ms fresh check scales with submodule count).
 
 **Practical approach:** install `tsift init` in each submodule you actively develop in. That gives agents the `tsift status` instruction. The auto-reindex hook is most valuable per-submodule where you want zero-touch freshness.
-<!-- agent:boundary:425e9dec -->
+
+❯ When I ran "Please verify tsift is integrated" on this doc, tsift search seemed to hang. Why?
+```
+  Bash(tsift search "agent-doc preflight" --limit 3 2>&1)
+  ⎿  Running… (1m 53s)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+✢ Spelunking… (3m 21s · ↓ 1.9k tokens · thought for 2s)
+```
+### Re: tsift search hang — opus-4-6
+
+Two problems compounded:
+
+**1. SQLite lock from concurrent indexing.** The previous cycle ran `tsift index .` in the background. That held a write lock on `.tsift/index.db`. When `tsift search` tried to query, SQLite's default busy handler waited indefinitely on the lock — that's the initial hang.
+
+**2. `tsift search` itself hangs even after the lock is cleared.** After removing the stale journal and confirming the DB is readable (5,885 files, 17,774 symbols, 11,702 call edges), `tsift search "preflight" --limit 3` still times out at 10s. Even `--path src/tsift` scoping doesn't help. This points to a bug in the search command — likely the BM25 implementation hitting a pathological case or an infinite loop on this corpus size.
+
+`tsift explain`, `tsift graph`, and `tsift sql` all work fine against the same index. Only `search` is broken.
+
+**Next steps:**
+1. Profile `tsift search` to find the bottleneck (likely in `src/tsift/src/search/` BM25 scoring or file-content loading)
+2. Until fixed, use `tsift explain <symbol>` and `tsift graph` for navigation — they query the symbol/call-edge tables directly and return instantly
+<!-- agent:boundary:0dda18ff -->
 <!-- /agent:exchange -->
 
 <!--
+In src/session-share submodule, tasks/claudescore-3.md agent doc, I ran `/tsift init`
+```
+❯ /tsift init
+
+● Bash(tsift status 2>&1)
+  ⎿  index: stale (last indexed 18s ago, 481 files tracked, 323 stale)
+     summaries: none
+     recommendations:
+     … +2 lines (ctrl+o to expand)
+
+● tsift index is stale — 323 of 481 files need re-indexing. Available commands: search, explain, graph. Run tsift index
+   . to refresh if needed.
+```
 -->
 
 ## Pending / Not Built

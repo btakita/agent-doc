@@ -136,7 +136,7 @@ Done. Phase 2 implemented, tested, built, installed, committed, and pushed.
 **Spec:** updated `specs/07-commands.md` plan section — documents both `resolve_existing` and `expect_add` mutation kinds.
 
 **Verification:** clippy clean, 5/5 plan tests pass, full suite clean (1 pre-existing failure in codex hook test). Release built + installed. Commit `f67049e`, pushed to `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:6f9ad7ea -->
+<!-- agent:boundary:0d8e23d3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -145,7 +145,6 @@ Done. Phase 2 implemented, tested, built, installed, committed, and pushed.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pcg2] plan emits pending_mutations (Phase 2) — tasks/agent-doc/plan-pending-capture-precommit.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

@@ -139,10 +139,27 @@ AGENTS.md: created (tsift Code Navigation section added)
 ```
 
 **Commits:** `btakita/tsift@9269260`. Session-share initialized (`0a5fa2a`). Agent-loop pointers + skill updated. All pushed.
-<!-- agent:boundary:33da373f -->
+
+❯ Please look in agent-loop and all submodules to see if `.tsift/index.db` was committed. Please remove `.tsift/index.db` from the git history and force push.
+### Re: .tsift/index.db audit + history rewrite — opus-4-6
+
+**Audit results:**
+- **agent-loop + all submodules (working tree):** `.tsift/index.db` not tracked anywhere. Clean.
+- **agent-loop history:** never committed.
+- **agent-doc history:** `.tsift/index.db` (7.4MB) was committed in early test-author commits (`7a7855a`, `e43a9ed`, `7e8055b`, `c718591`) on the `20260421/release-0.33.10` branch and tags `v0.33.11`–`v0.33.13`. Not on main/HEAD.
+- **All other submodules:** clean history.
+
+**Cleanup:**
+- Ran `git filter-repo --invert-paths --path .tsift/index.db --force` in `src/agent-doc`.
+- Verified: zero commits now reference `.tsift/index.db` across all refs.
+- Force-pushed all branches and tags to `origin`.
+
+No other submodules were affected.
+<!-- agent:boundary:249fb403 -->
 <!-- /agent:exchange -->
 
 <!--
+Please investigate ways that tsift can save on token usage. You may look through as much of my session history as needed. Also note that I'm using Codex so look through Codex history as well.
 -->
 
 ## Pending / Not Built

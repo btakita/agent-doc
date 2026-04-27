@@ -287,7 +287,7 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the five `#4qgx` files.
-<!-- agent:boundary:c80caaea -->
+<!-- agent:boundary:a04a8b3f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -297,6 +297,5 @@ execute plan tasks/agent-doc/agent-doc-bugs3.md. spec-test-build-install-commit-
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#4qgx] [#tmuxspawn] [recommended] Prevent unexpected tmux session/pane creation or live Codex pane eviction during route/resync; see `tasks/agent-doc/plan-tmux-session-spawn-guard.md`
 - [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:pending -->

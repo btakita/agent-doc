@@ -109,7 +109,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 5. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`) **only if the candidate pane is running an agent process** (`agent-doc`, `claude`, `node`). Non-agent panes (corky, shells, etc.) are skipped — falls through to auto-start. Unregistered files skip lazy-claim entirely.
 6. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
 
-**Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning and falls back to the default session. It does NOT create new tmux sessions. The fallback order is: current tmux session (if running inside tmux) → default `claude` session.
+**Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning, ignores the stale pin, and resolves a live target from the current tmux session or an already-alive harness fallback session. If the only remaining target is a dead implicit fallback name (for example `"claude"` / `"codex"`), route fails closed instead of creating that session implicitly.
 
 > **Deprecation note:** `tmux_session` in frontmatter is deprecated. The tmux session is now determined at runtime: `--window` argument (sync), `current_tmux_session()` (route/start), or future `.agent-doc/config.toml` settings. The field is still read for backward compatibility and auto-repaired by sync. It will be removed in a future version.
 
@@ -677,6 +677,10 @@ The sync path uses `provision_pane` instead of the standard auto-start. This var
 ## Sync Swap-Pane Atomic Reconcile
 
 The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `provision_pane` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
+
+Before lazy-claim or auto-start, route also scans tmux for an already-running pane whose process tree is executing the same document and re-registers that pane when found. This prevents stale-registry drift from spawning a parallel fallback session for a document that is already live somewhere else.
+
+Cross-session stash rescue is intentionally non-destructive: if sync finds a live stashed pane for the document in another tmux session, it logs the mismatch and preserves that pane in place instead of moving it across sessions or killing it during rescue.
 
 ## Sync tmux_session Auto-Repair (Deprecated Field)
 

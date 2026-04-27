@@ -346,6 +346,24 @@ fn resolve_or_create_pane(
         .map(|e| e.pane.clone())
         .collect();
     if registered.is_some()
+        && let Some(existing) = crate::sync::find_alive_pane_for_file(tmux, file_path)
+    {
+        eprintln!(
+            "[route] found existing running pane {} for {}, re-registering",
+            existing, file_path
+        );
+        sessions::register(session_id, &existing, file_path)?;
+        send_command(tmux, &existing, file_path, harness)?;
+        require_routed_cycle_ack(
+            file,
+            &existing,
+            harness,
+            cycle_baseline.as_ref(),
+            pending_prompt_marker.as_deref(),
+        )?;
+        return Ok(existing);
+    }
+    if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
         && is_agent_process(tmux, &new_pane, harness)
     {
@@ -368,6 +386,7 @@ fn resolve_or_create_pane(
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
     let split_before = is_first_column(file, col_args);
+    ensure_auto_start_target_session(tmux, None, target_session, harness)?;
     auto_start_in_session(
         tmux,
         file,
@@ -684,24 +703,54 @@ fn resolve_target_session(
         return configured.unwrap();
     }
 
+    if let Some(ref stale) = configured {
+        eprintln!(
+            "[route] configured tmux_session '{}' is not alive, ignoring stale pin",
+            stale
+        );
+    }
+
     let resolved =
         current_tmux_session(tmux).unwrap_or_else(|| harness.tmux_session_fallback.clone());
 
-    // Auto-update config.toml when the configured session is stale.
-    // This prevents resync from killing panes in the actual session
-    // because config still points to a dead session name.
-    if configured.as_ref().is_some_and(|s| s != &resolved) {
-        eprintln!(
-            "[route] configured tmux_session '{}' is not alive, updating config to '{}'",
-            configured.as_ref().unwrap(),
-            resolved
-        );
-        if let Err(e) = crate::config::update_project_tmux_session(&resolved) {
-            eprintln!("[route] warning: failed to update config.toml: {}", e);
-        }
+    resolved
+}
+
+fn ensure_auto_start_target_session(
+    tmux: &Tmux,
+    context_session: Option<&str>,
+    session_name: &str,
+    harness: &HarnessConfig,
+) -> Result<()> {
+    if context_session.is_some() {
+        return Ok(());
     }
 
-    resolved
+    if crate::config::project_tmux_session().as_deref() == Some(session_name)
+        && tmux.session_alive(session_name)
+    {
+        return Ok(());
+    }
+
+    if current_tmux_session(tmux).as_deref() == Some(session_name) {
+        return Ok(());
+    }
+
+    if tmux.session_alive(session_name) {
+        return Ok(());
+    }
+
+    if session_name == harness.tmux_session_fallback {
+        anyhow::bail!(
+            "refusing to auto-start in implicit fallback tmux session '{}' without a live explicit target session",
+            session_name
+        );
+    }
+
+    anyhow::bail!(
+        "refusing to auto-start in tmux session '{}' because it is not alive",
+        session_name
+    );
 }
 
 /// Find an active target pane for lazy claiming.
@@ -801,26 +850,12 @@ fn evict_previous_stash_pane_entry(
         return;
     }
 
-    if is_agent_process(tmux, &previous.pane, harness) {
-        eprintln!(
-            "[route] skipping eviction of stash pane {} for session {} — agent process still active",
-            previous.pane,
-            &session_id[..std::cmp::min(8, session_id.len())]
-        );
-        return;
-    }
-
     eprintln!(
-        "[route] evicting replaced stash pane {} for session {}",
+        "[route] preserving previous stash pane {} for session {} — automatic stash eviction requires explicit provenance",
         previous.pane,
         &session_id[..std::cmp::min(8, session_id.len())]
     );
-    if let Err(e) = tmux.raw_cmd(&["kill-pane", "-t", &previous.pane]) {
-        eprintln!(
-            "[route] warning: failed to evict replaced stash pane {}: {}",
-            previous.pane, e
-        );
-    }
+    let _ = (replacement_pane, target_session, harness);
 }
 
 /// Find a registered agent-doc pane in the target tmux session.
@@ -943,6 +978,7 @@ fn auto_start_ext(
 ) -> Result<String> {
     let harness = resolve_harness_for_file(file);
     let session_name = resolve_target_session(tmux, context_session, &harness);
+    ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
     auto_start_in_session(
         tmux,
         file,
@@ -1422,18 +1458,6 @@ mod tests {
             std::thread::sleep(poll);
         }
         last
-    }
-
-    fn wait_for_pane_exit(iso: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
-        let start = std::time::Instant::now();
-        let poll = std::time::Duration::from_millis(50);
-        while start.elapsed() < timeout {
-            if !iso.pane_alive(pane) {
-                return true;
-            }
-            std::thread::sleep(poll);
-        }
-        !iso.pane_alive(pane)
     }
 
     // --- rewrite_start_path tests ---
@@ -2468,7 +2492,7 @@ history line
     }
 
     #[test]
-    fn evicts_replaced_stash_pane_for_same_session() {
+    fn preserves_replaced_stash_pane_without_provenance() {
         let iso = IsolatedTmux::new("route-test-evict-stash");
         let session = "route-evict";
         let dir = tempfile::tempdir().unwrap();
@@ -2499,8 +2523,8 @@ history line
             );
 
             assert!(
-                wait_for_pane_exit(&iso, &old_pane, std::time::Duration::from_secs(1)),
-                "previous stash pane should be evicted"
+                iso.pane_alive(&old_pane),
+                "previous stash pane should be preserved without explicit provenance"
             );
             assert!(
                 iso.pane_alive(&replacement_pane),
@@ -2696,6 +2720,17 @@ history line
         assert!(
             iso.session_exists("claude"),
             "fallback session should still be alive"
+        );
+    }
+
+    #[test]
+    fn implicit_fallback_session_is_not_auto_start_target() {
+        let iso = IsolatedTmux::new("route-test-no-implicit-fallback");
+        let result =
+            ensure_auto_start_target_session(&iso, None, "claude", &HarnessConfig::claude());
+        assert!(
+            result.is_err(),
+            "dead implicit fallback session should not be auto-started"
         );
     }
 

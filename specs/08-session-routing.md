@@ -47,6 +47,10 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Prompt-bearing rerun acknowledgment:** When `route` dispatches to an already-running pane and the document already has prompt-bearing user drift on top of a closed cycle, pane-input acceptance is not sufficient proof of success. Route must observe a newer per-document cycle state (`preflight_started` or later) before returning success; otherwise it fails closed instead of silently leaving the prompt stranded in the document.
 
+**Dead fallback session guard:** Route may fall back to the current tmux session or an already-alive harness fallback session, but it must not auto-start a brand-new implicit fallback session such as `"claude"` or `"codex"` just because no explicit target survived resolution. If the only remaining target is a dead implicit fallback name, route fails closed.
+
+**Duplicate-pane guard:** When a document's registry entry is stale but there is still a live pane whose process tree is already running that document, route re-registers and reuses that pane before attempting lazy-claim or auto-start.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.
@@ -61,7 +65,7 @@ The stash system preserves running Claude sessions when the user switches editor
 | — | target selection | Targets the LARGEST pane in the stash (by height) to avoid "pane too small" errors |
 | — | overflow | If join fails, `break_pane_to_stash()` creates an overflow stash window (also named `"stash"`) |
 | ATTACH | `reconcile()` | Joins a stashed pane back into `@0` when needed again |
-| RESCUE | `sync` pre-resolution | Rescues stashed panes back to agent-doc window via `swap-pane`/`join-pane` before layout |
+| RESCUE | `sync` pre-resolution | Rescues same-session stashed panes back to agent-doc window via `swap-pane`/`join-pane` before layout; cross-session stash rescue fails closed and preserves the live pane in place |
 
 **Discovery:** `find_all_stash_windows()` returns all stash windows — both the primary stash and any overflow windows. All windows named `"stash"` or matching `"stash-*"` (tmux auto-deduplication) are treated as stash windows by `is_stash_window_name()`.
 
@@ -70,6 +74,7 @@ The stash system preserves running Claude sessions when the user switches editor
 - Stash windows are named `"stash"` for consistent discovery
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
+- Successful route replacements do not kill older stash panes unless the cleanup path has explicit provenance that the older pane is a throwaway artifact from the current recovery attempt
 
 **Commit write contract:** `commit()` always stages a clean snapshot copy (no `(HEAD)`, no stale boundaries) and normalizes the boundary to end-of-exchange. The committed blob and snapshot converge to the same clean shape. The working tree and editor buffer preserve `(HEAD)` annotations so the user can see which response headings are new.
 

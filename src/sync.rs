@@ -973,13 +973,14 @@ fn run_with_options(
                             let target_sess = context_session.as_deref().unwrap_or("");
                             if !target_sess.is_empty() && pane_session != target_sess {
                                 eprintln!(
-                                    "[sync] pane {} for {} is in session '{}' stash, moving to target session '{}' stash first",
+                                    "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
                                     pane, file_path.display(), pane_session, target_sess
                                 );
-                                if let Err(e) = tmux.stash_pane(pane, target_sess) {
-                                    eprintln!("[sync] stash_pane to target session failed: {}", e);
-                                    return false;
-                                }
+                                sync_log(&format!(
+                                    "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
+                                    pane, file_path.display(), pane_session, target_sess
+                                ));
+                                return true;
                             }
                             eprintln!(
                                 "[sync] pane {} for {} is in stash window '{}', rescuing",
@@ -1119,6 +1120,31 @@ fn run_with_options(
                         .unwrap_or_default();
                     if win_name == "stash" || win_name.starts_with("stash-") {
                         let target_sess = context_session.as_deref().unwrap_or("");
+                        let pane_session = tmux
+                            .cmd()
+                            .args(["display-message", "-t", &existing, "-p", "#{session_name}"])
+                            .output()
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                            .unwrap_or_default();
+                        if !target_sess.is_empty() && pane_session != target_sess {
+                            eprintln!(
+                                "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
+                                existing,
+                                file_path.display(),
+                                pane_session,
+                                target_sess
+                            );
+                            sync_log(&format!(
+                                "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
+                                existing,
+                                file_path.display(),
+                                pane_session,
+                                target_sess
+                            ));
+                            continue;
+                        }
                         let rescue_win = window.map(|w| w.to_string()).or_else(|| {
                             if !target_sess.is_empty() {
                                 let candidate = format!("{}:agent-doc", target_sess);
@@ -1444,7 +1470,7 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
 /// This catches panes that were pruned from the registry but are still alive.
 ///
 /// Uses `ps -p <pid> -o command=` for cross-platform compatibility (Linux + macOS).
-fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
+pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
     let output = tmux
         .cmd()
         .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])

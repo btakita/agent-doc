@@ -1,0 +1,41 @@
+{
+  "name": "corky-gmail",
+  "version": "0.1.0",
+  "description": "Codex-facing Gmail adapter that routes auth, thread, draft, and send flows through the local corky CLI.",
+  "author": {
+    "name": "Brian Takita",
+    "email": "brian.takita@gmail.com",
+    "url": "https://github.com/btakita"
+  },
+  "homepage": "https://github.com/btakita/agent-loop",
+  "repository": "https://github.com/btakita/agent-loop",
+  "license": "UNLICENSED",
+  "keywords": [
+    "corky",
+    "gmail",
+    "codex",
+    "email",
+    "google-workspace"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "corky Gmail",
+    "shortDescription": "Use the local corky CLI for Gmail auth checks, draft creation, thread refresh, and send flows.",
+    "longDescription": "Thin local adapter for Codex Gmail work. It keeps Gmail auth, token storage, threading correctness, and draft/send behavior in corky while providing a repo-local plugin surface with safe wrapper scripts and workflow guidance.",
+    "developerName": "Brian Takita",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/btakita/agent-loop",
+    "defaultPrompt": [
+      "Check Gmail auth state through corky.",
+      "Refetch a Gmail thread and draft a reply through corky.",
+      "Push or send an approved corky draft through Gmail."
+    ],
+    "brandColor": "#C2410C",
+    "screenshots": []
+  }
+}

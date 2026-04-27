@@ -1,0 +1,32 @@
+{
+  "name": "agent-loop-local",
+  "interface": {
+    "displayName": "agent-loop local"
+  },
+  "plugins": [
+    {
+      "name": "agent-doc",
+      "source": {
+        "source": "local",
+        "path": "./src/agent-doc"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_USE"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "corky-gmail",
+      "source": {
+        "source": "local",
+        "path": "./plugins/corky-gmail"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

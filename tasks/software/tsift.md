@@ -256,7 +256,18 @@ The current fix is good enough. The timeout wrapper solves the user-facing probl
 Forking sift would let us fix the root cause inside the engine (why it blocks on large/stale directories), but it adds ongoing burden to track upstream changes from rupurt/sift. That tradeoff only makes sense if the 30-second timeout triggers frequently on **legitimate** searches with a fresh index. That would mean the engine itself is fundamentally too slow for the workload, not just blocking on stale data.
 
 **When to reconsider:** if fresh-index searches on agent-loop-sized repos (~6K files) regularly hit the 30s timeout, fork and investigate the sift internals. Until then, the thread+timeout wrapper is the right layer to fix this at.
-<!-- agent:boundary:6b40c8ad -->
+
+❯ Please create a bug report with a repoducible case to the sift github repo.
+### Re: sift bug report — opus-4-6
+
+Filed: [rupurt/sift#2](https://github.com/rupurt/sift/issues/2) — "search() hangs on large repos — walkdir doesn't respect .gitignore"
+
+**Root cause found during investigation:** sift uses `walkdir::WalkDir` in `collect_file_paths()` (corpus.rs:283) which walks every file in the tree. The `Ignore` struct only checks `.siftignore` files plus two hardcoded exclusions (`target/**`, `.git/**`). It never reads `.gitignore`. Agent-loop has 1.87M files total — with only `.git/` and `target/` excluded, sift tries to walk and index all of them.
+
+**Suggested fix in the issue:** replace `WalkDir` with the `ignore` crate's `WalkBuilder` (already a dependency), which natively respects `.gitignore` at every tree level. The `Ignore` struct would layer `.siftignore` on top.
+
+**Our workaround:** the `--timeout 30` wrapper from the previous cycle prevents the hang. If the upstream fix lands, the timeout becomes a safety net rather than the primary defense.
+<!-- agent:boundary:d7deefad -->
 <!-- /agent:exchange -->
 
 <!--
@@ -264,7 +275,7 @@ Forking sift would let us fix the root cause inside the engine (why it blocks on
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 - [ ] [#iflood] [recommended] Fix index --check output flood (433K token risk) — add --quiet/--summary
 - [ ] [#compact] [recommended] Global --compact flag across all commands (40-60% savings)
 - [ ] [#json] [recommended] Compact JSON default — to_string() vs to_string_pretty() (30-50% savings)

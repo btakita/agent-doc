@@ -465,7 +465,7 @@ Added both to the backlog. "Reduce semantic content" is safe and implemented; "S
 **What's NOT safe to reduce further:** #paths (path prefix stripping) and #caps (output line limits) are the remaining high-impact reductions. Both require more design work — #paths needs project-root detection, #caps needs per-command default limits. They stay as separate backlog items.
 
 **Tests:** 257 passed. **Commit:** `btakita/tsift@5b050af`. Pushed. Submodule pointer updated.
-<!-- agent:boundary:dfb68d19 -->
+<!-- agent:boundary:f0c2fcdd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -476,7 +476,6 @@ do **Reduce semantic content**. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#semred] Reduce semantic content — compact mode drops agent-irrelevant data
 - [ ] [#bags] [recommended] Shorter field names in JSON — --terse mode with schema header
 - [ ] [#paths] [recommended] Path prefix stripping — relative paths instead of absolute
 - [ ] [#caps] [recommended] Output caps for explain/graph/communities (--limit N)

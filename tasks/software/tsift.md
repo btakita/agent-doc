@@ -526,7 +526,47 @@ Instead of `Read src/graph.rs`, the agent runs `tsift summarize resolve_edges`. 
 - **Stale cache** — if the source changed since extraction, the summary may be outdated. `--extract --diff` re-extracts only changed files.
 
 The fundamental insight: most file reads during exploration are for understanding, not editing. The agent reads a file, extracts ~5% of the information, and discards the rest. Summaries pre-extract that 5% once and serve it at 1/40th the token cost.
-<!-- agent:boundary:4fa15635 -->
+
+❯ With normal software development, what would the savings look like?
+### Re: real-world savings estimate — opus-4-6
+
+Here's a worked example for a typical "fix a bug" session on a medium codebase (~200 files, ~50k lines).
+
+#### Typical bug-fix session without tsift summarize
+
+1. **Orientation** — agent reads 3-5 files to understand the area (~8,000 tokens)
+2. **Grep/search** — finds relevant symbols, reads 2-3 more files (~5,000 tokens)
+3. **Trace the call chain** — reads 2-4 files to follow the bug's path (~6,000 tokens)
+4. **Read the target file** — the file it actually needs to edit (~2,500 tokens)
+5. **Verify related files** — reads 1-2 files to check for side effects (~3,500 tokens)
+
+Total file-read tokens: **~25,000** across ~12-15 file reads.
+
+#### Same session with tsift summarize cached
+
+1. **Orientation** — `tsift summarize --file` on 3-5 files (~400 tokens total)
+2. **Search** — `tsift search` + `tsift explain` on symbols (~600 tokens)
+3. **Trace** — `tsift path from to` + `tsift explain` on 2-3 nodes (~500 tokens)
+4. **Read the target file** — still a full read, needs the source to edit (~2,500 tokens)
+5. **Verify** — `tsift graph <symbol> --callers` + maybe 1 full read (~1,500 tokens)
+
+Total: **~5,500 tokens**. Savings: **~19,500 tokens (78%)**.
+
+#### Scaling across a workday
+
+| Metric | Without | With | Savings |
+|--------|---------|------|---------|
+| Tokens per bug-fix session | ~25,000 | ~5,500 | 78% |
+| Tokens per feature session (larger) | ~60,000 | ~18,000 | 70% |
+| 8 sessions/day | ~340,000 | ~94,000 | ~246k tokens |
+| Monthly (20 days) | ~6.8M | ~1.9M | ~4.9M tokens |
+
+At Opus pricing ($15/M input), that's roughly **$73/month saved**. At Sonnet pricing ($3/M input), ~$15/month. The savings are proportionally larger for exploration-heavy work (onboarding, architecture review, large refactors) and smaller for focused edit sessions where you already know which file to change.
+
+#### Caveat
+
+These numbers assume the agent actually uses tsift instead of defaulting to Read/Grep. That's what the `tsift init` AGENTS.md directive is for — without it, the agent has no reason to prefer tsift over built-in tools. The directive + cached summaries together produce the savings; either one alone gives partial benefit.
+<!-- agent:boundary:10689ef5 -->
 <!-- /agent:exchange -->
 
 <!--

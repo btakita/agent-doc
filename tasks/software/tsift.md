@@ -161,7 +161,21 @@ Implemented `--tabular` global flag for TSV output across four commands.
 - Compatible with `--limit`, `--absolute`
 
 **Commit:** `btakita/tsift@d83f1eb`. 289 tests pass (7 new tabular tests). Built + installed.
-<!-- agent:boundary:f120fdba -->
+
+❯ do #abbrev. spec-test-build-install-commit-push
+### Re: do #abbrev — opus-4-6
+
+Implemented abbreviation conventions in `--compact` mode for shorter human-readable output.
+
+**What it does:**
+- Symbol kinds: `function`→`fn`, `method`→`meth`, `class`→`cls`, `interface`→`iface`, `type_alias`→`type`, `data_class`→`data_cls`, `sealed_class`→`sealed_cls`, `enum_class`→`enum_cls`, `companion_object`→`comp_obj`, `object`→`obj`, `heading`→`h`, `code_block`→`code`
+- Match types: `exact_name`→`exact`, `partial_tags`→`partial`
+- Section headers: `symbols`→`syms`, `callers`→`crs`, `callees`→`ces`, `community`→`comm`, `communities`→`comms`, `members`→`mbrs`, `symbol`→`sym`, `definitions`→`defs`
+- Short kinds pass through unchanged: `struct`, `trait`, `enum`, `const`, `static`, `mod`, `impl`
+- Applied in search, explain, graph, and communities compact output
+
+**Commit:** `btakita/tsift@ea59263`. 291 tests pass (2 new abbreviation tests). Built + installed.
+<!-- agent:boundary:c7ab815c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -170,7 +184,7 @@ Implemented `--tabular` global flag for TSV output across four commands.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
+- [x] [#abbrev] [recommended] Abbreviation conventions in --compact (fn/mod/unch/del)
 - [ ] [#schema] [recommended] Schema-then-values pattern for repeated output (headers once, rows of values)
 <!-- /agent:backlog -->
 

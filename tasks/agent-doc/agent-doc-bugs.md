@@ -861,7 +861,27 @@ The 5 occurrences in `src/boost-client/tasks/monsterrodholders.md` all share the
 Without the annotation, `session-check` would warn (or fail closed under `pending_capture_guard: strict`) because the heuristic detects recommendation-like patterns but no `--pending-add` was recorded for that cycle. The annotation explicitly marks it as intentional, not an oversight.
 
 **TL;DR:** it's the opt-out for false-positive pending-capture detection on responses that conclude work or give advice without creating new backlog.
-<!-- agent:boundary:96c5fc28 -->
+
+❯ I don't want these comments in the committed patchback. Please plan and add to pending how to remove `<!-- no-pending-capture -->` from the patchback commits.
+### Re: strip no-pending-capture from patchbacks — opus-4-6
+
+The binary already has `strip_guard_markers` in `git.rs:1480` that removes these from committed blobs — but only when they appear on **standalone lines** (the entire trimmed line equals the marker). All 5 occurrences in `monsterrodholders.md` are **inline**, appended to the end of content lines:
+
+```
+**All 39 variable products...** <!-- no-pending-capture -->
+This way we stop the bots... <!-- no-pending-capture -->
+```
+
+The `strip_guard_markers_preserves_inline_content` test at `git.rs:1956` explicitly preserves inline markers — this was a deliberate design choice, but agents routinely append the marker inline rather than on its own line.
+
+#### Plan
+
+1. **Change `strip_guard_markers` in `git.rs`** — in addition to removing standalone marker lines, strip the marker text from within content lines and trim any trailing whitespace left behind. Both `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->` need this treatment.
+2. **Update tests** — flip `strip_guard_markers_preserves_inline_content` to expect stripping. Add a new test for the trailing-on-content-line case (the most common agent pattern).
+3. **Retroactive cleanup** — strip existing inline markers from `src/boost-client/tasks/monsterrodholders.md` committed content (either via `sed` + commit, or `agent-doc compact`).
+
+Added `#npc1` to pending. <!-- no-pending-capture -->
+<!-- agent:boundary:9eb06b37 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -870,6 +890,7 @@ Without the annotation, `session-check` would warn (or fail closed under `pendin
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#npc1] Strip inline `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->` from committed blobs: change `strip_guard_markers` in `src/agent-doc/src/git.rs` to remove inline occurrences (not just standalone lines), trim trailing whitespace, update the `strip_guard_markers_preserves_inline_content` test to expect stripping, add a new test for trailing-on-content-line case. Also retroactively strip from monsterrodholders.md committed history via interactive rebase or filter-branch.
 - [/] [#hfix8] Bump JB plugin version, build + install, manual verify (HEAD) appears after patchback with IPC listener active
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

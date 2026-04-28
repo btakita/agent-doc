@@ -326,6 +326,28 @@ pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
 fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
+            if let Some(reason) = crate::repair::recover_missing_commit_boundary(
+                file,
+                "session_check_commit_boundary_recovered",
+            )? {
+                if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                    return Ok(SessionCheckStatus::Interrupted(format!(
+                        "[session-check] INTERRUPTED: cycle `{}` was `{}` ({}), recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                        state.cycle_id,
+                        phase_name(state.phase),
+                        state.last_event,
+                        reason,
+                        prompt_marker
+                    )));
+                }
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — cycle `{}` was `{}` ({}); recovered the missing commit boundary from {}",
+                    state.cycle_id,
+                    phase_name(state.phase),
+                    state.last_event,
+                    reason
+                )));
+            }
             return Ok(SessionCheckStatus::Interrupted(open_cycle_message(&state)));
         }
         if let Some(marker) = detect_bypassed_response_write(file)? {
@@ -408,6 +430,33 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             )))
         }
         Some(event) if is_write_completed_commit_missing_event(&event) => {
+            if let Some(reason) = crate::repair::recover_missing_commit_boundary(
+                file,
+                "session_check_commit_boundary_recovered",
+            )? {
+                let repaired_cycle = crate::cycle_state::load(file)?;
+                if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                    return Ok(SessionCheckStatus::Interrupted(format!(
+                        "[session-check] INTERRUPTED: last ops.log entry was `{}`, recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
+                        event_name(&event),
+                        reason,
+                        prompt_marker
+                    )));
+                }
+                if let Some(state) = repaired_cycle {
+                    return Ok(SessionCheckStatus::Ok(format!(
+                        "[session-check] ok — last event: {}; recovered the missing commit boundary from {} into cycle `{}`",
+                        event,
+                        reason,
+                        state.cycle_id
+                    )));
+                }
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — last event: {}; recovered the missing commit boundary from {}",
+                    event,
+                    reason
+                )));
+            }
             Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: last ops.log entry is `{}` — response write landed but no commit followed",
                 event_name(&event)
@@ -1303,6 +1352,194 @@ mod tests {
     }
 
     #[test]
+    fn session_check_recovers_open_write_applied_cycle_from_committed_exchange_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #patchbypass. spec-test-build-install-commit-push\n",
+            "### Re: #patchbypass — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(snapshot),
+            Some(committed),
+        )
+        .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(
+                    message.contains("recovered the missing commit boundary from committed historical exchange snapshot drift"),
+                    "unexpected session-check message: {message}"
+                );
+            }
+            other => panic!("expected repaired ok status, got {other:?}"),
+        }
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
+        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(repaired_snapshot.contains("### Re: #patchbypass — gpt-5"));
+    }
+
+    #[test]
+    fn session_check_recovers_missing_commit_log_from_committed_exchange_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #patchbypass. spec-test-build-install-commit-push\n",
+            "### Re: #patchbypass — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            root.join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_write_consumed file={} patches=1\n",
+                doc.display()
+            ),
+        )
+        .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(
+                    message.contains("recovered the missing commit boundary from committed historical exchange snapshot drift"),
+                    "unexpected session-check message: {message}"
+                );
+            }
+            other => panic!("expected repaired ok status, got {other:?}"),
+        }
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
+    }
+
+    #[test]
     fn session_check_repairs_committed_historical_snapshot_drift() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -1526,15 +1763,11 @@ mod tests {
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(
-                    message.contains("prompt-bearing user changes"),
+                    message.contains("direct response patchback"),
                     "unexpected session-check message: {message}"
                 );
                 assert!(
-                    message.contains("prompt_target"),
-                    "unexpected session-check message: {message}"
-                );
-                assert!(
-                    !message.contains("direct response patchback"),
+                    message.contains("bare prompt target"),
                     "unexpected session-check message: {message}"
                 );
             }
@@ -1542,12 +1775,12 @@ mod tests {
         }
 
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(repaired_snapshot.contains("### Re: do `#sgzy` — codex"));
+        assert!(!repaired_snapshot.contains("### Re: do `#sgzy` — codex"));
         assert!(!repaired_snapshot.contains("What are the next steps?"));
     }
 
     #[test]
-    fn session_check_repairs_committed_historical_response_before_local_status_edit() {
+    fn session_check_fails_closed_when_committed_historical_patchback_mutates_status() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -1646,21 +1879,17 @@ mod tests {
         fs::write(&doc, current).unwrap();
 
         match inspect(&doc).unwrap() {
-            SessionCheckStatus::Ok(message) => {
+            SessionCheckStatus::Interrupted(message) => {
                 assert!(
-                    message.contains("repaired committed historical exchange snapshot drift"),
-                    "unexpected session-check message: {message}"
-                );
-                assert!(
-                    !message.contains("direct response patchback"),
+                    message.contains("direct response patchback"),
                     "unexpected session-check message: {message}"
                 );
             }
-            other => panic!("expected repaired ok status, got {other:?}"),
+            other => panic!("expected interrupted status, got {other:?}"),
         }
 
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(repaired_snapshot.contains("### Re: do `#done` — codex"));
+        assert!(!repaired_snapshot.contains("### Re: do `#done` — codex"));
         assert!(!repaired_snapshot.contains("Tuned manually."));
     }
 

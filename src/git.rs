@@ -826,11 +826,74 @@ fn classify_safe_out_of_band_agent_doc_mutation(
     classify_safe_agent_doc_mutation(snapshot_doc, file_doc, false)
 }
 
-fn classify_safe_committed_historical_agent_doc_mutation(
+fn classify_committed_historical_agent_doc_mutation(
     snapshot_doc: &str,
     file_doc: &str,
 ) -> Option<&'static str> {
     classify_safe_agent_doc_mutation(snapshot_doc, file_doc, true)
+}
+
+fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool {
+    let snap_body = crate::frontmatter::parse(snapshot_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(snapshot_doc);
+    let file_body = crate::frontmatter::parse(file_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(file_doc);
+
+    let Ok(snap_components) = crate::component::parse(snap_body) else {
+        return false;
+    };
+    let Ok(file_components) = crate::component::parse(file_body) else {
+        return false;
+    };
+    if snap_components.is_empty() || file_components.is_empty() {
+        return false;
+    }
+    if snap_components.len() != file_components.len() {
+        return true;
+    }
+
+    for (snap_comp, file_comp) in snap_components.iter().zip(file_components.iter()) {
+        if snap_comp.name != file_comp.name {
+            return true;
+        }
+        if !is_backlog_component(&snap_comp.name) && snap_comp.patch_mode() != file_comp.patch_mode()
+        {
+            return true;
+        }
+        let snap_content = normalize_component_content_for_absorb(snap_comp.content(snap_body));
+        let file_content = normalize_component_content_for_absorb(file_comp.content(file_body));
+        if snap_content == file_content {
+            continue;
+        }
+        if snap_comp.name != "exchange" {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(test)]
+fn classify_safe_committed_historical_agent_doc_mutation(
+    snapshot_doc: &str,
+    file_doc: &str,
+) -> Option<&'static str> {
+    if has_non_exchange_component_drift(snapshot_doc, file_doc) {
+        None
+    } else {
+        match classify_committed_historical_agent_doc_mutation(snapshot_doc, file_doc) {
+            Some("exchange") => Some("exchange"),
+            None
+                if crate::session_check::detect_bypassed_response_write_between(snapshot_doc, file_doc)
+                    .is_some() =>
+            {
+                Some("exchange")
+            }
+            _ => None,
+        }
+    }
 }
 
 fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc: &str) -> bool {
@@ -912,13 +975,18 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     let Some(head_doc) = show_head(file)? else {
         return Ok(None);
     };
-    let historical_reason =
-        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc);
+    let historical_mutation =
+        classify_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc);
+    let non_exchange_component_drift = has_non_exchange_component_drift(&snapshot_doc, &head_doc);
     let historical_response_marker =
         crate::session_check::detect_bypassed_response_write_between(&snapshot_doc, &head_doc);
-    let Some(reason) =
-        historical_reason.or_else(|| historical_response_marker.as_ref().map(|_| "exchange"))
-    else {
+    let Some(reason) = (match historical_mutation {
+        Some("exchange") => Some("exchange"),
+        None if !non_exchange_component_drift && historical_response_marker.is_some() => {
+            Some("exchange")
+        }
+        _ => None,
+    }) else {
         return Ok(None);
     };
 
@@ -1030,12 +1098,13 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     let safe_out_of_band_mutation = snapshot_content
         .as_deref()
         .and_then(|snapshot| classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content));
+    let safe_out_of_band_exchange_only = safe_out_of_band_mutation == Some("exchange");
     let only_heading_attribution_drift = head_doc.as_deref().is_some_and(|head| {
         normalize_post_commit_re_heading_drift(&file_content)
             == normalize_post_commit_re_heading_drift(head)
     });
     if let Some(marker) = bypassed_response_write
-        && safe_out_of_band_mutation.is_none()
+        && !safe_out_of_band_exchange_only
         && !only_heading_attribution_drift
     {
         crate::ops_log::log_op(
@@ -1052,6 +1121,19 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             marker
         );
     }
+    let committed_historical_patchback = snapshot_content
+        .as_deref()
+        .zip(head_doc.as_deref())
+        .map(|(snapshot, head)| {
+            let mutation = classify_committed_historical_agent_doc_mutation(snapshot, head);
+            (
+                mutation.or_else(|| {
+                    has_non_exchange_component_drift(snapshot, head)
+                        .then_some("typed_component_drift")
+                }),
+                crate::session_check::detect_bypassed_response_write_between(snapshot, head),
+            )
+        });
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     crate::ops_log::log_op(
@@ -1076,6 +1158,26 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         } else {
             false
         };
+
+    if !repaired_committed_historical
+        && let Some((Some(kind), Some(marker))) = committed_historical_patchback.as_ref()
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_blocked_committed_historical_patchback file={} kind={} marker={}",
+                file.display(),
+                kind,
+                marker.replace('\n', " ")
+            ),
+        );
+        anyhow::bail!(
+            "refusing to auto-adopt committed historical response patchback for {}: HEAD contains an out-of-band {} mutation with response marker {}",
+            file.display(),
+            kind,
+            marker
+        );
+    }
 
     if let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
@@ -2868,7 +2970,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_absorbs_out_of_band_exchange_and_pending_mutation() {
+    fn commit_blocks_out_of_band_exchange_and_pending_mutation() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -2940,41 +3042,14 @@ mod tests {
             <!-- /agent:pending -->\n";
         fs::write(&doc, file).unwrap();
 
-        commit(&doc).expect("commit should succeed");
-
-        let show = Command::new("git")
-            .current_dir(root)
-            .args(["show", "HEAD:session.md"])
-            .output()
-            .unwrap();
-        assert!(show.status.success(), "git show HEAD:session.md failed");
-        let committed = String::from_utf8_lossy(&show.stdout);
+        let err = commit(&doc).expect_err("typed pending mutations should fail closed");
+        let message = err.to_string();
         assert!(
-            committed.contains("### Re: newer\n"),
-            "committed blob should contain absorbed response:\n{committed}"
+            message.contains("direct response patchback without agent-doc cycle"),
+            "error should explain the blocked bypassed patchback:\n{message}"
         );
-        assert!(
-            committed.contains("[#c3d4] new pending"),
-            "committed blob should contain absorbed pending item:\n{committed}"
-        );
-        assert!(
-            !committed.contains("(HEAD)"),
-            "committed blob must be clean:\n{committed}"
-        );
-
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("### Re: newer\n"),
-            "snapshot should advance to absorbed response:\n{snap}"
-        );
-        assert!(
-            !snap.contains("(HEAD)"),
-            "snapshot should stay clean after absorbed closeout:\n{snap}"
-        );
-        assert!(
-            snap.contains("[#c3d4] new pending"),
-            "snapshot should advance to absorbed pending item:\n{snap}"
-        );
+        assert_eq!(snap, snapshot, "snapshot must remain unchanged on failure");
     }
 
     #[test]
@@ -3255,7 +3330,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_absorbs_out_of_band_status_and_exchange_mutation() {
+    fn commit_blocks_out_of_band_status_and_exchange_mutation() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -3326,41 +3401,14 @@ mod tests {
             <!-- /agent:exchange -->\n";
         fs::write(&doc, file).unwrap();
 
-        commit(&doc).expect("commit should absorb status+exchange mutation");
-
-        let show = Command::new("git")
-            .current_dir(root)
-            .args(["show", "HEAD:session.md"])
-            .output()
-            .unwrap();
-        assert!(show.status.success(), "git show HEAD:session.md failed");
-        let committed = String::from_utf8_lossy(&show.stdout);
+        let err = commit(&doc).expect_err("typed status mutations should fail closed");
+        let message = err.to_string();
         assert!(
-            committed.contains("Newer status"),
-            "committed blob should contain absorbed status:\n{committed}"
+            message.contains("direct response patchback without agent-doc cycle"),
+            "error should explain the blocked bypassed patchback:\n{message}"
         );
-        assert!(
-            committed.contains("### Re: newer\n"),
-            "committed blob should contain absorbed response:\n{committed}"
-        );
-        assert!(
-            !committed.contains("(HEAD)"),
-            "committed blob must be clean:\n{committed}"
-        );
-
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("Newer status"),
-            "snapshot should advance to absorbed status:\n{snap}"
-        );
-        assert!(
-            snap.contains("### Re: newer\n"),
-            "snapshot should advance to absorbed response:\n{snap}"
-        );
-        assert!(
-            !snap.contains("(HEAD)"),
-            "snapshot should stay clean after absorbed status+exchange closeout:\n{snap}"
-        );
+        assert_eq!(snap, snapshot, "snapshot must remain unchanged on failure");
     }
 
     #[test]
@@ -3815,7 +3863,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_repairs_committed_historical_response_before_local_status_edit() {
+    fn commit_fails_closed_when_committed_historical_response_mutates_status() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -3938,7 +3986,8 @@ mod tests {
             .args(["rev-parse", "HEAD"])
             .output()
             .unwrap();
-        let did_commit = commit(&doc).expect("commit should adopt HEAD before later local edits");
+        let err =
+            commit(&doc).expect_err("status-mutating historical patchback should fail closed");
         let head_after = Command::new("git")
             .current_dir(root)
             .args(["rev-parse", "HEAD"])
@@ -3946,8 +3995,8 @@ mod tests {
             .unwrap();
 
         assert!(
-            !did_commit,
-            "repairing the snapshot up to committed HEAD should close as a no-op"
+            err.to_string().contains("committed historical response patchback"),
+            "error should explain the blocked historical patchback:\n{err}"
         );
         assert_eq!(
             String::from_utf8_lossy(&head_before.stdout),
@@ -3956,34 +4005,23 @@ mod tests {
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("### Re: do `#done` — codex"),
-            "snapshot should repair up to the already-committed response:\n{snap}"
-        );
-        assert!(
-            !snap.contains("Tuned manually."),
-            "snapshot repair must stop at HEAD, not absorb later local edits:\n{snap}"
-        );
-
-        let working_after = fs::read_to_string(&doc).unwrap();
-        assert!(
-            working_after.contains("Tuned manually."),
-            "working tree should keep later local edits uncommitted:\n{working_after}"
+        assert_eq!(
+            snap, stale_snapshot,
+            "snapshot must stay on the pre-repair baseline when the historical patchback is rejected"
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
-        assert_eq!(state.last_event, "commit_already_current");
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert_eq!(state.last_event, "response_captured");
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("snapshot_repair file=") && log.contains("basis=head_local_drift"),
-            "snapshot repair should record the head-local-drift adoption path:\n{log}"
+            log.contains("commit_blocked_committed_historical_patchback file="),
+            "blocked historical patchback should be recorded in ops.log:\n{log}"
         );
         assert!(
-            log.contains("post_commit_local_drift file=")
-                && log.contains("kind=working_tree_edits"),
-            "later local edits should still be classified after repair:\n{log}"
+            !log.contains("snapshot_repair file="),
+            "rejected historical patchback must not rewrite the snapshot:\n{log}"
         );
     }
 
@@ -4269,6 +4307,113 @@ mod tests {
         assert!(
             log.contains("commit_blocked_bypassed_patchback file="),
             "ops log should record the blocked bypassed patchback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_committed_historical_patchback_that_mutates_status() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Before.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: state\n",
+            "clean committed response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: state\n",
+            "clean committed response\n\n",
+            "do #patchbypass. spec-test-build-install-commit-push\n",
+            "### Re: #patchbypass — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(snapshot),
+            Some(committed),
+        )
+        .unwrap();
+
+        let err = commit(&doc).expect_err("status-mutating historical patchback should fail closed");
+        let message = err.to_string();
+        assert!(
+            message.contains("committed historical response patchback"),
+            "error should explain the committed historical patchback:\n{message}"
+        );
+        assert!(
+            message.contains("typed_component_drift")
+                || message.contains("status+exchange")
+                || message.contains("status"),
+            "error should surface the out-of-band mutation kind:\n{message}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_committed_historical_patchback file="),
+            "ops log should record the blocked historical patchback:\n{log}"
         );
     }
 

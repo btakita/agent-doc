@@ -2430,7 +2430,10 @@ mod tests {
         .unwrap();
 
         let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
-        assert!(!recovered, "no pending response replay should be needed");
+        assert!(
+            recovered,
+            "the missing commit boundary should be recovered from already-committed HEAD"
+        );
         assert!(
             !committed,
             "HEAD-current closeout should not create a duplicate git commit"

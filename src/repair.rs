@@ -58,6 +58,7 @@ pub enum RepairOutcome {
     AlreadyApplied,
     ManualTailRemovalRespected,
     StalePreflightLockRepaired,
+    CommitBoundaryRecovered,
     CompletedBacklogReaped,
 }
 
@@ -146,6 +147,7 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
             repaired_snapshot.as_deref(),
             Some(&file_content),
         )?;
+        crate::capture::mark_committed(file)?;
         crate::ops_log::log_op(
             file,
             &format!(
@@ -173,6 +175,65 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     }
 
     Ok(RepairOutcome::Noop)
+}
+
+pub(crate) fn recover_missing_commit_boundary(
+    file: &Path,
+    event: &str,
+) -> Result<Option<&'static str>> {
+    let state = crate::cycle_state::load(file)?;
+    let has_open_commit_boundary = state.as_ref().is_some_and(|state| {
+        matches!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured
+                | crate::cycle_state::CyclePhase::WriteApplied
+        )
+    });
+    let has_missing_commit_event = if has_open_commit_boundary {
+        false
+    } else {
+        crate::session_check::detect_write_completed_commit_missing(file)?.is_some()
+    };
+    if !has_open_commit_boundary && !has_missing_commit_event {
+        return Ok(None);
+    }
+
+    let current_doc = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for commit-boundary recovery", file.display()))?;
+    let head_doc = crate::git::show_head(file)?;
+    let reason = match crate::git::verify_snapshot_committed(file)? {
+        crate::git::SnapshotCommitStatus::Committed => head_doc
+            .as_deref()
+            .filter(|head| {
+                crate::session_check::detect_bypassed_response_write_between(head, &current_doc)
+                    .is_none()
+            })
+            .map(|_| "already-committed HEAD"),
+        _ => crate::git::repair_committed_historical_snapshot_drift(file)?
+            .map(|_| "committed historical exchange snapshot drift"),
+    };
+    let Some(reason) = reason else {
+        return Ok(None);
+    };
+
+    let repaired_snapshot = snapshot::load(file)?;
+    crate::cycle_state::mark_committed(
+        file,
+        event,
+        repaired_snapshot.as_deref(),
+        Some(&current_doc),
+    )?;
+    crate::capture::mark_committed(file)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_commit_boundary_recovered file={} event={} reason={}",
+            file.display(),
+            event,
+            reason
+        ),
+    );
+    Ok(Some(reason))
 }
 
 fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
@@ -482,6 +543,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         let outcome = repair_stale_preflight_started_cycle(file)?;
         if outcome != RepairOutcome::Noop {
             return Ok(outcome);
+        }
+        if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
+            return Ok(RepairOutcome::CommitBoundaryRecovered);
         }
         return repair_completed_backlog_items(file);
     }
@@ -1300,6 +1364,62 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_committed_historical");
+        assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
+    }
+
+    #[test]
+    fn recover_closes_write_applied_cycle_when_head_already_has_exchange_patchback() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(root, &doc);
+
+        let updated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, updated).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .status()
+            .unwrap();
+
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(updated)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(content),
+            Some(updated),
+        )
+        .unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::CommitBoundaryRecovered);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "repair_commit_boundary_recovered");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
     }
 

@@ -316,7 +316,32 @@ Commit/push:
 - blocked in this environment. `git commit` in `src/tsift` failed with `fatal: Unable to create '/home/brian/work/btakita/agent-loop/.git/modules/src/tsift/index.lock': Read-only file system`, so no new `btakita/tsift@...` commit or push was produced.
 
 Top of backlog: `#tmv7`.
-<!-- agent:boundary:98264f7b -->
+
+❯ Error when running agent-doc on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+```
+• Ran tsift search "build-documentation"
+  └ Error: autoindexing index
+
+    … +12 lines (ctrl + t to view transcript)
+    index.db (lock: /home/brian/work/btakita/agent-loop/src/session-share/.tsift/index.lock). A concurrent `tsift
+    index` or `tsift search --autoindex` is already updating this index; wait for it to finish before retrying.
+```
+### Re: lock error in `claudescore-3.md` — gpt-5
+
+That failure is the expected fast-fail path for a concurrent index writer, not evidence of index corruption.
+
+I checked the live `src/session-share` state just now:
+- `tsift locks .` reports `lock: absent` and `journal: absent`
+- `tsift status .` reports `index: fresh` with 748 tracked files
+
+So the most likely sequence is that another `tsift index` or `tsift search --autoindex` was already running when that `agent-doc` session searched, and the writer finished afterward.
+
+What to do when it happens:
+- retry the search after the active writer finishes
+- if it keeps recurring, run `tsift locks /home/brian/work/btakita/agent-loop/src/session-share` while the failure is live; that will distinguish a live writer from a stale sidecar and print the recommended next step
+
+I am not adding a new `tsift` backlog item from this single repro because the current state does not show a stale lock or failed recovery path. If this starts happening without overlapping index work, that would justify a new concurrency/UX bug.
+<!-- agent:boundary:09422656 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -117,7 +117,12 @@ fn pane_session_name(tmux: &Tmux, pane: &str) -> String {
         .unwrap_or_default()
 }
 
-fn ensure_pane_in_session(tmux: &Tmux, pane: &str, expected_session: &str, action: &str) -> Result<()> {
+fn ensure_pane_in_session(
+    tmux: &Tmux,
+    pane: &str,
+    expected_session: &str,
+    action: &str,
+) -> Result<()> {
     let pane_session = pane_session_name(tmux, pane);
     if pane_session != expected_session {
         anyhow::bail!(

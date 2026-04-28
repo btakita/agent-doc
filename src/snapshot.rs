@@ -345,10 +345,11 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         // Read and parse frontmatter
         if let Ok(snap_content) = std::fs::read_to_string(&path)
             && let Ok((snap_fm, _)) = crate::frontmatter::parse(&snap_content)
-                && snap_fm.session.as_deref() == Some(&session_uuid) {
-                    old_hash = Some(stem);
-                    break;
-                }
+            && snap_fm.session.as_deref() == Some(&session_uuid)
+        {
+            old_hash = Some(stem);
+            break;
+        }
     }
 
     let old_hash = match old_hash {
@@ -384,7 +385,9 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         if new_file.exists() {
             eprintln!(
                 "[init] skip migrate {}/{}.{} — destination exists",
-                subdir, &new_hash[..8.min(new_hash.len())], ext
+                subdir,
+                &new_hash[..8.min(new_hash.len())],
+                ext
             );
             continue;
         }
@@ -421,23 +424,24 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     let registry_path = crate::sessions::registry_path();
     if registry_path.exists()
         && let Ok(_lock) = crate::sessions::RegistryLock::acquire(&registry_path)
-            && let Ok(mut registry) = crate::sessions::load() {
-                let mut updated = 0u32;
-                for (_sid, entry) in registry.iter_mut() {
-                    // Match by session UUID — the file field may have the old path
-                    if _sid == &session_uuid {
-                        let old_file = entry.file.clone();
-                        if old_file != doc_path_str && old_file != canonical_str {
-                            entry.file = doc_path_str.clone();
-                            updated += 1;
-                        }
-                    }
-                }
-                if updated > 0 {
-                    let _ = crate::sessions::save(&registry);
-                    eprintln!("[init] updated {} session registry entry(ies)", updated);
+        && let Ok(mut registry) = crate::sessions::load()
+    {
+        let mut updated = 0u32;
+        for (_sid, entry) in registry.iter_mut() {
+            // Match by session UUID — the file field may have the old path
+            if _sid == &session_uuid {
+                let old_file = entry.file.clone();
+                if old_file != doc_path_str && old_file != canonical_str {
+                    entry.file = doc_path_str.clone();
+                    updated += 1;
                 }
             }
+        }
+        if updated > 0 {
+            let _ = crate::sessions::save(&registry);
+            eprintln!("[init] updated {} session registry entry(ies)", updated);
+        }
+    }
 
     eprintln!(
         "[init] rename migration complete — {} state file(s) migrated",
@@ -1179,9 +1183,17 @@ mod tests {
 
         // Also create a baseline and pending file for the old hash
         let baseline_dir = dir.path().join(".agent-doc/baselines");
-        fs::write(baseline_dir.join(format!("{}.md", old_hash)), "baseline content").unwrap();
+        fs::write(
+            baseline_dir.join(format!("{}.md", old_hash)),
+            "baseline content",
+        )
+        .unwrap();
         let pending_dir = dir.path().join(".agent-doc/pending");
-        fs::write(pending_dir.join(format!("{}.md", old_hash)), "pending content").unwrap();
+        fs::write(
+            pending_dir.join(format!("{}.md", old_hash)),
+            "pending content",
+        )
+        .unwrap();
 
         // "Rename" the file
         let new_doc = dir.path().join("renamed.md");
@@ -1227,7 +1239,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("test.md");
-        fs::write(&doc, "---\nagent_doc_format: template\n---\n\nNo session UUID\n").unwrap();
+        fs::write(
+            &doc,
+            "---\nagent_doc_format: template\n---\n\nNo session UUID\n",
+        )
+        .unwrap();
 
         let migrated = try_migrate_renamed(&doc).unwrap();
         assert!(!migrated, "should not migrate without session UUID");

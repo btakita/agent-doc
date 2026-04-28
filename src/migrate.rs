@@ -127,33 +127,33 @@ fn migrate_comment(comment: &str) -> String {
 
     // Open tag: <!-- agent:pending ... -->
     if let Some(rest) = comment.strip_prefix("<!-- agent:pending")
-        && let Some(inner) = rest.strip_suffix("-->") {
-            let trimmed = inner.trim();
-            if trimmed.is_empty() {
-                return "<!-- agent:backlog -->".to_string();
-            }
-            // Filter out patch= and mode= attributes
-            let tokens: Vec<&str> = trimmed
-                .split_whitespace()
-                .filter(|t| {
-                    t.split_once('=')
-                        .map(|(k, _)| k != "patch" && k != "mode")
-                        .unwrap_or(true)
-                })
-                .collect();
-            if tokens.is_empty() {
-                return "<!-- agent:backlog -->".to_string();
-            }
-            return format!("<!-- agent:backlog {} -->", tokens.join(" "));
+        && let Some(inner) = rest.strip_suffix("-->")
+    {
+        let trimmed = inner.trim();
+        if trimmed.is_empty() {
+            return "<!-- agent:backlog -->".to_string();
         }
+        // Filter out patch= and mode= attributes
+        let tokens: Vec<&str> = trimmed
+            .split_whitespace()
+            .filter(|t| {
+                t.split_once('=')
+                    .map(|(k, _)| k != "patch" && k != "mode")
+                    .unwrap_or(true)
+            })
+            .collect();
+        if tokens.is_empty() {
+            return "<!-- agent:backlog -->".to_string();
+        }
+        return format!("<!-- agent:backlog {} -->", tokens.join(" "));
+    }
 
     comment.to_string()
 }
 
 fn discover_session_docs() -> Result<Vec<PathBuf>> {
     let cwd = std::env::current_dir()?;
-    let root = snapshot::find_project_root(&cwd)
-        .unwrap_or_else(|| cwd.clone());
+    let root = snapshot::find_project_root(&cwd).unwrap_or_else(|| cwd.clone());
 
     let snapshots_dir = root.join(".agent-doc/snapshots");
     if !snapshots_dir.is_dir() {
@@ -194,9 +194,9 @@ fn walk_for_session_docs(dir: &Path, docs: &mut Vec<PathBuf>, depth: usize) -> R
             if let Ok(content) = std::fs::read_to_string(&path)
                 && (content.contains("<!-- agent:pending")
                     || content.contains("<!-- /agent:pending"))
-                {
-                    docs.push(path);
-                }
+            {
+                docs.push(path);
+            }
         }
     }
 
@@ -214,7 +214,11 @@ fn compute_code_ranges(content: &str) -> Vec<CodeRange> {
     let mut fence_start = 0;
 
     for (i, line) in content.lines().enumerate() {
-        let line_start = content[..].lines().take(i).map(|l| l.len() + 1).sum::<usize>();
+        let line_start = content[..]
+            .lines()
+            .take(i)
+            .map(|l| l.len() + 1)
+            .sum::<usize>();
         let trimmed = line.trim_start();
 
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {

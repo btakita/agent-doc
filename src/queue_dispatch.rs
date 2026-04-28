@@ -109,9 +109,7 @@ impl DispatchContext {
         let (fm, _) = frontmatter::parse(&doc)?;
         let project_root = snapshot::find_project_root(file);
 
-        let pane_id = if let (Some(root), Some(session)) =
-            (&project_root, &fm.session)
-        {
+        let pane_id = if let (Some(root), Some(session)) = (&project_root, &fm.session) {
             lookup_pane(root, session)
         } else {
             None
@@ -168,8 +166,15 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
         }
         "compact" => {
             let default_file = ctx.file.to_string_lossy();
-            let file_arg = item.args.first().map(|s| s.as_str()).unwrap_or(&default_file);
-            eprintln!("[queue_dispatch] /compact {} — running subprocess", file_arg);
+            let file_arg = item
+                .args
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or(&default_file);
+            eprintln!(
+                "[queue_dispatch] /compact {} — running subprocess",
+                file_arg
+            );
             let exe =
                 std::env::current_exe().context("failed to resolve current agent-doc binary")?;
             let status = std::process::Command::new(&exe)
@@ -223,8 +228,8 @@ fn try_supervisor_dispatch(
     // The harness interprets `/command` lines natively.
     let bytes = format!("{}\n", item.raw);
     let method = supervisor_ipc::IpcMethod::Inject { bytes };
-    let resp = supervisor_ipc::send_command(&sock, &method)
-        .context("supervisor IPC dispatch failed")?;
+    let resp =
+        supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
 
     if !resp.ok {
         let msg = resp.error.unwrap_or_else(|| "unknown error".to_string());

@@ -358,7 +358,8 @@ pub fn transfer(
         let target_comps = component::parse(&target_refreshed).unwrap_or_default();
 
         if let Some(source_pending) = source_comps.iter().find(|c| is_backlog_component(&c.name))
-            && let Some(target_pending) = target_comps.iter().find(|c| is_backlog_component(&c.name))
+            && let Some(target_pending) =
+                target_comps.iter().find(|c| is_backlog_component(&c.name))
         {
             let pending_content = source_pending.content(&source_refreshed);
             if !pending_content.trim().is_empty() {
@@ -423,7 +424,10 @@ fn transfer_pending_items(
 
     let source_pending = source_comps.iter().find(|c| is_backlog_component(&c.name));
     let Some(source_pending) = source_pending else {
-        anyhow::bail!("component 'pending'/'backlog' not found in {}", source.display());
+        anyhow::bail!(
+            "component 'pending'/'backlog' not found in {}",
+            source.display()
+        );
     };
 
     let pending_content = source_pending.content(&source_content);

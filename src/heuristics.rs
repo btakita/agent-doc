@@ -203,9 +203,7 @@ fn contains_resolved_marker(line: &str) -> bool {
         "closed by ",
     ];
 
-    RESOLVED_MARKERS
-        .iter()
-        .any(|marker| line.contains(marker))
+    RESOLVED_MARKERS.iter().any(|marker| line.contains(marker))
 }
 
 fn contains_unresolved_marker(line: &str) -> bool {

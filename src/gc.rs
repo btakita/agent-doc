@@ -366,10 +366,7 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
     for entry in std::fs::read_dir(&supervisor_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path
-            .extension()
-            .is_none_or(|e| e != "sock")
-        {
+        if path.extension().is_none_or(|e| e != "sock") {
             continue;
         }
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();

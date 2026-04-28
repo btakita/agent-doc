@@ -374,6 +374,24 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         let state_is_open = crate::cycle_state::load(file)?
             .map(|state| state.is_open())
             .unwrap_or(true);
+        let snapshot_missing_response = snapshot::load(file)?
+            .as_deref()
+            .map(|snapshot_doc| !is_already_applied(snapshot_doc, &response))
+            .unwrap_or(true);
+        if state_is_open && snapshot_missing_response {
+            snapshot::save(file, &repaired_doc)?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_adopt_existing_response file={} reason=snapshot_missing_response",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[repair] advanced snapshot to the already-present response for {}",
+                file.display()
+            );
+        }
         if state_is_open
             && let Err(e) = crate::cycle_state::mark_write_applied(
                 file,
@@ -1096,6 +1114,66 @@ mod tests {
         assert!(
             snap.contains("Recovered answer."),
             "snapshot should be advanced to the recovered response:\n{snap}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn repair_commits_already_present_response_when_snapshot_lags_committed_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Why did the patchback miss?\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+
+        let direct_patch = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Why did the patchback miss?\n",
+            "### Re: missed patchback — gpt-5\n\n",
+            "Recovered through direct patch.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, direct_patch).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: missed patchback — gpt-5\n\n",
+            "Recovered through direct patch.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        save_pending(&doc, response).unwrap();
+
+        let outcome = repair(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            head.contains("Recovered through direct patch."),
+            "HEAD should own the already-present response after repair:\n{head}"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("Recovered through direct patch."),
+            "snapshot should advance to the already-present response:\n{snap}"
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();

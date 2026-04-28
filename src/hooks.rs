@@ -82,7 +82,14 @@ pub fn fire_doc_event(file: &Path, event: &str) {
     let session_id = fm.session.as_deref().unwrap_or("").to_string();
     let harness = agent_doc::model_tier::detect_harness();
     let resolved_model = fm.resolve_harness_model(&harness).map(|s| s.to_string());
-    fire_doc_hooks(&fm.hooks, event, file, &session_id, &fm.agent, &resolved_model);
+    fire_doc_hooks(
+        &fm.hooks,
+        event,
+        file,
+        &session_id,
+        &fm.agent,
+        &resolved_model,
+    );
 }
 
 /// Fire a post_write hook event.

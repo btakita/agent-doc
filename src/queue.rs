@@ -20,7 +20,7 @@
 //!
 //! This module is I/O-free. Callers handle reading/writing files.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,9 +263,7 @@ pub fn render(entries: &[QueueEntry]) -> String {
 }
 
 fn is_start_fence(line: &str) -> bool {
-    line == "--- start"
-        || line.starts_with("--- start ")
-        || line == "~~~start"
+    line == "--- start" || line.starts_with("--- start ") || line == "~~~start"
 }
 
 fn parse_start_datetime(line: &str) -> Option<String> {
@@ -514,7 +512,8 @@ mod tests {
 
     #[test]
     fn parse_multiple_time_gates() {
-        let body = "- do #fix1\n--- start 17:00 ET\n- run nightly\n--- start 18:00 ET\n- coverage\n";
+        let body =
+            "- do #fix1\n--- start 17:00 ET\n- run nightly\n--- start 18:00 ET\n- coverage\n";
         let entries = parse(body).unwrap();
         assert_eq!(entries.len(), 5);
         assert_eq!(
@@ -723,10 +722,7 @@ mod tests {
 
     #[test]
     fn activation_start_fence_bare() {
-        let entries = vec![
-            QueueEntry::StartFence(None),
-            make_prompt("do #fix1"),
-        ];
+        let entries = vec![QueueEntry::StartFence(None), make_prompt("do #fix1")];
         let act = resolve_activation(&entries, false, false, false);
         assert!(act.active);
         assert_eq!(act.trigger, Some(QueueTrigger::StartFence));

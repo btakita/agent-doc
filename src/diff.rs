@@ -952,10 +952,7 @@ fn parse_prompt_preset_directive(line: &str) -> Option<Vec<String>> {
             continue;
         }
         for part in segment.split(" and ") {
-            let name = part
-                .trim()
-                .trim_end_matches(['.', ':', ';'])
-                .trim();
+            let name = part.trim().trim_end_matches(['.', ':', ';']).trim();
             if !name.is_empty() {
                 names.push(name.to_string());
             }
@@ -1172,9 +1169,7 @@ pub fn detect_queue_trigger(diff: &str) -> bool {
         }
 
         // Strip the `❯ ` prompt prefix if present
-        let text = trimmed
-            .strip_prefix("❯ ")
-            .unwrap_or(trimmed);
+        let text = trimmed.strip_prefix("❯ ").unwrap_or(trimmed);
         let lower = text.to_lowercase();
 
         if lower.starts_with("do queue") || lower.starts_with("run queue") {
@@ -1184,9 +1179,7 @@ pub fn detect_queue_trigger(diff: &str) -> bool {
                 &text[9..]
             };
             // Must be end of line, or followed by non-alphanumeric (punctuation, space)
-            if after.is_empty()
-                || after.starts_with(|c: char| !c.is_alphanumeric() && c != '#')
-            {
+            if after.is_empty() || after.starts_with(|c: char| !c.is_alphanumeric() && c != '#') {
                 return true;
             }
         }
@@ -3412,8 +3405,7 @@ Please fix the bug.\n\
 
     #[test]
     fn detect_exchange_compaction_request_ignores_non_directive_mentions() {
-        let diff =
-            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+I failed to compact exchange earlier.\n";
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+I failed to compact exchange earlier.\n";
         assert!(!detect_exchange_compaction_request(diff));
     }
 

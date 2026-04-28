@@ -2965,9 +2965,7 @@ Existing answer.
             .unwrap()
             .expect("repair should apply");
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-        let pending_open = repaired
-            .find("<!-- agent:pending -->")
-            .unwrap();
+        let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
         let assistant = repaired.find("## Assistant").unwrap();
 
         assert!(
@@ -3031,9 +3029,7 @@ Existing answer.
             .unwrap()
             .expect("repair should apply");
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-        let pending_open = repaired
-            .find("<!-- agent:pending -->")
-            .unwrap();
+        let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
         let todo_open = repaired.find("<!-- agent:todo patch=replace -->").unwrap();
         let trailing_summary = repaired
             .rfind("Exchange compacted. No new work was run in this turn.")

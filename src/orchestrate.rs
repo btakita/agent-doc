@@ -842,32 +842,31 @@ fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<St
     if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) = (
         crate::template::parse_patches(full),
         crate::template::parse_patches(streamed),
-    )
-        && full_unmatched.trim().is_empty()
-            && streamed_unmatched.trim().is_empty()
-            && full_patches.len() == streamed_patches.len()
-        {
-            let mut delta = String::new();
-            for (full_patch, streamed_patch) in full_patches.iter().zip(streamed_patches.iter()) {
-                if full_patch.name != streamed_patch.name
-                    || !full_patch.content.starts_with(&streamed_patch.content)
-                {
-                    return None;
-                }
-                let suffix = &full_patch.content[streamed_patch.content.len()..];
-                if suffix.is_empty() {
-                    continue;
-                }
-                delta.push_str(&format!(
-                    "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
-                    full_patch.name, suffix, full_patch.name
-                ));
+    ) && full_unmatched.trim().is_empty()
+        && streamed_unmatched.trim().is_empty()
+        && full_patches.len() == streamed_patches.len()
+    {
+        let mut delta = String::new();
+        for (full_patch, streamed_patch) in full_patches.iter().zip(streamed_patches.iter()) {
+            if full_patch.name != streamed_patch.name
+                || !full_patch.content.starts_with(&streamed_patch.content)
+            {
+                return None;
             }
-
-            if !delta.trim().is_empty() {
-                return Some(delta);
+            let suffix = &full_patch.content[streamed_patch.content.len()..];
+            if suffix.is_empty() {
+                continue;
             }
+            delta.push_str(&format!(
+                "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
+                full_patch.name, suffix, full_patch.name
+            ));
         }
+
+        if !delta.trim().is_empty() {
+            return Some(delta);
+        }
+    }
     None
 }
 

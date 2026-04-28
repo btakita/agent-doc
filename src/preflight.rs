@@ -2359,7 +2359,9 @@ mod tests {
         );
         match crate::session_check::inspect(&doc).unwrap() {
             crate::session_check::SessionCheckStatus::Ok(_) => {}
-            status => panic!("expected clean closeout after boundary-artifact-only preflight, got {status:?}"),
+            status => panic!(
+                "expected clean closeout after boundary-artifact-only preflight, got {status:?}"
+            ),
         }
     }
 

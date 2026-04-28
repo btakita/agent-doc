@@ -350,7 +350,20 @@ I am not adding a new `tsift` backlog item from this single repro because the cu
 2. Medium: workspace summarize extraction uses an arbitrary scoped symbol index, so symbol context is nondeterministic and can come from the wrong submodule. [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2791) returns the first `index.db` it sees under `.tsift/indexes/*`, and [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2404) reuses that one DB for every file being summarized. Then [src/tsift/src/summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:411) loads symbols with `WHERE file LIKE '%' || ?1` at [src/tsift/src/summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:431), which suffix-matches any same-named file. In a workspace with multiple `src/lib.rs` or `main.rs` files, summarize extraction can pull symbols from the wrong module, and which module wins depends on `read_dir()` order.
 
 Verification: review-only turn. I did not run the suite.
-<!-- agent:boundary:e7528709 -->
+
+❯ #next-steps
+### Re: next steps — gpt-5
+
+Added the two actionable follow-up items from the review and put them ahead of the longer-term roadmap items.
+
+Top of backlog: `#sumpath`
+
+Added:
+1. `#sumpath` — fix `tsift summarize --extract <relative>` so the walked extraction path resolves against `--path` / project root instead of the caller's CWD.
+2. `#sumscope` — fix workspace summarize extraction so symbol context comes from the correct scoped index instead of an arbitrary first `index.db` plus suffix-based file matching.
+
+I did not add more than these two because they cover the concrete correctness gaps from the review without turning the backlog into duplicated implementation detail.
+<!-- agent:boundary:04be7066 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -359,6 +372,8 @@ Verification: review-only turn. I did not run the suite.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sumpath] fix summarize --extract relative path resolution against --path root
+- [ ] [#sumscope] fix workspace summarize symbol-index selection and same-path collisions
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

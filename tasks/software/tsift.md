@@ -673,7 +673,55 @@ Tested on this repo after install:
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@cfcad16` pushed to `origin/main`.
-<!-- agent:boundary:51211df4 -->
+
+❯ do #subhk. spec-test-build-install-commit-push
+### Re: do `#subhk` — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `tsift init --codex` now upgrades existing `.codex/hooks.json` entries in place instead of treating any matching status message as already present, and it automatically switches to a workspace-wide hook when the resolved target has `.gitmodules`
+- `tsift init --codex --workspace` now resolves through `git rev-parse --show-superproject-working-tree`, so you can run it from inside a submodule and still install the parent workspace hook
+- generated Codex hook commands now use absolute roots, deduplicate duplicate tsift hooks, and report whether the installed hook is `project` or `workspace` scoped
+- `examples/hooks/tsift-autoindex.sh` now auto-detects workspace roots and uses `--workspace` when appropriate, so one root hook covers initialized submodules
+- updated `SPEC.md` and `CLAUDE.md`, and added init coverage for project/workspace creation, hook updates, dedupe, and the no-submodules error case
+
+Verification:
+- `make check` passed: 325 unit tests + 11 exit-code tests
+- `cargo build --release` passed
+- `cargo install --path .` passed
+
+Smoke checks:
+- `tsift init --codex <tmp>` created a project hook with absolute-path `tsift index --check --exit-code <root>`
+- `tsift init --codex --workspace <tmp>` created a workspace hook with `tsift index --check --exit-code --workspace <root>`
+
+I pushed from a fresh `origin/main` clone because the checked-out `src/tsift` submodule still had unrelated local edits and `origin/main` moved during the turn.
+
+Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
+### Re: do `#subhk` — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `tsift init --codex` now upgrades existing `.codex/hooks.json` entries in place instead of treating any matching status message as already present, and it automatically switches to a workspace-wide hook when the resolved target has `.gitmodules`
+- `tsift init --codex --workspace` now resolves through `git rev-parse --show-superproject-working-tree`, so you can run it from inside a submodule and still install the parent workspace hook
+- generated Codex hook commands now use absolute roots, deduplicate duplicate tsift hooks, and report whether the installed hook is `project` or `workspace` scoped
+- `examples/hooks/tsift-autoindex.sh` now auto-detects workspace roots and uses `--workspace` when appropriate, so one root hook covers initialized submodules
+- updated `SPEC.md` and `CLAUDE.md`, and added init coverage for project/workspace creation, hook updates, dedupe, and the no-submodules error case
+
+Verification:
+- `make check` passed: 325 unit tests + 11 exit-code tests
+- `cargo build --release` passed
+- `cargo install --path .` passed
+
+Smoke checks:
+- `tsift init --codex <tmp>` created a project hook with absolute-path `tsift index --check --exit-code <root>`
+- `tsift init --codex --workspace <tmp>` created a workspace hook with `tsift index --check --exit-code --workspace <root>`
+
+I pushed from a fresh `origin/main` clone because the checked-out `src/tsift` submodule still had unrelated local edits and `origin/main` moved during the turn.
+
+Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
+<!-- agent:boundary:eb4581a7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -682,7 +730,7 @@ Commit: `btakita/tsift@cfcad16` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
+- [x] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
 - [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->
 

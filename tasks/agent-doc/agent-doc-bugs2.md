@@ -648,12 +648,42 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `VERSIONS.md`, `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/pending.rs`, and `src/write.rs`.
-<!-- agent:boundary:abbeb540 -->
+
+❯ `agent-doc pending` should be deprecated and alias `agent-doc backlog`. spec-test-build-install-commit-push
+### Re: deprecate `agent-doc pending` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `ac1aa6d` (`fix: deprecate pending backlog command`) on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `agent-doc backlog ...` is now the canonical top-level backlog command.
+- `agent-doc pending ...` remains accepted as a deprecated alias and now emits an explicit deprecation warning.
+- bare-invocation subcommand detection now recognizes subcommand aliases too, so the alias does not interfere with path-vs-command routing.
+- updated command metadata, runbook/spec text, and integration coverage for both the canonical and deprecated spellings.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `ac1aa6d` (`fix: deprecate pending backlog command`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `VERSIONS.md`, `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/commands.rs`, `src/main.rs`, `src/pending_cmd.rs`, and `tests/pending_integration.rs`.
+<!-- agent:boundary:49821714 -->
 <!-- /agent:exchange -->
 
 <!--
-`agent-doc pending` should be deprecated and alias `agent-doc backlog`.
-agent-doc should detect an id in the text when a backlog item is sent...such as `[#sdig2matrix] Fixture evidence matrix — publish which rubric families are eligible on session-doc, plaintext, retained-text, and JSONL-backed fixtures so future benchmark drift is attributable`.
+`agent-doc backlog` should detect an id in the text when a backlog item is sent...such as `[#sdig2matrix] Fixture evidence matrix — publish which rubric families are eligible on session-doc, plaintext, retained-text, and JSONL-backed fixtures so future benchmark drift is attributable`...which currenly results in:
+
+```
+- [ ] [#sgzy] [#sdig2matrix] Fixture evidence matrix — publish which rubric families are eligible on session-doc, plaintext, retained-text, and JSONL-backed fixtures so future benchmark drift is attributable
+```
+
+Instead the backlog item should be:
+```
+- [ ] [#sdig2matrix] Fixture evidence matrix — publish which rubric families are eligible on session-doc, plaintext, retained-text, and JSONL-backed fixtures so future benchmark drift is attributable
+```
 
 Why is there Codex permission prompts when `codex_args: -s danger-full-access` frontmatter is set?
 -->

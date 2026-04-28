@@ -611,7 +611,32 @@ Yes. I would put these into the backlog:
 3. `#tdoc` — add a small diagnostics/remediation command for lock states (`index.lock`, `index.db-journal`, live PID hints, recommended next step). The current behavior is safer now, but the operator story is still too implicit.
 
 I added those as recommended backlog items in this cycle.
-<!-- agent:boundary:afd810bf -->
+
+❯ sync orchestra
+❯ preset #spec-test-build-install-commit-push
+❯ - do #sprch
+❯ - do #sdia
+❯ - do #tdoc
+### Re: `#sprch` + `#sdia` + `#tdoc` — gpt-5
+
+Implemented the full locked-index follow-up stack in tsift.
+
+What changed:
+- `#sprch`: search freshness prechecks now reuse the same rollback-journal snapshot fallback as `tsift status` / `tsift index --check`, so root, scoped, federated, and `--no-autoindex` stale checks resolve to stale/missing/fresh instead of surfacing raw `database is locked` errors.
+- `#sdia`: `tsift status` now surfaces snapshot fallback explicitly in human output (`recovery: snapshot fallback ...`) and JSON (`index.recovery: "snapshot_fallback"`).
+- `#tdoc`: added `tsift locks [path] [--scope <submodule>] [--json]` to report `index.lock`, `index.db-journal`, PID hints, the exact reindex command, and the recommended next step.
+
+Verification:
+- `cargo test` passed: 317 unit tests + 10 exit-code tests.
+- `make check` passed.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+- Installed-binary smoke check: `tsift locks /home/brian/work/btakita/agent-loop` reports the current root index has no active lock or rollback-journal state.
+
+I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@9a18b25` pushed to `origin/main`.
+<!-- agent:boundary:8c16d150 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -620,9 +645,9 @@ I added those as recommended backlog items in this cycle.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#sprch] [recommended] Extend locked-db snapshot fallback to search freshness prechecks (scoped, federated, and --no-autoindex paths)
-- [ ] [#sdia] [recommended] Expose snapshot-fallback recovery in tsift status human + JSON output so agents can tell when health checks ran in degraded mode
-- [ ] [#tdoc] [recommended] Add lock diagnostics/remediation command for rollback-journal and writer-lock states
+- [x] [#sprch] [recommended] Extend locked-db snapshot fallback to search freshness prechecks (scoped, federated, and --no-autoindex paths)
+- [x] [#sdia] [recommended] Expose snapshot-fallback recovery in tsift status human + JSON output so agents can tell when health checks ran in degraded mode
+- [x] [#tdoc] [recommended] Add lock diagnostics/remediation command for rollback-journal and writer-lock states
 <!-- /agent:backlog -->
 
 <!--

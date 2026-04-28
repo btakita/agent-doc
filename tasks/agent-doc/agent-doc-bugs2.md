@@ -19,8 +19,8 @@ prompt_presets:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-Compacted exchange summary: investigated missing patchbacks and uncommitted write cycles in this document and related  sessions; root causes were traced across fresh Codex route-start acknowledgment, write/commit-boundary drift, stale /boundary preflight churn, pending/backlog mutation capture, submodule writable-root gaps, tmux pane routing/rescue instability, and repair when the response was already present in the document. Multiple  fixes were implemented and pushed on , including fail-closed startup/session-check/commit handling, strict session write-commit, pending-done and bypass guards, backlog alias deprecation, tmux duplicate-start/swap/sync-scope fixes, and repair adoption of already-present responses; a broad commit-all request was blocked on scope, then narrowed and  was verified (, , ) and pushed as . No unresolved exchange prompts remained at compaction time.
-<!-- agent:boundary:00e9a158 -->
+Compacted exchange summary: investigated missing patchbacks and uncommitted write cycles in this document and related src/session-share sessions; root causes were traced across fresh Codex route-start acknowledgment, write/commit-boundary drift, stale HEAD/boundary preflight churn, pending and backlog mutation capture, submodule writable-root gaps, tmux pane routing and rescue instability, and repair when the response was already present in the document. Multiple src/agent-doc fixes were implemented and pushed on origin/20260422/codex-agent-backend, including fail-closed startup/session-check/commit handling, strict session write-commit, pending-done and bypass guards, backlog alias deprecation, tmux duplicate-start/swap/sync-scope fixes, and repair adoption of already-present responses; a broad commit-all request was blocked on scope, then narrowed and src/agent-doc was verified with cargo test, cargo build, and cargo install --path . --force and pushed as 0e18871. No unresolved exchange prompts remained at compaction time.
+<!-- agent:boundary:dbd90a3c -->
 <!-- /agent:exchange -->
 
 <!--

@@ -313,7 +313,61 @@ The actual publish step is blocked on two concrete release-boundary issues:
 So I did **not** run the real `cargo publish` / PyPI publish, because doing so now would either fail immediately on crates.io version reuse or violate the repo's stated release process.
 
 If you want me to finish the release, the next explicit step is to tell me the new version to cut for this branch work. Then I can bump version files, update `VERSIONS.md`, merge/release per the repo policy, and publish.
-<!-- agent:boundary:97c3d152 -->
+
+❯ do #gscsa. spec-test-build-install-commit-push
+### Re: GSC auth bug — gpt-5
+
+I completed the `#gscsa` implementation locally.
+
+I checked Google's current Search Console docs before changing the auth model:
+- Search Console user management says added users must have a valid Google Account: https://support.google.com/webmasters/answer/7687615
+- the Search Console API docs say the caller must already have appropriate Search Console access: https://developers.google.com/webmaster-tools/about
+
+From that, the safe implementation is not to assume a service-account email is addable as a property user.
+
+In `src/corky` I changed the GSC path accordingly:
+- `src/gsc/auth.rs` now prefers stored/refreshed `gsc:*` user tokens first
+- a configured service-account path is only kept if the minted token can successfully list at least one visible Search Console property
+- if that probe fails or comes back empty, corky now warns and falls back to `corky gsc auth`
+- help/spec/diagnostic text no longer tells the user to unconditionally add the SA email in Search Console
+- added unit coverage for the no-sites probe and fallback messaging
+
+Verification passed end-to-end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+I did **not** make the requested commit/push. The blocker is the current `src/corky` repo state: branch `20260413/corky-gsc` already has unrelated pre-existing modifications across multiple `.claude/skills/...` files, and `src/corky/AGENTS.md` requires clean commits with no dangling unstaged files. I won't bundle those unrelated edits into this GSC fix.
+
+If you want me to finish the delivery boundary, the next safe step is either to include those existing skill-doc changes intentionally in the same commit, or to clean/split them first and then let me commit/push the GSC work.
+### Re: GSC auth bug — gpt-5
+
+The code/spec/test/build/install portion of `#gscsa` is complete locally, but the task remains open because the requested commit/push boundary is still blocked.
+
+I checked Google's current Search Console docs before changing the auth model:
+- Search Console user management says added users must have a valid Google Account: https://support.google.com/webmasters/answer/7687615
+- the Search Console API docs say the caller must already have appropriate Search Console access: https://developers.google.com/webmaster-tools/about
+
+From that, the safe implementation is not to assume a service-account email is addable as a property user.
+
+In `src/corky` I changed the GSC path accordingly:
+- `src/gsc/auth.rs` now prefers stored/refreshed `gsc:*` user tokens first
+- a configured service-account path is only kept if the minted token can successfully list at least one visible Search Console property
+- if that probe fails or comes back empty, corky now warns and falls back to `corky gsc auth`
+- help/spec/diagnostic text no longer tells the user to unconditionally add the SA email in Search Console
+- added unit coverage for the no-sites probe and fallback messaging
+
+Verification passed end-to-end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+I did **not** make the requested commit/push. The blocker is the current `src/corky` repo state: branch `20260413/corky-gsc` already has unrelated pre-existing modifications across multiple `.claude/skills/...` files, and `src/corky/AGENTS.md` requires clean commits with no dangling unstaged files. I won't bundle those unrelated edits into this GSC fix.
+
+If you want me to finish the delivery boundary, the next safe step is either to include those existing skill-doc changes intentionally in the same commit, or to clean/split them first and then let me commit/push the GSC work.
+<!-- agent:boundary:b485980f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -409,7 +409,7 @@ Commit/push:
 Top of backlog: `#tmv7`.
 
 ❯ #code-review
-#code-review
+❯ #code-review
 ### Re: code review — gpt-5
 
 1. High: workspace scope identity is not unique, so different submodules with the same trailing directory name collide onto the same scope and index DB. In [src/tsift/src/config.rs](../../src/tsift/src/config.rs) lines 88-104, `submodule_dirs()` derives the scope name from `Path::file_name()`, and line 84-85 maps that name directly to `.tsift/indexes/<name>/index.db`. That name is then trusted by workspace indexing and search in [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 1367-1388 and 2864-2908. I reproduced it with `.gitmodules` entries `pkg/app/foo` and `vendor/foo`: `tsift index --workspace` ran two `[foo]` passes against the same DB path, and `tsift search --scope foo vendor_only` resolved back to the first `foo` root instead of the second module.
@@ -490,7 +490,7 @@ Verification:
 Commit/push:
 - the resulting `tsift` changes are already present in `btakita/tsift@61bd2f2` (`chore: commit workspace changes`) on `origin/main`; `git commit` had nothing left to record and `git push origin main` reported `Everything up-to-date`.
 
-Top of backlog: `#substrict`.
+❯ Top of backlog: `#substrict`. 
 
 ❯ do #substrict. spec-test-build-install-commit-push
 ### Re: do #substrict — gpt-5
@@ -514,7 +514,27 @@ Commit/push:
 - `btakita/tsift@ab7f349` (`fix: fail closed unknown submodule indexing`) pushed to `origin/main`.
 
 Top of backlog: `#tmv7`.
-<!-- agent:boundary:c1c64e50 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: `tsift status` can report a partially indexed workspace as fully fresh. In [status.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/status.rs:162), `check_workspace_index()` skips any configured scope whose `index.db` is missing (lines 165-168) and then computes freshness only from the remaining scopes (lines 191-220). I reproduced this with a workspace containing `alpha` and `beta`, after indexing only `alpha` via `tsift index --submodule alpha <root>`: `tsift status --json <root>` returned `{"state":"fresh"}` with only one `workspace_scopes` entry and no warning that `beta` had never been indexed.
+
+2. High: workspace-only indexes are still unusable by default for `graph`, `explain`, `path`, and `communities`. [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1952) routes those commands through `open_index_db()`, which falls back to `root/.tsift/index.db` whenever `--scope` is omitted (lines 1956-1969); `graph` also duplicates the same root-only fallback in [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1658). After `tsift index --workspace <root>`, `tsift graph alpha <root>` still fails with `no index found at .../.tsift/index.db` unless the caller already knows the right scope to pass.
+
+3. Medium: `tsift summarize --extract ... --diff` ignores untracked new files. In [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2405), diff extraction takes its file list entirely from `summarize::git_changed_files()`; [summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:599) implements that as `git diff --name-only HEAD`, which excludes untracked paths. I reproduced this in a repo with a committed `src/main.rs` plus a new untracked `src/new.rs`: `tsift summarize --extract src --diff --path <root>` returned `No files to extract.` instead of attempting to summarize the new file.
+
+Added three recommended backlog items from these findings and ordered them by priority.
+
+Top of backlog: `#wspart`.
+
+Added:
+1. `#wspart` — `[recommended]` status: report missing workspace scopes instead of false `fresh` when some configured scoped indexes are absent.
+2. `#wsquery` — `[recommended]` workspace queries: make `graph` / `explain` / `path` / `communities` workspace-aware by default, or fail with an explicit scope-selection error instead of a missing root DB.
+3. `#sumdiff` — `[recommended]` summarize diff mode: include untracked files, not just `git diff --name-only HEAD`.
+
+Verification: review-only turn. I validated the findings with direct CLI repros against the current `tsift` binary; I did not change code or run the full suite.
+<!-- agent:boundary:7577ef16 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -523,6 +543,9 @@ Top of backlog: `#tmv7`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#wspart] [recommended] status: report missing workspace scopes instead of false fresh when some configured scoped indexes are absent
+- [ ] [#wsquery] [recommended] workspace queries: make graph / explain / path / communities workspace-aware by default, or fail with an explicit scope-selection error instead of a missing root DB
+- [ ] [#sumdiff] [recommended] summarize diff mode: include untracked files, not just git diff --name-only HEAD
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

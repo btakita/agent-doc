@@ -150,6 +150,7 @@ pub fn run(
             return Ok(());
         }
     };
+    write::guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
 
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
@@ -470,6 +471,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
 
@@ -509,6 +511,36 @@ mod tests {
         assert!(prompt.contains("kind=\"prompt_target\""));
         assert!(prompt.contains("❯ First unresolved question?"));
         assert!(prompt.contains("❯ Second unresolved question?"));
+    }
+
+    #[test]
+    fn run_rejects_bare_compact_exchange_directive() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n\n",
+            "compact exchange\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let err = run(&doc, false, None, None, true, true, &Config::default())
+            .expect_err("run should fail closed on unresolved compaction directive");
+        let msg = err.to_string();
+        assert!(msg.contains("compact exchange"));
+        assert!(msg.contains("agent-doc compact"));
     }
 
     #[test]

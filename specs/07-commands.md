@@ -14,6 +14,8 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 **Imperative-directive guard:** if the pending user diff contains executable directives like `do #id`, `run tests`, `build + install`, `commit + push`, a one-word approval such as `go`, or natural-language pending-item task text that begins with an imperative verb (for example `[#n8q4] Fix the cross-repo ...`), `run` rejects status-only/meta-only agent replies. The response must include either concrete execution evidence (for example commands, verification/commit sections, or file-path evidence) or a concrete blocker.
 
+**Compaction-directive guard:** if the pending diff contains a bare `compact exchange` request, `run` must not proceed as an ordinary agent response cycle. It fails closed and instructs the caller to use the binary compaction path instead: `agent-doc compact <FILE> --commit` (optionally with `--message ...`).
+
 **Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `repair` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
 
 ## init
@@ -457,6 +459,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - `--pending-only` is rejected because `finalize` is for response cycles, not standalone pending maintenance
 - **pre-commit pending capture gate** (strict mode only): after a successful write and before the commit step, `finalize` loads the active capture, extracts response text, and runs `detect_uncaptured_recommendations()`. When `pending_capture_guard` is `strict` and the response contains recommendation-like items or a single high-confidence unresolved follow-up item (for example, a current bug still needing tracking) without any `--pending-add` flags, `finalize` exits non-zero before committing. When `pending_capture_guard` is `warn` (default) or `off`, only the post-commit `session-check` fires. The `<!-- no-pending-capture -->` marker and `had_pending_mutations` cycle state suppress the gate as they do for `session-check`
 - **pre-commit pending-done gate** (strict mode only): after the write succeeds and before the commit step, `finalize` also compares the active response capture against still-open backlog ids. When the response clearly completes an existing `#id` item but the cycle recorded no matching `--pending-done <id>`, `finalize` exits non-zero before committing. Session documents default this guard to `strict`; frontmatter or project config may downgrade it to `warn` or `off`. The `<!-- no-pending-done-guard -->` marker suppresses the gate for intentional exceptions.
+- **compaction-directive gate:** if the current baseline→document diff contains a bare `compact exchange` request, `write` / `finalize` reject the ordinary response path before mutation and direct the caller to `agent-doc compact <FILE> --commit` (optionally `--message ...`) instead. Normal finalize success is reserved for actual response turns, not binary-owned exchange compaction.
 - success means the cycle closed in `.agent-doc/state/cycles/<hash>.json` as `committed`
 - a write error plus a commit error is still a command failure even if some recovery work ran
    - imperative directive diffs (`do #id`, `run tests`, `build + install`, `commit + push`, `go`, or pending-item prose like `[#id] Fix ...`) reject status-only/meta-only responses unless they contain concrete execution evidence or a concrete blocker
@@ -475,7 +478,10 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - when replaying a historical template capture that still contains a single list-shaped `replace:pending` / `patch:pending` block, normalize that pending/backlog patch through the granular pending primitives before applying the assistant response; unsupported shapes still fail closed
    - fail closed before replay when a template-mode pending/captured payload looks like a transcript or full document dump rather than one assistant closeout; save the blocked payload under `.agent-doc/repair-blocked/` for diagnostics instead of appending it into `agent:exchange`
 2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`
-3. If no pending/captured repair path exists, print the usual "No pending response found" note and stop without committing
+3. If no pending/captured repair path exists, repair still checks for stale completed backlog items:
+   - if the live `agent:backlog` / `agent:pending` still contains `- [x]` items, reap them immediately, mirror the same reap into the snapshot, and archive them into `agent:pending-done` when that component exists
+   - snapshot sync for that reap must stay surgical to the backlog/archive components; it must not absorb unrelated live exchange/user prompt edits into the snapshot
+   - otherwise stop without committing
 
 **Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content. For template docs that means `AlreadyApplied` is still a document-mutation-capable repair outcome when transcript canonicalization is needed.
 

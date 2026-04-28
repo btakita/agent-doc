@@ -116,11 +116,20 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let repo_actions = diff::extract_imperative_directives(&diff_text);
     let orchestration_request = diff::detect_orchestration_request(&diff_text);
+    let exchange_compaction_requested = diff::detect_exchange_compaction_request(&diff_text);
     let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
     let pending_mutations = pending_mutations_for_doc(&content, &repo_actions, &prompt_targets)?;
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
+
+    if exchange_compaction_requested {
+        required_commands.push(format!(
+            "Run `agent-doc compact {} --commit` before any free-form response.",
+            file.display()
+        ));
+        handoff = HandoffTarget::Compact;
+    }
 
     if let Some(request) = orchestration_request {
         required_commands.push(format!(
@@ -162,7 +171,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         }
     }
 
-    required_commands.extend(finalize_placeholder_commands(file, &fm));
+    if !exchange_compaction_requested {
+        required_commands.extend(finalize_placeholder_commands(file, &fm));
+    }
 
     Ok(DispatchPlan {
         prompt_targets,
@@ -419,6 +430,66 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    #[test]
+    fn build_plan_dispatches_compact_exchange_request() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+compact exchange
+<!-- /agent:exchange -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.handoff, HandoffTarget::Compact);
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("agent-doc compact") && cmd.contains("--commit")),
+            "expected compact handoff command, got: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            !plan
+                .required_commands
+                .iter()
+                .any(|cmd| cmd.contains("agent-doc finalize")),
+            "compact handoff should not advertise finalize: {:?}",
+            plan.required_commands
+        );
     }
 
     #[test]

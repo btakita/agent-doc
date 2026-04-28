@@ -340,6 +340,39 @@ fn resolve_commit_mode(
     Ok(CommitMode::BestEffort)
 }
 
+fn compact_command_hint(file: &Path) -> String {
+    format!("agent-doc compact {} --commit", file.display())
+}
+
+pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
+    if crate::diff::detect_exchange_compaction_request(diff_text) {
+        anyhow::bail!(
+            "bare `compact exchange` directive detected in the current diff; close this turn \
+             through the binary compaction path instead: `{}` \
+             (optionally add `--message ...` for a custom checkpoint summary)",
+            compact_command_hint(file)
+        );
+    }
+    Ok(())
+}
+
+fn guard_no_exchange_compaction_request_between(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+) -> Result<()> {
+    let baseline_owned = baseline
+        .map(ToOwned::to_owned)
+        .or_else(|| snapshot::load(file).ok().flatten());
+    let Some(base) = baseline_owned.as_deref() else {
+        return Ok(());
+    };
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(base, current_content) else {
+        return Ok(());
+    };
+    guard_no_exchange_compaction_request_for_diff(file, &diff_text)
+}
+
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
 
@@ -447,6 +480,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         .map(std::fs::read_to_string)
         .transpose()
         .context("failed to read baseline file")?;
+
+    let current_content =
+        std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
+    guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
 
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
@@ -2080,7 +2117,8 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     }
 
     let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
-    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    let snapshot_content =
+        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -2222,7 +2260,8 @@ pub fn run_template(
     }
 
     let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
-    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    let snapshot_content =
+        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -2771,10 +2810,13 @@ pub fn run_stream(
     }
 
     let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
-    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    let snapshot_content =
+        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
     let snapshot_crdt_state = match snapshot_mode {
         SnapshotPersistMode::FinalContent => crdt_state,
-        SnapshotPersistMode::ContentOurs => crate::crdt::CrdtDoc::from_text(&content_ours).encode_state(),
+        SnapshotPersistMode::ContentOurs => {
+            crate::crdt::CrdtDoc::from_text(&content_ours).encode_state()
+        }
     };
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
@@ -4358,6 +4400,36 @@ mod tests {
     }
 
     #[test]
+    fn guard_rejects_normal_write_when_diff_requests_compact_exchange() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Old progress.\n\n",
+            "compact exchange\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let err = guard_no_exchange_compaction_request_between(&doc, Some(baseline), current)
+            .expect_err("ordinary response write should be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("compact exchange"));
+        assert!(msg.contains("agent-doc compact"));
+    }
+
+    #[test]
     fn write_preserves_user_edits_via_merge() {
         let base = "---\nsession: test\n---\n\n## User\n\nOriginal question\n";
         let response = "My response";
@@ -4515,7 +4587,8 @@ mod tests {
     #[test]
     fn explicit_baseline_preserves_concurrent_user_edits_for_next_cycle() {
         let baseline = Some("baseline");
-        let content_ours = "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
         let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
 
         assert_eq!(
@@ -4534,7 +4607,8 @@ mod tests {
 
     #[test]
     fn implicit_baseline_still_persists_final_merged_disk_state() {
-        let content_ours = "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
         let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
 
         assert_eq!(

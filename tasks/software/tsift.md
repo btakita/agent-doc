@@ -408,8 +408,20 @@ Commit/push:
 
 Top of backlog: `#tmv7`.
 
+❯ #code-review
 #code-review
-<!-- agent:boundary:6e5bcda7 -->
+### Re: code review — gpt-5
+
+1. High: workspace scope identity is not unique, so different submodules with the same trailing directory name collide onto the same scope and index DB. In [src/tsift/src/config.rs](../../src/tsift/src/config.rs) lines 88-104, `submodule_dirs()` derives the scope name from `Path::file_name()`, and line 84-85 maps that name directly to `.tsift/indexes/<name>/index.db`. That name is then trusted by workspace indexing and search in [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 1367-1388 and 2864-2908. I reproduced it with `.gitmodules` entries `pkg/app/foo` and `vendor/foo`: `tsift index --workspace` ran two `[foo]` passes against the same DB path, and `tsift search --scope foo vendor_only` resolved back to the first `foo` root instead of the second module.
+
+2. Medium: `tsift status` reports `index: missing` for a workspace that was successfully indexed with scoped DBs only. [src/tsift/src/status.rs](../../src/tsift/src/status.rs) lines 93-98 hard-code status to `.tsift/index.db` and `.tsift/summaries.db`, and lines 110-113 immediately return `Missing` when the root DB is absent. I reproduced this by indexing a temp workspace with `tsift index --workspace <tmp>`; both submodule indexes were created, but `tsift status <tmp> --json` still returned `{"index":{"state":"missing"}}` plus the misleading recommendation to run `tsift init && tsift index .`.
+
+3. Medium: `tsift index --submodule <name>` accepts unknown names and indexes `root/<name>` anyway, creating a scoped DB that later commands refuse to use. In [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 1367-1373, the `--submodule` target falls back to `root.join(name)` when the name is not present in `.gitmodules`. But search resolves scopes only through configured submodules in lines 2864-2892. I reproduced this with a workspace that only configured `alpha`: `tsift index --submodule nope <tmp>` created `.tsift/indexes/nope/index.db`, then `tsift search stray --path <tmp> --scope nope` failed with `unknown scope \`nope\`. Available scopes: alpha`.
+
+Verification: review-only turn. I validated findings with direct `cargo run -- index/search/status ...` repros in temporary workspaces.
+
+Top of backlog: `#scopeid`.
+<!-- agent:boundary:d7f0ba5a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -418,6 +430,9 @@ Top of backlog: `#tmv7`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#scopeid] [recommended] Make workspace scope identifiers unique instead of deriving them from the last path component in .gitmodules
+- [ ] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
+- [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

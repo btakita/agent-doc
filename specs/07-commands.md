@@ -688,6 +688,8 @@ For fresh auto-starts, route now fails closed instead of silently idling when pr
 
 Fresh auto-start also requires a real per-document cycle acknowledgment after trigger injection. Accepting the typed command in the pane is not sufficient. After the trigger is sent, route polls the target document's persisted cycle state and only treats the start as successful once it observes a new cycle for that file (for example `preflight_started`, `response_captured`, `write_applied`, or `committed`). If the baseline state was already `committed`, route requires a newer cycle id; same-cycle `commit_already_current` churn does not count. Success logs `fresh_route_start_acknowledged`; absence of a new cycle within the bounded wait logs `fresh_route_start_missing` and fails closed.
 
+If that fresh-start acknowledgment fails after route already created and registered a new pane, cleanup must preserve the pane when it is still the live registered owner for the document. Route may fail closed with `fresh_route_start_missing` / `fresh_route_trigger_missing`, but it must not convert that startup-ack miss into a visible tmux pane crash by killing the new live pane as "orphaned cleanup".
+
 ## is_tracked FFI Export
 
 `agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.

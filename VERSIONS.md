@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Failed fresh-route cleanup no longer kills the new live pane.** When route creates and registers a new pane for a document but later fails closed because fresh-start acknowledgment was not observed, `route.rs` now preserves that pane if it is still the live registered owner instead of cleaning it up as an orphan. This keeps `fresh_route_start_missing` / `fresh_route_trigger_missing` from surfacing to the user as a tmux pane crash. Added route coverage for both preserving the registered owner and still cleaning up truly unregistered panes.
+
 - **Resume auto-trigger cancellation now cuts through the shared child-pty writer path.** Supervisor shutdown now flips both the auto-trigger stop flag and the stdin->pty writer stop path before joining either thread, the auto-trigger waits for the shared writer mutex interruptibly, and Unix child-pty writes now poll in short intervals so cancellation can break backpressure instead of hanging behind `stdin->pty`. Added regression coverage for cancelling while the writer lock is busy and updated the supervisor spec to document the shutdown ordering.
 
 - **Resume auto-trigger now proves the prompt from current child PTY output.** The restart watcher no longer decides readiness from `tmux capture-pane` history. It now watches the filtered output emitted by the current resumed child and only injects once the latest non-empty line is a harness prompt, so stale visible prompts left in tmux scrollback cannot trigger an early resume command. Added regression coverage for latest-line prompt detection and updated the supervisor spec/module contract to match.

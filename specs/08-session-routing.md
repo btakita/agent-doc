@@ -51,6 +51,8 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Duplicate-pane guard:** When a document's registry entry is stale but there is still a live pane whose process tree is already running that document, route re-registers and reuses that pane before attempting lazy-claim or auto-start.
 
+**Failed fresh-start cleanup guard:** If route creates a new pane, registers it, and later fails closed because fresh-start acknowledgment was not observed, cleanup must preserve that pane when it is still the live registered owner for the document. The operator should see the startup-ack failure, not a killed pane.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.

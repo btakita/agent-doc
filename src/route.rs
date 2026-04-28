@@ -260,25 +260,44 @@ pub fn run_with_tmux(
             Ok(())
         }
         Err(e) => {
-            // Clean up orphaned panes created during the failed route attempt.
-            // Compare current panes to the snapshot and kill any new ones.
+            // Clean up panes created during the failed route attempt, but fail
+            // closed for the current session owner: if a newly-created pane is
+            // still the registered live pane for this document, preserve it so
+            // a missed start-ack cannot crash the user's active tmux pane.
             if let Some(w) = window_arg.as_deref()
                 && let Ok(panes_after) = tmux.list_window_panes(w)
             {
                 for p in &panes_after {
-                    if !panes_before.contains(p) {
-                        eprintln!(
-                            "[route] cleaning up orphaned pane {} (created during failed route)",
-                            p
-                        );
-                        tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
-                        let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+                    if panes_before.contains(p) {
+                        continue;
                     }
+                    if should_preserve_failed_route_pane(tmux, p, &session_id) {
+                        eprintln!(
+                            "[route] preserving newly-created pane {} after failed route because it is still the live registered owner for {}",
+                            p,
+                            file.display()
+                        );
+                        continue;
+                    }
+                    eprintln!(
+                        "[route] cleaning up orphaned pane {} (created during failed route)",
+                        p
+                    );
+                    tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
+                    let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
                 }
             }
             Err(e)
         }
     }
+}
+
+fn should_preserve_failed_route_pane(tmux: &Tmux, pane_id: &str, session_id: &str) -> bool {
+    sessions::lookup(session_id)
+        .ok()
+        .flatten()
+        .as_deref()
+        .is_some_and(|registered| registered == pane_id && tmux.pane_alive(pane_id))
 }
 
 /// Resolve an existing pane or create a new one. Returns the pane ID.
@@ -3497,6 +3516,53 @@ history line
 
         let registry = sessions::load().unwrap();
         assert_eq!(registry.len(), 2, "both documents should be registered");
+
+        std::env::set_current_dir(prev_cwd).unwrap();
+    }
+
+    #[test]
+    fn failed_route_cleanup_preserves_live_registered_owner() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
+        let pane = iso.new_session("test", dir.path()).unwrap();
+        sessions::register_full_in(
+            dir.path(),
+            "session-1",
+            &pane,
+            "tasks/software/corky.md",
+            123,
+            "@1",
+        )
+        .unwrap();
+
+        assert!(
+            should_preserve_failed_route_pane(&iso, &pane, "session-1"),
+            "failed-route cleanup must preserve the live registered owner pane"
+        );
+
+        std::env::set_current_dir(prev_cwd).unwrap();
+    }
+
+    #[test]
+    fn failed_route_cleanup_does_not_preserve_unregistered_pane() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let iso = IsolatedTmux::new("route-test-cleanup-unregistered");
+        let pane = iso.new_session("test", dir.path()).unwrap();
+
+        assert!(
+            !should_preserve_failed_route_pane(&iso, &pane, "session-1"),
+            "failed-route cleanup should still remove panes that never became the live owner"
+        );
 
         std::env::set_current_dir(prev_cwd).unwrap();
     }

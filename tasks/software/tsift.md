@@ -491,7 +491,7 @@ Commit/push:
 - the resulting `tsift` changes are already present in `btakita/tsift@61bd2f2` (`chore: commit workspace changes`) on `origin/main`; `git commit` had nothing left to record and `git push origin main` reported `Everything up-to-date`.
 
 Top of backlog: `#substrict`.
-<!-- agent:boundary:71ec1e07 -->
+<!-- agent:boundary:27d3fad5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -500,7 +500,6 @@ Top of backlog: `#substrict`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
 - [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

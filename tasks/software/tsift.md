@@ -969,7 +969,27 @@ Verification:
 - installed-binary smoke check: forced a 1s timeout with `TSIFT_TEST_SEARCH_WORKER_SLEEP_MS=5000`; `tsift search` exited with the timeout error and the recorded worker PID was no longer alive.
 
 Commit: `btakita/tsift@fdd1609` pushed to `origin/main`.
-<!-- agent:boundary:8f0a2e83 -->
+
+❯ do #walckpt. spec-test-build-install-commit-push
+### Re: do #walckpt — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- writable `IndexDb::open()` connections now set and verify `PRAGMA wal_autocheckpoint=256` after forcing WAL mode, so tsift-owned index writers checkpoint on an explicit budget instead of relying on SQLite defaults.
+- added regression coverage that asserts the writable index connection now carries WAL mode, the 5s busy timeout, and the explicit auto-checkpoint setting together.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.2`.
+
+Verification:
+- `make check` passed: 351 unit tests + 13 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+- installed binary reports `tsift 0.1.2`.
+
+Note: `wal_autocheckpoint` is connection-scoped in SQLite, so the guarantee is enforced on tsift's writable index connections rather than as a persistent DB header value.
+
+Commit: `btakita/tsift@1381e76` pushed to `origin/main`.
+<!-- agent:boundary:f315920f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -978,7 +998,7 @@ Commit: `btakita/tsift@fdd1609` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)
+- [x] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)
 - [ ] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
 - [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
 <!-- /agent:backlog -->

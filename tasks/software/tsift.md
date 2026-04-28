@@ -363,7 +363,29 @@ Added:
 2. `#sumscope` — fix workspace summarize extraction so symbol context comes from the correct scoped index instead of an arbitrary first `index.db` plus suffix-based file matching.
 
 I did not add more than these two because they cover the concrete correctness gaps from the review without turning the backlog into duplicated implementation detail.
-<!-- agent:boundary:04be7066 -->
+
+❯ do #sumpath. spec-test-build-install-commit-push
+### Re: do #sumpath — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift summarize --extract <relative>` now resolves the walked extraction path against `--path` / the canonical project root before the non-`--diff` file walk, so extraction no longer depends on the caller's current working directory.
+- added regressions in both the direct summarize path (`src/main.rs`) and the compiled CLI surface (`tests/exit_code.rs`), including an out-of-tree CLI repro that would previously return `No files to extract.` from the wrong `src/`.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.11`, and refreshed the installed binary.
+
+Verification:
+- `cargo test summarize_extract -- --nocapture` passed.
+- `make check` passed: 363 unit tests + 27 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.11`.
+
+Commit/push:
+- `btakita/tsift@1c3964a` (`fix: harden summarize cache and extract paths`) pushed to `origin/main`.
+- that commit also carried the already-verified local summarize cache hardening changes that had been left uncommitted from the prior blocked turn.
+
+Top of backlog: `#sumscope`.
+<!-- agent:boundary:580d0ee0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -372,7 +394,7 @@ I did not add more than these two because they cover the concrete correctness ga
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sumpath] fix summarize --extract relative path resolution against --path root
+- [x] [#sumpath] fix summarize --extract relative path resolution against --path root
 - [ ] [#sumscope] fix workspace summarize symbol-index selection and same-path collisions
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

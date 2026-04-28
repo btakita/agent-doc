@@ -170,7 +170,26 @@ Verification:
 - `cargo install --path .` passed, and `tsift --version` now reports `0.1.6`.
 
 Commit: `btakita/tsift@c04ad6d` pushed to `origin/main`.
-<!-- agent:boundary:0ac9d9aa -->
+
+❯ do #lintdb. spec-test-build-install-commit-push
+### Re: do #lintdb — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift lint` no longer probes the retired `symbols.db` layout. It now discovers live `index.db` files from the nearest ancestor project root, including single-project `.tsift/index.db` and scoped `.tsift/indexes/*/index.db` layouts.
+- added helper-level regressions in `src/lint.rs` for project-root discovery and scoped index discovery, plus direct command coverage in `src/main.rs` and a compiled CLI regression in `tests/exit_code.rs`.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.7` so the lint/index contract matches the shipped behavior.
+
+Verification:
+- `cargo test lint_ -- --nocapture` passed.
+- `cargo test find_project_root_uses_markdown_ancestors -- --nocapture` passed.
+- `make check` passed: 359 unit tests + 22 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.7`.
+
+Commit: `btakita/tsift@f1868bb` pushed to `origin/main`.
+<!-- agent:boundary:70a4aa88 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -179,8 +198,7 @@ Commit: `btakita/tsift@c04ad6d` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
-- [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
+- [x] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

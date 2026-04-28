@@ -594,7 +594,27 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:8c4fcfd0 -->
+
+❯ do #rvinjectrace. spec-test-build-install-commit-push
+### Re: `#rvinjectrace` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `3d4c157`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The fix closes the trigger-window race by moving restart auto-trigger delivery off tmux pane stdin and onto the supervisor-owned child pty writer:
+- the watcher still waits for a visible harness prompt via `tmux capture-pane`
+- once the prompt appears, it re-checks cancellation and writes `agent-doc <file>\r` directly to the child pty
+- if that writer is already gone, the handoff records `SendFailed` instead of typing into the supervisor restart prompt or a later pane process
+
+Regression/spec updates:
+- added unit coverage for carriage-return injection, late cancel before write, and closed-writer failure during the trigger window
+- updated the supervisor spec and unreleased notes to document child-pty trigger delivery
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+<!-- agent:boundary:2f076f5a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -603,6 +623,5 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#rvlateprompt] [recommended] Treat auto-trigger timeout as provisional until the resumed child either truly never establishes a prompt or manual recovery is observed.
-- [ ] [#rvinjectrace] [recommended] Re-check child liveness/cancellation immediately before auto-trigger send-keys and add a regression for child exit during the trigger window.
+- [x] [#rvinjectrace] [recommended] Re-check child liveness/cancellation immediately before auto-trigger send-keys and add a regression for child exit during the trigger window.
 <!-- /agent:backlog -->

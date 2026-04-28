@@ -306,7 +306,7 @@ Verification:
 - `cargo install --path . --force`
 
 ❯ do #freshack. spec-test-build-install-commit-push
-### Re: #freshack — opus-4-6 (HEAD)
+### Re: #freshack — opus-4-6
 
 Implemented `#freshack` in `src/agent-doc` and pushed commit `de6dad7` to `origin/20260422/codex-agent-backend`.
 
@@ -325,7 +325,7 @@ Verification:
 - `cargo test` — 1876 tests, all passing
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:f788b6f8 -->
+<!-- agent:boundary:f01966a6 -->
 <!-- /agent:exchange -->
 
 <!--

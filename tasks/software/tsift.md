@@ -150,7 +150,27 @@ The key distinction is that `#tmuxcrash` / `#bugs2tmux` fixed the **ambiguous li
 I captured that remaining gap as `#freshack`, added it to the top of `tasks/agent-doc/agent-doc-bugs2.md`, and created a dedicated plan in `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`. The plan focuses on reconstructing the `tsift.md` `%279` / `%285` startup-miss chain, auditing `route.rs` + `start.rs` fresh-start acknowledgment, and making startup misses fail visibly instead of looking like dead tmux panes.
 
 Verification: planning-only turn; no code changes or tests run.
-<!-- agent:boundary:7a386868 -->
+
+❯ do #badscope. spec-test-build-install-commit-push
+### Re: do #badscope — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift search --scope <name>` now fails closed when the submodule name is unknown instead of silently falling back to a workspace-root lexical search.
+- the scope resolution path now reports the available submodule names, so typoed or stale scope names produce an immediate actionable error.
+- added regressions at both layers: a direct `cmd_search` test in `src/main.rs` and a compiled-CLI integration test in `tests/exit_code.rs`.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.6` so the strict scope contract is recorded in the versioned surface.
+
+Verification:
+- `cargo test scoped_search_cmd_errors_on_unknown_scope -- --nocapture` passed.
+- `cargo test search_scope_fails_on_unknown_submodule_name --test exit_code -- --nocapture` passed.
+- `make check` passed: 355 unit tests + 21 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.6`.
+
+Commit: `btakita/tsift@c04ad6d` pushed to `origin/main`.
+<!-- agent:boundary:0ac9d9aa -->
 <!-- /agent:exchange -->
 
 <!--
@@ -159,7 +179,7 @@ Verification: planning-only turn; no code changes or tests run.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
+- [x] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
 - [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

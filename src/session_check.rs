@@ -181,15 +181,8 @@ fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let newly_completed_ids = crate::cycle_state::load(file)?
-        .map(|state| state.pending_done_ids)
-        .unwrap_or_default();
-
     let refs = completed
         .into_iter()
-        .filter(|item| {
-            item.id.is_empty() || !newly_completed_ids.iter().any(|done| done == &item.id)
-        })
         .map(|item| {
             if item.id.is_empty() {
                 format!("<missing-id> {}", item.text)
@@ -2092,19 +2085,24 @@ mod tests {
     }
 
     #[test]
-    fn session_check_allows_completed_backlog_items_recorded_this_cycle() {
+    fn session_check_interrupts_when_completed_backlog_items_were_recorded_this_cycle() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_committed_capture_with_pending(
             tmp.path(),
             None,
             "### Re: `#reap1` — gpt-5\n\nImplemented.\n",
             false,
-            Some("- [x] [#reap1] Completed but awaiting next preflight reap\n"),
+            Some("- [x] [#reap1] Completed but stranded after closeout\n"),
             &["reap1"],
         );
 
-        let report = inspect_with_warnings(&doc).unwrap();
-        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("completed backlog item(s)"));
+                assert!(message.contains("#reap1"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
     }
 
     #[test]

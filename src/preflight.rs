@@ -1215,7 +1215,7 @@ pub fn run(file: &Path) -> Result<()> {
 ///
 /// Any write-through (backfill / reap) is persisted and committed in the same pass.
 /// Silent no-op when the document has no `agent:pending` component.
-fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
+pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
         Err(_) => return Ok((false, 0)),

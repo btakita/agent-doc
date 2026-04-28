@@ -14,7 +14,7 @@ Pending items carry stable IDs and GFM checkboxes:
 
 ```
 - [ ] [#a3f2] active item
-- [x] [#b1c4] user-marked done (preflight reaps next cycle; `agent-doc repair` can also clean up stale completed items)
+- [x] [#b1c4] user-marked done (commit-required closeouts reap it in the same cycle; preflight / repair also clean up stale completed items)
 - [/] [#c9e0] gated — skipped by reaper, waiting on external signal
 ```
 
@@ -28,7 +28,7 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
-| `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle. Repeat for multiple ids. |
+| `--pending-done <id>` | Mark `[x]` — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |

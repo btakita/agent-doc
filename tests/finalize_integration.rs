@@ -388,6 +388,69 @@ fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() 
 }
 
 #[test]
+fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
+    let (tmp, doc) = setup_session_template_doc();
+    insert_pending_item(
+        &doc,
+        "- [ ] [#done1] Close the loop\n- [ ] [#keep1] Keep tracking follow-up\n",
+    );
+    let current = fs::read_to_string(&doc).unwrap();
+    let updated = current.replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n<!-- /agent:pending-done -->\n",
+    );
+    fs::write(&doc, &updated).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-done",
+            "done1",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(!content.contains("- [x] [#done1] Close the loop"));
+    assert!(content.contains("[#keep1] Keep tracking follow-up"));
+    assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
+    assert!(content.contains("<!-- agent:pending-done -->"));
+    assert!(content.contains("[#done1] Close the loop"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head_text = String::from_utf8_lossy(&head_blob.stdout);
+    assert!(
+        !head_text.contains("- [x] [#done1] Close the loop"),
+        "HEAD backlog should not strand freshly completed items"
+    );
+    assert!(
+        head_text.contains("- [ ] [#keep1] Keep tracking follow-up"),
+        "HEAD backlog should retain remaining live work"
+    );
+    assert!(
+        head_text.contains("<!-- agent:pending-done -->")
+            && head_text.contains("[#done1] Close the loop"),
+        "HEAD should archive reaped items when a pending-done component exists"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
     let (tmp, doc) = setup_template_doc();
     enable_strict_pending_capture(&doc);

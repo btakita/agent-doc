@@ -131,7 +131,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 | Flag | Behavior |
 |------|----------|
 | `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. |
-| `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle, or immediate if `--reap` is added. Valid from any state (`[ ]` or `[/]`). |
+| `--pending-done <id>` | Mark `[x]` — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
 | `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. |

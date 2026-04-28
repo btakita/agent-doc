@@ -466,6 +466,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if options.pending_only {
+        run_closeout_pending_maintenance(file, commit_mode)?;
         return finalize_commit(file, commit_mode);
     }
 
@@ -526,6 +527,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         && let Err(e) = consume_queue_prompt(file)
     {
         eprintln!("[queue] warning: consumption failed: {}", e);
+    }
+
+    if write_result.is_ok() {
+        run_closeout_pending_maintenance(file, commit_mode)?;
     }
 
     // Phase 3b: pre-commit pending closeout gates (strict mode only).
@@ -701,6 +706,13 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
     }
+}
+
+fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Result<()> {
+    if commit_mode != CommitMode::Required {
+        return Ok(());
+    }
+    crate::preflight::run_pending_maintenance(file).map(|_| ())
 }
 
 /// Consume the first queue prompt after a successful write cycle.

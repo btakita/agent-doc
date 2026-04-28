@@ -421,7 +421,53 @@ Top of backlog: `#tmv7`.
 Verification: review-only turn. I validated findings with direct `cargo run -- index/search/status ...` repros in temporary workspaces.
 
 Top of backlog: `#scopeid`.
-<!-- agent:boundary:d7f0ba5a -->
+
+❯ do #scopeid. spec-test-build-install-commit-push
+### Re: do #scopeid — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- workspace scope ids are now collision-free. Unique submodules keep the short leaf name, but duplicate trailing names promote to the full `.gitmodules` path such as `pkg/app/foo` and `vendor/foo`, so workspace indexing and scoped search no longer share one `index.db`.
+- duplicate leaf-name selectors now fail closed as ambiguous and list the concrete scope ids to use, instead of silently resolving to the first matching submodule.
+- threaded the new `WorkspaceScope` model through workspace index/search/query paths and updated the versioned docs (`SPEC.md`, `CLAUDE.md`, `VERSIONS.md`).
+- added regressions in both the in-process command tests and the compiled CLI surface for duplicate-leaf workspaces.
+
+Verification:
+- `cargo test submodule_dirs_use_full_path_when_leaf_names_collide -- --nocapture` passed.
+- `cargo test scoped_search_cmd_errors_on_ambiguous_legacy_scope_name -- --nocapture` passed.
+- `cargo test search_scope_errors_on_ambiguous_duplicate_leaf_name --test exit_code -- --nocapture` passed.
+- `make check` passed: 369 unit tests + 29 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.13`.
+
+Commit/push:
+- `btakita/tsift@7bb0585` (`fix: uniquify workspace scope identifiers`) pushed to `origin/main`.
+
+Top of backlog: `#statusws`.
+### Re: do #scopeid — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- workspace scope ids are now collision-free. Unique submodules keep the short leaf name, but duplicate trailing names promote to the full `.gitmodules` path such as `pkg/app/foo` and `vendor/foo`, so workspace indexing and scoped search no longer share one `index.db`.
+- duplicate leaf-name selectors now fail closed as ambiguous and list the concrete scope ids to use, instead of silently resolving to the first matching submodule.
+- threaded the new `WorkspaceScope` model through workspace index/search/query paths and updated the versioned docs (`SPEC.md`, `CLAUDE.md`, `VERSIONS.md`).
+- added regressions in both the in-process command tests and the compiled CLI surface for duplicate-leaf workspaces.
+
+Verification:
+- `cargo test submodule_dirs_use_full_path_when_leaf_names_collide -- --nocapture` passed.
+- `cargo test scoped_search_cmd_errors_on_ambiguous_legacy_scope_name -- --nocapture` passed.
+- `cargo test search_scope_errors_on_ambiguous_duplicate_leaf_name --test exit_code -- --nocapture` passed.
+- `make check` passed: 369 unit tests + 29 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.13`.
+
+Commit/push:
+- `btakita/tsift@7bb0585` (`fix: uniquify workspace scope identifiers`) pushed to `origin/main`.
+
+Top of backlog: `#statusws`.
+<!-- agent:boundary:95e6a178 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -430,7 +476,7 @@ Top of backlog: `#scopeid`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#scopeid] [recommended] Make workspace scope identifiers unique instead of deriving them from the last path component in .gitmodules
+- [x] [#scopeid] [recommended] Make workspace scope identifiers unique instead of deriving them from the last path component in .gitmodules
 - [ ] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
 - [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

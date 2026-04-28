@@ -341,7 +341,16 @@ What to do when it happens:
 - if it keeps recurring, run `tsift locks /home/brian/work/btakita/agent-loop/src/session-share` while the failure is live; that will distinguish a live writer from a stale sidecar and print the recommended next step
 
 I am not adding a new `tsift` backlog item from this single repro because the current state does not show a stale lock or failed recovery path. If this starts happening without overlapping index work, that would justify a new concurrency/UX bug.
-<!-- agent:boundary:09422656 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: `tsift summarize --extract <relative>` ignores `--path` for the actual file walk. In [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2397), `cmd_summarize()` canonicalizes the project root from `--path` and even computes `extract_scope`, but the non-`--diff` branch still calls `collect_source_files(&extract_path)` at [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2414). That means `tsift summarize --path /repo --extract src/` walks `src/` relative to the caller's current working directory, not `/repo/src`. From outside the repo it can silently extract nothing or extract the wrong tree, while still writing into `/repo/.tsift/summaries.db`.
+
+2. Medium: workspace summarize extraction uses an arbitrary scoped symbol index, so symbol context is nondeterministic and can come from the wrong submodule. [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2791) returns the first `index.db` it sees under `.tsift/indexes/*`, and [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2404) reuses that one DB for every file being summarized. Then [src/tsift/src/summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:411) loads symbols with `WHERE file LIKE '%' || ?1` at [src/tsift/src/summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:431), which suffix-matches any same-named file. In a workspace with multiple `src/lib.rs` or `main.rs` files, summarize extraction can pull symbols from the wrong module, and which module wins depends on `read_dir()` order.
+
+Verification: review-only turn. I did not run the suite.
+<!-- agent:boundary:e7528709 -->
 <!-- /agent:exchange -->
 
 <!--

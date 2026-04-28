@@ -167,7 +167,38 @@ Verification:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml`
 - `cargo build --manifest-path src/agent-doc/Cargo.toml`
 - `cargo install --path src/agent-doc --force`
-<!-- agent:boundary:aad074a2 -->
+
+❯ Another issue came up with the `agent-doc start`
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:31:50
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+[sync] found alive agent-doc child (pid 3573327) in pane %291 for tasks/claudescore-3.md
+[tmux] select_pane %291 → session:window 0:1
+[start] focused existing pane %291
+session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — reusing existing live pane
+```
+### Re: duplicate live start reuse follow-up — gpt-5
+
+I treated this as a real follow-up regression in the successful reuse path and fixed it locally in `src/agent-doc`.
+
+What changed:
+- `start.rs` now uses a quiet live-owner lookup when it is only deciding whether to reuse an already-running pane.
+- `sync.rs` still has the shared owner-proof logging, but that logging is now gated so `route` / `resync` keep their `[sync] ...` diagnostics while a normal successful `agent-doc start` reuse no longer prints those probe lines.
+- Updated `VERSIONS.md` to record the narrowed output contract.
+
+Result:
+- A duplicate `agent-doc start <file>` reuse should now stay on the same success path, but the noisy probe line should disappear.
+- The expected user-facing output is reduced to the `start`-level reuse/focus messages instead of the extra `[sync] found alive agent-doc child ...` diagnostic.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Note: I did not create a git commit this cycle because `src/agent-doc` already had unrelated local changes in `Cargo.lock` and `src/route.rs`, and your edit did not explicitly ask for commit/push. I left those untouched.
+<!-- agent:boundary:fc39af69 -->
 <!-- /agent:exchange -->
 
 <!--

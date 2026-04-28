@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -439,17 +439,38 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 - Pushed commit `3a1a5de` to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:91a5611f -->
-<!-- /agent:exchange -->
-
-<!--
-
+❯ When I navigate the editor to /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md, a session is already running. But I get another window that does not successfully switch focus. #spec-test-build-install-commit-push
 ```
 /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
 ~/work/btakita/agent-loop/src/session-share main ⇡1 !1                                            agent-loop 13:41:31
 ❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
 session 7b453f47 for tasks/claudescore-3.md is running in pane %304 — switching focus
 ```
+### Re: start cross-session focus reuse — gpt-5
+
+Implemented the `agent-doc start` reuse fix in `src/agent-doc` and pushed commit `ded774c` to `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- The reuse path only ran `select-window` + `select-pane`. That is enough within one tmux session, but when the live owner pane is in another session it can print "switching focus" without actually moving the caller's current client into the target session.
+
+What changed:
+- `start.rs` now uses a dedicated focus helper for reuse and restart-success paths.
+- When the current pane and live owner pane are in different tmux sessions, `start` first runs `switch-client -t <target-session>`, then selects the target window and pane.
+- Same-session reuse keeps the existing `select-window` + `select-pane` behavior.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) and `src/tmux-router/src/tmux.rs` untouched.
+<!-- agent:boundary:10fa2ae6 -->
+<!-- /agent:exchange -->
+
+<!--
+`agent-doc resync --fix` kills all running sessions, including ones actively running a turn.
 ---
 When I switch to tsift.md, another session attempts to open
 ![img.png](img.png)

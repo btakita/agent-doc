@@ -147,8 +147,15 @@ fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
 
+    let newly_completed_ids = crate::cycle_state::load(file)?
+        .map(|state| state.pending_done_ids)
+        .unwrap_or_default();
+
     let refs = completed
         .into_iter()
+        .filter(|item| {
+            item.id.is_empty() || !newly_completed_ids.iter().any(|done| done == &item.id)
+        })
         .map(|item| {
             if item.id.is_empty() {
                 format!("<missing-id> {}", item.text)
@@ -158,6 +165,9 @@ fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
         })
         .collect::<Vec<_>>()
         .join(", ");
+    if refs.is_empty() {
+        return Ok(None);
+    }
     Ok(Some(format!(
         "[session-check] INTERRUPTED: document still contains completed backlog item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
         refs
@@ -1533,7 +1543,7 @@ mod tests {
             "### Re: `#reap1` — gpt-5\n\nImplemented.\n",
             false,
             Some("- [x] [#reap1] Completed but not reaped\n"),
-            &["reap1"],
+            &[],
         );
 
         match inspect_with_warnings(&doc).unwrap().status {
@@ -1543,6 +1553,22 @@ mod tests {
             }
             other => panic!("expected interrupted status, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_check_allows_completed_backlog_items_recorded_this_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: `#reap1` — gpt-5\n\nImplemented.\n",
+            false,
+            Some("- [x] [#reap1] Completed but awaiting next preflight reap\n"),
+            &["reap1"],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
     }
 
     #[test]

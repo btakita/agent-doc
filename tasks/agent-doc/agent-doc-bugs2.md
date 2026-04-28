@@ -496,7 +496,27 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 I committed only `src/route.rs`, `specs/07-commands.md`, and `specs/08-session-routing.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
-<!-- agent:boundary:758de8eb -->
+
+❯ commit + push all src/agent-doc files
+### Re: commit + push all `src/agent-doc` files — gpt-5
+
+Done. I committed the remaining modified `src/agent-doc` files and pushed them on `origin/20260422/codex-agent-backend` as `248bfbd`.
+
+What that commit contains:
+- `src/pending.rs`: widened custom pending/backlog ids from 1-8 chars to any non-empty ASCII alphanumeric string
+- `src/diff.rs`: imperative diff normalization now recognizes those longer custom ids too
+- `tests/pending_integration.rs`: added integration coverage for long bracketed ids in `backlog add`, `write --pending-add`, and `replace:pending` normalization
+- `runbooks/pending-ops.md`: updated the pending-ops contract text to match the wider id rule
+
+Verification in `src/agent-doc` before commit:
+- `cargo test` — 1349 passed, 0 failed
+
+This was a repo-scoped commit of the four previously uncommitted files:
+- `runbooks/pending-ops.md`
+- `src/diff.rs`
+- `src/pending.rs`
+- `tests/pending_integration.rs`
+<!-- agent:boundary:e0d5547e -->
 <!-- /agent:exchange -->
 
 <!--

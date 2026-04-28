@@ -574,12 +574,62 @@ fn flush_exchange_insert_block(block: &mut String) -> bool {
         block.clear();
         return true;
     }
-    let ok = trimmed
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .is_some_and(|line| line.trim_start().starts_with("### Re:"));
+    let ok = is_safe_historical_exchange_insert_block(trimmed);
     block.clear();
     ok
+}
+
+fn is_safe_historical_exchange_insert_block(block: &str) -> bool {
+    let non_blank: Vec<&str> = block
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if non_blank.is_empty() {
+        return true;
+    }
+
+    let Some(first_response_idx) = non_blank.iter().position(|line| {
+        line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("##### Re:")
+    }) else {
+        return false;
+    };
+    if first_response_idx == 0 {
+        return true;
+    }
+
+    non_blank[..first_response_idx]
+        .iter()
+        .all(|line| historical_exchange_prelude_looks_like_prompt_target(line))
+}
+
+fn historical_exchange_prelude_looks_like_prompt_target(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with("<!--")
+        && !trimmed.starts_with("```")
+        && !trimmed.starts_with("~~~")
+        && !trimmed.starts_with("### Re:")
+        && !trimmed.starts_with("#### Re:")
+        && !trimmed.starts_with("##### Re:")
+        && (trimmed.starts_with('❯')
+            || trimmed.ends_with('?')
+            || historical_exchange_prelude_looks_like_imperative(trimmed))
+}
+
+fn historical_exchange_prelude_looks_like_imperative(line: &str) -> bool {
+    let compact = line.trim_start_matches('>').trim().to_ascii_lowercase();
+    compact == "go"
+        || compact == "continue"
+        || compact.starts_with("do #")
+        || compact.starts_with("run ")
+        || compact.starts_with("rerun ")
+        || compact.starts_with("build ")
+        || compact.starts_with("test ")
+        || compact.starts_with("commit ")
+        || compact.starts_with("push ")
+        || compact.starts_with("fix ")
+        || compact.starts_with("complete ")
 }
 
 fn is_safe_historical_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
@@ -850,15 +900,15 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     let Some(head_doc) = show_head(file)? else {
         return Ok(None);
     };
-    let Some(reason) =
-        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc)
-    else {
-        return Ok(None);
-    };
+    let historical_reason =
+        classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc);
 
     if normalize_transient_agent_doc_markers(&current_doc)
         == normalize_transient_agent_doc_markers(&head_doc)
     {
+        let Some(reason) = historical_reason else {
+            return Ok(None);
+        };
         crate::snapshot::save(file, &current_doc)?;
         crate::ops_log::log_op(
             file,
@@ -872,6 +922,7 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     }
 
     if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
+        let reason = historical_reason.unwrap_or("exchange");
         crate::snapshot::save(file, &head_doc)?;
         crate::ops_log::log_op(
             file,
@@ -2341,6 +2392,17 @@ mod tests {
         assert!(is_safe_user_only_follow_up_after_committed_head(
             head, current
         ));
+    }
+
+    #[test]
+    fn is_safe_historical_exchange_growth_allows_prompt_target_before_response() {
+        let snapshot = "### Re: older\nold body\n";
+        let head = "### Re: older\nold body\n\ndo #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted.\n";
+
+        assert!(is_safe_historical_exchange_insert_block(
+            "do #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted."
+        ));
+        assert!(is_safe_historical_exchange_growth(snapshot, head));
     }
 
     #[test]

@@ -58,7 +58,7 @@ What changed:
 Verified with `cargo test`, `cargo build`, and `cargo install --path . --force` in `src/agent-doc`.
 
 Note: `src/agent-doc` still has unrelated local edits in `src/start.rs` and `specs/supervisor.md`; I left them untouched.
-<!-- agent:boundary:b25a3d70 -->
+<!-- agent:boundary:ee3a7eb5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -74,8 +74,8 @@ I added a focused plan in `tasks/agent-doc/plan-response-patchback-not-committed
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
-- [x] [#bugs2tmux] Diagnose and harden the agent-doc-bugs2.md tmux crash / orphan state so reruns classify or recover the live pane deterministically. Plan: tasks/agent-doc/plan-bugs2-tmux-session-crash.md
 - [ ] [#backlogshadow] [recommended] Fail closed or warn when open backlog-shaped items drift into parked/commented sections instead of the live `agent:backlog`, so unfinished work cannot silently vanish from active tracking. Plan: `tasks/agent-doc/plan-backlog-shadow-open-items.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`

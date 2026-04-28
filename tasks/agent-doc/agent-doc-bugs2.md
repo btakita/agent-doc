@@ -427,7 +427,55 @@ Verification in `src/agent-doc`:
 - `npm test` in `editors/vscode`
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:8d42d30d -->
+
+❯ do #dedup1. spec-test-build-install-commit-push
+### Re: `#dedup1` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `4e2e9c4`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug was the repair dedup guard treating the first three non-marker response lines as independent substring checks anywhere in the document. That made short or generic responses vulnerable to false `AlreadyApplied` hits when those lines happened to recur elsewhere.
+
+What changed:
+- `src/repair.rs`: replaced the 3-line fingerprint heuristic with normalized visible-line matching that requires the response to appear as one contiguous block in the document
+- dedup normalization still ignores patch/agent markers and strips transient ` (HEAD)` only from response headings, so the existing boundary-marker / heading-churn case still dedups correctly
+- added regressions for scattered matching lines and short non-contiguous responses, while preserving the existing `(HEAD)` + blank-line success case
+- updated the repair spec to document the contiguous-block requirement
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1342 passed, 6 failed in pre-existing route/tmux tests (`send_keys_delivers_*`, `resolve_or_create_pane_*`, `full_auto_start_flow`)
+- focused repair regressions passed:
+  - `cargo test recover_dedup_with_blank_lines_and_boundary`
+  - `cargo test dedup_requires_contiguous_normalized_response_block`
+  - `cargo test dedup_short_response_still_requires_contiguous_match`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
+### Re: `#dedup1` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `4e2e9c4`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug was the repair dedup guard treating the first three non-marker response lines as independent substring checks anywhere in the document. That made short or generic responses vulnerable to false `AlreadyApplied` hits when those lines happened to recur elsewhere.
+
+What changed:
+- `src/repair.rs`: replaced the 3-line fingerprint heuristic with normalized visible-line matching that requires the response to appear as one contiguous block in the document
+- dedup normalization still ignores patch/agent markers and strips transient ` (HEAD)` only from response headings, so the existing boundary-marker / heading-churn case still dedups correctly
+- added regressions for scattered matching lines and short non-contiguous responses, while preserving the existing `(HEAD)` + blank-line success case
+- updated the repair spec to document the contiguous-block requirement
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1342 passed, 6 failed in pre-existing route/tmux tests (`send_keys_delivers_*`, `resolve_or_create_pane_*`, `full_auto_start_flow`)
+- focused repair regressions passed:
+  - `cargo test recover_dedup_with_blank_lines_and_boundary`
+  - `cargo test dedup_requires_contiguous_normalized_response_block`
+  - `cargo test dedup_short_response_still_requires_contiguous_match`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
+<!-- agent:boundary:cd9ca441 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -436,7 +484,7 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
+- [x] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
 - [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
 - [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

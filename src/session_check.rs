@@ -122,6 +122,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_backlog_replay_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
@@ -220,6 +228,46 @@ fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
         .map(crate::pending::ShadowPendingItem::reference)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn check_backlog_replay_guard(file: &Path) -> Result<GuardResult> {
+    let current_content = std::fs::read_to_string(file)?;
+
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let hash = crate::snapshot::doc_hash(&canonical).unwrap_or_default();
+    let baseline_content = crate::snapshot::find_project_root(&canonical)
+        .map(|root| root.join(format!(".agent-doc/baselines/{}.md", hash)))
+        .and_then(|p| std::fs::read_to_string(p).ok());
+
+    let baseline = match baseline_content {
+        Some(content) => content,
+        None => match crate::git::show_head(file)? {
+            Some(content) => content,
+            None => return Ok(GuardResult::None),
+        },
+    };
+
+    let done_ids: std::collections::HashSet<String> = crate::cycle_state::load(file)?
+        .map(|state| state.pending_done_ids.into_iter().collect())
+        .unwrap_or_default();
+
+    let report =
+        crate::pending::detect_dropped_from_history(&current_content, &baseline, &done_ids)?;
+
+    if !report.dropped.is_empty() {
+        let refs = report
+            .dropped
+            .iter()
+            .map(crate::pending::DroppedBacklogItem::reference)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Ok(GuardResult::Error(format!(
+            "[session-check] INTERRUPTED: open backlog item(s) from recent history are completely absent from the document: {}. Restore them to the live backlog, move them to icebox, or mark them done",
+            refs
+        )));
+    }
+
+    Ok(GuardResult::None)
 }
 
 pub fn enforce_clean_closeout(file: &Path) -> Result<()> {

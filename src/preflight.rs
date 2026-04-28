@@ -753,6 +753,7 @@ pub fn run(file: &Path) -> Result<()> {
     // commit which stages from snapshot picks them up atomically.
     let (pending_reordered, pending_gated_count) = run_pending_maintenance(file)?;
     enforce_no_shadow_open_backlog(file)?;
+    enforce_no_dropped_backlog(file)?;
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -1413,6 +1414,38 @@ fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
         .map(crate::pending::ShadowPendingItem::reference)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn enforce_no_dropped_backlog(file: &Path) -> Result<()> {
+    let head_content = match crate::git::show_head(file)? {
+        Some(content) => content,
+        None => return Ok(()),
+    };
+    let current_content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to inspect backlog replay state in {}",
+            file.display()
+        )
+    })?;
+    let done_ids: std::collections::HashSet<String> = crate::cycle_state::load(file)?
+        .map(|state| state.pending_done_ids.into_iter().collect())
+        .unwrap_or_default();
+
+    let report =
+        crate::pending::detect_dropped_from_history(&current_content, &head_content, &done_ids)?;
+    if !report.dropped.is_empty() {
+        let refs = report
+            .dropped
+            .iter()
+            .map(crate::pending::DroppedBacklogItem::reference)
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::bail!(
+            "open backlog item(s) from recent committed history are completely absent from the document: {}. Restore them to the live backlog, move them to icebox, or mark them done before continuing",
+            refs
+        );
+    }
+    Ok(())
 }
 
 /// Queue component state extracted during maintenance.

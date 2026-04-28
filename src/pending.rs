@@ -489,6 +489,127 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     Ok(report)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedBacklogItem {
+    pub id: String,
+    pub text: String,
+}
+
+impl DroppedBacklogItem {
+    pub fn reference(&self) -> String {
+        format!("#{}", self.id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DroppedBacklogReport {
+    pub dropped: Vec<DroppedBacklogItem>,
+}
+
+/// Compare current document against a baseline to find open backlog items that
+/// existed in the baseline but are completely absent from the current document.
+///
+/// "Completely absent" means the item's ID does not appear in:
+/// - the live `agent:backlog` (any state: open, gated, or done)
+/// - the `agent:icebox` component
+/// - shadow/commented sections outside the live backlog
+///
+/// Items found in shadow sections are NOT reported here — the shadow guard
+/// (`detect_shadow_open_items`) handles those separately.
+///
+/// `done_ids` allows callers to exclude items that were explicitly marked done
+/// during the current cycle (from `cycle_state.pending_done_ids`).
+pub fn detect_dropped_from_history(
+    current_doc: &str,
+    baseline_doc: &str,
+    done_ids: &HashSet<String>,
+) -> Result<DroppedBacklogReport> {
+    let baseline_components = crate::component::parse(baseline_doc)?;
+    let Some(baseline_backlog) = baseline_components
+        .iter()
+        .find(|c| crate::component::is_backlog_component(&c.name))
+    else {
+        return Ok(DroppedBacklogReport::default());
+    };
+
+    let (_, baseline_items, _) = parse_items(baseline_backlog.content(baseline_doc));
+    let baseline_open: Vec<(String, String)> = baseline_items
+        .into_iter()
+        .filter(|item| !item.id.is_empty() && !item.is_done())
+        .map(|item| (item.id, item.text))
+        .collect();
+
+    if baseline_open.is_empty() {
+        return Ok(DroppedBacklogReport::default());
+    }
+
+    let current_components = crate::component::parse(current_doc)?;
+
+    let mut current_ids: HashSet<String> = HashSet::new();
+
+    for comp in &current_components {
+        if crate::component::is_backlog_component(&comp.name)
+            || crate::component::is_icebox_component(&comp.name)
+        {
+            let (_, items, _) = parse_items(comp.content(current_doc));
+            for item in items {
+                if !item.id.is_empty() {
+                    current_ids.insert(item.id);
+                }
+            }
+        }
+    }
+
+    let excluded_ranges: Vec<(usize, usize)> = current_components
+        .iter()
+        .filter(|c| {
+            crate::component::is_backlog_component(&c.name)
+                || crate::component::is_icebox_component(&c.name)
+        })
+        .map(|c| (c.open_start, c.close_end))
+        .collect();
+    let code_ranges = crate::component::find_code_ranges(current_doc);
+
+    let mut offset = 0usize;
+    for raw_line in current_doc.split_inclusive('\n') {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let line_start = offset;
+        let line_end = offset + raw_line.len();
+        offset = line_end;
+
+        if excluded_ranges
+            .iter()
+            .any(|(start, end)| line_start < *end && line_end > *start)
+        {
+            continue;
+        }
+        if code_ranges
+            .iter()
+            .any(|(start, end)| line_start < *end && line_end > *start)
+        {
+            continue;
+        }
+
+        if let Some(item) = parse_item_line(line) {
+            if !item.id.is_empty() {
+                current_ids.insert(item.id);
+            }
+        }
+    }
+
+    let mut dropped = Vec::new();
+    for (id, text) in baseline_open {
+        if done_ids.contains(&id) {
+            continue;
+        }
+        if !current_ids.contains(&id) {
+            dropped.push(DroppedBacklogItem { id, text });
+        }
+    }
+
+    Ok(DroppedBacklogReport { dropped })
+}
+
 /// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
 ///
 /// Backward-compat thin wrapper over [`generate_hash_n`] at width 4. Existing
@@ -1780,5 +1901,148 @@ mod tests {
         let report = detect_shadow_open_items(doc).unwrap();
         assert!(report.duplicated_in_live_backlog.is_empty());
         assert!(report.shadow_only.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_catches_missing_item() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Still here\n",
+            "- [ ] [#gone1] Was open in baseline\n",
+            "- [ ] [#gone2] Also open in baseline\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Still here\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, vec!["gone1", "gone2"]);
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_done_in_live() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#item1] Now done\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_done_ids() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let mut done = HashSet::new();
+        done.insert("item1".to_string());
+        let report = detect_dropped_from_history(current, baseline, &done).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_icebox() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#item1] Archived\n",
+            "<!-- /agent:icebox -->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_shadow() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- parked\n",
+            "- [ ] [#item1] Drifted to shadow\n",
+            "-->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_ignores_baseline_done_items() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Already done in baseline\n",
+            "- [/] [#gate1] Gated in baseline\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, vec!["gate1"]);
+    }
+
+    #[test]
+    fn detect_dropped_from_history_no_baseline_backlog() {
+        let baseline = "# Just a document\nNo backlog here.\n";
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] New item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_ignores_code_blocks_in_current() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "```md\n",
+            "- [ ] [#item1] In code block only\n",
+            "```\n"
+        );
+        let report =
+            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, vec!["item1"]);
     }
 }

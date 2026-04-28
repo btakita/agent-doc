@@ -337,6 +337,23 @@ impl PtySession {
             .context("take_writer: failed to take pty writer")
     }
 
+    /// Duplicate the master fd for direct interruptible writes on Unix.
+    #[cfg(unix)]
+    pub fn dup_write_fd(&self) -> Result<std::os::unix::io::RawFd> {
+        let fd = self
+            .master
+            .as_raw_fd()
+            .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for writing"))?;
+        let duped = unsafe { libc::dup(fd) };
+        if duped < 0 {
+            anyhow::bail!(
+                "dup master fd for write failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(duped)
+    }
+
     /// Clone the pty reader for external use (e.g., master→stdout I/O thread).
     pub fn clone_reader(&self) -> Result<Box<dyn Read + Send>> {
         self.master

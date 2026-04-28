@@ -249,6 +249,10 @@ Auto-trigger provenance is lifecycle-bound to a single restart iteration:
   supervisor-owned child pty writer rather than tmux pane stdin, so a late
   trigger cannot hit the supervisor restart prompt or a non-child process in
   the pane
+- supervisor shutdown signals both the auto-trigger stop flag and the
+  stdin->pty writer stop path before joining either thread, and the shared
+  child-pty writer lock/write path is cancellation-aware, so a stop request
+  does not hang behind a blocked stdin->pty writer mutex wait
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.
 

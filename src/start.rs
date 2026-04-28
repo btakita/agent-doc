@@ -72,10 +72,10 @@
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use crate::supervisor::{
@@ -134,6 +134,9 @@ const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
+const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
+const SHARED_WRITER_CHUNK_MAX: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -276,6 +279,177 @@ fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
     }
 }
 
+struct SharedPtyWriter {
+    writer: Box<dyn Write + Send>,
+    #[cfg(unix)]
+    raw_fd: Option<std::os::unix::io::RawFd>,
+}
+
+impl SharedPtyWriter {
+    #[cfg(any(not(unix), test))]
+    fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self {
+            writer,
+            #[cfg(unix)]
+            raw_fd: None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn with_raw_fd(writer: Box<dyn Write + Send>, raw_fd: std::os::unix::io::RawFd) -> Self {
+        Self {
+            writer,
+            raw_fd: Some(raw_fd),
+        }
+    }
+
+    fn write_all_interruptibly(&mut self, bytes: &[u8], stop: &AtomicBool) -> io::Result<()> {
+        #[cfg(unix)]
+        if let Some(fd) = self.raw_fd {
+            return write_all_fd_interruptibly(fd, bytes, stop);
+        }
+
+        write_all_with_stop(self.writer.as_mut(), bytes, stop)
+    }
+
+    fn write_all_blocking(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let never_stop = AtomicBool::new(false);
+        self.write_all_interruptibly(bytes, &never_stop)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SharedPtyWriter {
+    fn drop(&mut self) {
+        if let Some(fd) = self.raw_fd.take() {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+    }
+}
+
+fn write_all_with_stop(writer: &mut dyn Write, bytes: &[u8], stop: &AtomicBool) -> io::Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        if stop.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "writer cancelled",
+            ));
+        }
+        let end = (written + SHARED_WRITER_CHUNK_MAX).min(bytes.len());
+        let n = writer.write(&bytes[written..end])?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "writer returned 0 bytes",
+            ));
+        }
+        written += n;
+    }
+    if stop.load(Ordering::Relaxed) {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "writer cancelled",
+        ));
+    }
+    writer.flush()
+}
+
+#[cfg(unix)]
+fn write_all_fd_interruptibly(
+    fd: std::os::unix::io::RawFd,
+    bytes: &[u8],
+    stop: &AtomicBool,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        if stop.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "writer cancelled",
+            ));
+        }
+
+        let mut fds = [libc::pollfd {
+            fd,
+            events: libc::POLLOUT,
+            revents: 0,
+        }];
+        let ret = unsafe {
+            libc::poll(
+                fds.as_mut_ptr(),
+                fds.len() as libc::nfds_t,
+                SHARED_WRITER_WRITE_POLL_INTERVAL_MS,
+            )
+        };
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        }
+        if ret == 0 {
+            continue;
+        }
+
+        let revents = fds[0].revents;
+        if revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("pty writer poll failed: revents=0x{revents:x}"),
+            ));
+        }
+        if revents & libc::POLLOUT == 0 {
+            continue;
+        }
+
+        let end = (written + SHARED_WRITER_CHUNK_MAX).min(bytes.len());
+        let chunk = &bytes[written..end];
+        let n = unsafe { libc::write(fd, chunk.as_ptr() as *const libc::c_void, chunk.len()) };
+        if n < 0 {
+            let err = io::Error::last_os_error();
+            if matches!(
+                err.kind(),
+                io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+            ) {
+                continue;
+            }
+            return Err(err);
+        }
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "pty master write returned 0 bytes",
+            ));
+        }
+        written += n as usize;
+    }
+    Ok(())
+}
+
+fn lock_writer_interruptibly<'a>(
+    writer_arc: &'a Arc<Mutex<SharedPtyWriter>>,
+    stop: &AtomicBool,
+) -> Option<std::sync::MutexGuard<'a, SharedPtyWriter>> {
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        match writer_arc.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::WouldBlock) => {
+                if !sleep_with_stop(stop, SHARED_WRITER_LOCK_POLL_INTERVAL) {
+                    return None;
+                }
+            }
+            Err(TryLockError::Poisoned(err)) => return Some(err.into_inner()),
+        }
+    }
+}
+
 fn auto_trigger_inject_command(
     shared: &SupervisorShared,
     stop: &AtomicBool,
@@ -294,11 +468,21 @@ fn auto_trigger_inject_command(
     let mut payload = trigger_cmd.as_bytes().to_vec();
     payload.push(b'\r');
 
-    let mut writer = writer_arc.lock().unwrap();
-    if writer.write_all(&payload).is_err() || writer.flush().is_err() {
-        return AutoTriggerOutcome::SendFailed;
+    let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
+        return AutoTriggerOutcome::Cancelled;
+    };
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
     }
-    AutoTriggerOutcome::Sent
+    match writer.write_all_interruptibly(&payload, stop) {
+        Ok(()) => AutoTriggerOutcome::Sent,
+        Err(err) if err.kind() == io::ErrorKind::Interrupted && stop.load(Ordering::Relaxed) => {
+            AutoTriggerOutcome::Cancelled
+        }
+        Err(_) => {
+            return AutoTriggerOutcome::SendFailed;
+        }
+    }
 }
 
 fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -566,7 +750,7 @@ impl StopSignal {
 }
 
 /// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
-type SharedWriter = Mutex<Option<Arc<Mutex<Box<dyn Write + Send>>>>>;
+type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 
 /// Shared state between the main supervisor loop and the IPC handler thread.
 struct SupervisorShared {
@@ -656,7 +840,7 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             match guard.as_ref() {
                 Some(writer_arc) => {
                     let mut w = writer_arc.lock().unwrap();
-                    match w.write_all(bytes.as_bytes()).and_then(|_| w.flush()) {
+                    match w.write_all_blocking(bytes.as_bytes()) {
                         Ok(()) => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
                         Err(e) => IpcResponse::err(format!("write error: {e}")),
                     }
@@ -751,8 +935,9 @@ fn spawn_reader_thread(
 /// cleanly before the supervisor needs stdin for the restart prompt.
 #[cfg(unix)]
 fn spawn_writer_thread(
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    writer: Arc<Mutex<SharedPtyWriter>>,
     stop_fd: std::os::unix::io::RawFd,
+    stop: Arc<AtomicBool>,
     ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -817,10 +1002,15 @@ fn spawn_writer_thread(
                             flag.store(true, Ordering::Relaxed);
                         }
                     }
-                    let mut w = writer.lock().unwrap();
-                    if w.write_all(data).is_err() || w.flush().is_err() {
+                    let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
                         if debug {
-                            eprintln!("[stdin->pty] pty write failed, exiting");
+                            eprintln!("[stdin->pty] stop requested while waiting for writer");
+                        }
+                        break;
+                    };
+                    if let Err(err) = w.write_all_interruptibly(data, stop.as_ref()) {
+                        if debug {
+                            eprintln!("[stdin->pty] pty write failed, exiting: {err}");
                         }
                         break;
                     }
@@ -846,8 +1036,9 @@ fn spawn_writer_thread(
 /// Non-Unix fallback: blocking stdin read (no stop signal support).
 #[cfg(not(unix))]
 fn spawn_writer_thread(
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    writer: Arc<Mutex<SharedPtyWriter>>,
     _stop_fd: (),
+    stop: Arc<AtomicBool>,
     ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -866,8 +1057,10 @@ fn spawn_writer_thread(
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
-                        let mut w = writer.lock().unwrap();
-                        if w.write_all(&buf[..n]).is_err() || w.flush().is_err() {
+                        let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
+                            break;
+                        };
+                        if w.write_all_interruptibly(&buf[..n], stop.as_ref()).is_err() {
                             break;
                         }
                     }
@@ -1146,9 +1339,17 @@ pub fn run(file: &Path) -> Result<()> {
             .with_context(|| format!("failed to spawn {}", harness.binary))?;
 
         // Extract writer and reader for shared I/O
+        #[cfg(unix)]
+        let pty_write_fd = session.dup_write_fd()?;
         let pty_writer = session.take_writer()?;
         let pty_reader = session.clone_reader()?;
-        let writer_arc = Arc::new(Mutex::new(pty_writer));
+        #[cfg(unix)]
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::with_raw_fd(
+            pty_writer,
+            pty_write_fd,
+        )));
+        #[cfg(not(unix))]
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(pty_writer)));
 
         // Update shared state
         *shared.inject_writer.lock().unwrap() = Some(writer_arc.clone());
@@ -1168,12 +1369,22 @@ pub fn run(file: &Path) -> Result<()> {
         // Spawn I/O forwarding threads
         let reader_thread = spawn_reader_thread(shared.clone(), pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
+        let writer_stop_flag = Arc::new(AtomicBool::new(false));
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
-        let writer_thread =
-            spawn_writer_thread(writer_arc, writer_stop.read_fd(), Some(ctrl_d_flag.clone()));
+        let writer_thread = spawn_writer_thread(
+            writer_arc.clone(),
+            writer_stop.read_fd(),
+            writer_stop_flag.clone(),
+            Some(ctrl_d_flag.clone()),
+        );
         #[cfg(not(unix))]
-        let writer_thread = spawn_writer_thread(writer_arc, (), Some(ctrl_d_flag.clone()));
+        let writer_thread = spawn_writer_thread(
+            writer_arc.clone(),
+            (),
+            writer_stop_flag.clone(),
+            Some(ctrl_d_flag.clone()),
+        );
 
         // Start resize watcher (stop previous one first)
         if let Some(mut rw) = resize_watcher.take() {
@@ -1211,15 +1422,18 @@ pub fn run(file: &Path) -> Result<()> {
             .with_context(|| format!("failed waiting on {}", harness.binary))?;
         first_run = false;
 
-        if let Some((stop, handle)) = auto_trigger_thread.take() {
+        if let Some((stop, _)) = auto_trigger_thread.as_ref() {
             stop.store(true, Ordering::Relaxed);
-            let _ = handle.join();
         }
+        writer_stop_flag.store(true, Ordering::Relaxed);
 
         // Stop the stdin→pty writer thread so stdin is free for the restart
         // prompt (or for the next iteration's fresh writer thread).
         writer_stop.signal();
         let _ = writer_thread.join();
+        if let Some((_, handle)) = auto_trigger_thread.take() {
+            let _ = handle.join();
+        }
         if ctrl_d_flag.load(Ordering::Relaxed) {
             shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
         }
@@ -2086,8 +2300,8 @@ mod tests {
     fn auto_trigger_inject_command_writes_carriage_return() {
         let shared = Arc::new(SupervisorShared::new("test"));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(
-            RecordingWriter(written.clone()),
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
         ))));
         let stop = AtomicBool::new(false);
 
@@ -2105,8 +2319,8 @@ mod tests {
     fn auto_trigger_inject_command_honors_late_cancel_before_write() {
         let shared = Arc::new(SupervisorShared::new("test"));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(
-            RecordingWriter(written.clone()),
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
         ))));
         let stop = AtomicBool::new(true);
 
@@ -2118,9 +2332,40 @@ mod tests {
     }
 
     #[test]
+    fn auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock() {
+        let shared = Arc::new(SupervisorShared::new("test"));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(RecordingWriter(
+            written.clone(),
+        )))));
+        let held = writer.lock().unwrap();
+        *shared.inject_writer.lock().unwrap() = Some(writer.clone());
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let shared_for_thread = shared.clone();
+        let stop_for_thread = stop.clone();
+        let handle = std::thread::spawn(move || {
+            auto_trigger_inject_command(
+                &shared_for_thread,
+                stop_for_thread.as_ref(),
+                "agent-doc tasks/software/tsift.md",
+            )
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        stop.store(true, Ordering::Relaxed);
+        drop(held);
+
+        assert_eq!(handle.join().unwrap(), AutoTriggerOutcome::Cancelled);
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
         let shared = Arc::new(SupervisorShared::new("test"));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(FailingWriter))));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(FailingWriter),
+        ))));
         let stop = AtomicBool::new(false);
 
         assert_eq!(
@@ -2205,15 +2450,17 @@ mod tests {
         }
 
         let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_write_fd));
-        let writer_arc = Arc::new(Mutex::new(writer));
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
 
         let stop = StopSignal::new().unwrap();
-        let handle = spawn_writer_thread(writer_arc, stop.read_fd(), None);
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let handle = spawn_writer_thread(writer_arc, stop.read_fd(), stop_flag.clone(), None);
 
         // Writer thread should be alive, blocked in poll()
         std::thread::sleep(std::time::Duration::from_millis(50));
 
         // Signal stop — thread should exit promptly
+        stop_flag.store(true, Ordering::Relaxed);
         stop.signal();
         let result = handle.join();
         assert!(
@@ -2255,16 +2502,18 @@ mod tests {
         }
 
         let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_fds[1]));
-        let writer_arc = Arc::new(Mutex::new(writer));
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
 
         let stop = StopSignal::new().unwrap();
         let stop_fd = stop.read_fd();
-        let handle = spawn_writer_thread(writer_arc, stop_fd, None);
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let handle = spawn_writer_thread(writer_arc, stop_fd, stop_flag.clone(), None);
 
         // Inject a byte into stdin to trigger a write attempt.
         // The write will fail (EPIPE) and the thread should exit.
         // We use the stop signal as a fallback timeout.
         std::thread::sleep(std::time::Duration::from_millis(50));
+        stop_flag.store(true, Ordering::Relaxed);
         stop.signal();
 
         let result = handle.join();

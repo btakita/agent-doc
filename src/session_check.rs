@@ -2061,7 +2061,8 @@ mod tests {
             .unwrap();
 
         let doc = root.join("doc.md");
-        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nbody\n### Re: test\nresponse\n";
+        let content =
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\nbody\n### Re: test\nresponse\n";
         fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
         Command::new("git")
@@ -2076,13 +2077,8 @@ mod tests {
             .unwrap();
 
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(
-            &doc,
-            "commit_success",
-            Some(content),
-            Some(content),
-        )
-        .unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
+            .unwrap();
 
         let status = inspect(&doc).unwrap();
         match status {

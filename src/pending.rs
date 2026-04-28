@@ -1917,8 +1917,7 @@ mod tests {
             "- [ ] [#keep1] Still here\n",
             "<!-- /agent:backlog -->\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, vec!["gone1", "gone2"]);
     }
@@ -1935,8 +1934,7 @@ mod tests {
             "- [x] [#item1] Now done\n",
             "<!-- /agent:backlog -->\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 
@@ -1947,10 +1945,7 @@ mod tests {
             "- [ ] [#item1] Was open\n",
             "<!-- /agent:backlog -->\n"
         );
-        let current = concat!(
-            "<!-- agent:backlog -->\n",
-            "<!-- /agent:backlog -->\n"
-        );
+        let current = concat!("<!-- agent:backlog -->\n", "<!-- /agent:backlog -->\n");
         let mut done = HashSet::new();
         done.insert("item1".to_string());
         let report = detect_dropped_from_history(current, baseline, &done).unwrap();
@@ -1971,8 +1966,7 @@ mod tests {
             "- [ ] [#item1] Archived\n",
             "<!-- /agent:icebox -->\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 
@@ -1990,8 +1984,7 @@ mod tests {
             "- [ ] [#item1] Drifted to shadow\n",
             "-->\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 
@@ -2003,12 +1996,8 @@ mod tests {
             "- [/] [#gate1] Gated in baseline\n",
             "<!-- /agent:backlog -->\n"
         );
-        let current = concat!(
-            "<!-- agent:backlog -->\n",
-            "<!-- /agent:backlog -->\n"
-        );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let current = concat!("<!-- agent:backlog -->\n", "<!-- /agent:backlog -->\n");
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, vec!["gate1"]);
     }
@@ -2021,8 +2010,7 @@ mod tests {
             "- [ ] [#item1] New item\n",
             "<!-- /agent:backlog -->\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 
@@ -2040,8 +2028,7 @@ mod tests {
             "- [ ] [#item1] In code block only\n",
             "```\n"
         );
-        let report =
-            detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, vec!["item1"]);
     }

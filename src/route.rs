@@ -165,8 +165,7 @@ fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason:
         reason,
         file.display()
     );
-    if let Err(e) = tmux.send_keys_raw(pane_id, &format!("echo '{}'", msg.replace('\'', "'\\''")))
-    {
+    if let Err(e) = tmux.send_keys_raw(pane_id, &format!("echo '{}'", msg.replace('\'', "'\\''"))) {
         eprintln!(
             "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
             pane_id, e
@@ -797,13 +796,17 @@ fn require_routed_cycle_ack(
             let marker = prompt_bearing_marker.unwrap_or("(unknown)");
             eprintln!(
                 "[route] skipping cycle ack for {} — live agent-doc child active in pane {}, pending {}",
-                file.display(), pane, marker
+                file.display(),
+                pane,
+                marker
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
                     "route_cycle_ack_skipped_live_child file={} pane={} marker={}",
-                    file.display(), pane, marker
+                    file.display(),
+                    pane,
+                    marker
                 ),
             );
         }
@@ -4161,9 +4164,14 @@ history line
         )
         .unwrap();
 
-        let miss = crate::startup_miss::load(&doc).unwrap().expect("should have marker");
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("should have marker");
         assert_eq!(miss.pane_id, "%42");
-        assert_eq!(miss.origin, crate::startup_miss::StartupMissOrigin::FreshStart);
+        assert_eq!(
+            miss.origin,
+            crate::startup_miss::StartupMissOrigin::FreshStart
+        );
         assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
     }
 
@@ -4232,7 +4240,13 @@ history line
         .unwrap();
 
         let miss = crate::startup_miss::load(&doc).unwrap().expect("marker");
-        assert_eq!(miss.origin, crate::startup_miss::StartupMissOrigin::RoutedTrigger);
-        assert_eq!(miss.cycle_baseline_id.as_deref(), Some("cycle-baseline-123"));
+        assert_eq!(
+            miss.origin,
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger
+        );
+        assert_eq!(
+            miss.cycle_baseline_id.as_deref(),
+            Some("cycle-baseline-123")
+        );
     }
 }

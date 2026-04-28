@@ -1264,9 +1264,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // Even for no-op submodule commits, the parent pointer may be stale
         // (e.g., submodule committed in a previous cycle but parent never updated).
         if in_submodule && is_submodule_pointer_stale(file) {
-            eprintln!(
-                "[commit] submodule pointer stale in parent after no-op commit — updating"
-            );
+            eprintln!("[commit] submodule pointer stale in parent after no-op commit — updating");
             update_parent_submodule_pointer(&super_root, &git_root, &msg);
         }
 
@@ -2041,7 +2039,10 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotCommitStatus {
     Committed,
-    SnapshotDiffersFromHead { snapshot_len: usize, head_len: usize },
+    SnapshotDiffersFromHead {
+        snapshot_len: usize,
+        head_len: usize,
+    },
     NoSnapshot,
     NoHead,
     NotInGitRepo,

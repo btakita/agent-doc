@@ -1,0 +1,25 @@
+# Build artifacts
+target/**
+dist/**
+build/**
+.next/**
+__pycache__/**
+
+# Dependencies
+node_modules/**
+.venv/**
+vendor/**
+
+# Agent-doc internals
+.agent-doc/**
+
+# IDE / tool caches
+.idea/**
+.wrangler/**
+
+# Binary / data files
+*.db
+*.wasm
+*.so
+*.dylib
+*.lock

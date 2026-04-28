@@ -16,7 +16,7 @@ agent_doc_write: crdt
 
 ❯ See mail/conversations/phone-screen-follow-up-world-wide-technology-inc-software-en.md
 ❯ Since ECCO Select is a government contractor, would there be laws against me subcontracting some of the work? Can I be criminally liable?
-### Re: Contact + Subcontracting Question — opus-4-6
+### Re: Contact + Subcontracting Question — opus-4-6 (HEAD)
 
 **Contact created:** `mail/contacts/max-pawela/AGENTS.md` with details from LinkedIn and the email thread. Summary:
 - Max Pawela, Technical Recruiter at ECCO Select
@@ -43,7 +43,7 @@ Short answer: subcontracting portions of C2C work is generally legal and common 
 - Read ECCO's subcontractor agreement carefully for assignment/delegation restrictions
 - If you want to subcontract, ask Max directly whether that's permitted under their arrangement with WWT
 - Be transparent about the arrangement ... trying to hide it is where legal risk escalates
-<!-- agent:boundary:15f2532e -->
+<!-- agent:boundary:bb47efc9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

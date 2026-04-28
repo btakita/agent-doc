@@ -1074,7 +1074,7 @@ Each diagram title label identifies the source section (e.g., "§3 Day-to-Day Wo
 ❯ - left to right
 ❯ - colors
 ❯ - diagrams should be on a single figma board that is given as part of the prompt
-### Re: Light mode colors + markdown-to-figma spec — opus-4-6
+### Re: Light mode colors + markdown-to-figma spec — opus-4-6 (HEAD)
 
 **Color update applied** to all 164 nodes on the [rob-harness-automation-for-git](https://www.figma.com/board/hRFplC9Ig2tMVPTfFMD8r6/rob-harness-automation-for-git) board:
 
@@ -1131,7 +1131,7 @@ Each diagram title label identifies the source section (e.g., "§3 Day-to-Day Wo
 - `-->|label|` → Connector with text label
 - Subgraphs → FigJam sections or grouped labels
 - Stadium/pill nodes → same as rounded rectangles (FigJam has no pill shape)
-<!-- agent:boundary:0310550f -->
+<!-- agent:boundary:69606319 -->
 <!-- /agent:exchange -->
 
 <!--

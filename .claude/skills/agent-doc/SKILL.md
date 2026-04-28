@@ -2,7 +2,7 @@
 description: "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.33.13"
+agent-doc-version: "0.33.16"
 ---
 
 # agent-doc
@@ -39,12 +39,12 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 **Detect subcommands** before running the normal workflow:
 
 - `claim <FILE>` → run `agent-doc claim <FILE>` via Bash and stop.
-- `compact <FILE>` → run `agent-doc compact <FILE>` then `agent-doc commit <FILE>` and stop.
+- `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
 **Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
-**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
+**Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Print any `claims` to the console as a record.
@@ -61,6 +61,8 @@ If `slash_commands` or `builtin_commands` is non-empty, handle each **before** r
 Trust the preflight output — do not re-validate code fences or blockquotes.
 
 **Binary-owned orchestration request:** if `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before composing any manual response. Treat this as a blocking dispatch requirement, not advisory prose. If the orchestrate run completes the requested batch cleanly, stop instead of manually simulating the same work in a second response.
+
+**Prompt preset validation:** if `prompt_presets_requested` is non-empty, treat it as proof that preflight already validated the referenced frontmatter `prompt_presets`. Do not manually inline the preset text in the skill; let `agent-doc orchestrate` expand those presets into each task prompt so sequential, `dag`, and `parallel` stay consistent.
 
 ### 0c. Model tier gate
 
@@ -132,17 +134,19 @@ RESPONSE
 
 **End-of-turn guard:** for git-backed docs, `agent-doc finalize <FILE> ...`, `agent-doc write --commit <FILE> ...`, and `agent-doc repair <FILE>` now run the `session-check` closeout guard internally before they return success. If one of those commands surfaces a `session-check` interruption, the cycle is still open or the document shows a likely direct assistant patchback that bypassed `agent-doc`: do **not** report success, and continue recovery instead of ending the turn. The only self-heal exception is already-committed historical snapshot drift that `session-check` can prove from `HEAD`.
 
+For real session documents (`agent_doc_session` / legacy `session`), `agent-doc write --commit <FILE>` now shares `finalize`'s fail-closed commit boundary for response writes: non-git docs are rejected before mutation, commit failure is a command failure, and success means the cycle reached `committed`. Best-effort `--commit` remains only for non-session docs and `--pending-only` maintenance.
+
 `session-check` still enforces two pending backstops: the pending-capture guard warns (or fails closed under `pending_capture_guard: strict` / project `[guards] pending_capture = "strict"`) when a committed response contains recommendation batches but no `--pending-add` / `--pending-add-gated` was recorded, and the pending-done guard warns (or fails closed under `pending_done_guard: strict` / project `[guards] pending_done = "strict"`) when a committed response appears to complete an existing `#id` task but no matching `--pending-done <id>` was recorded. `<!-- no-pending-capture -->` and `<!-- no-pending-done-guard -->` suppress the respective guard for that cycle. It also fails closed on likely bypassed patchbacks that leave bare prompt-target lines without the binary-owned `❯ ` prefix. On the binary side, `agent-doc repair` must still canonicalize those template-doc prompt prefixes even when the response body is already present and the repair outcome is `AlreadyApplied`. You can still run `agent-doc session-check <FILE>` directly for debugging or if a hook tells you to.
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. The only allowed follow-up is minimal recovery if the binary-owned closeout guard failed, plus concise result reporting.
 
-**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file across nested `.agent-doc` roots in the same workspace. On `Stop`, the hook first tries to finish the response cycle deterministically from `last_assistant_message` by replaying the normal write/commit path, even if the `Stop` arrives on a later turn in the same Codex session; if the cycle still cannot be closed, it falls back to capture-and-block / fail-closed behavior instead of silently letting a bypassed patchback leave the harness. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit`.
+**Codex hook backstop:** the Codex install also writes `.codex/hooks.json` plus `.codex/config.toml` with `features.codex_hooks = true`. Those `UserPromptSubmit` / `Stop` hooks track the active `agent-doc` file across nested `.agent-doc` roots in the same workspace. On `Stop`, the hook first tries to finish the response cycle deterministically from `last_assistant_message`, but only when that payload validates as a single assistant closeout. If the payload looks like a transcript dump or full exchange patchback, the hook stores it only as diagnostics and blocks/fails closed instead of replaying it. Treat that as a safety backstop, not a replacement for explicitly running `finalize` / `write --commit`.
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 
 **IMPORTANT: The response content MUST include `<!-- patch:exchange -->` blocks for template-mode documents.** If the heredoc is empty or contains only raw text without patch markers, the binary will warn (`0 template patches found`) and only apply normalization — the response will be silently lost. Context compaction can drop the response between generation and the write command; if this happens, re-generate the response before piping.
 
-**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document and you are repairing a missed patchback, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` for the response write-back so the repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists in the document.
+**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document and you are repairing a missed patchback, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` for the response write-back so the repair crosses the normal snapshot/commit boundary in one path. On real session docs, that path now fails closed unless the write reaches `committed`. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists in the document.
 
 Document format, frontmatter fields, append vs template mode conventions, and component naming: [runbooks/document-format.md](runbooks/document-format.md). Commit-boundary exceptions and anti-patterns live in [runbooks/commit.md](runbooks/commit.md).
 

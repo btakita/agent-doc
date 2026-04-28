@@ -598,14 +598,14 @@ I’d track this as one umbrella item with phase wording so the fix stays cohere
 - `[#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted`
 
 ❯ Does #pbc1 still need to be done?
-### Re: #pbc1 status — gpt-5
+### Re: #pbc1 status — gpt-5 (HEAD)
 
 No. `#pbc1` is already done in `src/agent-doc`.
 
 The implementation landed in commit `92b8df7` (`fix: harden codex commit boundary recovery`), and the current `src/agent-doc` HEAD is later than that on `origin/20260422/codex-agent-backend`, so the fix is already present in this checkout. The code and docs match the plan: `src/preflight.rs` handles the write-completed / commit-missing recovery path, `src/route.rs` fails closed on missed fresh-start triggers, `src/session_check.rs` distinguishes the interrupted commit-boundary state, and the behavior is documented in `specs/07-commands.md` and `specs/codex-support.md`.
 
 I’m marking `#pbc1` done in backlog in this cycle so the document matches the repo state.
-<!-- agent:boundary:192e82da -->
+<!-- agent:boundary:770a1526 -->
 <!-- /agent:exchange -->
 
 <!--

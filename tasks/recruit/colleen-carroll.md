@@ -94,7 +94,7 @@ Built `BrianTakita-test-double.pdf` (4 pages) with a Test Double-specific profil
 
 Let me know if you'd like changes to the resume or email, and I'll push to Gmail Drafts via corky.
 ❯ Please send my updated email as a gmail draft
-### Re: Send updated email — opus-4-6
+### Re: Send updated email — opus-4-6 (HEAD)
 
 Pushed to Gmail Drafts (btak.dev). The draft includes:
 - Updated wording: "Monday" and "the full-time role"
@@ -102,7 +102,7 @@ Pushed to Gmail Drafts (btak.dev). The draft includes:
 - Threaded via In-Reply-To + thread_id
 
 Open your btak.dev Gmail drafts to review and send.
-<!-- agent:boundary:1df0a309 -->
+<!-- agent:boundary:67c59fcd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

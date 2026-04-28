@@ -124,11 +124,10 @@ Done. Created `src/lib.rs` with all 9 modules as `pub mod`. Updated `main.rs` to
 80 tests pass (72 existing + 8 new), clippy clean. Committed and pushed.
 
 release
-### Re: release — sonnet-4-6
+### Re: release — sonnet-4-6 (HEAD)
 
 Bumped to v0.6.0 (minor — new library API), ran 80 tests + clippy clean, tagged and pushed, published to [crates.io/crates/tagpath](https://crates.io/crates/tagpath).
-<!-- agent:boundary:5e292e5b -->
-<!-- agent:boundary:17e53722 -->
+<!-- agent:boundary:14157c35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

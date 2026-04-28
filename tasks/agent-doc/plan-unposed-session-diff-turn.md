@@ -1,0 +1,28 @@
+# Plan — fix prompt-bearing session diffs that never become a new `agent-doc` turn
+
+- [ ] Reconstruct the concrete `tasks/monsterrodholders.md` failure chain:
+  - prior assistant response was already committed in `HEAD`
+  - the document then gained a real follow-up user prompt
+  - rerunning `agent-doc` detected changes, rewrote only agent-owned `(HEAD)` / boundary surfaces, and resumed Codex without landing a new assistant turn
+- [ ] Trace the state classification and routing path in `src/agent-doc` for this shape:
+  - diff classification (`content_edit` vs `boundary_artifact`)
+  - prompt extraction from the live document tail
+  - open-cycle / already-committed-cycle detection
+  - Codex resume handoff and closeout expectations
+- [ ] Determine exactly where the new prompt is being lost:
+  - preflight/session-check incorrectly considers the state already closed
+  - prompt extraction omits the new user text
+  - resume dispatch runs but does not carry the prompt-bearing diff into a new model turn
+  - closeout logic tolerates a stalled resume instead of failing closed
+- [ ] Define the invariant for prompt-bearing follow-up edits after a committed response:
+  - if a session doc contains new user text after the last committed assistant block, rerunning `agent-doc` must either open a new turn and persist the answer or fail closed with explicit resumable state
+  - agent-owned `(HEAD)` / boundary churn must never be the only visible output when a real prompt diff is still pending
+- [ ] Fix the relevant write/routing path so already-committed prior responses do not suppress or strand a later prompt-bearing follow-up edit in the same document.
+- [ ] Tighten preflight/session-check so this state is detected deterministically on rerun instead of silently re-entering a stalled or no-op resume path.
+- [ ] Add regression coverage for:
+  - a submodule-owned session doc with an already-committed assistant response plus a later user follow-up line
+  - rerun produces a fresh turn rather than only `(HEAD)` / boundary drift
+  - rerun that cannot safely continue fails closed with a specific phase/state signal
+  - repeated rerun after successful closeout yields `no_changes`
+- [ ] Update the relevant spec/runbook surfaces only after the code path and regression coverage prove the invariant.
+- [ ] Patch the concrete outcome back into `tasks/agent-doc/agent-doc-bugs2.md`, then reduce pending once the stranded-prompt state is closed.

@@ -57,7 +57,7 @@ A future integration could theoretically use Cursor's extension API to bridge th
 | Models | GPT-4o, Claude (via Cursor proxy) | Claude (direct Anthropic API) |
 
 You'd use Cursor's AI for fast inline work and agent-doc for the deeper session-based workflows. No conflict, no sharing needed.
-### Re: Open source agentic plugins using Cursor API — opus-4-6
+### Re: Open source agentic plugins using Cursor API — opus-4-6 (HEAD)
 
 **No legitimate open source project uses Cursor's AI subscription for agentic workflows.** Cursor has no public API — its AI backend is proprietary and tightly coupled to the editor.
 
@@ -80,8 +80,7 @@ These all violate Cursor's ToS, frequently get DMCA'd, and are unstable. Not a v
 All of these require their own API keys (Anthropic, OpenAI, Ollama, etc.). None can piggyback on Cursor's subscription because Cursor doesn't expose its AI as a provider to extensions.
 
 **For agent-doc specifically:** the path forward is direct Anthropic API / Claude Code, not Cursor's AI. The editor plugin handles the presentation layer (gutter decorations, IPC, submit/claim) while Claude Code handles the agent runtime — that split is clean and doesn't need Cursor's AI at all.
-<!-- agent:boundary:8f650406 -->
-<!-- agent:boundary:380a4998 -->
+<!-- agent:boundary:80ac6007 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1,0 +1,31 @@
+# Plan — fix false `outside the writable root` refusals for parent-repo backlog writes
+
+- [ ] Reconstruct the exact failure chain from the `claudescore-3.md` repro:
+  - `agent-doc` generated a backlog item for `agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+  - the response claimed the path was outside the writable root
+  - the surrounding session had already written to the parent `agent-loop` repo successfully
+- [ ] Distinguish the three path/permission cases that must not be conflated:
+  - true non-writable paths outside the harness-granted roots
+  - writable parent-repo paths that are valid for direct document/backlog updates
+  - external git metadata paths such as `.git/modules/...` that may need separate access handling for commit operations
+- [ ] Trace where `src/agent-doc` derives writeability/refusal messaging for Codex-backed sessions:
+  - route/session context handed to the model
+  - any writable-root summary surfaced into the prompt or patchback guidance
+  - backend-specific resume behavior that strips unsupported args while inheriting prior writable roots
+- [ ] Define the invariant:
+  - if `agent-doc` can already read/write a target repo path during the active session, it must not claim that path is outside the writable root
+  - refusal text must name the actual blocked path class when the failure is about git metadata, network/push, or commit ownership rather than file writeability
+- [ ] Implement a deterministic pre-response check for path claims:
+  - before emitting an `outside the writable root` refusal, verify the target file path is not already inside a known writable root
+  - if the path is writable but the operation is blocked for another reason, emit the specific blocker instead
+- [ ] Separate writeability from commit/push capability in user-facing diagnostics:
+  - local file mutation permission
+  - external gitdir access
+  - network / SSH / remote push capability
+- [ ] Add regression coverage in `src/agent-doc` for:
+  - writable parent-repo backlog file from a submodule-rooted session
+  - real external-gitdir restriction
+  - network/push failure that must not be mislabeled as writable-root failure
+  - resumed Codex session still recognizing inherited writable roots correctly
+- [ ] Update the relevant runbook/spec surfaces only after the code path and regression coverage prove the diagnostic invariant.
+- [ ] Patch the outcome back into `tasks/agent-doc/agent-doc-bugs2.md` and clear or refine any overlapping pending items about writable-root / permission messaging.

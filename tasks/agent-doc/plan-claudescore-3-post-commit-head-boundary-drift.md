@@ -1,0 +1,30 @@
+# Plan — fix repeated post-commit `codex (HEAD)` / boundary drift in `claudescore-3.md`
+
+- [ ] Reconstruct the exact failure chain for `src/session-share/tasks/claudescore-3.md`: `agent-doc` commits a response successfully, but the live file is immediately left dirty with only two differences from `HEAD`:
+  - response header rewritten from the committed model line to `codex (HEAD)`
+  - `agent:boundary` advanced in the working tree after the commit
+- [ ] Trace the binary-owned write/commit path in `src/agent-doc` that can touch these two surfaces after a successful commit:
+  - template response rendering
+  - model attribution suffix generation
+  - boundary insertion/reposition logic
+  - snapshot refresh / IPC refresh
+  - any post-commit normalization path
+- [ ] Determine whether the bug is:
+  - commit content being stale while the working tree is correct
+  - working-tree post-processing rewriting the file after the correct commit
+  - divergent renderers for committed content vs live-buffer content
+- [ ] Define the invariant for successful closeout of a session document:
+  - the committed file, the live working tree, and the refreshed snapshot must agree on the final response header and boundary marker
+  - rerunning `agent-doc` on the same file without new user edits must yield `no_changes`
+- [ ] Fix the model-attribution path so a committed response cannot later be rewritten from the resolved model line into the harness label `codex (HEAD)` in the live file.
+- [ ] Fix boundary handling so the post-commit refresh path cannot leave the working tree on a newer boundary marker than the just-created commit unless there is a real new user edit after commit.
+- [ ] Add deterministic detection for this broken state in `preflight` / `session-check`:
+  - distinguish harmless historical snapshot drift from active post-commit working-tree mutation caused by `agent-doc`
+  - fail closed or auto-repair instead of allowing an endless rerun loop
+- [ ] Add regression coverage in `src/agent-doc` for:
+  - normal committed template patchback leaves the document clean
+  - repair path leaves the document clean
+  - repeated rerun on the same file with no new user edits yields no diff
+  - submodule-owned session document remains clean after closeout
+- [ ] Update the relevant spec/runbook surfaces only after the code path and regression coverage prove the invariant.
+- [ ] Patch the concrete outcome back into `tasks/agent-doc/agent-doc-bugs2.md`, then reduce pending to the remaining unresolved `claudescore-3.md` state classes.

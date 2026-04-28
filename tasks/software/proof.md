@@ -156,7 +156,7 @@ I'd recommend a **Claude Code skill** (not baked into agent-doc core). Here's wh
 
 This is essentially the same pattern as the `/agent-doc` skill itself — a Claude Code skill that orchestrates agent-doc CLI commands with external service calls.
 
-### Re: Proof comment overlay in agent-doc
+### Re: Proof comment overlay in agent-doc (HEAD)
 
 The overlay would work through the **sync skill**, not by modifying agent-doc's format. Here's the concrete mechanism:
 
@@ -190,7 +190,7 @@ The overlay would work through the **sync skill**, not by modifying agent-doc's 
 4. You run `/proof sync proof.md` — response + comment reply pushed to Proof
 
 The key design choice: Proof comments are **transient imports** in agent-doc, not permanent storage. The source of truth for comments stays in Proof's marks system. The local annotations are just a bridge for the agent-doc diff cycle.
-<!-- agent:boundary:ca42737b -->
+<!-- agent:boundary:5f3daa28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

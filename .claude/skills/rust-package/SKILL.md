@@ -138,6 +138,32 @@ Standalone installer for end-users:
 - Download binary from GitHub Releases
 - Install to `~/.cargo/bin/` or `~/.local/bin/`
 
+### 7. AGENTS.md — Library Context Policy Stub
+
+Create `AGENTS.md` at the package root with a project header and the Library Context Policy pointer:
+
+```markdown
+# <name>
+
+<one-line description from Cargo.toml>
+
+## Library Context Policy
+
+This library follows the agent-loop library-context policy. Contributors
+authoring `AGENTS.md`, `SKILL.md`, or runbooks in this repo must read:
+
+[Library Context Policy](../instruction-files/LIBRARY_CONTEXT_POLICY.md)
+
+before making changes.
+```
+
+Adjust the relative path to `LIBRARY_CONTEXT_POLICY.md` based on the package's depth under `src/`. For packages outside the agent-loop workspace, use the absolute GitHub URL instead:
+`https://github.com/btakita/agent-loop/blob/main/src/instruction-files/LIBRARY_CONTEXT_POLICY.md`
+
+If `AGENTS.md` already exists, add only the `## Library Context Policy` section if missing.
+
+Symlink `CLAUDE.md → AGENTS.md` if `CLAUDE.md` doesn't already exist.
+
 ## Release Checklist
 
 1. Bump version in `Cargo.toml` (+ `pyproject.toml` if applicable)

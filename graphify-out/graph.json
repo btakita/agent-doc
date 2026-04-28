@@ -1,0 +1,48 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "Code Files (107)",
+      "file_type": "code",
+      "source_file": "detection",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "code_files",
+      "community": 0,
+      "norm_label": "code files (107)"
+    },
+    {
+      "label": "Documentation (69)",
+      "file_type": "document",
+      "source_file": "detection",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "doc_files",
+      "community": 1,
+      "norm_label": "documentation (69)"
+    },
+    {
+      "label": "Images (6)",
+      "file_type": "image",
+      "source_file": "detection",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "image_files",
+      "community": 2,
+      "norm_label": "images (6)"
+    }
+  ],
+  "links": [],
+  "hyperedges": []
+}

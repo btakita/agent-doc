@@ -21,6 +21,7 @@ Every appended `agent-doc` response must be committed unless the user explicitly
 - Bare `agent-doc write` is acceptable only when the user explicitly wants the response left uncommitted, or when you are writing an intermediate checkpoint rather than the final response.
 - If you intentionally leave a response uncommitted, say so clearly and do not describe the cycle as complete.
 - `agent-doc write --commit` remains the documented repair path because it preserves the older CLI surface while still crossing the write/commit boundary in one invocation.
+- For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--pending-only` maintenance.
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.
 - Manual repair uses the same ordering rule: do the repair write-back last, then `session-check`, then stop.
 

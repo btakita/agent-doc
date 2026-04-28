@@ -62,5 +62,5 @@ AI agent services — custom automation, document workflows, correspondence tool
 2. Brian builds a one-page site
 3. Robert starts soft-pitching to 5 contacts this week
 4. File a simple LLC once revenue starts (CA LLC = $800/yr minimum franchise tax, so wait until you have a paying client)
-
+<!-- agent:boundary:0d1b2cb1 -->
 <!-- /agent:exchange -->

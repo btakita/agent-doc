@@ -14,6 +14,19 @@ Bump `pluginVersion` in `gradle.properties` whenever you make any code change to
 pluginVersion = 0.2.47  # increment patch version
 ```
 
+## Build on every bump (MANDATORY)
+
+**Never leave a plugin version bumped without building the artifact.** A bumped version without a built zip/VSIX makes local testing impossible — the user can't install what doesn't exist.
+
+Whenever you bump:
+
+- `editors/jetbrains/gradle.properties::pluginVersion` → run `./gradlew buildPlugin signPlugin` in `editors/jetbrains/` and confirm `build/distributions/agent-doc-jetbrains-<version>.zip` exists.
+- `editors/vscode/package.json::version` → run `npm run compile && npm run package` in `editors/vscode/` and confirm `agent-doc-<version>.vsix` exists.
+
+Do both in the same cycle as the bump, not "pending". If the build fails, either fix it or revert the version bump — never report "version bumped, build pending" as a stopping point.
+
+This applies identically to the core `agent-doc` binary: bumping `Cargo.toml` without `cargo build --release && cargo install --path .` means `~/.cargo/bin/agent-doc` serves the old code and tmux-spawned sessions test stale behavior.
+
 ## Before suggesting a plugin install
 
 Always check the currently installed plugin version before telling the user to install:

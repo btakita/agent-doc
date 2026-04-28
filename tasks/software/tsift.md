@@ -97,7 +97,7 @@ Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
 Verification: `cargo test` passed in `src/tsift` (352 unit tests + 19 integration tests).
 
 ❯ do #prunefix. spec-test-build-install-commit-push
-### Re: do #prunefix — gpt-5
+### Re: do #prunefix — gpt-5 (HEAD)
 
 Implemented in `tsift`.
 
@@ -113,7 +113,7 @@ Verification:
 - `cargo install --path .` passed, and `tsift --version` now reports `0.1.4`.
 
 Commit: `btakita/tsift@f24ec73` pushed to `origin/main`.
-<!-- agent:boundary:f450c773 -->
+<!-- agent:boundary:00a609c9 -->
 <!-- /agent:exchange -->
 
 <!--

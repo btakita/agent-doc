@@ -1,6 +1,26 @@
+---
+description: "Code-search and code-navigation skill for tsift. TRIGGER: user invokes /tsift or explicitly asks to search/explore a codebase with tsift. VERSION CHECK: compare installed tsift binary against tsift-version before relying on this copied skill text."
+user-invocable: true
+argument-hint: "[query or symbol]"
+tsift-version: "0.1.0"
+---
+
 # tsift
 
 Search a codebase using Sift (hybrid BM25 + vector search) via tsift CLI. Also provides AST symbol indexing, call-graph queries, batch editing, model-tier routing, and SQL introspection.
+
+## Version Check
+
+- Run `tsift --version` and compare it to `tsift-version` in this file's frontmatter.
+- If the installed binary is newer, treat this skill text as stale. Refresh from `src/tsift/CLAUDE.md` and `src/tsift/VERSIONS.md`, and prefer `tsift --help` / subcommand help for the live command surface.
+- Keep `tsift-version` aligned with `src/tsift/Cargo.toml`.
+
+## Freshness Check
+
+- Run `tsift status` at session start before relying on `search`, `explain`, or `graph`.
+- If `tsift status` reports `index: stale` or `use: (none — run tsift index first)`, run `tsift index .` before continuing.
+- If `tsift search` times out with `The index may be stale`, treat that as a required reindex. This is common in resumed tmux sessions with an old `.tsift/index.db`.
+- After `tsift index .`, retry the original tsift command. Reserve `--timeout 0` for cases where you intentionally want an uncapped long-running search on a fresh index.
 
 ## TRIGGER
 

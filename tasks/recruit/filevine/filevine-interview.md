@@ -149,6 +149,8 @@ I read the CSVs instead of pulling xlsx headers out of LocalStack (same content,
 
 `Person ID`, `Full Name`, `Full Name - Extended`, `(Last, First)`, `First Name`, `Middle Name`, `Last Name`, `Nickname`, `Prefix`, `Suffix`, `Company Name`, `Job Title`, `Department`, `Date of Birth`, `is a Company`, `Created Date`, `Modified Date`, `Person Id` *(dup, different case)*, `Date of Death`, `is Deceased`, `Age`, `Hashtags`, `Emails`, `Phones`, `Emails Count`, `PhonesCount`, `Addresses Count`, `Email 1`, `Phone 1`, `Address 1`, `Address 1 Line 1`, `Address 1 Line 2`, `Address 1 City`, `Address 1 State`, `Address 1 Zip`, `Address 1 Label`, `Contact's 1 Primary Email`, `Contact's 2 Personal Email`, `Contact's 3 Work Email`, `Contact's 4 Other Email`, `Contact's 1 Daytime Phone`, `Contact's 2 Evening Phone`, `Contact's 3 Mobile Phone`, `Contact's 4 Fax Phone`, `Contact's 5 Work Phone`, `Contact's 6 Home Phone`, `Contact's 7 Other Phone`, `Contact's Personal Mobile Phone`, `Contact's 1 Mailing Address`, `Contact's Types`
 
+The new system has a partner_id column...which is the 3rd party's record id.
+
 **Address History** (`Migration - List of Address History Items ...csv`) — 25 columns:
 
 `Project Name`, `Address in the U.S. (Y/N)`, `Address Includes an Apt/Ste/Flr (Y/N)`, `Address Notes`, `Address Type`, `Apt./Ste./Flr. Number`, `City or Town`, `Count of Attachments`, `Country`, `County`, `First Date at Address`, `In Care of Name (if any)`, `Last Date at Address`, `Postal Code`, `Province`, `Select Apt/Ste/Flr`, `State`, `Street Number and Name`, `ZIP Code`, `Item Created Date`, `Item Link`, `Item URL`, `Item ID`, `Project Number`, `Filevine URL`

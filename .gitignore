@@ -12,3 +12,4 @@ tmp/
 .agent-doc
 *.agent-doc.lock
 .wrangler
+.tsift/

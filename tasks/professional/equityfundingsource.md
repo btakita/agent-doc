@@ -600,7 +600,7 @@ That should resolve the `code: 10042` / "Please enable R2" error. Let me know if
 
 ---
 ❯ Please draft a text message to robert-waldman for reminders of his todo list to get TMO keys and other things we discussed. Read the phone call transcript with robert-waldman.
-### Re: text message for Robert — gpt-5
+### Re: text message for Robert — gpt-5 (HEAD)
 
 Here’s a tight draft you can send:
 
@@ -615,7 +615,7 @@ Here’s a tight draft you can send:
 If you want it a little warmer / more casual, use this version instead:
 
 > Hi Robert — just wanted to follow up on the EFS items from our call. When you get a chance, can you send over the Google Workspace admin/login details for SMTP + calendar, let me know what TMO says about API/webhook support, and forward the logo / FDL reference files / any hero images? Once I have those, I can keep pushing the next phase forward. Thanks.
-<!-- agent:boundary:c0503620 -->
+<!-- agent:boundary:3d12ec9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

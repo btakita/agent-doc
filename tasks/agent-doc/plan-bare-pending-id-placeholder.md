@@ -1,0 +1,28 @@
+# Plan — reject or normalize bare `[#]` pending-id placeholders before backlog write-back
+
+- [ ] Reconstruct the exact failure chain that produced bare `[#]` in `tasks/agent-doc/agent-doc-bugs2.md`:
+  - exchange text contained leading `[#] [#id] ...`
+  - pending capture or backlog mutation preserved the bare `[#]` token into the rendered pending item
+  - the document temporarily displayed `- [ ] [#] ...` instead of a stable generated or explicit id
+- [ ] Trace the two relevant pending-id paths in `src/agent-doc`:
+  - add-time custom-id parsing (`parse_bracketed_custom_id_prefix`, `op_add`, pending capture / finalize wiring)
+  - document/backfill parsing (`parse_item_line`, `backfill`, render path)
+- [ ] Decide the intended contract for bare `[#]`:
+  - either reject it everywhere as invalid input
+  - or normalize it deterministically before it can ever appear in the live pending/backlog component
+- [ ] Tighten the add-time path so agent-authored `--pending-add` / pending-capture mutations cannot silently treat bare `[#]` as acceptable compatibility syntax.
+- [ ] Tighten the read/backfill path so legacy documents can still recover safely without teaching the active write path that bare `[#]` is normal authoring syntax.
+- [ ] Add a fail-closed guard for malformed bracketed custom-id prefixes:
+  - bare `[#]`
+  - empty `id=` prefixes
+  - duplicated or stacked prefixes where only one real pending id should exist
+- [ ] Add regression coverage for:
+  - `--pending-add "[#] [#foo] text"` does not produce a persisted bare `[#]`
+  - captured recommendation-to-pending promotion does not persist a bare `[#]`
+  - legacy document backfill can still repair an old bare `[#]` line into a real generated id
+  - render output never contains `- [ ] [#]` after a successful write/finalize cycle
+- [ ] Update the pending spec/runbook surfaces so agents are told unambiguously:
+  - use `id=<custom> text` for explicit ids
+  - `[#custom] text` remains compatibility input only
+  - bare `[#]` is invalid and must not survive into backlog content
+- [ ] Patch the concrete outcome back into `tasks/agent-doc/agent-doc-bugs2.md`, then remove or mark done the dedicated backlog item once the write path and regression coverage prove the fix.

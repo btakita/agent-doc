@@ -1,4 +1,5 @@
 ---
+agent: codex
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 agent_doc_format: template
 agent_doc_write: crdt
@@ -388,7 +389,7 @@ mail = { index = false }  # skip entirely
 6. Add per-submodule config + isolation tiers
 
 ❯ Please create a spec in tasks/tsift.md. Transfer pending items and context to implement the spec from tsift.md
-### Re: spec created & items transferred — opus-4-6
+### Re: spec created & items transferred — opus-4-6 (HEAD)
 
 Done. Created the spec in `tasks/tsift.md` with:
 
@@ -402,14 +403,16 @@ Done. Created the spec in `tasks/tsift.md` with:
 The existing tsift pending items (release workflow, audit subcommands) are preserved alongside the new ones.
 
 Marked `#bamc` done here — it now lives in `tasks/tsift.md`.
-<!-- agent:boundary:2eadd923 -->
-<!-- agent:boundary:d7a1870e -->
+Commit + push all submodules, recursively, and the agent-loop repo.4### Re: transferred snapshot GC feature to `agent-doc-feat.md` — gpt-5.4
+
+Transferred. `tasks/agent-doc/agent-doc-feat.md` now carries a concrete baseline snapshot GC spec with a configurable reap cycle, a proposed `agent-doc gc baselines` command surface, config defaults (`older_than`, `run_every`), and a pending implementation item for safe retention behavior and tests.
+<!-- agent:boundary:825761a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
-- [ ] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
+- [x] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
 - [x] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 <!-- /agent:pending -->

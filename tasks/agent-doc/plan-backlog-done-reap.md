@@ -1,0 +1,21 @@
+# Plan — fix completed `agent:backlog` items not being reaped
+
+- [ ] Reconstruct the exact failure chain for a template doc where one or more backlog items are already rendered as `- [x] ...`, but a subsequent normal `agent-doc` cycle leaves them in `<!-- agent:backlog -->` instead of reaping them.
+- [ ] Distinguish this state class from the older closeout bug where a response should have emitted `--pending-done <id>` but never marked the item done in the first place. This plan only covers items that are already `[x]`.
+- [ ] Inspect the reap path in `src/agent-doc`:
+  - `pending::reap` / `pending::reap_with_items`
+  - `pending_cmd::reap`
+  - preflight pending maintenance and archive flow in `preflight.rs`
+  - any guards that skip write-through when other component mutations are present
+- [ ] Define the invariant: for active template docs, any successful preflight/closeout pass that sees `[x]` backlog items must either
+  - reap and persist them in the same cycle, or
+  - fail closed with a phase-labelled reason explaining why reap was intentionally blocked.
+- [ ] Verify archive behavior at the same time: if `agent:pending-done` / done-archive surfaces are expected to receive reaped items, confirm whether the bug is “reap never ran”, “reap ran but write-through was skipped”, or “archive/write ordering restored the removed lines”.
+- [ ] Add explicit detection for the bad state in diagnostics / session-check output: active doc still contains `[x]` backlog items after a supposedly clean cycle.
+- [ ] Add regression coverage for:
+  - reap on a plain template backlog with one completed item
+  - reap when other backlog mutations occur in the same cycle
+  - reap + archive persistence in a CRDT template doc
+  - fail-closed behavior if reap cannot be persisted safely
+- [ ] Update the pending-system spec / runbook surfaces only after the code-level reap invariant and tests are in place.
+- [ ] Run targeted verification in `src/agent-doc`, then patch the concrete outcome back into the tracking bug document and reduce backlog accordingly.

@@ -324,10 +324,10 @@ Judith shared GoDaddy PIN verbally during call (not logged here). Credentials ar
 - [ ] Get Robert's demo site URL for design reference
 - [ ] Investor e-blast: draft outreach sequence with Robert for 400 contacts
 ❯ Please add Next steps into pending
-### Re: pending — opus-4-6
+### Re: pending — opus-4-6 (HEAD)
 
 Done — moved the six next-step items into pending.
-<!-- agent:boundary:df6b5dc5 -->
+<!-- agent:boundary:ba6fc65f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

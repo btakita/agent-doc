@@ -219,6 +219,14 @@ Key work: briantakita.me migration to Cloudflare Pages (prerender + static deplo
 
 ## Assistant
 
+## 2026-04-23 — `agent-doc-bugs` `#bndy` + `#ha3h`
+
+- [ ] Confirm the exact remaining scope for `#bndy` versus `#ha3h` by auditing the current boundary-cleanup and pending auto-create code/tests/specs in `src/agent-doc`.
+- [ ] For `#bndy`, determine what can be verified headlessly in this environment and what still requires an actual JetBrains / VS Code live editor session with IPC listener behavior.
+- [ ] Implement the minimal `#ha3h` recipient-side config surface in `src/agent-doc` (`.agent-doc/config.toml` receive policy), update the notify/write default behavior to consult it, and keep docs/specs aligned.
+- [ ] Add focused regression coverage for the new receive-policy behavior and run the relevant verification in `src/agent-doc`.
+- [ ] Patch the outcome back into `tasks/agent-doc/agent-doc-bugs.md`, including any residual manual validation still required for `#bndy`.
+
 ### Audit results
 
 Ran `audit-docs` across submodules:

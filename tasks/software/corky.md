@@ -446,7 +446,7 @@ corky gsc sites --format table
 If that succeeds, then the earlier `#cgb1` framing is stale for the GSC auth path, and the remaining blocker is whatever comes after successful user OAuth, not Search Console permissions and not redirect registration.
 
 ❯ Please implement a desktop notify whenever an oauth is encountered. spec-test-build-install-commit-push
-### Re: desktop OAuth notify — gpt-5
+### Re: desktop OAuth notify — gpt-5 (HEAD)
 
 Implemented and pushed.
 
@@ -466,7 +466,7 @@ Commits now on the branch:
 - `7b3a95c` — `docs: simplify corky skill command list`
 
 You can retry `corky gsc auth` from a normal desktop shell; when OAuth is encountered, corky should now raise a desktop notification in addition to the terminal/browser output.
-<!-- agent:boundary:83864991 -->
+<!-- agent:boundary:89ef6a67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

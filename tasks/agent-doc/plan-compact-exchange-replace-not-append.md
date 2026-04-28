@@ -1,0 +1,37 @@
+# Plan — fix `compact exchange` so it replaces, not appends, `agent:exchange`
+
+- [ ] Reconstruct the exact failure chain from `src/session-share/tasks/claudescore-3.md` and `.agent-doc/logs/ops.log`:
+  - repeated `compact exchange` prompts produced additional `### Re:` summaries instead of collapsing the exchange body
+  - pre-response follow-up edits were repeatedly classified as `post_commit_local_drift`
+  - later reruns appended more exchange content on top of the already-expanded body
+- [ ] Trace every `src/agent-doc` path that can mutate `agent:exchange` during compaction:
+  - template rendering for exchange responses
+  - CRDT merge path
+  - boundary insertion / reposition logic
+  - any helper that handles `compact exchange` or archived-summary phrasing
+- [ ] Define the invariant for a successful compaction request:
+  - `compact exchange` rewrites the active `agent:exchange` body to one compact checkpoint summary
+  - superseded progress logs and older `### Re:` blocks are removed from the same component
+  - rerunning `agent-doc` without a new user edit yields `no_changes`
+- [ ] Distinguish compaction from normal append behavior:
+  - ordinary responses may append a new exchange entry
+  - explicit compaction must switch to component-replacement semantics
+  - CRDT-backed writes must preserve concurrent user edits outside the replaced exchange window
+- [ ] Implement a deterministic pre-send check:
+  - if the target component already contains prior progress logs plus a new compaction request, collapse the component before final write/commit
+  - fail closed if the component cannot be rewritten unambiguously
+- [ ] Define a canonical compacted exchange schema:
+  - current state
+  - completed actions
+  - blockers
+  - next step
+- [ ] Add guardrails so compaction cannot silently no-op:
+  - if the response text claims compaction occurred, verify the resulting `agent:exchange` body actually shrank or replaced prior progress text
+  - treat “compacted note appended over old body” as a failed closeout, not success
+- [ ] Add regression coverage in `src/agent-doc` for:
+  - repeated progress appends followed by `compact exchange`
+  - compaction on a CRDT-merged document
+  - compaction in a submodule-owned session document
+  - rerun after successful compaction yields clean `HEAD`
+- [ ] Update relevant runbook/spec surfaces only after the code path and regression coverage prove the replacement invariant.
+- [ ] Patch the concrete outcome back into `tasks/agent-doc/agent-doc-bugs2.md`, then reduce the backlog to any remaining exchange-compaction edge cases.

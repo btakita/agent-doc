@@ -539,12 +539,35 @@ Verification run before commit:
 - `cargo install --path src/agent-doc --force`
 
 The remaining diff was mostly formatting/cleanup plus the Codex support wording update; I committed the whole leftover `src/agent-doc` batch exactly as requested.
-<!-- agent:boundary:0b82a497 -->
+
+❯ `agent-doc resync --fix` kills all running sessions, including ones actively running a turn. Any tmux pane that is correctly aligned with bound document should remain. spec-test-build-install-commit-push
+### Re: live-session preservation in `resync` and stale startup-miss reroutes — gpt-5
+
+Implemented and pushed in `src/agent-doc` as `e418437` on `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route.rs` no longer treats a persisted startup-miss marker as authoritative when the registered pane has since resumed proving live ownership of the document. In that case it now clears the stale marker and reuses the pane instead of deregistering it and spawning a duplicate fallback session.
+- `resync.rs` now requires the live-owner proof to resolve back to the registered pane itself. If some other pane owns the file, the registration is treated as stale `NoLiveOwner` instead of being treated as healthy.
+- `resync --fix` now preserves active bound panes when they still prove live ownership, even if session/window cleanup heuristics would otherwise classify them as `WrongSession` or `WrongWindow`. That closes the destructive path where cleanup could kill or stash a pane that was still correctly bound to its document.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document both contracts.
+
+Why this matches the `tsift.md` evidence:
+- The `ops.log` sequence showed `route_cycle_start_missing` on live pane `%308`, then a later `route_startup_miss_deregistered`, then `fresh_route_start_missing` on new pane `%309`.
+- That is exactly the stale-startup-miss path: a previously recorded miss was still present, route trusted it blindly, and it launched another session even though the original pane was the live owner again.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+  - One full parallel run hit the existing tmux prompt/readiness flakes `route::tests::wait_for_agent_ready_detects_prompt` and `resync::tests::no_wrong_window_when_panes_in_same_window`.
+  - Both failing tests passed immediately on isolated exact reruns after the code changes.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- `src/agent-doc/Cargo.lock` changed because Cargo rewrote the `tmux-router` registry metadata during verification; I committed that with the fix.
+<!-- agent:boundary:5cd503be -->
 <!-- /agent:exchange -->
 
 <!--
-`agent-doc resync --fix` kills all running sessions, including ones actively running a turn.
----
 When I switch to tsift.md, another session attempts to open
 ![img.png](img.png)
 -->
@@ -552,5 +575,6 @@ When I switch to tsift.md, another session attempts to open
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxready] [recommended] Stabilize tmux prompt-readiness tests that still flake under parallel full-suite load (route::tests::wait_for_agent_ready_detects_prompt, resync::tests::no_wrong_window_when_panes_in_same_window) so ownership regressions fail deterministically.
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

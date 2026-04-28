@@ -394,16 +394,42 @@ Verification:
 - `cargo test` — 1891 tests, all passing
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:dd6313f8 -->
+
+❯ do #tailpatch. spec-test-build-install-commit-push
+### Re: #tailpatch — opus-4-6
+
+Implemented `#tailpatch` in `src/agent-doc` and pushed commit `1406b48` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added `guard_no_conversation_tail_outside_exchange()` in `template.rs` that fails closed when conversation content (`## User`, `## Assistant`, `### Re:`, `❯ ` prompts) would land outside the live `&lt;!-- agent:exchange --&gt;` block, instead of silently repairing.
+- Replaced the silent repair call in `normalize_template_structure_or_fail()` (write.rs) with the new guard — all write paths now reject tail escapes.
+- Explicit `agent-doc repair` still calls `repair_conversation_tail_outside_exchange()` to move safe escaped content back inside exchange for recovery.
+- Updated spec `07-commands.md` to document the fail-closed behavior.
+
+Tests added (5 new):
+- `guard_..._passes_for_normal_content` — content inside exchange passes
+- `guard_..._fails_on_tail_after_session_digest` — escapes after `# Session Digest` rejected
+- `guard_..._fails_on_tail_after_backlog` — escapes after `agent:backlog` rejected
+- `guard_..._passes_without_exchange_block` — no exchange = no guard
+- `guard_..._passes_for_comment_only_tail` — non-conversation notes outside exchange allowed
+
+Verification:
+- `cargo test` — 1896 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:fac8f180 -->
 <!-- /agent:exchange -->
 
 <!--
+In the JB plugin, this error popped up. It seems delayed from the cause because I was not actively doing any keystrokes. I had the editor on tsift.md and it was running an agent-doc turn using Codex.
+```
+agent-doc route failed (exit 1): [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2120199) in pane %308 for tasks/software/tsift.md [route] Pane %308 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md → pane %308 [route] Command accepted (0.3s, 0 Enter retries) Error: routed codex trigger for tasks/software/tsift.md was accepted in pane %308, but no new document cycle started for pending prompt_target: do #lintidx. spec-test-build-install-commit-push
+```
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
-- [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
+- [x] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

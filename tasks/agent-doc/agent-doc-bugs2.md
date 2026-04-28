@@ -687,7 +687,21 @@ If you want me to execute it, narrow the scope in the document to the exact repo
 - `commit + push root repo only`
 - `commit + push src/agent-doc and root repo`
 - `commit + push everything except mail/resume/.env`
-<!-- agent:boundary:a8694a1f -->
+
+❯ commit + push src/agent-doc
+### Re: commit + push `src/agent-doc` — gpt-5
+
+Completed in `src/agent-doc` and pushed as `0e18871` (`fix: adopt already-present responses during repair`) on `origin/20260422/codex-agent-backend`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Scope note:
+- this commit included all currently uncommitted changes in `src/agent-doc` (14 tracked files)
+- the first push ran before the new commit existed and reported `Everything up-to-date`; the follow-up push published `0e18871`
+<!-- agent:boundary:54783a15 -->
 <!-- /agent:exchange -->
 
 <!--

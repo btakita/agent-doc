@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## Unreleased
+
+- **`agent-doc backlog` is now the canonical backlog CLI, with `agent-doc pending` retained as a deprecated alias.** The top-level backlog management subcommand now lives under `agent-doc backlog ...`; invoking the legacy `agent-doc pending ...` spelling still works for compatibility but emits a deprecation warning directing callers to the canonical name. Updated autocomplete command metadata and integration coverage for both the canonical and deprecated spellings.
+
 ## 0.33.16
 
 - **Pending add/backlog normalization now fail closed on malformed leading id prefixes.** Active `--pending-add` parsing still accepts canonical `id=<custom> ...` and compatibility `[#custom] ...`, but it now rejects bare `[#]` placeholders, empty `id=` prefixes, and stacked leading prefixes like `[#a] [#b] ...` or `id=a [#b] ...`. The accidental `replace:pending` / `patch:pending` normalization path still repairs a lone legacy `- [ ] [#] ...` line into a generated id, but it now blocks the stacked-prefix shape before any malformed prefix text can persist into backlog content. Added unit coverage for the add-time parser and write-path regression coverage for normalize-vs-reject behavior.

@@ -165,11 +165,15 @@ fn rewrite_bare_file_invocation(mut args: Vec<OsString>) -> Vec<OsString> {
 
     let is_known_subcommand = Cli::command()
         .get_subcommands()
-        .any(|sub| sub.get_name() == first);
+        .any(|sub| sub.get_name() == first || sub.get_all_aliases().any(|alias| alias == first));
     if !is_known_subcommand && looks_like_document_path(first) {
         args.insert(1, OsString::from("run"));
     }
     args
+}
+
+fn deprecated_pending_alias_used(args: &[OsString]) -> bool {
+    matches!(args.get(1).and_then(|arg| arg.to_str()), Some("pending"))
 }
 
 #[derive(Args, Clone)]
@@ -838,8 +842,9 @@ enum Commands {
         #[arg(long, default_value = "sonnet")]
         fallback_model: String,
     },
-    /// Manage the agent:backlog (pending) component
-    Pending {
+    /// Manage the agent:backlog component (`pending` is a deprecated alias)
+    #[command(name = "backlog", alias = "pending")]
+    Backlog {
         /// Path to the session document
         file: PathBuf,
         #[command(subcommand)]
@@ -1125,11 +1130,19 @@ fn main() -> anyhow::Result<()> {
     // When unset, no file logging (zero overhead).
     init_tracing();
 
-    let cli = Cli::parse_from(rewrite_bare_file_invocation(std::env::args_os().collect()));
+    let raw_args: Vec<OsString> = std::env::args_os().collect();
+    let pending_alias_used = deprecated_pending_alias_used(&raw_args);
+    let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
     // Warn about newer versions on startup, but skip if running the upgrade command itself.
     if !matches!(cli.command, Commands::Upgrade) {
         upgrade::warn_if_outdated();
+    }
+
+    if pending_alias_used && matches!(cli.command, Commands::Backlog { .. }) {
+        eprintln!(
+            "[deprecation] `agent-doc pending` is deprecated — use `agent-doc backlog` instead"
+        );
     }
 
     let config = config::load()?;
@@ -1646,7 +1659,7 @@ fn main() -> anyhow::Result<()> {
             poll_interval,
             fallback_model,
         } => cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model),
-        Commands::Pending { file, action } => match action {
+        Commands::Backlog { file, action } => match action {
             PendingAction::Add { item } => pending_cmd::add(&file, &item, false),
             PendingAction::AddGated { item } => pending_cmd::add(&file, &item, true),
             PendingAction::Remove { target, contains } => {

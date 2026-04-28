@@ -41,7 +41,7 @@ When you need a stable human-chosen identifier, start the add text with
 canonical `id=<custom> ` syntax:
 
 ```bash
-agent-doc pending plan.md add "id=spec1 write rollout spec"
+agent-doc backlog plan.md add "id=spec1 write rollout spec"
 agent-doc write plan.md --pending-add "id=fix42 add regression test"
 ```
 

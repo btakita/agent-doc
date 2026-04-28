@@ -33,7 +33,7 @@ fn setup_doc(body: &str) -> (TempDir, PathBuf) {
 fn pending_backfill_assigns_hashes_to_legacy_items() {
     let (_tmp, doc) = setup_doc("- legacy one\n- legacy two");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "backfill"])
+        .args(["backlog", doc.to_str().unwrap(), "backfill"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -47,7 +47,7 @@ fn pending_backfill_assigns_hashes_to_legacy_items() {
 fn pending_add_creates_item_with_hash() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "add", "first task"])
+        .args(["backlog", doc.to_str().unwrap(), "add", "first task"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -56,11 +56,28 @@ fn pending_add_creates_item_with_hash() {
 }
 
 #[test]
+fn pending_alias_still_works_with_deprecation_warning() {
+    let (_tmp, doc) = setup_doc("");
+    let assert_result = agent_doc()
+        .args(["pending", doc.to_str().unwrap(), "add", "first task"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(content.contains("first task"));
+    assert!(
+        stderr.contains("deprecated"),
+        "expected deprecation warning in stderr, got: {}",
+        stderr
+    );
+}
+
+#[test]
 fn pending_add_accepts_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
         .args([
-            "pending",
+            "backlog",
             doc.to_str().unwrap(),
             "add",
             "id=spec1 first task",
@@ -76,7 +93,7 @@ fn pending_add_accepts_bracketed_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
         .args([
-            "pending",
+            "backlog",
             doc.to_str().unwrap(),
             "add",
             "[#spec1] first task",
@@ -92,7 +109,7 @@ fn pending_add_rejects_invalid_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
         .args([
-            "pending",
+            "backlog",
             doc.to_str().unwrap(),
             "add",
             "id=bad-id first task",
@@ -106,7 +123,7 @@ fn pending_add_rejects_invalid_custom_id_prefix() {
 fn pending_done_marks_checked_by_id() {
     let (_tmp, doc) = setup_doc("- [ ] [#abcd] task one");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "done", "abcd"])
+        .args(["backlog", doc.to_str().unwrap(), "done", "abcd"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -118,7 +135,7 @@ fn pending_edit_preserves_hash() {
     let (_tmp, doc) = setup_doc("- [ ] [#abcd] original text");
     agent_doc()
         .args([
-            "pending",
+            "backlog",
             doc.to_str().unwrap(),
             "edit",
             "abcd",
@@ -136,7 +153,7 @@ fn pending_edit_preserves_hash() {
 fn pending_reorder_by_id() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] first\n- [ ] [#bbbb] second\n- [ ] [#cccc] third");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "reorder", "cccc,aaaa"])
+        .args(["backlog", doc.to_str().unwrap(), "reorder", "cccc,aaaa"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -150,7 +167,7 @@ fn pending_reorder_by_id() {
 fn pending_reap_removes_checked_items() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] keep\n- [x] [#bbbb] drop\n- [ ] [#cccc] keep2");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "reap"])
+        .args(["backlog", doc.to_str().unwrap(), "reap"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
@@ -163,7 +180,7 @@ fn pending_reap_removes_checked_items() {
 fn pending_clear_empties_list() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] one\n- [ ] [#bbbb] two");
     agent_doc()
-        .args(["pending", doc.to_str().unwrap(), "clear"])
+        .args(["backlog", doc.to_str().unwrap(), "clear"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();

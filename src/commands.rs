@@ -225,24 +225,24 @@ fn all_commands() -> Vec<CommandInfo> {
         "Clean up: callback orchestration, compaction",
     ));
     cmds.push(cmd(
-        "/agent-doc pending add",
+        "/agent-doc backlog add",
         "<FILE> <ITEM>",
-        "Add item to pending component",
+        "Add item to the backlog component",
     ));
     cmds.push(cmd(
-        "/agent-doc pending remove",
+        "/agent-doc backlog remove",
         "<FILE> <TARGET>",
-        "Remove item from pending component",
+        "Remove item from the backlog component",
     ));
     cmds.push(cmd(
-        "/agent-doc pending prune",
+        "/agent-doc backlog prune",
         "<FILE>",
-        "Remove completed items from pending",
+        "Remove completed items from the backlog",
     ));
     cmds.push(cmd(
-        "/agent-doc pending list",
+        "/agent-doc backlog list",
         "<FILE>",
-        "List pending items",
+        "List backlog items",
     ));
     cmds.push(cmd(
         "/agent-doc callback request",

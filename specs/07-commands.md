@@ -548,6 +548,14 @@ The source content stays in place. When preflight sees `<!-- agent:referral -->`
 5. Append extracted content to target's matching component with `> **[EXTRACT from <source>]** (timestamp)` annotation
 6. Save snapshots for both files
 
+## backlog
+
+`agent-doc backlog <FILE> <ACTION>` — manage the document backlog component.
+
+Canonical entrypoint is `agent-doc backlog`. The legacy spelling `agent-doc pending` remains accepted as a deprecated alias for the same command surface, but it must emit a deprecation warning directing callers to `agent-doc backlog`.
+
+Supported actions include `add`, `add-gated`, `remove`, `prune`/`reap`, `backfill`, `done`, `edit`, `clear`, `reorder`, `list`, `resolve-gate`, and `set-gate-type`. These actions operate on the canonical `agent:backlog` component while continuing to accept legacy `agent:pending` markers at the document-parsing layer.
+
 ## terminal
 
 `agent-doc terminal <FILE> [--session NAME]` — open an external terminal with tmux attached to the session.

@@ -1,13 +1,13 @@
 //! # Module: pending_cmd
 //!
-//! CLI subcommands for managing the `agent:pending` component.
+//! CLI subcommands for managing the `agent:backlog` component.
 //!
-//! - `agent-doc pending <FILE> add <item>` — add a pending item at the beginning
+//! - `agent-doc backlog <FILE> add <item>` — add a backlog item at the beginning
 //!   (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input
 //!   to preserve a custom id)
-//! - `agent-doc pending <FILE> remove <target>` — remove by content match
-//! - `agent-doc pending <FILE> prune` — remove completed items
-//! - `agent-doc pending <FILE> list` — print pending items
+//! - `agent-doc backlog <FILE> remove <target>` — remove by content match
+//! - `agent-doc backlog <FILE> prune` — remove completed items
+//! - `agent-doc backlog <FILE> list` — print backlog items
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -24,7 +24,7 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
     let comp = components
         .into_iter()
         .find(|c| is_backlog_component(&c.name))
-        .context("document has no pending component")?;
+        .context("document has no backlog/pending component")?;
     Ok((content, comp))
 }
 
@@ -307,7 +307,10 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let comp = match components.into_iter().find(|c| is_backlog_component(&c.name)) {
+            let comp = match components
+                .into_iter()
+                .find(|c| is_backlog_component(&c.name))
+            {
                 Some(c) => c,
                 None => continue,
             };

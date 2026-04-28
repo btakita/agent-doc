@@ -491,7 +491,30 @@ Commit/push:
 - the resulting `tsift` changes are already present in `btakita/tsift@61bd2f2` (`chore: commit workspace changes`) on `origin/main`; `git commit` had nothing left to record and `git push origin main` reported `Everything up-to-date`.
 
 Top of backlog: `#substrict`.
-<!-- agent:boundary:27d3fad5 -->
+
+❯ do #substrict. spec-test-build-install-commit-push
+### Re: do #substrict — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift index --submodule <name>` now uses the same strict workspace scope resolution as `--scope`, so unknown selectors fail closed instead of indexing `root/<name>` into an unreachable scoped database.
+- ambiguous duplicate leaf-name selectors now fail closed for submodule indexing too, requiring the concrete scope id when `.gitmodules` contains colliding leaf names.
+- added regressions in both the direct command path (`src/main.rs`) and the compiled CLI surface (`tests/exit_code.rs`).
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.15`, and refreshed the installed binary.
+
+Verification:
+- `cargo test workspace_index_single_submodule_errors_on_unknown_scope -- --nocapture` passed.
+- `cargo test index_submodule_fails_on_unknown_submodule_name --test exit_code -- --nocapture` passed.
+- `make check` passed: 373 unit tests + 31 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.15`.
+
+Commit/push:
+- `btakita/tsift@ab7f349` (`fix: fail closed unknown submodule indexing`) pushed to `origin/main`.
+
+Top of backlog: `#tmv7`.
+<!-- agent:boundary:6666c02e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -500,7 +523,7 @@ Top of backlog: `#substrict`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
+- [x] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

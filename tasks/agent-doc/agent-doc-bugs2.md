@@ -665,7 +665,28 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 Note: I left the unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/route.rs`, and the unstaged non-#patchregr portions of `src/repair.rs`) untouched.
-<!-- agent:boundary:58ee01fa -->
+
+❯ do #nodiffswallow. spec-test-build-install-commit-push
+### Re: #nodiffswallow — gpt-5
+
+Implemented `#nodiffswallow` in `src/agent-doc` and pushed commit `fb00851` to `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- `repair_completed_backlog_items()` reaped stale completed backlog items by updating the live file and then refreshing the snapshot from the resulting whole-document shape.
+- When a fresh user prompt had been inserted in `agent:exchange` just before `agent:boundary`, that snapshot refresh could absorb the prompt during preflight, so step 4 later saw `no_changes: true` even though no response had been written.
+
+What changed:
+- `repair` now mirrors stale completed-backlog reaps into the snapshot surgically from the snapshot's backlog/archive components instead of re-saving the whole live document.
+- Added regressions for both the direct `repair` path and the full `preflight` path where completed-backlog reap and a live prompt coexist.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to make the non-swallow contract explicit.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/route.rs`) untouched.
+<!-- agent:boundary:cd67cc67 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -674,6 +695,6 @@ Note: I left the unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runboo
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#patchregr] [recommended] Response patchback left uncommitted regression — `src/session-share/tasks/claudescore-3.md` currently shows the assistant patchback in the worktree while the response remains uncommitted, which should not be possible after `#patchcommit`. Reconstruct the exact closeout path, prove whether `finalize` / `write --commit` / hook-stop / `session-check` was bypassed or misclassified, and fail closed before success whenever a fresh response patchback is visible without the owning-root commit proof. Plan: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
-- [ ] [#nodiffswallow] [recommended] Preflight/repair can swallow a fresh user prompt and still return `no_changes: true`. Reproduction: `tasks/monsterrodholders.md` had a new prompt (`Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps`) inserted just before `agent:boundary`; `agent-doc preflight` logged `changes detected`, auto-committed a stale backlog cleanup, then left the prompt in both the live doc and snapshot while returning `no_changes`. The harness therefore stopped without answering. Fix by proving unresolved user deltas against pre-repair `HEAD` and failing closed if snapshot/baseline maintenance absorbs prompt-bearing text. Plan: `tasks/agent-doc/plan-preflight-no-changes-user-prompt.md`
+- [ ] [#patchbypass] [recommended] Response patchback can land in the target document without a binary-owned commit boundary, and later `session-check` still treats the now-committed exchange as likely direct patchback instead of a recoverable closeout. Reproduction: `src/session-share/tasks/claudescore-3.md` received the UTC-news response block, no `agent-doc finalize` / `write --commit` acknowledgment was recorded for that write, `src/session-share` was later manually committed as `9be7d48`, and `agent-doc session-check` still interrupted on `found likely direct response patchback without agent-doc cycle`. Fix by making commit acknowledgment binary-owned for the document's owning repo/submodule and adding deterministic recovery when the write landed but the commit boundary did not. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
+- [x] [#nodiffswallow] [recommended] Preflight/repair can swallow a fresh user prompt and still return `no_changes: true`. Reproduction: `tasks/monsterrodholders.md` had a new prompt (`Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps`) inserted just before `agent:boundary`; `agent-doc preflight` logged `changes detected`, auto-committed a stale backlog cleanup, then left the prompt in both the live doc and snapshot while returning `no_changes`. The harness therefore stopped without answering. Fix by proving unresolved user deltas against pre-repair `HEAD` and failing closed if snapshot/baseline maintenance absorbs prompt-bearing text. Plan: `tasks/agent-doc/plan-preflight-no-changes-user-prompt.md`
 <!-- /agent:backlog -->

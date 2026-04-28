@@ -857,7 +857,27 @@ Verification:
 I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@d15a66d` pushed to `origin/main`.
-<!-- agent:boundary:deef31ae -->
+
+❯ do #sumtxn. spec-test-build-install-commit-push
+### Re: do #sumtxn — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `SummaryDb::replace_file` now wraps each file's summary-cache rewrite in a SQLite savepoint, so `tsift summarize --extract` no longer leaves a file empty if an insert fails after the delete.
+- `cmd_summarize` now stages the per-file summary rows, swaps them in atomically, and only then increments the extraction counters.
+- added a regression test that injects a mid-replacement failure and proves the prior file summaries survive.
+- updated `SPEC.md` and `CLAUDE.md` to document the transactional per-file cache rewrite.
+
+Verification:
+- `make check` passed: 345 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+
+I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@62c35bf` pushed to `origin/main`.
+<!-- agent:boundary:f1e387f4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -866,8 +886,7 @@ Commit: `btakita/tsift@d15a66d` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
-- [ ] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
+- [x] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
 - [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
 - [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
 - [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)

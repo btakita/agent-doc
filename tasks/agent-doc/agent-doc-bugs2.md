@@ -310,7 +310,27 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1339 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:f0a9a935 -->
+
+❯ The tmux pane supervisor for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md restarts Codex when Ctrl+D is pressed. It does not present the Enter to restart or q to quit menu. I cannot quit the supervisor process unless I kill the process. Please investigate and fix. spec-test-build-install-commit-push
+### Re: Ctrl+D does not present restart/quit menu — opus-4-6
+
+Implemented in `src/agent-doc`, committed as `579c196`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug: the supervisor's `CleanExitBehavior::RestartContinue` policy for Codex auto-restarts on all clean exits (code 0), but doesn't distinguish between a normal turn completion and the user pressing Ctrl+D. Both produce exit code 0 — Codex sees EOF on its pty slave and exits cleanly — so the supervisor always auto-restarts, trapping the user.
+
+The fix detects `\x04` (the Ctrl+D byte in raw mode) in the `stdin→pty` writer thread as it forwards data. When the writer thread sees `\x04` in the forwarded bytes, it sets a `ctrl_d_forwarded` flag on shared state. In the supervisor loop's `RestartContinue` branch, if the flag is set, the supervisor falls through to the `PromptUser` path (showing "Press Enter to restart, or 'q' to exit") instead of silently auto-restarting.
+
+What changed:
+- `src/start.rs`: added `ctrl_d_forwarded: AtomicBool` to `SupervisorShared`; `spawn_writer_thread` now accepts and sets an `Arc<AtomicBool>` when `\x04` is detected in forwarded data; `RestartContinue` branch checks the flag and falls through to prompt behavior
+- `specs/supervisor.md`: documented the Ctrl+D override in the clean-exit policy spec
+- Tests: `ctrl_d_flag_initialized_false`, `ctrl_d_overrides_codex_auto_restart`
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1341 passed, 1 pre-existing codex hook test failure unrelated to this change
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:c78c9329 -->
 <!-- /agent:exchange -->
 
 <!--

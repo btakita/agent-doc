@@ -367,11 +367,28 @@ Verification passed end-to-end:
 I did **not** make the requested commit/push. The blocker is the current `src/corky` repo state: branch `20260413/corky-gsc` already has unrelated pre-existing modifications across multiple `.claude/skills/...` files, and `src/corky/AGENTS.md` requires clean commits with no dangling unstaged files. I won't bundle those unrelated edits into this GSC fix.
 
 If you want me to finish the delivery boundary, the next safe step is either to include those existing skill-doc changes intentionally in the same commit, or to clean/split them first and then let me commit/push the GSC work.
-<!-- agent:boundary:b485980f -->
+
+❯ commit + push all files in src/corky
+### Re: GSC auth bug — gpt-5
+
+I completed the remaining delivery boundary.
+
+In `src/corky` I staged **all** current tracked changes, committed them, and pushed branch `20260413/corky-gsc` to `origin`.
+
+Commit:
+- `e84e38e` — `fix: fall back to user oauth for gsc`
+
+Push result:
+- `origin/20260413/corky-gsc` advanced from `cf63185` to `e84e38e`
+- the branch now tracks `origin/20260413/corky-gsc`
+- `git status` is clean
+
+That means `#gscsa` is complete, so I closed it.
+<!-- agent:boundary:d8063af0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#gscsa] GSC auth bug: Search Console users UI rejected service-account email with 'Failed to add user: email not found'. Rework src/corky/src/gsc/auth.rs plus docs so GSC does not assume SA identities are addable to properties; verify product support, prefer or cleanly fall back to user OAuth, and improve diagnostics/spec for this case.
+- [x] [#gscsa] GSC auth bug: Search Console users UI rejected service-account email with 'Failed to add user: email not found'. Rework src/corky/src/gsc/auth.rs plus docs so GSC does not assume SA identities are addable to properties; verify product support, prefer or cleanly fall back to user OAuth, and improve diagnostics/spec for this case.
 <!-- /agent:pending -->

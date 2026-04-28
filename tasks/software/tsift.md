@@ -9,7 +9,7 @@ claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
-  '#follow-up-backlog': Any follow-up items to place in the backlog?
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -893,7 +893,25 @@ Verification:
 - `cargo build --release` passed.
 
 Commit: `btakita/tsift@8e0c5ef` pushed to `origin/main`.
-<!-- agent:boundary:ed38ef48 -->
+
+❯ do #apicheck. spec-test-build-install-commit-push
+### Re: do #apicheck — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `call_anthropic_api()` now reads the response body explicitly and checks the HTTP status before trying to parse summary content.
+- non-2xx Anthropic responses now fail closed with the HTTP status, API error type, and API message when present; successful responses keep the existing content-cleanup and token-accounting path.
+- added regression tests for HTTP error bodies, missing error-message fallback, and normal success parsing.
+- updated `SPEC.md` and `CLAUDE.md`.
+
+Verification:
+- `make check` passed: 348 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+
+Commit: `btakita/tsift@beb3bb5` pushed to `origin/main`.
+<!-- agent:boundary:c59cbfeb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -902,7 +920,7 @@ Commit: `btakita/tsift@8e0c5ef` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
+- [x] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
 - [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
 - [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
 - [ ] [#threadjoin] Join or abort search timeout thread (main.rs:5028-5030)

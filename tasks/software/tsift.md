@@ -200,7 +200,19 @@ Commit: `btakita/tsift@f1868bb` pushed to `origin/main`.
 3. Medium: read-only summarize paths still take the writable `SummaryDb` opener. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 2510-2539 call `summarize::SummaryDb::open()` for both `--stats` and normal query mode, and [src/tsift/src/summarize.rs](../../src/tsift/src/summarize.rs) lines 95-133 make that opener create parent directories, enable WAL, and create tables. The result is that `tsift summarize --stats` mutates a fresh checkout by creating `.tsift/summaries.db`, and summary lookups can contend with extract writers even though they are logically read-only. I reproduced the mutation on an empty temp project: `summarize --stats` exited 0 and created `.tsift/summaries.db`.
 
 Verification: review-only turn. I did not change code or run the full suite; I validated findings with direct CLI repros for the `lint` lock path, the `--index .tsift/indexes` path, and `summarize --stats` creating `summaries.db`.
-<!-- agent:boundary:7b954526 -->
+
+❯ Add actionable items into the backlog.
+### Re: backlog follow-up — gpt-5
+
+Added three actionable backlog items derived from the review findings and ordered them by implementation priority.
+
+Top of backlog: `#lintlock`
+
+Added:
+1. `#lintlock` — make `tsift lint` use the same lock-aware read-only/snapshot path as the other query commands.
+2. `#lintidx` — make `tsift lint --index .tsift/indexes` discover scoped `index.db` files correctly and pin it with a regression.
+3. `#sumro` — make summarize stats/query paths read-only so they stop creating or contending on `summaries.db`.
+<!-- agent:boundary:acba24e7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -209,6 +221,9 @@ Verification: review-only turn. I did not change code or run the full suite; I v
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#lintlock] Fix `tsift lint` to use lock-aware read-only index access and snapshot fallback so active writers do not fail with `database is locked`.
+- [ ] [#lintidx] Fix `tsift lint --index .tsift/indexes` discovery so scoped index roots load `.tsift/indexes/*/index.db`, and add a CLI regression for that path.
+- [ ] [#sumro] Make `tsift summarize --stats` and summary query mode open `summaries.db` read-only so lookup paths do not create or contend on the cache DB.
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

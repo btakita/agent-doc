@@ -526,12 +526,18 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             ),
         );
 
-        let recovered = repair::run(file)
-            .unwrap_or_else(|e| {
+        let recovered = match repair::run(file) {
+            Ok(outcome) => outcome.repaired(),
+            Err(e) => {
+                if e.to_string()
+                    .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                {
+                    anyhow::bail!("{}", e);
+                }
                 eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
-                repair::RepairOutcome::Noop
-            })
-            .repaired();
+                false
+            }
+        };
 
         let committed = match git::commit(file) {
             Ok(did_commit) => did_commit,
@@ -603,12 +609,18 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         );
     }
 
-    let recovered = repair::run(file)
-        .unwrap_or_else(|e| {
+    let recovered = match repair::run(file) {
+        Ok(outcome) => outcome.repaired(),
+        Err(e) => {
+            if e.to_string()
+                .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+            {
+                anyhow::bail!("{}", e);
+            }
             eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
-            repair::RepairOutcome::Noop
-        })
-        .repaired();
+            false
+        }
+    };
 
     let committed = match git::commit(file) {
         Ok(did_commit) => did_commit,
@@ -710,12 +722,18 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
     let recovered = recovered_prior
-        || repair::run(file)
-            .unwrap_or_else(|e| {
+        || match repair::run(file) {
+            Ok(outcome) => outcome.repaired(),
+            Err(e) => {
+                if e.to_string()
+                    .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                {
+                    return Err(e);
+                }
                 eprintln!("[preflight] repair warning: {}", e);
-                repair::RepairOutcome::Noop
-            })
-            .repaired();
+                false
+            }
+        };
 
     // Step 1b: Ensure document is initialized (snapshot + git baseline).
     // If no snapshot exists, creates one and commits the file.
@@ -2405,6 +2423,47 @@ mod tests {
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_ambiguous_preflight_started_patchback_without_artifact() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(crate::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR),
+            "expected fail-closed ambiguous patchback error, got: {message}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "ambiguous patchback must not be auto-committed"
+        );
     }
 
     #[test]

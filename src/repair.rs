@@ -76,6 +76,13 @@ fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
     )
 }
 
+pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
+    "ambiguous preflight_started patchback";
+
+fn normalized_content_hash(content: &str) -> String {
+    crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
+}
+
 fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(RepairOutcome::Noop);
@@ -95,33 +102,73 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     let current_snapshot_hash = snapshot_content
         .as_deref()
         .map(crate::ops_log::content_hash);
+    let current_normalized_file_hash = normalized_content_hash(&file_content);
+    let current_normalized_snapshot_hash = snapshot_content.as_deref().map(normalized_content_hash);
 
-    if state.file_hash.as_deref() != Some(current_file_hash.as_str())
-        || state.snapshot_hash != current_snapshot_hash
-    {
-        return Ok(RepairOutcome::Noop);
+    let raw_hashes_match = state.file_hash.as_deref() == Some(current_file_hash.as_str())
+        && state.snapshot_hash == current_snapshot_hash;
+    let normalized_hashes_match = state.normalized_file_hash.as_deref()
+        == Some(current_normalized_file_hash.as_str())
+        && state.normalized_snapshot_hash == current_normalized_snapshot_hash;
+
+    if raw_hashes_match || normalized_hashes_match {
+        crate::cycle_state::mark_committed(
+            file,
+            "repair_preflight_stale_lock",
+            snapshot_content.as_deref(),
+            Some(&file_content),
+        )?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "repair_preflight_stale_lock file={} cycle_id={}",
+                file.display(),
+                state.cycle_id
+            ),
+        );
+        eprintln!(
+            "[repair] repaired stale preflight_started cycle {} for {}",
+            state.cycle_id,
+            file.display()
+        );
+        return Ok(RepairOutcome::StalePreflightLockRepaired);
     }
 
-    crate::cycle_state::mark_committed(
-        file,
-        "repair_preflight_stale_lock",
-        snapshot_content.as_deref(),
-        Some(&file_content),
-    )?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "repair_preflight_stale_lock file={} cycle_id={}",
+    if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+        let repaired_snapshot = snapshot::load(file)?;
+        crate::cycle_state::mark_committed(
+            file,
+            "repair_preflight_committed_historical",
+            repaired_snapshot.as_deref(),
+            Some(&file_content),
+        )?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "repair_preflight_committed_historical file={} cycle_id={} reason={}",
+                file.display(),
+                state.cycle_id,
+                reason
+            ),
+        );
+        eprintln!(
+            "[repair] closed stale preflight_started cycle {} for {} after repairing committed historical {} drift",
+            state.cycle_id,
             file.display(),
-            state.cycle_id
-        ),
-    );
-    eprintln!(
-        "[repair] repaired stale preflight_started cycle {} for {}",
-        state.cycle_id,
-        file.display()
-    );
-    Ok(RepairOutcome::StalePreflightLockRepaired)
+            reason
+        );
+        return Ok(RepairOutcome::StalePreflightLockRepaired);
+    }
+
+    if let Some(marker) = crate::session_check::detect_bypassed_response_write(file)? {
+        anyhow::bail!(
+            "{} for {}: found visible response patchback ({marker}) but no pending/capture artifact exists and HEAD cannot prove the patchback was already committed",
+            AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR,
+            file.display(),
+        );
+    }
+
+    Ok(RepairOutcome::Noop)
 }
 
 fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
@@ -987,6 +1034,85 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_lock");
+    }
+
+    #[test]
+    fn recover_repairs_preflight_started_cycle_when_committed_patchback_is_visible() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(root, &doc);
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let updated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, updated).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .status()
+            .unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::StalePreflightLockRepaired);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "repair_preflight_committed_historical");
+        assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
+    }
+
+    #[test]
+    fn recover_fails_closed_on_ambiguous_preflight_started_patchback_without_artifact() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let updated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, updated).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR));
+        assert!(message.contains("### Re: topic — gpt-5"));
     }
 
     #[test]

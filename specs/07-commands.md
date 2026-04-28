@@ -595,7 +595,9 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 0. Enforce previous-cycle completion using persisted per-document cycle state in `.agent-doc/state/cycles/<doc-hash>.json`
    - If the prior cycle is `response_captured` or `write_applied`, preflight first auto-attempts `repair` + `commit`
    - If that `commit` path finds the staged snapshot already matches `HEAD`, it closes the cycle as already committed instead of logging `commit_failed`
-   - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match exactly, `repair` repairs that stale preflight lock as a no-op closeout
+   - If the prior cycle is `preflight_started` and the persisted snapshot/file hashes still match (including normalized transient-marker-only churn), `repair` repairs that stale preflight lock as a no-op closeout
+   - If the prior cycle is `preflight_started`, no pending/capture artifact exists, and `HEAD` proves the visible response patchback was already committed, `repair` repairs the historical snapshot drift and closes the stale cycle before diffing
+   - If the prior cycle is `preflight_started`, a visible response patchback is present, no pending/capture artifact exists, and `HEAD` cannot prove the patchback was already committed, preflight fails closed before running `agent-doc commit <FILE>` so the tool does not silently commit ambiguous flushed content
    - Otherwise, preflight still attempts the normal snapshot-only `agent-doc commit <FILE>` closeout before failing. That closeout stages the prior snapshot only, so later live working-tree edits stay uncommitted. If the cycle is still open after `repair` + `commit`, preflight fails closed instead of diffing again
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)

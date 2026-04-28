@@ -55,6 +55,10 @@ pub struct CycleState {
     pub snapshot_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_file_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capture_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +103,8 @@ pub fn start_preflight(
         updated_at: now,
         snapshot_hash: snapshot_content.map(crate::ops_log::content_hash),
         file_hash: file_content.map(crate::ops_log::content_hash),
+        normalized_snapshot_hash: snapshot_content.map(normalized_content_hash),
+        normalized_file_hash: file_content.map(normalized_content_hash),
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
@@ -121,6 +127,8 @@ pub fn mark_write_applied(
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
     state.file_hash = file_content.map(crate::ops_log::content_hash);
+    state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
+    state.normalized_file_hash = file_content.map(normalized_content_hash);
     save(file, &state)?;
     Ok(state)
 }
@@ -141,6 +149,8 @@ pub fn mark_response_captured(
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
     state.file_hash = file_content.map(crate::ops_log::content_hash);
+    state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
+    state.normalized_file_hash = file_content.map(normalized_content_hash);
     state.capture_id = Some(state.cycle_id.clone());
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
@@ -199,9 +209,11 @@ pub fn mark_committed(
     state.updated_at = now_secs();
     if let Some(snapshot) = snapshot_content {
         state.snapshot_hash = Some(crate::ops_log::content_hash(snapshot));
+        state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
     }
     if let Some(content) = file_content {
         state.file_hash = Some(crate::ops_log::content_hash(content));
+        state.normalized_file_hash = Some(normalized_content_hash(content));
     }
     save(file, &state)?;
     Ok(state)
@@ -255,11 +267,17 @@ fn synthetic_state_with_id(
         updated_at: now,
         snapshot_hash: None,
         file_hash: None,
+        normalized_snapshot_hash: None,
+        normalized_file_hash: None,
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
         pending_done_ids: Vec::new(),
     }
+}
+
+fn normalized_content_hash(content: &str) -> String {
+    crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
 }
 
 fn normalize_pending_id(id: &str) -> String {

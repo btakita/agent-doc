@@ -623,15 +623,43 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only the eight `#wroot1` files.
-<!-- agent:boundary:7e62eec3 -->
+
+❯ do #q8p2. spec-test-build-install-commit-push
+### Re: do `#q8p2` — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `793e36c` (`fix: reject malformed pending id prefixes`) on `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- the legacy/backfill parser correctly repaired old bare `[#]` lines, but the live add-time and pending-patch normalization paths still lacked a fail-closed check for malformed leading id prefixes in item text.
+- that left room for stacked forms like `[#] [#id] ...` or mixed `id=... [#id] ...` to survive normalization and persist as malformed backlog content instead of being rejected.
+
+What changed:
+- `pending.rs` now rejects bare `[#]` add-time prefixes, empty `id=` prefixes, and stacked leading custom-id prefixes while still accepting canonical `id=<custom> ...` and compatibility `[#custom] ...`.
+- `write.rs` now applies the same fail-closed guard when normalizing accidental list-shaped pending/backlog patches before capture, while still repairing a lone legacy `- [ ] [#] ...` placeholder into a generated id.
+- updated `specs/07-commands.md`, `runbooks/pending-ops.md`, and `VERSIONS.md`, plus added parser and write-path regressions for normalize-vs-reject behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `793e36c` (`fix: reject malformed pending id prefixes`)
+
+Scope note:
+- `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `VERSIONS.md`, `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/pending.rs`, and `src/write.rs`.
+<!-- agent:boundary:d6596480 -->
 <!-- /agent:exchange -->
 
 <!--
+`agent-doc pending` should be deprecated and alias `agent-doc backlog`.
+agent-doc should detect an id in the text when a backlog item is sent...such as `[#sdig2matrix] Fixture evidence matrix — publish which rubric families are eligible on session-doc, plaintext, retained-text, and JSONL-backed fixtures so future benchmark drift is attributable`.
+
 Why is there Codex permission prompts when `codex_args: -s danger-full-access` frontmatter is set?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
+- [x] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

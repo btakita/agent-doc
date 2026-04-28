@@ -143,7 +143,7 @@ on claude exit with code c:
                   Codex: auto-restart in resume mode so `codex exec` stays attached
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user (Enter/q)
                          AND when the resumed child never re-establishes a prompt
-                         (`auto_trigger_timeout` / `send_keys` failure), treat the
+                         (`auto_trigger_timeout` / child-pty trigger failure), treat the
                          handoff as failed provenance. The 30s
                          `auto_trigger_timeout` log is provisional telemetry:
                          the watcher keeps polling after that point, and the
@@ -238,6 +238,10 @@ Auto-trigger provenance is lifecycle-bound to a single restart iteration:
   the next restart iteration begins
 - stale auto-trigger workers must never outlive the child they were waiting on,
   so they cannot inject commands into a later replacement child in the same pane
+- after the prompt appears, the trigger command is written through the
+  supervisor-owned child pty writer rather than tmux pane stdin, so a late
+  trigger cannot hit the supervisor restart prompt or a non-child process in
+  the pane
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.
 

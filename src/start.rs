@@ -24,12 +24,14 @@
 //!   user quit, and session end.
 //! - On `--continue` restarts, spawns a background thread that polls
 //!   `tmux capture-pane` for the harness prompt before
-//!   sending the harness-specific trigger command via `tmux send-keys` to auto-trigger
-//!   the skill workflow in the resumed conversation. This avoids the race
-//!   where DSR (Device Status Report) escape sequences interleave with the
-//!   injected command, corrupting Claude Code's input state. If the prompt
-//!   still has not appeared after 30 seconds, the thread logs a provisional
-//!   timeout but keeps watching until the child exits or the prompt appears.
+//!   injecting the harness-specific trigger command into the child pty to
+//!   auto-trigger the skill workflow in the resumed conversation. This avoids
+//!   the race where DSR (Device Status Report) escape sequences interleave
+//!   with the injected command, corrupting Claude Code's input state, while
+//!   also ensuring a stale worker cannot later type into the supervisor prompt
+//!   or a replacement process in the tmux pane. If the prompt still has not
+//!   appeared after 30 seconds, the thread logs a provisional timeout but
+//!   keeps watching until the child exits or the prompt appears.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -258,6 +260,31 @@ fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
     }
 }
 
+fn auto_trigger_inject_command(
+    shared: &SupervisorShared,
+    stop: &AtomicBool,
+    trigger_cmd: &str,
+) -> AutoTriggerOutcome {
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
+    }
+    let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
+        return AutoTriggerOutcome::SendFailed;
+    };
+    if stop.load(Ordering::Relaxed) {
+        return AutoTriggerOutcome::Cancelled;
+    }
+
+    let mut payload = trigger_cmd.as_bytes().to_vec();
+    payload.push(b'\r');
+
+    let mut writer = writer_arc.lock().unwrap();
+    if writer.write_all(&payload).is_err() || writer.flush().is_err() {
+        return AutoTriggerOutcome::SendFailed;
+    }
+    AutoTriggerOutcome::Sent
+}
+
 fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -296,11 +323,8 @@ fn spawn_auto_trigger_thread(
                     };
                     if tail.iter().any(|line| harness.matches_prompt(line.trim())) {
                         let trigger_cmd = harness.trigger_command(&file);
-                        let status = std::process::Command::new("tmux")
-                            .args(["send-keys", "-t", &pane_id, &trigger_cmd, "Enter"])
-                            .output();
-                        match status {
-                            Ok(output) if output.status.success() => {
+                        match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
+                            AutoTriggerOutcome::Sent => {
                                 shared
                                     .auto_trigger_outcome
                                     .store(AutoTriggerOutcome::Sent as u8, Ordering::Relaxed);
@@ -313,18 +337,28 @@ fn spawn_auto_trigger_thread(
                                 );
                                 eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
                             }
-                            _ => {
+                            AutoTriggerOutcome::Cancelled => {
+                                shared
+                                    .auto_trigger_outcome
+                                    .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
+                            }
+                            AutoTriggerOutcome::SendFailed => {
                                 shared
                                     .auto_trigger_outcome
                                     .store(AutoTriggerOutcome::SendFailed as u8, Ordering::Relaxed);
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "auto_trigger_failed pane={} harness={} reason=send_keys",
+                                        "auto_trigger_failed pane={} harness={} reason=pty_write",
                                         pane_id, harness.binary
                                     ),
                                 );
                                 eprintln!("[agent-doc] auto-trigger failed");
+                            }
+                            outcome => {
+                                shared
+                                    .auto_trigger_outcome
+                                    .store(outcome as u8, Ordering::Relaxed);
                             }
                         }
                         return;
@@ -1930,6 +1964,82 @@ mod tests {
         assert_eq!(
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
             AutoTriggerOutcome::Cancelled
+        );
+    }
+
+    #[derive(Clone)]
+    struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "writer closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn auto_trigger_inject_command_writes_carriage_return() {
+        let shared = Arc::new(SupervisorShared::new("test"));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(
+            RecordingWriter(written.clone()),
+        ))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::Sent
+        );
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_command_honors_late_cancel_before_write() {
+        let shared = Arc::new(SupervisorShared::new("test"));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(
+            RecordingWriter(written.clone()),
+        ))));
+        let stop = AtomicBool::new(true);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::Cancelled
+        );
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
+        let shared = Arc::new(SupervisorShared::new("test"));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(Box::new(FailingWriter))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::SendFailed
         );
     }
 

@@ -467,7 +467,9 @@ Commit/push:
 - `btakita/tsift@7bb0585` (`fix: uniquify workspace scope identifiers`) pushed to `origin/main`.
 
 Top of backlog: `#statusws`.
-<!-- agent:boundary:95e6a178 -->
+
+do #statusws. spec-test-build-install-commit-push
+<!-- agent:boundary:e7134607 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -476,7 +478,6 @@ Top of backlog: `#statusws`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#scopeid] [recommended] Make workspace scope identifiers unique instead of deriving them from the last path component in .gitmodules
 - [ ] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
 - [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

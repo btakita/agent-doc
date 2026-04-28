@@ -727,7 +727,7 @@ Verification:
 
 Note:
 - I left unrelated local edits outside the `#patchbypass` scope untouched.
-<!-- agent:boundary:c0120a41 -->
+<!-- agent:boundary:809784c0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -736,5 +736,4 @@ Note:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#patchbypass] [recommended] Response patchback can land in the target document without a binary-owned commit boundary, and later `session-check` still treats the now-committed exchange as likely direct patchback instead of a recoverable closeout. Reproduction: `src/session-share/tasks/claudescore-3.md` received the UTC-news response block, no `agent-doc finalize` / `write --commit` acknowledgment was recorded for that write, `src/session-share` was later manually committed as `9be7d48`, and `agent-doc session-check` still interrupted on `found likely direct response patchback without agent-doc cycle`. Fix by making commit acknowledgment binary-owned for the document's owning repo/submodule and adding deterministic recovery when the write landed but the commit boundary did not. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

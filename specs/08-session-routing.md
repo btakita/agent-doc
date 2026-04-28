@@ -111,6 +111,8 @@ When the user navigates to a document in the editor:
    - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane)
    - No pane exists → trigger **Provisioning**
 5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
+   - Serializes concurrent provisioning with per-document and per-session startup flocks before choosing the split target
+   - Re-checks the registry after the lock is acquired so a concurrent route that already registered this document is reused instead of double-started
    - Splits alongside an existing pane in the agent-doc window
    - Registers the session→pane **Binding** in `sessions.json`
    - Starts Claude asynchronously in the new pane

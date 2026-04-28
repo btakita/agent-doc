@@ -109,6 +109,8 @@
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
 
@@ -1015,6 +1017,67 @@ fn auto_start_ext(
     )
 }
 
+struct StartupLocks {
+    _doc: File,
+    _session: File,
+}
+
+fn starting_dir_for(file: &Path) -> Option<std::path::PathBuf> {
+    let canonical = std::fs::canonicalize(file).ok()?;
+    let base = snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(|p| p.to_path_buf()))?;
+    Some(base.join(".agent-doc/starting"))
+}
+
+fn session_start_lock_name(session_name: &str) -> String {
+    let hash = crate::snapshot::doc_hash_from_str(&format!("session:{session_name}"));
+    format!("session-{hash}.lock")
+}
+
+fn open_start_lock(path: &Path) -> Result<File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+        .with_context(|| format!("failed to open startup lock {}", path.display()))
+}
+
+fn acquire_startup_locks(file: &Path, session_name: &str) -> Result<Option<StartupLocks>> {
+    let Some(starting_dir) = starting_dir_for(file) else {
+        return Ok(None);
+    };
+
+    let doc_lock_path = if let Ok(hash) = snapshot::doc_hash(file) {
+        starting_dir.join(format!("{hash}.lock"))
+    } else {
+        let fallback = crate::snapshot::doc_hash_from_str(&file.to_string_lossy());
+        starting_dir.join(format!("{fallback}.lock"))
+    };
+    let session_lock_path = starting_dir.join(session_start_lock_name(session_name));
+
+    let doc_lock = open_start_lock(&doc_lock_path)?;
+    doc_lock
+        .lock_exclusive()
+        .with_context(|| format!("failed to acquire startup lock {}", doc_lock_path.display()))?;
+
+    let session_lock = open_start_lock(&session_lock_path)?;
+    session_lock.lock_exclusive().with_context(|| {
+        format!(
+            "failed to acquire session startup lock {}",
+            session_lock_path.display()
+        )
+    })?;
+
+    Ok(Some(StartupLocks {
+        _doc: doc_lock,
+        _session: session_lock,
+    }))
+}
+
 /// Resolve HarnessConfig from a file's frontmatter + global config.
 fn resolve_harness_for_file(file: &Path) -> HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
@@ -1046,31 +1109,18 @@ fn auto_start_in_session(
     split_before: bool,
     harness: &HarnessConfig,
 ) -> Result<String> {
-    // Startup lock: prevent double-spawn when sync fires twice in quick succession.
-    // Check for a lock file; if it exists and is < 5s old, skip this auto-start.
-    // Best-effort: skip lock entirely if file doesn't exist or hash fails.
-    if let Ok(canonical) = std::fs::canonicalize(file)
-        && let Some(project_root) = snapshot::find_project_root(&canonical)
-        && let Ok(hash) = snapshot::doc_hash(file)
+    // Serialize auto-starts for both the document and the target tmux session.
+    // This prevents duplicate starts for the same file and split-target races
+    // when two different documents provision concurrently into the same window.
+    let startup_locks = acquire_startup_locks(file, session_name)?;
+    if let Some(existing) = sessions::lookup(session_id)?
+        && tmux.pane_alive(&existing)
     {
-        let starting_dir = project_root.join(".agent-doc/starting");
-        let lock_path = starting_dir.join(format!("{}.lock", hash));
-        if lock_path.exists()
-            && let Ok(meta) = lock_path.metadata()
-            && let Ok(modified) = meta.modified()
-            && let Ok(age) = modified.elapsed()
-            && age.as_secs() < 5
-        {
-            eprintln!(
-                "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
-                file_path,
-                age.as_secs_f64()
-            );
-            return Err(anyhow::anyhow!("startup lock active for {}", file_path));
-        }
-        // Create the lock
-        let _ = std::fs::create_dir_all(&starting_dir);
-        let _ = std::fs::write(&lock_path, "");
+        eprintln!(
+            "[route] startup already provisioned pane {} for {} while waiting on locks",
+            existing, file_path
+        );
+        return Ok(existing);
     }
 
     // Use the document's own submodule root as the pane cwd when applicable,
@@ -1166,6 +1216,7 @@ fn auto_start_in_session(
 
     // Register immediately so subsequent route calls find this pane
     sessions::register(session_id, &new_pane, file_path)?;
+    drop(startup_locks);
 
     // Focus the new pane immediately so the user sees Claude starting
     if let Err(e) = tmux.select_pane(&new_pane) {
@@ -3377,6 +3428,77 @@ history line
             new_pane[0],
             "right-column file should produce rightmost pane even after rearrangement"
         );
+    }
+
+    #[test]
+    fn concurrent_provision_pane_serializes_same_session_auto_start() {
+        use std::sync::{Arc, Barrier};
+
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let session = "test";
+        let iso = Arc::new(IsolatedTmux::new("route-test-concurrent-provision"));
+        let doc_a = dir.path().join("a.md");
+        let doc_b = dir.path().join("b.md");
+        std::fs::write(&doc_a, "# A\n").unwrap();
+        std::fs::write(&doc_b, "# B\n").unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let iso_a = Arc::clone(&iso);
+        let barrier_a = Arc::clone(&barrier);
+        let doc_a_thread = doc_a.clone();
+        let handle_a = std::thread::spawn(move || {
+            barrier_a.wait();
+            provision_pane(
+                &iso_a,
+                &doc_a_thread,
+                "session-a",
+                doc_a_thread.to_string_lossy().as_ref(),
+                Some(session),
+                &[],
+            )
+        });
+
+        let iso_b = Arc::clone(&iso);
+        let barrier_b = Arc::clone(&barrier);
+        let doc_b_thread = doc_b.clone();
+        let handle_b = std::thread::spawn(move || {
+            barrier_b.wait();
+            provision_pane(
+                &iso_b,
+                &doc_b_thread,
+                "session-b",
+                doc_b_thread.to_string_lossy().as_ref(),
+                Some(session),
+                &[],
+            )
+        });
+
+        barrier.wait();
+        let pane_a = handle_a.join().unwrap().unwrap();
+        let pane_b = handle_b.join().unwrap().unwrap();
+
+        let window_a = iso.pane_window(&pane_a).unwrap();
+        let window_b = iso.pane_window(&pane_b).unwrap();
+        assert_eq!(
+            window_a, window_b,
+            "concurrent provisioning in one tmux session should converge into a single window"
+        );
+
+        let panes = iso.list_window_panes(&window_a).unwrap();
+        assert!(
+            panes.contains(&pane_a) && panes.contains(&pane_b),
+            "both provisioned panes should remain visible in the shared window"
+        );
+
+        let registry = sessions::load().unwrap();
+        assert_eq!(registry.len(), 2, "both documents should be registered");
+
+        std::env::set_current_dir(prev_cwd).unwrap();
     }
 
     #[test]

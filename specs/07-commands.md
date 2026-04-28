@@ -118,7 +118,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 > **Deprecation note:** `tmux_session` in frontmatter is deprecated. The tmux session is now determined at runtime: `--window` argument (sync), `current_tmux_session()` (route/start), or future `.agent-doc/config.toml` settings. The field is still read for backward compatibility and auto-repaired by sync. It will be removed in a future version.
 
 **Auto-start algorithm (`auto_start_in_session`):**
-1. **Startup lock:** Check `.agent-doc/starting/<hash>.lock`. If exists and age < 5s → skip (prevents double-spawn when sync fires twice rapidly). Create lock file before proceeding. Best-effort: skipped if file doesn't exist or hash fails.
+1. **Startup locks:** Acquire flock-backed locks under `.agent-doc/starting/` for both the document hash and the target tmux session (`session-<hash>.lock`). This serializes same-document retries and same-session provisioning races. After the locks are held, re-check the registry; if another route already registered a live pane for this document, reuse it instead of spawning again.
 2. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
 3. Find a split target pane:
    - **Sync path** (`skip_wait=true`): pick the split target by column position — first pane in the agent-doc window for left-column files, last pane for right-column files. This places the new pane adjacent to its column neighbors.

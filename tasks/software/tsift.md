@@ -66,7 +66,23 @@ Verification:
 - added coverage for unreadable-file warning capture in `IndexSummary` and CLI stderr logging from `tsift index`.
 
 Commit: `btakita/tsift@0ac2a22` pushed to `origin/main`.
-<!-- agent:boundary:2b3b2aff -->
+
+❯ do #e2e. spec-test-commit-push
+### Re: do #e2e — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- added a real indexed temp-project fixture in `tests/exit_code.rs`
+- added end-to-end JSON coverage for `search`, `graph`, `communities`, `path`, and `explain`
+- documented the integration-fixture expectation in `SPEC.md` and `CLAUDE.md`
+
+Verification:
+- `cargo test --test exit_code` passed: 19 tests.
+- `make check` passed: 352 unit tests + 19 exit-code/integration tests.
+
+Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
+<!-- agent:boundary:87857922 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -75,7 +91,6 @@ Commit: `btakita/tsift@0ac2a22` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
 - [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
 <!-- /agent:backlog -->
 

@@ -189,7 +189,18 @@ Verification:
 - `cargo install --path .` passed, and `tsift --version` now reports `0.1.7`.
 
 Commit: `btakita/tsift@f1868bb` pushed to `origin/main`.
-<!-- agent:boundary:70a4aa88 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: `tsift lint` still fails under an active index writer. [src/tsift/src/lint.rs](../../src/tsift/src/lint.rs) lines 183-202 open each discovered `index.db` through raw `rusqlite::Connection::open_with_flags(...)`, and [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 3327-3330 route normal lint discovery through that path. Unlike `search`, `status`, `graph`, and `communities`, lint never uses the lock-aware `IndexDb::open_read_only` / snapshot-fallback helpers, so a rollback-journal writer turns lint into a 5-second stall followed by `database is locked`. I reproduced this locally with `cargo run -- lint ... --json` while holding `BEGIN EXCLUSIVE` on `.tsift/index.db`.
+
+2. Medium: `tsift lint --index .tsift/indexes` silently ignores every scoped index. [src/tsift/src/lint.rs](../../src/tsift/src/lint.rs) lines 208-220 only probe `<arg>/index.db`, `<arg>/.tsift/index.db`, `<arg>/indexes/*/index.db`, and `<arg>/.tsift/indexes/*/index.db`. Passing the actual scoped-index directory (`.tsift/indexes`) therefore misses `.tsift/indexes/<scope>/index.db` entirely and degrades lint into a near no-op. The CLI help in [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 267-276 describes `--index` as an index-directory path, so this is an easy workflow trap. I reproduced it: `--index <tmp>/.tsift/indexes` returned `annotations: []`, while `--index <tmp>/.tsift` found the expected `alpha_helper` annotation immediately.
+
+3. Medium: read-only summarize paths still take the writable `SummaryDb` opener. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 2510-2539 call `summarize::SummaryDb::open()` for both `--stats` and normal query mode, and [src/tsift/src/summarize.rs](../../src/tsift/src/summarize.rs) lines 95-133 make that opener create parent directories, enable WAL, and create tables. The result is that `tsift summarize --stats` mutates a fresh checkout by creating `.tsift/summaries.db`, and summary lookups can contend with extract writers even though they are logically read-only. I reproduced the mutation on an empty temp project: `summarize --stats` exited 0 and created `.tsift/summaries.db`.
+
+Verification: review-only turn. I did not change code or run the full suite; I validated findings with direct CLI repros for the `lint` lock path, the `--index .tsift/indexes` path, and `summarize --stats` creating `summaries.db`.
+<!-- agent:boundary:7b954526 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -198,7 +209,6 @@ Commit: `btakita/tsift@f1868bb` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

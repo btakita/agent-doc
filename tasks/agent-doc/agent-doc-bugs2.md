@@ -153,7 +153,28 @@ So if the prompts you mean are happening inside an `agent-doc start` Codex sessi
 Separate nuance: if you mean permission prompts from the outer Codex harness running this turn, the document frontmatter does not control that layer at all; `codex_args` only affect the child Codex sessions that `agent-doc` launches.
 
 The concrete fix is to preserve the resolved Codex sandbox/launch args across resume instead of replacing them with plain `resume --last`.
-<!-- agent:boundary:bfdaa0e3 -->
+
+❯ do #permresume. spec-test-build-install-commit-push
+### Re: `#permresume` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `08165bc`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug was in the interactive supervisor restart path: Codex restarts were rebuilt as bare `resume --last`, which dropped resolved `codex_args` like `-s danger-full-access` after the first run.
+
+What changed:
+- `src/harness.rs` now treats the Codex restart path as a prefix operation, so restart args become `resume --last` plus the original resolved `base_args` instead of replacing them.
+- Updated the harness contract comments and restart tests to assert Codex keeps its base flags across resume while still entering resume mode.
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+I also checked the live CLI syntax locally: `codex resume --help` confirms interactive resume accepts `-s/--sandbox`, so preserving the original Codex sandbox flags on resume is valid.
+
+Because `src/agent-doc` already had unrelated local edits in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs`, I committed only `src/harness.rs` for this fix.
+<!-- agent:boundary:a84f49cc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -162,5 +183,5 @@ The concrete fix is to preserve the resolved Codex sandbox/launch args across re
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#permresume] [recommended] Preserve Codex sandbox args across interactive resume so codex_args like -s danger-full-access still apply after restart
+- [x] [#permresume] [recommended] Preserve Codex sandbox args across interactive resume so codex_args like -s danger-full-access still apply after restart
 <!-- /agent:backlog -->

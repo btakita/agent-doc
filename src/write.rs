@@ -558,21 +558,25 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
             }
             Ok(())
         }
-        CommitMode::Required => {
-            crate::git::commit(file)?;
-            ensure_cycle_committed(file)?;
-            // Verify the snapshot is actually committed in the owning git root.
-            // If it isn't (e.g., post-commit mutation dirtied the file, or the commit
-            // staged wrong content), retry once before handing off to session-check.
-            if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
-                crate::git::verify_snapshot_committed(file)?
-            {
-                eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
-                crate::git::commit(file)?;
-            }
-            crate::session_check::enforce_clean_closeout(file)
-        }
+        CommitMode::Required => complete_required_closeout(file).map(|_| ()),
     }
+}
+
+pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
+    let mut did_commit = crate::git::commit(file)?;
+    ensure_cycle_committed(file)?;
+    // Verify the snapshot is actually committed in the owning git root.
+    // If it isn't (e.g., post-commit mutation dirtied the file, or the commit
+    // staged wrong content), retry once before handing off to session-check.
+    if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
+        crate::git::verify_snapshot_committed(file)?
+    {
+        eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
+        did_commit |= crate::git::commit(file)?;
+        ensure_cycle_committed(file)?;
+    }
+    crate::session_check::enforce_clean_closeout(file)?;
+    Ok(did_commit)
 }
 
 fn ensure_cycle_committed(file: &Path) -> Result<()> {
@@ -6796,6 +6800,8 @@ mod verify_sidecar_normalization_tests {
 #[cfg(test)]
 mod precommit_pending_capture_tests {
     use std::fs;
+    use std::path::Path;
+    use std::process::Command as ProcessCommand;
 
     fn setup_precommit(
         root: &std::path::Path,
@@ -6859,6 +6865,34 @@ mod precommit_pending_capture_tests {
         )
         .unwrap();
         doc
+    }
+
+    fn init_git_repo(root: &Path, tracked: &Path) {
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .status()
+            .unwrap();
     }
 
     #[test]
@@ -7006,6 +7040,51 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check(&doc)
             .expect("suppression marker should disable the pre-commit pending-done gate");
+    }
+
+    #[test]
+    fn required_closeout_fails_when_only_later_prompt_drift_remains() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/state/cycles")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/captures")).unwrap();
+
+        let doc = tmp.path().join("doc.md");
+        let initial = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "body\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, initial).unwrap();
+        init_git_repo(tmp.path(), &doc);
+        crate::snapshot::save(&doc, initial).unwrap();
+
+        let drifted = initial.replace(
+            "<!-- /agent:exchange -->\n",
+            "do #followup. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, &drifted).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_already_current",
+            Some(initial),
+            Some(&drifted),
+        )
+        .unwrap();
+
+        let err = super::complete_required_closeout(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("unresolved prompt-bearing user changes"));
+        assert!(message.contains("do #followup. spec-test-build-install-commit-push"));
     }
 }
 

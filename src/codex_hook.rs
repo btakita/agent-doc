@@ -283,23 +283,11 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    if crate::git::commit(file)? {
+    if crate::write::complete_required_closeout(file)? {
         note.push_str(" The hook finished the commit boundary automatically.");
     }
-
-    match crate::session_check::inspect(file)? {
-        crate::session_check::SessionCheckStatus::Ok(_) => {
-            crate::ops_log::log_op(file, "codex_stop_auto_close_success");
-            Ok(StopCloseAttempt::Closed)
-        }
-        crate::session_check::SessionCheckStatus::Interrupted(reason) => {
-            crate::ops_log::log_op(file, &format!("codex_stop_auto_close_open reason={reason}"));
-            note.push_str(&format!(
-                " The cycle remained open after the auto-close attempt: {reason}"
-            ));
-            Ok(StopCloseAttempt::StillOpen { note })
-        }
-    }
+    crate::ops_log::log_op(file, "codex_stop_auto_close_success");
+    Ok(StopCloseAttempt::Closed)
 }
 
 fn capture_assistant_text(file: &Path, input: &StopInput) -> String {

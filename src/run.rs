@@ -238,8 +238,7 @@ pub fn run(
     maybe_abort_after_write_applied_for_test()?;
 
     if !no_git {
-        git::commit(file)?;
-        ensure_cycle_committed(file)?;
+        write::complete_required_closeout(file)?;
     }
 
     eprintln!("Response written to {}", file.display());
@@ -257,30 +256,6 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
         Some(&file_content),
     )?;
     Ok(())
-}
-
-fn ensure_cycle_committed(file: &Path) -> Result<()> {
-    let Some(state) = crate::cycle_state::load(file)? else {
-        anyhow::bail!("run did not persist cycle state");
-    };
-    if state.is_open() {
-        anyhow::bail!(
-            "run left cycle `{}` open at `{}` ({})",
-            state.cycle_id,
-            cycle_phase_name(state.phase),
-            state.last_event
-        );
-    }
-    Ok(())
-}
-
-fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
-    match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-    }
 }
 
 fn maybe_abort_after_write_applied_for_test() -> Result<()> {

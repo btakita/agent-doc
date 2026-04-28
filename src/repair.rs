@@ -507,8 +507,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
     let outcome = run(file)?;
     if outcome.repaired() && crate::git::is_in_git_repo(file) {
-        crate::git::commit(file)?;
-        crate::session_check::enforce_clean_closeout(file)?;
+        crate::write::complete_required_closeout(file)?;
     }
     Ok(outcome)
 }

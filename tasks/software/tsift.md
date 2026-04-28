@@ -82,7 +82,7 @@ Verification:
 - `make check` passed: 352 unit tests + 19 exit-code/integration tests.
 
 Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
-<!-- agent:boundary:87857922 -->
+<!-- agent:boundary:2446c54c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -91,7 +91,7 @@ Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
+- [x] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
 <!-- /agent:backlog -->
 
 <!--

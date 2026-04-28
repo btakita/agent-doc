@@ -141,7 +141,16 @@ In `.agent-doc/logs/tsift-v0.1.log`, the prior Codex-backed `tsift.md` panes end
 That points to an `agent-doc` tmux/session handoff failure, not a `tsift` runtime failure: the old pane exited cleanly, a replacement pane was launched, but route/start acknowledgment did not prove a real new cycle, so the user was left with a pane that looked dead or crashed. This also matches the later `agent-doc` fixes for Codex `Ctrl+D` clean exits, fresh-route acknowledgement, and ambiguous live-pane ownership.
 
 I did not add a new bug item because this is already covered by the existing `agent-doc` tmux-crash tracking (`#tmuxcrash` / `#bugs2tmux`) and the plan in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`. The remaining uncertainty is that the current logs still do not record enough provenance to distinguish “pane visibly died” from “live supervisor got stranded or replaced,” which is exactly why that plan is still open.
-<!-- agent:boundary:72a77b9f -->
+### Re: `#tmuxcrash` persists / `#agent-doc-bug` — gpt-5
+
+I treated this as a new `#agent-doc-bug` follow-up, but not as a duplicate of the already-completed stale-owner work.
+
+The key distinction is that `#tmuxcrash` / `#bugs2tmux` fixed the **ambiguous live-owner** class, while the `tsift.md` evidence still shows a different failure: after a clean Codex exit, fresh replacement panes were started, but `.agent-doc/logs/ops.log` still recorded `route_cycle_start_missing` for real prompts like `do #prunefix...` and `do #commlock...`. That means the remaining bug is a **fresh-start cycle-ack miss** that still feels like a pane crash to the user even though the pane itself was preserved.
+
+I captured that remaining gap as `#freshack`, added it to the top of `tasks/agent-doc/agent-doc-bugs2.md`, and created a dedicated plan in `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`. The plan focuses on reconstructing the `tsift.md` `%279` / `%285` startup-miss chain, auditing `route.rs` + `start.rs` fresh-start acknowledgment, and making startup misses fail visibly instead of looking like dead tmux panes.
+
+Verification: planning-only turn; no code changes or tests run.
+<!-- agent:boundary:7a386868 -->
 <!-- /agent:exchange -->
 
 <!--

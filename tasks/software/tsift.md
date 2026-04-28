@@ -445,7 +445,7 @@ Commit/push:
 - `btakita/tsift@7bb0585` (`fix: uniquify workspace scope identifiers`) pushed to `origin/main`.
 
 Top of backlog: `#statusws`.
-### Re: do #scopeid — gpt-5 (HEAD)
+### Re: do #scopeid — gpt-5
 
 Implemented in `tsift`.
 
@@ -468,9 +468,30 @@ Commit/push:
 
 Top of backlog: `#statusws`.
 
+❯ do #statusws. spec-test-build-install-commit-push
 do #statusws. spec-test-build-install-commit-push
-<!-- agent:boundary:80e3fbb3 -->
-do #statusws. spec-test-build-install-commit-push
+### Re: do #statusws — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift status` now detects workspace-only indexes under `.tsift/indexes/<scope>/index.db` instead of reporting `index: missing` whenever the root `.tsift/index.db` is absent.
+- workspace status now aggregates scoped freshness into the top-level `index` state, reports the contributing scopes in both human and JSON output, and recommends `tsift index --workspace .` / `tsift init --workspace` for workspace roots.
+- added regressions in both the direct status helpers (`src/status.rs`) and the compiled CLI surface (`tests/exit_code.rs`).
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the crate version to `0.1.14`.
+
+Verification:
+- `cargo test status_workspace --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `cargo test status_reports_workspace_scoped_indexes_in_json --test exit_code --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `make check` passed: 372 unit tests + 30 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.14`.
+
+Commit/push:
+- the resulting `tsift` changes are already present in `btakita/tsift@61bd2f2` (`chore: commit workspace changes`) on `origin/main`; `git commit` had nothing left to record and `git push origin main` reported `Everything up-to-date`.
+
+Top of backlog: `#substrict`.
+<!-- agent:boundary:71ec1e07 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -479,7 +500,7 @@ do #statusws. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
+- [x] [#statusws] [recommended] Make `tsift status` detect/report workspace scoped indexes instead of only `.tsift/index.db`
 - [ ] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

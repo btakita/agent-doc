@@ -354,7 +354,26 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1349 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:72ddc440 -->
+
+❯ do #crdt1. spec-test-build-install-commit-push
+### Re: `#crdt1` — opus-4-6
+
+Implemented in `src/agent-doc`, committed as `68ba0a2`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug had three parts:
+
+1. **write.rs stream paths lost responses on CRDT merge error** — lines 2700 and 2938 used bare `?` on `merge_contents_crdt()`, propagating the error and losing the entire response. The IPC timeout path (line 2555) already had a `match` with `splice_pending_component()` fallback. Applied the same pattern to both unprotected paths.
+
+2. **Reactive mode agent-change detection collapsed to zero** — `is_agent_change` used `debounce * 3` to detect agent-triggered changes, but reactive (CRDT) docs use zero debounce, making `0 * 3 = 0`. Every change after `last_run` appeared agent-triggered. Added `MIN_AGENT_CHANGE_WINDOW_MS = 500` floor so the detection window is always at least 500ms.
+
+3. **Integration tests were blocked by outdated `#[ignore]` comments** — `crdt::merge` has been `pub` through `lib.rs` all along. Enabled both tests with real assertions: corrupted state returns `Err` (not panic), `None` base bootstraps correctly, and merge convergence is idempotent (re-merging converged content produces identical output).
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1349 passed, 1 pre-existing codex hook test failure unrelated to this change
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:a345d768 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -363,7 +382,7 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
+- [x] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
 - [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk
 - [ ] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup
 - [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses

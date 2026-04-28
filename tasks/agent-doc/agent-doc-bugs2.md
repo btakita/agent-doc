@@ -58,8 +58,6 @@ What changed:
 Verified with `cargo test`, `cargo build`, and `cargo install --path . --force` in `src/agent-doc`.
 
 Note: `src/agent-doc` still has unrelated local edits in `src/start.rs` and `specs/supervisor.md`; I left them untouched.
-
-❯ do #backlogshadow. spec-test-build-install-commit-push
 ### Re: #backlogshadow — gpt-5
 
 Implemented `#backlogshadow` in `src/agent-doc` and pushed commit `5806501` to `origin/20260422/codex-agent-backend`.
@@ -77,37 +75,31 @@ Verification:
 - One full `cargo test` run hit that same unrelated tmux-route test nondeterministically before the targeted rerun passed
 
 Note: `src/agent-doc` still has unrelated local edits in `src/start.rs` and `specs/supervisor.md`; I left them untouched.
-<!-- agent:boundary:4fb4c542 -->
+### Re: #bugs2tmux follow-up — gpt-5
+
+Patched back the follow-up fix for the JetBrains `Run Agent Doc` ambiguity case and pushed commit `2ca3d56` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route` still prefers proving ownership from a tmux process tree that contains the document path.
+- When that argv/path proof disappears but the long-lived `agent-doc` supervisor still owns the document session, route now asks the per-session supervisor socket for the live child PID and maps that PID back to the owning tmux pane.
+- Only if neither the tmux process tree nor the supervisor PID can prove a live owner does route fail closed as ambiguous.
+- Added a regression that covers the live-pane / lost-argv case, and updated `VERSIONS.md` plus `specs/07-commands.md`.
+
+Verification:
+- `cargo build`
+- `cargo install --path .`
+- `cargo test route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path -- --exact`
+
+Note: I also reran the broader crate suite, but existing tmux/mock-start route tests remain flaky in this environment. I left the unrelated local edits in `src/start.rs` and `specs/supervisor.md` untouched.
+<!-- agent:boundary:7faefcf7 -->
 <!-- /agent:exchange -->
 
 <!--
-### Re: restore lost backlog items from recent commits — codex
-
-I checked the recent `src/session-share/tasks/claudescore-3.md` history directly.
-
-Current state: the live backlog is already correct again. The still-open items from the recent history are present now:
-- `#sdig2`
-- `#sdig2fx`
-- `#sredact`
-
-The concrete loss/recovery repro is earlier in history:
-- commit `541da7c` dropped those unfinished digest items from the live backlog and left only `#outcome`
-- commit `4f25d47` restored `#sdig2`, `#sdig2fx`, and `#sredact` from recent history
-
-So there is nothing valid to re-add to `claudescore-3.md` right now, but this is still a real `agent-doc` bug. I captured it as `#backlogreplay`: when recent committed history proves backlog items were still open, `agent-doc` should not silently accept a new closeout state that drops them entirely. This is complementary to `#backlogshadow`: shadow detection covers parked/commented copies, while `#backlogreplay` covers history-backed recovery when no visible shadow copy remains.
-
-### Re: response patchback not committed — codex
-
-I treated this as a new `#agent-doc-bug` report and captured it as `#patchcommit`.
-
-This looks narrower than the older missed-trigger / interrupted-preflight family: the response patchback is already visible in the target session document, but the owning repo or submodule was left dirty instead of being committed by the binary-owned closeout path. The reference repro is `src/session-share/tasks/claudescore-3.md`, where the response landed in the file but the session-share submodule still required a manual commit.
-
-I added a focused plan in `tasks/agent-doc/plan-response-patchback-not-committed.md` and put the backlog item at the top of `Pending / Not Built`. The plan is to make success depend on commit proof for the target document's owning repo/submodule, reopen closeout when the dirty state still belongs to the just-finished assistant turn, and fail closed when that provenance is ambiguous.
-
----
-After restarting tmux then calling `Run Agent Doc` from JB Idea, I see the following error in Idea
+In a previous session in this document I saw:
 ```
-agent-doc route failed (exit 1): [route] target tmux session: 0 Error: registered pane %275 is alive but no live agent-doc session currently owns /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md (pane=%275 pane_pid=1890954 pane_session=0 current_command=agent-doc). Refusing to route into an ambiguous pane; restart or reclaim the session instead
+• Ran agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md
+  └ [session-check] INTERRUPTED: cycle `cycle-1777359800675` is still `preflight_started` (preflight_started) — cycle
+    started but no write/commit followed
 ```
 -->
 
@@ -116,7 +108,6 @@ agent-doc route failed (exit 1): [route] target tmux session: 0 Error: registere
 <!-- agent:backlog -->
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
-- [ ] [#backlogshadow] [recommended] Fail closed or warn when open backlog-shaped items drift into parked/commented sections instead of the live `agent:backlog`, so unfinished work cannot silently vanish from active tracking. Plan: `tasks/agent-doc/plan-backlog-shadow-open-items.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

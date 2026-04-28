@@ -266,7 +266,28 @@ Lock files >1 hour old are removed. Legitimate CRDT operations exceeding 1 hour 
 - `src/write.rs:341`: `Mutex::lock().unwrap()` in supervisor IPC — panics on poisoned lock
 
 #### Follow-up items added to backlog.
-<!-- agent:boundary:190e65de -->
+
+❯ do #toctou1. spec-test-build-install-commit-push
+### Re: `#toctou1` — opus-4-6
+
+Implemented in `src/agent-doc`, committed as `893ab7c`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug: `consume_queue_prompt()` in `src/write.rs` reads the document, parses queue component byte offsets, modifies content, and writes back — all without holding the document lock. A concurrent edit between read and write could invalidate parsed offsets, causing prompt duplication or silent loss.
+
+What changed:
+- `src/write.rs`: `consume_queue_prompt()` now acquires `acquire_doc_lock(file)` at the top and holds it (RAII) through the entire read-parse-write cycle, including the snapshot update
+- `specs/07-commands.md`: documented the lock acquisition step in the post-commit consumption spec
+- `docs/reference/race-conditions.md`: added this as a resolved race condition entry
+- `tests/finalize_integration.rs`: added `finalize_queue_consume_updates_snapshot_atomically` regression test verifying both file and snapshot are updated in sync
+
+The doc lock (`.agent-doc/locks/<hash>.lock`) is separate from the snapshot lock (`.agent-doc/snapshots/<hash>.md.lock`), so no deadlock risk with the internal `snapshot::save()` call.
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1334 passed, 3 pre-existing tmux failures unrelated to this change
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:a7564739 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -275,7 +296,7 @@ Lock files >1 hour old are removed. Legitimate CRDT operations exceeding 1 hour 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#toctou1] TOCTOU race in write.rs consume_queue_prompt — read/parse/write cycle not atomic under document lock
+- [x] [#toctou1] TOCTOU race in write.rs consume_queue_prompt — read/parse/write cycle not atomic under document lock
 - [ ] [#envvar1] Unsafe env::set_var in write.rs run_command — not thread-safe for FFI/plugin callers
 - [ ] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
 - [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing

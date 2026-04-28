@@ -142,6 +142,9 @@ on claude exit with code c:
                   Claude: prompt user (Enter/q)
                   Codex: auto-restart in resume mode so `codex exec` stays attached
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user (Enter/q)
+                         AND resume auto-trigger only accepts a prompt line that
+                         appears in pane output newer than the pre-restart pane
+                         snapshot; stale prompt history is not enough
                          AND when the resumed child never re-establishes a prompt
                          (`auto_trigger_timeout` / child-pty trigger failure), treat the
                          handoff as failed provenance. The 30s

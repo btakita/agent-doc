@@ -285,6 +285,48 @@ fn auto_trigger_inject_command(
     AutoTriggerOutcome::Sent
 }
 
+fn capture_pane_lines(pane_id: &str) -> Option<Vec<String>> {
+    let output = std::process::Command::new("tmux")
+        .args(["capture-pane", "-t", pane_id, "-p", "-S", "-"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.to_string())
+            .collect(),
+    )
+}
+
+fn prompt_line_matches(harness: &crate::harness::HarnessConfig, line: &str) -> bool {
+    let stripped = crate::prompt::strip_ansi(line);
+    harness.matches_prompt(stripped.trim())
+}
+
+fn overlap_suffix_prefix(previous: &[String], current: &[String]) -> usize {
+    let max_overlap = previous.len().min(current.len());
+    for overlap in (1..=max_overlap).rev() {
+        if previous[previous.len() - overlap..] == current[..overlap] {
+            return overlap;
+        }
+    }
+    0
+}
+
+fn fresh_prompt_visible(
+    previous: &[String],
+    current: &[String],
+    harness: &crate::harness::HarnessConfig,
+) -> bool {
+    let overlap = overlap_suffix_prefix(previous, current);
+    current[overlap..]
+        .iter()
+        .any(|line| prompt_line_matches(harness, line))
+}
+
 fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -297,6 +339,7 @@ fn spawn_auto_trigger_thread(
         .name("auto-trigger".into())
         .spawn(move || {
             let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
+            let mut previous_lines = capture_pane_lines(&pane_id).unwrap_or_default();
             for attempt in 0.. {
                 let delay = if attempt == 0 {
                     AUTO_TRIGGER_INITIAL_DELAY
@@ -309,19 +352,10 @@ fn spawn_auto_trigger_thread(
                         .store(monitor.stop_outcome() as u8, Ordering::Relaxed);
                     return;
                 }
-                if let Ok(output) = std::process::Command::new("tmux")
-                    .args(["capture-pane", "-t", &pane_id, "-p"])
-                    .output()
-                    && output.status.success()
-                {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    let lines: Vec<&str> = text.lines().collect();
-                    let tail = if lines.len() > 20 {
-                        &lines[lines.len() - 20..]
-                    } else {
-                        &lines
-                    };
-                    if tail.iter().any(|line| harness.matches_prompt(line.trim())) {
+                if let Some(lines) = capture_pane_lines(&pane_id) {
+                    let prompt_visible = fresh_prompt_visible(&previous_lines, &lines, &harness);
+                    previous_lines = lines;
+                    if prompt_visible {
                         let trigger_cmd = harness.trigger_command(&file);
                         match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
                             AutoTriggerOutcome::Sent => {
@@ -2041,6 +2075,50 @@ mod tests {
             auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
             AutoTriggerOutcome::SendFailed
         );
+    }
+
+    #[test]
+    fn overlap_suffix_prefix_detects_append_from_same_history() {
+        let previous = vec!["old output".to_string(), "❯".to_string()];
+        let current = vec![
+            "old output".to_string(),
+            "❯".to_string(),
+            "resume banner".to_string(),
+            "❯".to_string(),
+        ];
+        assert_eq!(overlap_suffix_prefix(&previous, &current), 2);
+    }
+
+    #[test]
+    fn fresh_prompt_visible_rejects_stale_prompt_reflow() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let previous = vec!["resume banner".to_string(), "❯".to_string()];
+        let current = vec!["❯".to_string()];
+        assert!(
+            !fresh_prompt_visible(&previous, &current, &harness),
+            "a pane redraw containing only the old prompt should not count as a fresh resumed prompt"
+        );
+    }
+
+    #[test]
+    fn fresh_prompt_visible_requires_prompt_in_new_content() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let previous = vec!["resume banner".to_string(), "❯".to_string()];
+        let current = vec![
+            "resume banner".to_string(),
+            "❯".to_string(),
+            "restored context".to_string(),
+            "❯".to_string(),
+        ];
+        assert!(fresh_prompt_visible(&previous, &current, &harness));
+    }
+
+    #[test]
+    fn fresh_prompt_visible_accepts_clear_screen_with_new_prompt() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let previous = vec!["resume banner".to_string(), "❯".to_string()];
+        let current = vec!["resumed child ready".to_string(), "❯".to_string()];
+        assert!(fresh_prompt_visible(&previous, &current, &harness));
     }
 
     // --- StopSignal + writer thread tests ---

@@ -115,7 +115,7 @@ Key differences from Claude Code:
    - Binary name parameterized (spawn, error messages, log events)
    - Restart args use `harness.restart_args()` (append vs replace)
    - Clean exit handling is harness-aware: Codex auto-restarts in resume mode after a normal `codex exec` turn instead of dropping into the Claude-style `Enter`/`q` prompt
-   - Prompt detection uses `harness.matches_prompt()`
+   - Prompt detection now requires a prompt line that appears in pane content produced after the resumed child starts; a stale prompt still visible in tmux history no longer counts as resume proof
    - Trigger command uses `harness.trigger_command()`
    - `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by `supports_*` flags
    - Fresh-route timeout no longer silently idles: `route.rs` now attempts one bounded fallback trigger injection before logging `fresh_route_trigger_missing` and failing closed

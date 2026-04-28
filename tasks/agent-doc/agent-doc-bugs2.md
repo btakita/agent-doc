@@ -310,7 +310,7 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1339 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:6a3de429 -->
+<!-- agent:boundary:f0a9a935 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -319,7 +319,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#envvar1] Unsafe env::set_var in write.rs run_command — not thread-safe for FFI/plugin callers
 - [ ] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
 - [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
 - [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk

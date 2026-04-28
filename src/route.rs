@@ -1852,6 +1852,39 @@ mod tests {
         );
     }
 
+    fn pane_current_command(iso: &IsolatedTmux, pane: &str) -> Option<String> {
+        let output = iso
+            .cmd()
+            .args([
+                "display-message",
+                "-t",
+                pane,
+                "-p",
+                "#{pane_current_command}",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if cmd.is_empty() { None } else { Some(cmd) }
+    }
+
+    fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
+        const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if let Some(cmd) = pane_current_command(iso, pane)
+                && IDLE_SHELLS.contains(&cmd.as_str())
+            {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+
     // --- rewrite_start_path tests ---
 
     #[test]
@@ -2145,13 +2178,21 @@ mod tests {
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
 
         send_keys_with_retry(&iso, &pane, &mock_agent_script(500));
-        let _ = wait_for_pane_contains(
+        let content = wait_for_pane_contains(
             &iso,
             &pane,
             "Starting agent...",
             std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting agent..."),
+            "mock agent never started in pane: {content}"
         );
 
         let harness = HarnessConfig::claude();
@@ -2196,16 +2237,24 @@ mod tests {
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock codex launch"
+        );
 
         // Codex uses > as prompt
         let script =
             r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
         send_keys_with_retry(&iso, &pane, script);
-        let _ = wait_for_pane_contains(
+        let content = wait_for_pane_contains(
             &iso,
             &pane,
             "Starting codex...",
             std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting codex..."),
+            "mock codex never started in pane: {content}"
         );
 
         let harness = HarnessConfig::codex();
@@ -2862,13 +2911,21 @@ history line
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before prompt detection test"
+        );
 
         send_keys_with_retry(&iso, &pane, &mock_agent_script(100));
-        let _ = wait_for_pane_contains(
+        let content = wait_for_pane_contains(
             &iso,
             &pane,
             "Starting agent...",
             std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting agent..."),
+            "mock agent never started in pane: {content}"
         );
         let harness = HarnessConfig::claude();
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
@@ -2887,13 +2944,21 @@ history line
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before e2e launch"
+        );
 
         send_keys_with_retry(&iso, &pane, &mock_agent_script(300));
-        let _ = wait_for_pane_contains(
+        let content = wait_for_pane_contains(
             &iso,
             &pane,
             "Starting agent...",
             std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting agent..."),
+            "mock agent never started in pane: {content}"
         );
 
         let harness = HarnessConfig::claude();

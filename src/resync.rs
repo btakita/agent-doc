@@ -1606,6 +1606,10 @@ mod tests {
     use super::*;
     use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
 
+    fn test_cwd() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
     /// Poll until `pane_current_command` returns an idle shell, or timeout.
     /// Needed because shell startup is asynchronous and the 500ms sleep is
     /// insufficient under parallel test load (other tests saturate the CPU,
@@ -1671,18 +1675,84 @@ mod tests {
         }
     }
 
+    fn wait_for_window_relation(
+        tmux: &IsolatedTmux,
+        pane_a: &str,
+        pane_b: &str,
+        same_window: bool,
+        timeout: std::time::Duration,
+    ) -> Option<(String, String)> {
+        let start = std::time::Instant::now();
+        let mut last = None;
+        while start.elapsed() < timeout {
+            if let (Ok(window_a), Ok(window_b)) =
+                (tmux.pane_window(pane_a), tmux.pane_window(pane_b))
+            {
+                let relation_matches = (window_a == window_b) == same_window;
+                last = Some((window_a, window_b));
+                if relation_matches {
+                    return last;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        last
+    }
+
+    fn send_keys_with_retry(tmux: &IsolatedTmux, pane: &str, text: &str) {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(3);
+        let poll = std::time::Duration::from_millis(100);
+        let mut last_err = None;
+
+        while start.elapsed() < timeout {
+            match tmux.send_keys(pane, text) {
+                Ok(()) => return,
+                Err(err) => last_err = Some(err.to_string()),
+            }
+            std::thread::sleep(poll);
+        }
+
+        panic!(
+            "failed to send keys to pane {} after {:.1}s: {}",
+            pane,
+            start.elapsed().as_secs_f64(),
+            last_err.unwrap_or_else(|| "unknown error".to_string())
+        );
+    }
+
     fn launch_mock_agent_doc(
         tmux: &IsolatedTmux,
         pane: &str,
         script: &std::path::Path,
         file: &std::path::Path,
     ) {
-        tmux.send_keys(
+        assert!(
+            wait_for_shell(tmux, pane, 5000),
+            "shell did not become ready before mock agent launch in {}",
+            pane
+        );
+        send_keys_with_retry(
+            tmux,
             pane,
             &format!("exec {} {}", script.display(), file.display()),
-        )
-        .unwrap();
-        let content = wait_for_pane_contains(tmux, pane, "\n>", std::time::Duration::from_secs(3));
+        );
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(3);
+        let poll = std::time::Duration::from_millis(300);
+        let mut content = String::new();
+        while start.elapsed() < timeout {
+            content = sessions::capture_pane(tmux, pane).unwrap_or_default();
+            if content.contains("\n>") {
+                break;
+            }
+            if let Some(cmd) = pane_current_command(tmux, pane)
+                && IDLE_SHELLS.contains(&cmd.as_str())
+            {
+                let _ = tmux.send_keys_raw(pane, "Enter");
+            }
+            std::thread::sleep(poll);
+        }
         assert!(
             content.contains("\n>"),
             "mock agent should be ready, got: {content}"
@@ -1989,7 +2059,7 @@ mod tests {
         // Two panes in the same tmux session but different non-stash windows
         // should trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-wrong-win");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let dir = tempfile::tempdir().unwrap();
         let script = write_mock_agent_doc(dir.path());
         let doc_a = dir.path().join("a.md");
@@ -2003,10 +2073,14 @@ mod tests {
         launch_mock_agent_doc(&iso, &pane1, &script, &doc_a);
         launch_mock_agent_doc(&iso, &pane2, &script, &doc_b);
 
-        std::thread::sleep(std::time::Duration::from_millis(300));
-
-        let w1 = iso.pane_window(&pane1).unwrap();
-        let w2 = iso.pane_window(&pane2).unwrap();
+        let (w1, w2) = wait_for_window_relation(
+            &iso,
+            &pane1,
+            &pane2,
+            false,
+            std::time::Duration::from_secs(3),
+        )
+        .expect("panes should report windows");
         assert_ne!(w1, w2, "panes should be in different windows");
 
         let mut registry = SessionRegistry::new();
@@ -2036,7 +2110,7 @@ mod tests {
     fn no_wrong_window_when_panes_in_same_window() {
         // Two panes in the same window should NOT trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-same-win");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = test_cwd();
         let dir = tempfile::tempdir().unwrap();
         let script = write_mock_agent_doc(dir.path());
         let doc_a = dir.path().join("a.md");
@@ -2049,10 +2123,14 @@ mod tests {
         launch_mock_agent_doc(&iso, &pane1, &script, &doc_a);
         launch_mock_agent_doc(&iso, &pane2, &script, &doc_b);
 
-        std::thread::sleep(std::time::Duration::from_millis(300));
-
-        let w1 = iso.pane_window(&pane1).unwrap();
-        let w2 = iso.pane_window(&pane2).unwrap();
+        let (w1, w2) = wait_for_window_relation(
+            &iso,
+            &pane1,
+            &pane2,
+            true,
+            std::time::Duration::from_secs(3),
+        )
+        .expect("panes should report windows");
         assert_eq!(w1, w2, "panes should be in the same window");
 
         let mut registry = SessionRegistry::new();

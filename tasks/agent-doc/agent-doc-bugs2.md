@@ -116,7 +116,7 @@ Verification in `src/agent-doc`:
 Field check after install:
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md`
 - result: it now repairs the historical exchange snapshot drift and points at the newer unresolved prompt instead of blaming a direct patchback bypass
-<!-- agent:boundary:06a1874f -->
+<!-- agent:boundary:0a2c437b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -126,6 +126,5 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pbc2] Repeated session-document patchback landed but was not committed — keep every reproduction where the response visibly lands in the target document but no owning `write --commit` / `finalize` closeout commits the repo or submodule under this older commit-boundary / patchback-ownership family unless logs prove the narrower post-commit drift path from `tasks/agent-doc/agent-doc-bugs3.md`. Current anchor case: `src/session-share/tasks/claudescore-3.md`. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 - [ ] [#reap1] Completed `agent:backlog` items not reaped — template docs can still contain `- [x]` backlog entries after a later normal `agent-doc` cycle, even though the pending system contract says done items should be reaped on the next preflight pass. Track this separately from missing `--pending-done` closeout bugs: this family starts after the item is already `[x]` in the document. Plan: `tasks/agent-doc/plan-backlog-done-reap.md`
 <!-- /agent:backlog -->

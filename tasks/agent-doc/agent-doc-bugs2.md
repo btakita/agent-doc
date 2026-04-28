@@ -23,7 +23,12 @@ prompt_presets:
 
 <!-- agent:exchange patch=append -->
 Compacted exchange summary: this session tracked agent-doc patchback/closeout and tmux-route stability bugs across src/session-share reproductions. Implemented fixes in src/agent-doc included long custom backlog ids, Codex clean-exit auto-resume, stale-snapshot repair for committed prompt/response history, completed-backlog reap closeout, Codex resume preserving codex_args, queue TOCTOU locking, env-var-free pending/write flags, Ctrl+D supervisor quit handling, repair payload GC, VS Code stale IPC patch cleanup, dedup contiguous-block matching, tmux startup locking, resume handoff failure guards, current-child prompt proof, cancellation-aware child-pty trigger writes, and preserving a live registered pane when fresh-route acknowledgement fails (commit d7307a4). Key unresolved follow-up items remain: #pfcycle for response patchbacks stranded at preflight_started with no replay artifact, #backlogshadow for open backlog items drifting out of the live backlog block, and #tailpatch for fail-closed handling when prompt/response patchbacks land outside the live exchange block. No unanswered user prompt remains after the compact-exchange request.
-<!-- agent:boundary:8fd080ca -->
+
+do #pfcycle. spec-test-commit-push
+Compacted the exchange in [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md) with a custom summary preserving the main fixes and the open follow-ups `#pfcycle`, `#backlogshadow`, and `#tailpatch`.
+
+The original exchange was archived to [.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260428-060740.md](/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260428-060740.md), committed as `317f9ca7d`, and `agent-doc session-check` is `ok`.
+<!-- agent:boundary:27d2e44e -->
 <!-- /agent:exchange -->
 
 <!--

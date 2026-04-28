@@ -1,7 +1,7 @@
 # Plan: Compact Exchange Directive Dispatch
 
 **Pending:** `#compactdispatch` in `tasks/agent-doc/agent-doc-bugs2.md`
-**Status:** Draft
+**Status:** Implemented
 
 ## Problem
 

@@ -14,7 +14,7 @@ Pending items carry stable IDs and GFM checkboxes:
 
 ```
 - [ ] [#a3f2] active item
-- [x] [#b1c4] user-marked done (preflight reaps next cycle)
+- [x] [#b1c4] user-marked done (preflight reaps next cycle; `agent-doc repair` can also clean up stale completed items)
 - [/] [#c9e0] gated — skipped by reaper, waiting on external signal
 ```
 

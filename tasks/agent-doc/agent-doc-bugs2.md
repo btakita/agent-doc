@@ -9,6 +9,7 @@ claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#commit-push': commit + push all uncommitted files
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
@@ -667,7 +668,7 @@ Verification:
 Note: I left the unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/route.rs`, and the unstaged non-#patchregr portions of `src/repair.rs`) untouched.
 
 ❯ do #nodiffswallow. spec-test-build-install-commit-push
-### Re: #nodiffswallow — gpt-5
+### Re: #nodiffswallow — gpt-5 (HEAD)
 
 Implemented `#nodiffswallow` in `src/agent-doc` and pushed commit `fb00851` to `origin/20260422/codex-agent-backend`.
 
@@ -686,7 +687,9 @@ Verification:
 - `cargo install --path . --force`
 
 Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/route.rs`) untouched.
-<!-- agent:boundary:cd67cc67 -->
+
+#commit-push
+<!-- agent:boundary:5e6d0893 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -696,5 +699,4 @@ Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/p
 
 <!-- agent:backlog -->
 - [ ] [#patchbypass] [recommended] Response patchback can land in the target document without a binary-owned commit boundary, and later `session-check` still treats the now-committed exchange as likely direct patchback instead of a recoverable closeout. Reproduction: `src/session-share/tasks/claudescore-3.md` received the UTC-news response block, no `agent-doc finalize` / `write --commit` acknowledgment was recorded for that write, `src/session-share` was later manually committed as `9be7d48`, and `agent-doc session-check` still interrupted on `found likely direct response patchback without agent-doc cycle`. Fix by making commit acknowledgment binary-owned for the document's owning repo/submodule and adding deterministic recovery when the write landed but the commit boundary did not. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
-- [x] [#nodiffswallow] [recommended] Preflight/repair can swallow a fresh user prompt and still return `no_changes: true`. Reproduction: `tasks/monsterrodholders.md` had a new prompt (`Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps`) inserted just before `agent:boundary`; `agent-doc preflight` logged `changes detected`, auto-committed a stale backlog cleanup, then left the prompt in both the live doc and snapshot while returning `no_changes`. The harness therefore stopped without answering. Fix by proving unresolved user deltas against pre-repair `HEAD` and failing closed if snapshot/baseline maintenance absorbs prompt-bearing text. Plan: `tasks/agent-doc/plan-preflight-no-changes-user-prompt.md`
 <!-- /agent:backlog -->

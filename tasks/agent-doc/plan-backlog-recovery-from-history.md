@@ -1,7 +1,7 @@
 # Plan — recover dropped backlog items from recent history
 
 **Pending:** `#backlogreplay`
-**Status:** Draft
+**Status:** Implemented
 
 ## Problem
 

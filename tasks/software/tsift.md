@@ -445,7 +445,7 @@ Commit/push:
 - `btakita/tsift@7bb0585` (`fix: uniquify workspace scope identifiers`) pushed to `origin/main`.
 
 Top of backlog: `#statusws`.
-### Re: do #scopeid — gpt-5
+### Re: do #scopeid — gpt-5 (HEAD)
 
 Implemented in `tsift`.
 
@@ -469,7 +469,8 @@ Commit/push:
 Top of backlog: `#statusws`.
 
 do #statusws. spec-test-build-install-commit-push
-<!-- agent:boundary:e7134607 -->
+<!-- agent:boundary:80e3fbb3 -->
+do #statusws. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 
 <!--

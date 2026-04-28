@@ -505,7 +505,32 @@ Verification:
 I pushed the patch from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@66fdd19` pushed to `origin/main`.
-<!-- agent:boundary:4a7dbb5b -->
+
+❯ Are we currently saving an internal version? Can we auto upgrade the skill/runbook(s) if the version is out of sync? See how src/agent-doc does this.
+### Re: skill/runbook version sync — gpt-5
+
+No. `tsift` is not currently saving an internal installed-instructions version.
+
+What `agent-doc` does today:
+- the bundled skill template carries `agent-doc-version` in frontmatter
+- install rewrites that field from `CARGO_PKG_VERSION` and swaps in harness-specific auto-update instructions
+- install also owns bundled runbooks, so `agent-doc skill install` can refresh the whole instruction surface and signal `SKILL_RELOAD=restart|compact`
+
+What `tsift` does today:
+- `tsift init` writes a hard-coded `DEFAULT_SECTION` into `AGENTS.md` / `CLAUDE.md`
+- it only keys off the `<!-- tsift:code-navigation -->` markers and replaces that block in place
+- there is no installed version marker, no runbook bundle, and no "check installed instructions vs binary" path
+
+So yes, we can add the same pattern to `tsift`, but that would be new work rather than wiring up something that already exists.
+
+The minimal design would be:
+1. move the injected section into a bundled template with a `tsift-version` marker
+2. have `tsift init` render that marker from `CARGO_PKG_VERSION`
+3. add a check path that compares installed instructions vs binary version and re-runs `tsift init` when stale
+4. if we want more than the single AGENTS/CLAUDE block, add bundled runbooks the way `agent-doc` does
+
+If you want, I can turn that into a backlog item and implement it next.
+<!-- agent:boundary:a5eb2ca2 -->
 <!-- /agent:exchange -->
 
 <!--

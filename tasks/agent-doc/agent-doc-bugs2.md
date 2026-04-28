@@ -244,20 +244,31 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 Please test again with `agent-doc start tasks/claudescore-3.md`.
-<!-- agent:boundary:c7e87c12 -->
+
+❯ Another `agent-doc start` failure.
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:55:43
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+session 7b453f47 for tasks/claudescore-3.md is running in pane %291 — switching focus
+```
+❯ Fix test suite including flaky tests.
+
+❯ spec-test-build-install-commit-push
+### Re: test suite fix + start reuse analysis — opus-4-6
+
+**Test fix:** `test_codex_skill_install_writes_hook_artifacts` failed because the parent Claude Code process sets `CLAUDE_CODE`/`CLAUDE_CODE_ENTRYPOINT` in the environment. `detect_install_env()` checks `CLAUDE_CODE` before `CODEX_CLI` (higher priority), so even with `CODEX_CLI=1`, detection returned `ClaudeCode` and skipped Codex hook artifacts. Fixed by adding `env_remove("CLAUDE_CODE")`, `env_remove("CLAUDE_CODE_ENTRYPOINT")`, `env_remove("OPENCODE")` to the test command. All 1860 tests pass cleanly on two consecutive runs — no flaky tests detected.
+
+**Start reuse analysis:** Investigated the `agent-doc start` reuse path. Pane %291 is alive in session 0:1 with an active process tree: zsh → agent-doc start → claude (PID 3573350). The live-owner detection and `select_pane` (select-window + select-pane batch) are correct for same-session cross-window focus. The captured pane content shows a Claude Code session loaded with `/agent-doc tasks/claudescore-3.md` from session-share — technically responsive but may be stalled on an in-progress cycle from 3:48am. The reuse path correctly identifies and switches to this pane per spec.
+
+If the issue is that the session in %291 is unresponsive despite having live processes, that's a session health problem (not a start bug). A possible improvement: add a supervisor health check that distinguishes "supervisor with active agent child" from "supervisor at restart prompt" — and only reuse when the agent child is actually healthy. Adding to backlog as `#startreuse`.
+
+**Committed:** `b690284` on `20260422/codex-agent-backend`, pushed.
+<!-- agent:boundary:e7719c15 -->
 <!-- /agent:exchange -->
 
 <!--
-Another issue came upwith the `agent-doc start`
-```
-/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
-~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:31:50
-❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
-[sync] found alive agent-doc child (pid 3573327) in pane %291 for tasks/claudescore-3.md
-[tmux] select_pane %291 → session:window 0:1
-[start] focused existing pane %291
-session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — reusing existing live pane
-```
+Should we have this case call the equivalent of `agent-doc fix` since we should never get here?
 
 do #backlogreplay. spec-test-build-install-commit-push
 ### Re: Ctrl+D supervisor quit menu regression — gpt-5

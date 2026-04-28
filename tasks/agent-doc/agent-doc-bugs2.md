@@ -137,7 +137,7 @@ Verification in `src/agent-doc`:
 - `cargo build`
 - `cargo install --path . --force`
 - `cargo test`: the new reap/session-check coverage passed, but the full suite currently hits an unrelated route/tmux failure in `route::tests::send_keys_delivers_claude_command_with_enter`
-<!-- agent:boundary:326afdb3 -->
+<!-- agent:boundary:0ec33735 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -147,5 +147,4 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#reap1] Completed `agent:backlog` items not reaped — template docs can still contain `- [x]` backlog entries after a later normal `agent-doc` cycle, even though the pending system contract says done items should be reaped on the next preflight pass. Track this separately from missing `--pending-done` closeout bugs: this family starts after the item is already `[x]` in the document. Plan: `tasks/agent-doc/plan-backlog-done-reap.md`
 <!-- /agent:backlog -->

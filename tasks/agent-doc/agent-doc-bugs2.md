@@ -427,7 +427,7 @@ Verification in `src/agent-doc`:
 - `npm test` in `editors/vscode`
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:e0051ceb -->
+<!-- agent:boundary:8d42d30d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -436,7 +436,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup
 - [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
 - [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
 - [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`

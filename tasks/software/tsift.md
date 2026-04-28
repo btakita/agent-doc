@@ -837,7 +837,27 @@ Verification:
 I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@b4a3c5b` pushed to `origin/main`.
-<!-- agent:boundary:3c0b63ac -->
+
+❯ do #diffpath. spec-test-build-install-commit-push
+### Re: do #diffpath — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `tsift summarize --extract <path> --diff` now resolves the requested extract scope against the project root before filtering changed files, so relative file and directory targets match correctly.
+- removed the inverted parent/child path check and replaced it with a direct "changed file is inside requested scope" match.
+- added regression tests for relative directory and relative file scopes.
+- updated `SPEC.md` and `CLAUDE.md` so `--extract --diff` explicitly documents path-scoped behavior.
+
+Verification:
+- `make check` passed: 344 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+
+I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@d15a66d` pushed to `origin/main`.
+<!-- agent:boundary:deef31ae -->
 <!-- /agent:exchange -->
 
 <!--
@@ -846,8 +866,7 @@ Commit: `btakita/tsift@b4a3c5b` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#txn] Wrap apply_changes_inner + rebuild in SQLite transactions (index.rs:395-478, 497-501)
-- [ ] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
+- [x] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
 - [ ] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
 - [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
 - [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)

@@ -707,7 +707,27 @@ Notes:
 - `src/session-share`'s pre-commit hook passed and emitted only an advisory about a possible news entry; it did not block the commit.
 
 This response closeout will be committed locally by `agent-doc finalize` as the normal document-cycle commit.
-<!-- agent:boundary:e6cc4a34 -->
+
+❯ do #patchbypass. spec-test-build-install-commit-push
+### Re: #patchbypass — gpt-5
+
+Implemented `#patchbypass` in `src/agent-doc` and pushed commit `b1874f1` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Missing commit-boundary recovery now closes open `response_captured` / `write_applied` cycles and write-complete/no-commit log tails when `HEAD` already proves the response landed as exchange-only history.
+- `repair` and `session-check` now share that recovery path instead of interrupting forever on a missing commit acknowledgment.
+- Historical self-heal is now fail-closed when the bypassed patchback also mutated typed components such as `status`, backlog, or pending.
+- Bare prompt-target historical patchbacks still stay fail-closed instead of being silently adopted.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage across `git`, `repair`, `session-check`, and `preflight`.
+
+Verification:
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml --release`
+- `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
+
+Note:
+- I left unrelated local edits outside the `#patchbypass` scope untouched.
+<!-- agent:boundary:c0120a41 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -716,5 +736,5 @@ This response closeout will be committed locally by `agent-doc finalize` as the 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#patchbypass] [recommended] Response patchback can land in the target document without a binary-owned commit boundary, and later `session-check` still treats the now-committed exchange as likely direct patchback instead of a recoverable closeout. Reproduction: `src/session-share/tasks/claudescore-3.md` received the UTC-news response block, no `agent-doc finalize` / `write --commit` acknowledgment was recorded for that write, `src/session-share` was later manually committed as `9be7d48`, and `agent-doc session-check` still interrupted on `found likely direct response patchback without agent-doc cycle`. Fix by making commit acknowledgment binary-owned for the document's owning repo/submodule and adding deterministic recovery when the write landed but the commit boundary did not. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
+- [x] [#patchbypass] [recommended] Response patchback can land in the target document without a binary-owned commit boundary, and later `session-check` still treats the now-committed exchange as likely direct patchback instead of a recoverable closeout. Reproduction: `src/session-share/tasks/claudescore-3.md` received the UTC-news response block, no `agent-doc finalize` / `write --commit` acknowledgment was recorded for that write, `src/session-share` was later manually committed as `9be7d48`, and `agent-doc session-check` still interrupted on `found likely direct response patchback without agent-doc cycle`. Fix by making commit acknowledgment binary-owned for the document's owning repo/submodule and adding deterministic recovery when the write landed but the commit boundary did not. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

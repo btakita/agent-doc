@@ -132,7 +132,16 @@ Verification:
 - `cargo install --path .` passed, and `tsift --version` now reports `0.1.5`.
 
 Commit: `btakita/tsift@6b4b001` pushed to `origin/main`.
-<!-- agent:boundary:90163e98 -->
+### Re: previous tmux pane crash / `#agent-doc-bug` — gpt-5
+
+The strongest evidence says the earlier `tsift.md` pane did not hard-crash because of `tsift` itself.
+
+In `.agent-doc/logs/tsift-v0.1.log`, the prior Codex-backed `tsift.md` panes ended with clean harness exits like `codex_exit code=0`, followed by `restart_eval ... ctrl_d=true ... action=prompt_user`, `user_quit_after_eof`, and `session_end` on panes such as `%254` and `%267`. After that, new panes were started (`%279`, then `%285`), but `.agent-doc/logs/ops.log` recorded `route_cycle_start_missing` for real `tsift.md` prompt targets like `do #prunefix...` and `do #commlock...`.
+
+That points to an `agent-doc` tmux/session handoff failure, not a `tsift` runtime failure: the old pane exited cleanly, a replacement pane was launched, but route/start acknowledgment did not prove a real new cycle, so the user was left with a pane that looked dead or crashed. This also matches the later `agent-doc` fixes for Codex `Ctrl+D` clean exits, fresh-route acknowledgement, and ambiguous live-pane ownership.
+
+I did not add a new bug item because this is already covered by the existing `agent-doc` tmux-crash tracking (`#tmuxcrash` / `#bugs2tmux`) and the plan in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`. The remaining uncertainty is that the current logs still do not record enough provenance to distinguish “pane visibly died” from “live supervisor got stranded or replaced,” which is exactly why that plan is still open.
+<!-- agent:boundary:72a77b9f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -141,7 +150,6 @@ Commit: `btakita/tsift@6b4b001` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#commlock] [recommended] Make `tsift communities` read-only; it should not acquire the writer lock
 - [ ] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
 - [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

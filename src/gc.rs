@@ -9,6 +9,9 @@
 //! - Scans `.agent-doc/supervisor/*.sock` for orphaned sockets: checks
 //!   sessions.json PID liveness, then tries socket connect as fallback.
 //!   Removes dead sockets and prunes stale sessions.json entries.
+//! - Removes stale `.agent-doc/typing/` indicator files (>7 days).
+//! - Removes stale `.agent-doc/status/` files (>24 hours).
+//! - Removes old `.agent-doc/repair-blocked/` diagnostic files (>7 days).
 //! - `--dry-run` flag shows what would be deleted without deleting.
 //!
 //! ## Agentic Contracts
@@ -110,6 +113,51 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     }
     total_deleted += hook_deleted;
     total_skipped += hook_kept;
+
+    // Clean stale typing indicators (>7 days)
+    let (typing_deleted, typing_kept) = clean_stale_ephemeral_files(
+        &agent_doc_dir.join("typing"),
+        Duration::from_secs(7 * 86400),
+        dry_run,
+    )?;
+    if typing_deleted > 0 {
+        eprintln!(
+            "[gc] typing: {} stale deleted, {} kept",
+            typing_deleted, typing_kept
+        );
+    }
+    total_deleted += typing_deleted;
+    total_skipped += typing_kept;
+
+    // Clean stale status files (>24 hours)
+    let (status_deleted, status_kept) = clean_stale_ephemeral_files(
+        &agent_doc_dir.join("status"),
+        Duration::from_secs(86400),
+        dry_run,
+    )?;
+    if status_deleted > 0 {
+        eprintln!(
+            "[gc] status: {} stale deleted, {} kept",
+            status_deleted, status_kept
+        );
+    }
+    total_deleted += status_deleted;
+    total_skipped += status_kept;
+
+    // Clean old repair-blocked diagnostics (>7 days)
+    let (repair_deleted, repair_kept) = clean_stale_ephemeral_files(
+        &agent_doc_dir.join("repair-blocked"),
+        Duration::from_secs(7 * 86400),
+        dry_run,
+    )?;
+    if repair_deleted > 0 {
+        eprintln!(
+            "[gc] repair-blocked: {} old diagnostics deleted, {} kept",
+            repair_deleted, repair_kept
+        );
+    }
+    total_deleted += repair_deleted;
+    total_skipped += repair_kept;
 
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
@@ -331,6 +379,49 @@ fn clean_old_hooks(agent_doc_dir: &Path, dry_run: bool) -> Result<(usize, usize)
             } else {
                 kept += 1;
             }
+        }
+    }
+
+    Ok((deleted, kept))
+}
+
+/// Clean stale files from a flat directory based on mtime age.
+/// Used for typing indicators, status files, and repair-blocked diagnostics.
+fn clean_stale_ephemeral_files(
+    dir: &Path,
+    max_age: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    if !dir.is_dir() {
+        return Ok((0, 0));
+    }
+
+    let mut deleted = 0;
+    let mut kept = 0;
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let is_stale = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+
+        if is_stale {
+            if dry_run {
+                eprintln!("[gc] would delete: {}", path.display());
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+            deleted += 1;
+        } else {
+            kept += 1;
         }
     }
 
@@ -618,6 +709,88 @@ mod tests {
         // And sessions.json should be unmodified
         let loaded = sessions::load_in(root).unwrap();
         assert!(loaded.contains_key(uuid));
+    }
+
+    #[test]
+    fn gc_removes_stale_typing_indicators() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let typing_dir = root.join(".agent-doc/typing");
+        std::fs::create_dir_all(&typing_dir).unwrap();
+
+        // Create a stale indicator (mtime 8 days ago)
+        let stale = typing_dir.join("abc123");
+        std::fs::write(&stale, "1000000000000").unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+        let _ = filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time));
+
+        // Create a fresh indicator
+        let fresh = typing_dir.join("def456");
+        std::fs::write(&fresh, "9999999999999").unwrap();
+
+        let result = run(Some(root), false).unwrap();
+        assert!(result.deleted >= 1);
+        assert!(!stale.exists(), "stale typing indicator should be removed");
+        assert!(fresh.exists(), "fresh typing indicator should be kept");
+    }
+
+    #[test]
+    fn gc_removes_old_repair_blocked() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let rb_dir = root.join(".agent-doc/repair-blocked");
+        std::fs::create_dir_all(&rb_dir).unwrap();
+
+        let stale = rb_dir.join("abc123-1000000000.json");
+        std::fs::write(&stale, r#"{"reason":"test"}"#).unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+        let _ = filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time));
+
+        let fresh = rb_dir.join("def456-9999999999.json");
+        std::fs::write(&fresh, r#"{"reason":"recent"}"#).unwrap();
+
+        let result = run(Some(root), false).unwrap();
+        assert!(result.deleted >= 1);
+        assert!(!stale.exists(), "old repair-blocked should be removed");
+        assert!(fresh.exists(), "recent repair-blocked should be kept");
+    }
+
+    #[test]
+    fn gc_removes_stale_status_files() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let status_dir = root.join(".agent-doc/status");
+        std::fs::create_dir_all(&status_dir).unwrap();
+
+        let stale = status_dir.join("abc123");
+        std::fs::write(&stale, "generating").unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(2 * 86400);
+        let _ = filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time));
+
+        let fresh = status_dir.join("def456");
+        std::fs::write(&fresh, "writing").unwrap();
+
+        let result = run(Some(root), false).unwrap();
+        assert!(result.deleted >= 1);
+        assert!(!stale.exists(), "stale status file should be removed");
+        assert!(fresh.exists(), "fresh status file should be kept");
+    }
+
+    #[test]
+    fn gc_dry_run_preserves_ephemeral_files() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let typing_dir = root.join(".agent-doc/typing");
+        std::fs::create_dir_all(&typing_dir).unwrap();
+
+        let stale = typing_dir.join("abc123");
+        std::fs::write(&stale, "1000000000000").unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+        let _ = filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time));
+
+        let result = run(Some(root), true).unwrap();
+        assert!(result.deleted >= 1, "dry run reports would-delete count");
+        assert!(stale.exists(), "dry run should not actually delete");
     }
 
     #[test]

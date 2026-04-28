@@ -42,7 +42,7 @@ Collision probability: ~1 in 4.3 billion for random inputs. Collision is possibl
 
 **Mitigation:** No action needed. Collisions are rare and self-healing. If deterministic behavior is required, consider switching to SHA256 hashing in future.
 
-**Test coverage:** `test_hash_collision_no_collisions_for_common_paths` (10k paths). `test_hash_collision_cleanup_removes_stale_indicators` blocked pending GC implementation. See `tests/debounce_gaps_test_plan.rs`.
+**Test coverage:** `test_hash_collision_no_collisions_for_common_paths` (10k paths). `test_hash_collision_cleanup_removes_stale_indicators` — GC implemented in `gc.rs` via `clean_stale_ephemeral_files()`, removes typing indicators older than 7 days. See `tests/debounce_gaps_test_plan.rs`.
 
 ## Reactive Mode Assumes CRDT Merge Convergence
 
@@ -115,4 +115,4 @@ Files at **odd depths** from the project root (1, 3, 5 levels) failed to find `.
 
 5. **CRDT merge monitoring** — Log merge conflicts and convergence issues to `.agent-doc/logs/merge.log` for operator visibility.
 
-6. **Stale typing indicator cleanup** — Old `.agent-doc/typing/` files are never deleted. Add a GC step (e.g., in `agent-doc gc` or on preflight) to remove indicators older than a configurable threshold (default 1h).
+6. ~~**Stale typing indicator cleanup**~~ — **Fixed:** `agent-doc gc` now removes typing indicators older than 7 days, status files older than 24 hours, and repair-blocked diagnostics older than 7 days via `clean_stale_ephemeral_files()` in `gc.rs`.

@@ -60,6 +60,9 @@ Two modes:
 | Capture ledgers | Hash directory doesn't match any existing document | Directory removed |
 | Lock files | Modified >1 hour ago | File removed |
 | Hook events | Modified >24 hours ago | File removed |
+| Typing indicators | Modified >7 days ago | File removed |
+| Status files | Modified >24 hours ago | File removed |
+| Repair-blocked diagnostics | Modified >7 days ago | File removed |
 | Supervisor sockets | PID dead + socket won't connect | `.sock` file removed |
 | Session entries | PID dead + no socket file | Pruned from `sessions.json` |
 

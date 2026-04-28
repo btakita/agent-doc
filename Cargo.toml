@@ -58,6 +58,7 @@ signal-hook = "0.3"
 [dev-dependencies]
 assert_cmd = "2"
 existence = "0.4"
+filetime = "0.2"
 module-harness = "0.2"
 predicates = "3"
 proptest = "1"

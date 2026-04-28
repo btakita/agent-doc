@@ -28,6 +28,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "existence",
+ "filetime",
  "fs2",
  "hex",
  "htmd",

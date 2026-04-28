@@ -311,35 +311,61 @@ fn test_hash_collision_no_collisions_for_common_paths() {
 ///
 /// ## Spec
 /// - Typing indicator files accumulate over time as files are edited
-/// - No cleanup mechanism exists in debounce.rs
-/// - Risk: .agent-doc/typing/ grows unboundedly
-/// - Gap: no test for cleanup strategy (if one is implemented)
+/// - GC implemented in `gc.rs` via `clean_stale_ephemeral_files()`
+/// - Removes typing indicators older than 7 days
 ///
-/// ## Expected behavior (if gap is fixed)
-/// - A cleanup command (external or scheduled) removes indicators older than N days
-/// - Or: indicators are stored in memory (not on disk) and automatically expired
-/// - Or: a documented best-practice for cleanup is provided
+/// ## Coverage
+/// - Unit tests in `gc.rs::tests` verify age-based cleanup directly
+/// - This test verifies the CLI `agent-doc gc` command cleans typing indicators
 ///
 #[test]
-#[ignore] // Blocked: no cleanup function in debounce.rs; GC for .agent-doc/typing/ not yet implemented
 fn test_hash_collision_cleanup_removes_stale_indicators() {
+    use assert_cmd::Command;
+    use filetime::FileTime;
+
     let tmp = tempfile::TempDir::new().unwrap();
-    let typing_dir = tmp.path().join(".agent-doc/typing");
+    let root = tmp.path();
+    let typing_dir = root.join(".agent-doc/typing");
     std::fs::create_dir_all(&typing_dir).unwrap();
 
-    // Create some old indicator files (mtime 30 days ago)
-    for i in 0..100 {
+    // Create a document so the project root is valid
+    let doc = root.join("test.md");
+    std::fs::write(&doc, "# Test\n").unwrap();
+
+    // Create indicator files with mtime 30 days ago
+    let old_time = FileTime::from_unix_time(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            - 30 * 86400,
+        0,
+    );
+    for i in 0..10 {
         let indicator_path = typing_dir.join(format!("{:016x}", i));
         std::fs::write(&indicator_path, "1000000000000").unwrap();
-        // Set mtime to 30 days ago (would need std::fs::set_file_times)
-        // For now, placeholder
+        filetime::set_file_mtime(&indicator_path, old_time).unwrap();
     }
 
-    // Validation: cleanup removes files older than 7 days
-    // (this would require implementing a cleanup function)
-    let remaining = std::fs::read_dir(&typing_dir).unwrap().count();
-    // expect remaining == 0 if cleanup is implemented
-    let _ = remaining;
+    // Create a fresh indicator (should survive)
+    let fresh = typing_dir.join("fresh_indicator");
+    std::fs::write(&fresh, "9999999999999").unwrap();
+
+    Command::cargo_bin("agent-doc")
+        .unwrap()
+        .args(["gc", "--root", root.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let remaining: Vec<_> = std::fs::read_dir(&typing_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(remaining.len(), 1, "only fresh indicator should remain");
+    assert_eq!(
+        remaining[0].file_name().to_string_lossy(),
+        "fresh_indicator"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -9,6 +9,9 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
 ## Lifecycle
 
 - **Save**: After successful run, full content saved as snapshot
+- **Pre-response undo snapshot**: local write paths capture the undo snapshot from the live
+  document while the advisory doc lock is held, so `undo` restores the exact on-disk state that
+  existed immediately before the response write
 - **Load**: On next run, loaded as "previous" state for diff
 - **Safe absorb on commit**: If the working tree is ahead of the snapshot because of a missed
   agent-doc-style mutation (`status` changed and/or `exchange` gained a new `### Re:` block and/or

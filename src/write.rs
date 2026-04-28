@@ -116,9 +116,9 @@
 //!   drift from a mismatched snapshot.
 //! - Pending response is saved before any write attempt and cleared only after
 //!   a successful write, so an interrupted write is recoverable.
-//! - Pre-response snapshot is saved before acquiring the lock so `undo` can
-//!   restore the document to its pre-response state regardless of merge
-//!   outcome.
+//! - Pre-response snapshot is captured from the live document state while the
+//!   advisory doc lock is held, so `undo` restores the exact on-disk content
+//!   that existed immediately before the local write path applied the response.
 //! - All writes are atomic (temp file + rename). Partial writes never corrupt
 //!   the document.
 //! - Advisory file lock (`flock`) serialises concurrent writes to the same
@@ -1977,16 +1977,9 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Read document state under lock
-    let content_at_start = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
     let base = baseline.unwrap_or(&content_at_start);
-
-    // Save pre-response snapshot for undo
-    snapshot::save_pre_response(file, base)?;
 
     // Build "ours": baseline + response appended
     let mut content_ours = base.to_string();
@@ -2130,16 +2123,9 @@ pub fn run_template(
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Read document state under lock
-    let content_at_start = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
     let base = baseline.unwrap_or(&content_at_start);
-
-    // Save pre-response snapshot for undo
-    snapshot::save_pre_response(file, base)?;
 
     // Apply patches to baseline
     let content_ours =
@@ -2316,12 +2302,7 @@ pub fn run_stream(
         }
     }
 
-    // Save pre-response snapshot for undo (before IPC or disk write)
-    {
-        let pre_content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {} for pre-response", file.display()))?;
-        snapshot::save_pre_response(file, &pre_content)?;
-    }
+    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
     // Try IPC when plugin is installed and --force-disk is not set
     if !force_disk {
@@ -2333,8 +2314,6 @@ pub fn run_stream(
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
-            let content_at_start = std::fs::read_to_string(file)
-                .with_context(|| format!("failed to read {}", file.display()))?;
             let base = baseline.unwrap_or(&content_at_start);
             let t_apply = std::time::Instant::now();
             let mut content_ours = template::apply_patches_with_overrides(
@@ -2420,6 +2399,7 @@ pub fn run_stream(
                 == strip_boundary_for_dedup(&content_at_start)
             {
                 log_dedup(file, "no changes after merge, skipping write");
+                drop(doc_lock);
                 repair::clear_pending(file)?;
                 return Ok(());
             }
@@ -2463,6 +2443,7 @@ pub fn run_stream(
                 let session_id = frontmatter::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
                 crate::hooks::fire_doc_event(file, "post_write");
+                drop(doc_lock);
                 repair::clear_pending(file)?;
                 return Ok(());
             }
@@ -2638,12 +2619,6 @@ pub fn run_stream(
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Read document state under lock
-    let content_at_start = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
     let base = baseline.unwrap_or(&content_at_start);
 
     // Apply patches using the mode resolution chain:
@@ -2842,6 +2817,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         anyhow::bail!("no patch blocks or content found in response");
     }
 
+    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
+
     // Build IPC patch file
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
@@ -2907,6 +2884,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             );
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
             snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+            drop(doc_lock);
             repair::clear_pending(file)?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
             return Ok(());
@@ -2923,8 +2901,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let _ = std::fs::remove_file(&patch_file);
 
     // Fall back to stream write logic
-    let content_at_start = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
     let base = baseline.unwrap_or(&content_at_start);
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
     let mut content_ours =
@@ -4010,6 +3986,14 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
+fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
+    let doc_lock = acquire_doc_lock(path)?;
+    let content_at_start = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    snapshot::save_pre_response(path, &content_at_start)?;
+    Ok((doc_lock, content_at_start))
+}
+
 /// Detect whether the plugin has already applied the agent's response patches.
 ///
 /// On IPC sidecar ack timeout, the socket delivery may have succeeded but the
@@ -4153,7 +4137,10 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fs2::FileExt;
     use std::fs;
+    use std::fs::OpenOptions;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -4207,6 +4194,40 @@ mod tests {
         fs::write(&snap_abs, content).unwrap();
         let loaded = fs::read_to_string(&snap_abs).unwrap();
         assert_eq!(loaded, content);
+    }
+
+    #[test]
+    fn capture_locked_pre_response_reads_live_content_after_lock_wait() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "original\n").unwrap();
+
+        let lock_path = snapshot::lock_path_for(&doc).unwrap();
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        let held_lock = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        held_lock.lock_exclusive().unwrap();
+
+        let doc_for_thread = doc.clone();
+        let capture = std::thread::spawn(move || capture_locked_pre_response(&doc_for_thread));
+
+        std::thread::sleep(Duration::from_millis(100));
+        fs::write(&doc, "updated while waiting\n").unwrap();
+        drop(held_lock);
+
+        let (captured_lock, captured_content) = capture.join().unwrap().unwrap();
+        drop(captured_lock);
+
+        assert_eq!(captured_content, "updated while waiting\n");
+        assert_eq!(
+            snapshot::load_pre_response(&doc).unwrap().unwrap(),
+            "updated while waiting\n"
+        );
     }
 
     #[test]

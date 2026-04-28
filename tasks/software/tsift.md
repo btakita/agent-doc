@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -721,7 +721,35 @@ Smoke checks:
 I pushed from a fresh `origin/main` clone because the checked-out `src/tsift` submodule still had unrelated local edits and `origin/main` moved during the turn.
 
 Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
-<!-- agent:boundary:97165a9e -->
+
+❯ do #vsync. spec-test-build-install-commit-push
+### Re: do `#vsync` — opus-4-6
+
+Implemented in tsift.
+
+What changed:
+- `tsift init` now embeds `v=X.Y.Z` in the `<!-- tsift:code-navigation -->` opening marker, using the binary's Cargo.toml version
+- `tsift status` reports a new `instructions` field: `current`, `stale` (with found/expected versions), or `missing`
+- When instructions are stale or missing, `tsift init` is prepended to the `run:` recommendation
+- Pre-versioned markers (old format without `v=`) are detected and treated as stale
+- `tsift init` upgrades pre-versioned sections in place on re-run
+
+Verification:
+- `cargo clippy -- -D warnings` passed
+- `cargo test` passed: 349 tests (11 new for version extraction, status integration, upgrade paths)
+- `cargo build --release` passed
+- `cargo install --path .` passed
+
+Live verification after install:
+- `tsift status /home/brian/work/btakita/agent-loop` reports `instructions: missing (run tsift init)` with `run: tsift init && tsift index .`
+- `tsift status --json --pretty` includes `"instructions": {"state": "current", "version": "0.1.0"}` after init
+
+Updated SPEC.md (version markers section), CLAUDE.md (command table), and VERSIONS.md.
+
+I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule still has unrelated local edits.
+
+Commit: `btakita/tsift@f27c761` pushed to `origin/main`.
+<!-- agent:boundary:70b16c6d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -730,7 +758,7 @@ Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
+- [x] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->
 
 <!--

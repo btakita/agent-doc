@@ -49,7 +49,24 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 **Live open work:**
 - `#silentok` — log warnings on silent file-read / parse `.ok()` failures.
 - `#e2e` — add end-to-end CLI coverage for search, graph, explain, communities, and path.
-<!-- agent:boundary:a61a2738 -->
+
+❯ do #silentok. spec-test-commit-push
+### Re: do #silentok — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `IndexSummary` now carries structured `warnings` entries for non-fatal indexing failures, with stage metadata for source-read, symbol-extraction, and call-extraction failures.
+- `apply_changes()` no longer silently swallows those `.ok()` paths: it records the warning, keeps the index update non-fatal, and continues without inserting partial symbols/edges for the failed file.
+- shared index-update flows now emit those warnings on stderr, so both `tsift index` and search autoindex paths surface partial extraction failures instead of hiding them.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.3`.
+
+Verification:
+- `make check` passed: 352 unit tests + 14 exit-code tests.
+- added coverage for unreadable-file warning capture in `IndexSummary` and CLI stderr logging from `tsift index`.
+
+Commit: `btakita/tsift@0ac2a22` pushed to `origin/main`.
+<!-- agent:boundary:2b3b2aff -->
 <!-- /agent:exchange -->
 
 <!--
@@ -58,7 +75,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
+- [x] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
 - [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
 <!-- /agent:backlog -->
 

@@ -749,7 +749,7 @@ Updated SPEC.md (version markers section), CLAUDE.md (command table), and VERSIO
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule still has unrelated local edits.
 
 Commit: `btakita/tsift@f27c761` pushed to `origin/main`.
-<!-- agent:boundary:70b16c6d -->
+<!-- agent:boundary:1d002a2d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -758,7 +758,6 @@ Commit: `btakita/tsift@f27c761` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->
 
 <!--

@@ -8,7 +8,7 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
-  '#follow-up-backlog': Any follow-up items to place in the backlog?
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -614,7 +614,16 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:2f076f5a -->
+
+❯ #code-review
+### Re: `#code-review` — gpt-5
+
+1. High: the new child-pty injection path still does not prove that the detected prompt belongs to the resumed child. `spawn_auto_trigger_thread()` triggers as soon as any of the last 20 captured pane lines matches a prompt (`src/start.rs:312-326`), and `matches_prompt()` accepts any line that equals or simply ends with the prompt token (`src/harness.rs:136-140`). Because the pane usually still contains the previous run's `❯` / `>` line after restart, the first poll can inject immediately even if the new child has not re-established a prompt yet. This fixes the wrong-target race, but it still leaves an early-injection race against stale pane history.
+
+2. Medium: cancellation is still not interruptible once the auto-trigger path starts waiting on the shared writer or doing the pty write. `auto_trigger_inject_command()` only checks `stop` before locking/writing (`src/start.rs:268-283`), while the stdin forwarder holds that same mutex across its own blocking `write_all`/`flush` (`src/start.rs:777-778`). The supervisor then joins the auto-trigger thread before it signals the stdin writer to stop (`src/start.rs:1171-1178`). Under PTY backpressure, shutdown can stall behind that shared writer path instead of cancelling promptly.
+
+I did not rerun the Rust test suite for this review; the findings are from code inspection of commit `3d4c157`.
+<!-- agent:boundary:bfa9202f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -623,5 +632,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#rvinjectrace] [recommended] Re-check child liveness/cancellation immediately before auto-trigger send-keys and add a regression for child exit during the trigger window.
+- [ ] [#rvpromptfresh] [recommended] Make restart auto-trigger wait for a prompt proven to come from the current resumed child, not any stale prompt still visible in tmux history.
+- [ ] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
 <!-- /agent:backlog -->

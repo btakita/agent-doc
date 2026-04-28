@@ -27,7 +27,9 @@
 //!   sending the harness-specific trigger command via `tmux send-keys` to auto-trigger
 //!   the skill workflow in the resumed conversation. This avoids the race
 //!   where DSR (Device Status Report) escape sequences interleave with the
-//!   injected command, corrupting Claude Code's input state.
+//!   injected command, corrupting Claude Code's input state. If the prompt
+//!   still has not appeared after 30 seconds, the thread logs a provisional
+//!   timeout but keeps watching until the child exits or the prompt appears.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -124,6 +126,9 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
 
 const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
 const FAILED_RESUME_THRESHOLD: usize = 2;
+const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
+const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -161,6 +166,39 @@ impl AutoTriggerOutcome {
 
     fn is_failed_resume(self) -> bool {
         matches!(self, Self::Timeout | Self::SendFailed)
+    }
+}
+
+#[derive(Debug)]
+struct AutoTriggerMonitor {
+    started_at: Instant,
+    timeout: Duration,
+    timed_out: bool,
+}
+
+impl AutoTriggerMonitor {
+    fn new(started_at: Instant, timeout: Duration) -> Self {
+        Self {
+            started_at,
+            timeout,
+            timed_out: false,
+        }
+    }
+
+    fn note_no_prompt(&mut self, now: Instant) -> bool {
+        if self.timed_out || now.duration_since(self.started_at) < self.timeout {
+            return false;
+        }
+        self.timed_out = true;
+        true
+    }
+
+    fn stop_outcome(&self) -> AutoTriggerOutcome {
+        if self.timed_out {
+            AutoTriggerOutcome::Timeout
+        } else {
+            AutoTriggerOutcome::Cancelled
+        }
     }
 }
 
@@ -231,16 +269,17 @@ fn spawn_auto_trigger_thread(
     std::thread::Builder::new()
         .name("auto-trigger".into())
         .spawn(move || {
-            for attempt in 0..60 {
+            let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
+            for attempt in 0.. {
                 let delay = if attempt == 0 {
-                    Duration::from_secs(2)
+                    AUTO_TRIGGER_INITIAL_DELAY
                 } else {
-                    Duration::from_millis(500)
+                    AUTO_TRIGGER_POLL_INTERVAL
                 };
                 if !sleep_with_stop(&stop, delay) {
                     shared
                         .auto_trigger_outcome
-                        .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
+                        .store(monitor.stop_outcome() as u8, Ordering::Relaxed);
                     return;
                 }
                 if let Ok(output) = std::process::Command::new("tmux")
@@ -291,22 +330,23 @@ fn spawn_auto_trigger_thread(
                         return;
                     }
                 }
+                if monitor.note_no_prompt(Instant::now()) {
+                    shared
+                        .auto_trigger_outcome
+                        .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "auto_trigger_timeout pane={} harness={} reason=no_prompt_after_30s",
+                            pane_id, harness.binary
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] auto-trigger: timed out waiting for {} prompt",
+                        harness.binary
+                    );
+                }
             }
-
-            shared
-                .auto_trigger_outcome
-                .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
-            log_event(
-                &mut session_log,
-                &format!(
-                    "auto_trigger_timeout pane={} harness={} reason=no_prompt_after_30s",
-                    pane_id, harness.binary
-                ),
-            );
-            eprintln!(
-                "[agent-doc] auto-trigger: timed out waiting for {} prompt",
-                harness.binary
-            );
         })
         .expect("spawn auto-trigger thread")
 }
@@ -1854,6 +1894,21 @@ mod tests {
         assert!(AutoTriggerOutcome::SendFailed.is_failed_resume());
         assert!(!AutoTriggerOutcome::Sent.is_failed_resume());
         assert!(!AutoTriggerOutcome::Cancelled.is_failed_resume());
+    }
+
+    #[test]
+    fn auto_trigger_monitor_cancels_before_timeout() {
+        let monitor = AutoTriggerMonitor::new(Instant::now(), Duration::from_secs(30));
+        assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Cancelled);
+    }
+
+    #[test]
+    fn auto_trigger_monitor_preserves_timeout_after_deadline() {
+        let start = Instant::now();
+        let mut monitor = AutoTriggerMonitor::new(start, Duration::from_millis(5));
+        assert!(monitor.note_no_prompt(start + Duration::from_millis(5)));
+        assert!(!monitor.note_no_prompt(start + Duration::from_millis(10)));
+        assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
     }
 
     #[test]

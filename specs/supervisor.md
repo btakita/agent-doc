@@ -144,7 +144,11 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user (Enter/q)
                          AND when the resumed child never re-establishes a prompt
                          (`auto_trigger_timeout` / `send_keys` failure), treat the
-                         handoff as failed provenance:
+                         handoff as failed provenance. The 30s
+                         `auto_trigger_timeout` log is provisional telemetry:
+                         the watcher keeps polling after that point, and the
+                         timeout only remains terminal if the child exits
+                         without a later prompt/send success:
                          - first failure in the 15-minute window → restart fresh
                            instead of chaining another blind `resume --last`
                          - second failure in the 15-minute window → stop the

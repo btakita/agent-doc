@@ -715,7 +715,7 @@ If that fresh-start acknowledgment fails after route already created and registe
 
 When a fresh-start or routed-trigger acknowledgment times out, route now records a startup-miss marker at `.agent-doc/state/startup-miss/<doc-hash>.json` with pane provenance (pane id, session id, harness, origin, cycle baseline). Route also echoes a diagnostic into the pane via `tmux send-keys` so the user sees a visible "startup-miss" message instead of an unexplained idle shell.
 
-On the next route invocation, if the registered pane matches a persisted startup-miss marker, route deregisters the stale pane, clears the marker, and auto-starts a fresh pane instead of reusing one that never successfully started a document cycle. This prevents the "looks like a healthy pane but never runs" loop.
+On the next route invocation, if the registered pane matches a persisted startup-miss marker, route first re-runs the live-owner proof. If that same pane still proves live ownership of the document, the marker is treated as stale and cleared in place. Only when the marked pane no longer proves live ownership does route deregister it, clear the marker, and auto-start a fresh pane. This prevents stale startup-miss state from spawning a duplicate fallback session on top of a pane that later recovered or was manually restarted.
 
 Successful cycle acknowledgment (both `fresh_route_start_acknowledged` and `route_cycle_start_acknowledged`) clears the startup-miss marker. `session-check` also reports a warning when a startup-miss marker exists for the inspected document.
 
@@ -749,7 +749,7 @@ When `context_session` (from `sync --window`) differs from the document's `tmux_
 
 The post-sync `resync` call runs with `--fix` disabled (report only). `auto_start` with `context_session` intentionally places panes in a different session than the frontmatter originally specified — `resync --fix` would incorrectly kill these cross-session panes. The resync still reports anomalies for operator awareness.
 
-`resync` uses that same live-owner proof for registered documents: direct tmux process-tree match on the document path, then supervisor PID fallback. An alive registered pane whose file can no longer be proven is reported as `NoLiveOwner`; `resync --fix` deregisters that stale binding without killing the pane. During stash cleanup, an unregistered agent pane is preserved only when that proof still ties it to some registered document; otherwise it is treated as orphaned and may be killed.
+`resync` uses that same live-owner proof for registered documents: direct tmux process-tree match on the document path, then supervisor PID fallback. The proof must resolve back to the registered pane itself; if some other pane owns the file, the current registration is treated as stale and reported as `NoLiveOwner`. `resync --fix` deregisters that stale binding without killing the pane. When a pane still proves live ownership of its bound document, `resync --fix` must preserve it even if foreground-command heuristics or tmux layout heuristics would otherwise classify it as `WrongSession` or `WrongWindow`; active bound sessions are never killed or stashed just because registry/layout cleanup is running. During stash cleanup, an unregistered agent pane is preserved only when that proof still ties it to some registered document; otherwise it is treated as orphaned and may be killed.
 
 ## Sync Visible-Window Split
 

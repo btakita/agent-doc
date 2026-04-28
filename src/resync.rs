@@ -162,6 +162,7 @@ enum Issue {
     },
     /// Panes for the same session are in different windows (excluding stash windows).
     WrongWindow {
+        key: String,
         file: String,
         pane: String,
         actual_window: String,
@@ -1082,6 +1083,7 @@ fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
 
 /// Info about an alive pane for cross-entry analysis.
 struct PaneInfo {
+    key: String,
     label: String,
     pane: String,
     tmux_session: String,
@@ -1134,10 +1136,22 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
             continue; // Don't also check session for wrong-process panes
         }
 
-        // Check 2: Is the pane in the expected tmux session?
         if entry.file.is_empty() {
             continue; // Can't check frontmatter without a file path
         }
+
+        let live_owner =
+            crate::sync::find_live_owner_pane(tmux, std::path::Path::new(&entry.file), key);
+        if live_owner.as_deref() != Some(entry.pane.as_str()) {
+            issues.push(Issue::NoLiveOwner {
+                key: key.clone(),
+                file: label.to_string(),
+                pane: entry.pane.clone(),
+            });
+            continue;
+        }
+
+        // Check 2: Is the pane in the expected tmux session?
 
         let frontmatter_session = match std::fs::read_to_string(&entry.file) {
             Ok(content) => match frontmatter::parse(&content) {
@@ -1174,19 +1188,9 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
             }
         }
 
-        let live_owner =
-            crate::sync::find_live_owner_pane(tmux, std::path::Path::new(&entry.file), key);
-        if live_owner.is_none() {
-            issues.push(Issue::NoLiveOwner {
-                key: key.clone(),
-                file: label.to_string(),
-                pane: entry.pane.clone(),
-            });
-            continue;
-        }
-
         // Collect window info for wrong-window detection
         alive_panes.push(PaneInfo {
+            key: key.clone(),
             label: label.to_string(),
             pane: entry.pane.clone(),
             tmux_session: tmux.pane_session(&entry.pane).unwrap_or_default(),
@@ -1228,6 +1232,7 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
         for p in panes {
             if p.window_id != expected_window {
                 issues.push(Issue::WrongWindow {
+                    key: p.key.clone(),
                     file: p.label.clone(),
                     pane: p.pane.clone(),
                     actual_window: p.window_id.clone(),
@@ -1279,6 +1284,14 @@ fn pane_current_command(tmux: &Tmux, pane_id: &str) -> Option<String> {
     if cmd.is_empty() { None } else { Some(cmd) }
 }
 
+fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &str) -> bool {
+    if file.is_empty() {
+        return false;
+    }
+    crate::sync::find_live_owner_pane(tmux, std::path::Path::new(file), key).as_deref()
+        == Some(pane)
+}
+
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
 fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
     if issues.is_empty() {
@@ -1316,10 +1329,50 @@ fn apply_fixes_to_registry(
         match issue {
             Issue::WrongSession {
                 key,
+                file,
                 pane,
                 expected_session,
                 ..
             } => {
+                if registered_pane_still_owns_file(tmux, key, file, pane) {
+                    if tmux.session_alive(expected_session) {
+                        if let Some(dest_pane) = tmux.active_pane(expected_session) {
+                            match PaneMoveOp::new(tmux, pane, &dest_pane)
+                                .allow_cross_session(
+                                    "auto-relocate active live owner to expected session",
+                                )
+                                .join("-dh")
+                            {
+                                Ok(()) => {
+                                    eprintln!(
+                                        "  auto-relocated live owner pane {} → session '{}'",
+                                        pane, expected_session
+                                    );
+                                    eprintln!("  fixed: {}", issue);
+                                    fixed += 1;
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "  preserving live owner pane {} after relocation failed ({}); registry left intact",
+                                        pane, e
+                                    );
+                                }
+                            }
+                        } else {
+                            eprintln!(
+                                "  preserving live owner pane {} because session '{}' has no active join target",
+                                pane, expected_session
+                            );
+                        }
+                    } else {
+                        eprintln!(
+                            "  preserving live owner pane {} for {} because it still owns the document",
+                            pane, file
+                        );
+                    }
+                    continue;
+                }
+
                 if let Some(target) = relocate_session {
                     // join-pane: move the pane to the target session without killing it.
                     // The pane ID is stable after join-pane, so the registry entry stays.
@@ -1442,7 +1495,16 @@ fn apply_fixes_to_registry(
                 registry.remove(key);
                 fixed += 1;
             }
-            Issue::WrongWindow { pane, .. } => {
+            Issue::WrongWindow {
+                key, file, pane, ..
+            } => {
+                if registered_pane_still_owns_file(tmux, key, file, pane) {
+                    eprintln!(
+                        "  preserving live owner pane {} for {} in its current window; not stashing an active bound session",
+                        pane, file
+                    );
+                    continue;
+                }
                 // Move the pane to the stash window to consolidate.
                 // Determine the tmux session for this pane.
                 let session_name = tmux
@@ -1705,11 +1767,10 @@ mod tests {
         );
 
         let issues = detect_issues_in_registry(&iso, &registry);
-        assert_eq!(issues.len(), 1, "should detect 1 wrong-session issue");
+        assert_eq!(issues.len(), 1, "should detect 1 stale-owner issue");
         assert!(
-            matches!(&issues[0], Issue::WrongSession { expected_session, actual_session, .. }
-                if expected_session == "correct" && actual_session == "wrong"),
-            "issue should be WrongSession with correct vs wrong, got: {}",
+            matches!(&issues[0], Issue::NoLiveOwner { .. }),
+            "pane with no provable owner should now fail as NoLiveOwner before WrongSession; got: {}",
             &issues[0]
         );
     }
@@ -2065,6 +2126,7 @@ mod tests {
         registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
 
         let issues = vec![Issue::WrongWindow {
+            key: "sess-2".to_string(),
             file: "b.md".to_string(),
             pane: pane2.clone(),
             actual_window: w2_before.clone(),
@@ -2483,6 +2545,17 @@ mod tests {
             !iso.pane_alive(&pane),
             "idle shell should still be killed when expected session is dead"
         );
+    }
+
+    #[test]
+    fn registered_pane_still_owns_file_returns_false_when_file_missing() {
+        let iso = IsolatedTmux::new("resync-live-owner-missing-file");
+        assert!(!registered_pane_still_owns_file(
+            &iso,
+            "session-1",
+            "/tmp/does-not-exist.md",
+            "%42"
+        ));
     }
 
     #[test]

@@ -159,6 +159,10 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
+fn startup_miss_requires_fresh_start(registered_pane: &str, live_owner: Option<&str>) -> bool {
+    live_owner != Some(registered_pane)
+}
+
 fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
     let msg = format!(
         "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
@@ -390,36 +394,51 @@ fn resolve_or_create_pane(
         if tmux.pane_alive(registered_pane)
             && crate::startup_miss::is_startup_miss_pane(file, registered_pane)
         {
+            if startup_miss_requires_fresh_start(registered_pane, live_owner.as_deref()) {
+                eprintln!(
+                    "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
+                    registered_pane, file_path
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_startup_miss_deregistered file={} pane={}",
+                        file_path, registered_pane
+                    ),
+                );
+                let _ = sessions::deregister(session_id)?;
+                let _ = crate::startup_miss::clear(file);
+                // Fall through to Strategy 3 (auto-start)
+                eprintln!("[route] No active pane found, auto-starting...");
+                if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+                    anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+                }
+                let split_before = is_first_column(file, col_args);
+                ensure_auto_start_target_session(tmux, None, target_session, harness)?;
+                return auto_start_in_session(
+                    tmux,
+                    file,
+                    session_id,
+                    file_path,
+                    target_session,
+                    false,
+                    split_before,
+                    harness,
+                );
+            }
+
             eprintln!(
-                "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
+                "[route] registered pane {} still proves live ownership for {} — clearing stale startup-miss marker",
                 registered_pane, file_path
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_startup_miss_deregistered file={} pane={}",
+                    "route_startup_miss_cleared_live_owner file={} pane={}",
                     file_path, registered_pane
                 ),
             );
-            let _ = sessions::deregister(session_id)?;
             let _ = crate::startup_miss::clear(file);
-            // Fall through to Strategy 3 (auto-start)
-            eprintln!("[route] No active pane found, auto-starting...");
-            if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
-                anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
-            }
-            let split_before = is_first_column(file, col_args);
-            ensure_auto_start_target_session(tmux, None, target_session, harness)?;
-            return auto_start_in_session(
-                tmux,
-                file,
-                session_id,
-                file_path,
-                target_session,
-                false,
-                split_before,
-                harness,
-            );
         }
     }
 
@@ -4248,5 +4267,12 @@ history line
             miss.cycle_baseline_id.as_deref(),
             Some("cycle-baseline-123")
         );
+    }
+
+    #[test]
+    fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
+        assert!(startup_miss_requires_fresh_start("%42", None));
+        assert!(startup_miss_requires_fresh_start("%42", Some("%99")));
+        assert!(!startup_miss_requires_fresh_start("%42", Some("%42")));
     }
 }

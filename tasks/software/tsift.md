@@ -911,7 +911,25 @@ Verification:
 - `cargo install --path .` passed.
 
 Commit: `btakita/tsift@beb3bb5` pushed to `origin/main`.
-<!-- agent:boundary:c59cbfeb -->
+
+❯ do #lockfix. spec-test-build-install-commit-push
+### Re: do #lockfix — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- replaced the PID-file writer gate with an OS-backed exclusive lock on `.tsift/index.lock` using `fs4`, while still writing the holder PID into the sidecar for diagnostics
+- stale unlocked sidecars are now reused automatically; live writers still fail fast, and `tsift locks` now probes the real file lock instead of inferring liveness from `/proc`
+- updated lock regression tests, CLI exit-code coverage, `SPEC.md`, and `CLAUDE.md`
+
+Verification:
+- `make check` passed: 349 unit tests + 11 exit-code tests
+- `cargo build --release` passed
+- `cargo install --path .` passed
+- installed-binary smoke check: `tsift locks /home/brian/work/btakita/agent-loop/src/tsift` reports `lock: absent`
+
+Commit: `btakita/tsift@654b0bb` pushed to `origin/main`.
+<!-- agent:boundary:2ab76cdb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -920,8 +938,7 @@ Commit: `btakita/tsift@beb3bb5` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
-- [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
+- [x] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
 - [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
 - [ ] [#threadjoin] Join or abort search timeout thread (main.rs:5028-5030)
 - [ ] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)

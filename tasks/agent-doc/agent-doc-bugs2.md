@@ -221,7 +221,30 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 No commit created — `src/agent-doc` and `src/tmux-router` have pre-existing uncommitted changes. Please test with `agent-doc start tasks/claudescore-3.md` to confirm the output is clean.
-<!-- agent:boundary:a2f5cd42 -->
+
+❯ The tmux pane immediately is removed from the tmux window and nothing happens in the tmux pane.
+```
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:47:53
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+```
+### Re: pane disappears on start reuse — opus-4-6
+
+The silent exit was the problem. When `select_pane` switches focus to a different tmux window, the user's current pane "disappears" from view (still exists, but the window changed). With zero output before the switch, there was no feedback.
+
+Fixed: the reuse path now prints a single message **before** calling `select_pane`:
+```
+session 7b453f47 for tasks/claudescore-3.md is running in pane %291 — switching focus
+```
+
+This appears in the user's terminal before the window switch happens, so they know what occurred. The `[tmux]` debug log stays removed from tmux-router.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Please test again with `agent-doc start tasks/claudescore-3.md`.
+<!-- agent:boundary:c7e87c12 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -557,7 +557,50 @@ That is different from the earlier `search --autoindex` failure:
 - this `status` failure happened without any write attempt; the read-only status path itself was blocked by the existing bad writer state
 
 So the short answer is: the current root `.tsift/index.db` is still contaminated by an older stuck writer, and `status` touched the same DB.
-<!-- agent:boundary:a6b160a1 -->
+
+❯ It happened in the last cancelled turn on this document as well.
+
+```
+• Ran tsift status
+  └ Error: database is locked
+
+    Caused by:
+        Error code 5: The database file is locked
+```
+
+❯ How can we fix this? Can tsift autofix the issue? Please test on this repo. spec-test-build-install-commit-push
+### Re: status lock autofix — gpt-5
+
+Implemented and tested in tsift.
+
+Short answer: yes, tsift can auto-recover this specific health-check failure, but only in the safe read-only case.
+
+What I changed:
+- `tsift status` and `tsift index --check` now retry against a temporary snapshot copy of `.tsift/index.db` when the live DB is locked **and** a rollback-journal sidecar is present.
+- that lets freshness checks complete instead of failing with raw `database is locked` output.
+- tsift still does **not** auto-kill a live writer or delete an active journal. That would be unsafe.
+- normal search/graph semantics were left alone; this fix is scoped to the read-only health-check path.
+
+Why this is the right boundary:
+- the current root-repo failure is caused by an older stuck rollback-journal writer.
+- we can safely read from a copied snapshot for status/check.
+- we cannot safely mutate or remove the live DB/journal while that writer may still exist.
+
+Spec/docs/tests/build/install:
+- updated `SPEC.md` and `CLAUDE.md`
+- added regression coverage for the rollback-journal snapshot fallback
+- `cargo test` passed: 308 unit tests + 10 exit-code tests
+- `make check` passed
+- `cargo install --path .` passed
+
+Tested on this repo after install:
+- `tsift status` now succeeds in `/home/brian/work/btakita/agent-loop` instead of failing with `database is locked`
+- `tsift index --check .` also completed against the same locked root index
+
+I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@12cb84f` pushed to `origin/main`.
+<!-- agent:boundary:e36222a9 -->
 <!-- /agent:exchange -->
 
 <!--

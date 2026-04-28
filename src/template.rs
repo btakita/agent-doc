@@ -442,6 +442,38 @@ fn tail_is_safe_exchange_content(tail: &str) -> bool {
     !in_fence
 }
 
+/// Fail closed when conversation content (prompts or response headings) would
+/// land outside the live `<!-- agent:exchange -->` block. This is a write-path
+/// guard — explicit `agent-doc repair` uses `repair_conversation_tail_outside_exchange`
+/// instead.
+pub fn guard_no_conversation_tail_outside_exchange(doc: &str) -> Result<()> {
+    let components = component::parse(doc).context("failed to parse components")?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(());
+    };
+
+    let trailing_search_start = components
+        .iter()
+        .map(|c| c.close_end)
+        .max()
+        .unwrap_or(exchange.close_end)
+        .max(exchange.close_end);
+
+    let tail_start = conversation_tail_start(doc, trailing_search_start);
+    let Some(tail_start) = tail_start else {
+        return Ok(());
+    };
+
+    let tail = &doc[tail_start..];
+    let first_line = tail.lines().next().unwrap_or("(empty)");
+    anyhow::bail!(
+        "prompt/response content would land outside `<!-- agent:exchange -->` — \
+         the write path cannot place conversation content after the exchange close tag. \
+         First escaped line: `{}`",
+        first_line.chars().take(120).collect::<String>()
+    );
+}
+
 /// Repair the safe malformed-template case where conversation content escaped
 /// below `<!-- /agent:exchange -->` and now trails the document after sibling
 /// components like pending/todo.
@@ -3092,5 +3124,94 @@ Existing answer.
             !stripped.contains("## Assistant"),
             "escaped assistant tail should be removed:\n{stripped}"
         );
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_normal_content() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ user question\n",
+            "### Re: question — opus-4-6\n\n",
+            "Answer.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] some task\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_session_digest() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "### Re: earlier — opus-4-6\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "# Session Digest\n\n",
+            "Summary of work.\n\n",
+            "❯ Why were the backlog items removed?\n",
+            "### Re: backlog — opus-4-6\n\n",
+            "Escaped answer.\n"
+        );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_backlog() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Assistant\n\n",
+            "Follow-up response.\n"
+        );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_without_exchange_block() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status -->\n",
+            "Active\n",
+            "<!-- /agent:status -->\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_comment_only_tail() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "[//]: # (leave this note outside exchange)\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
     }
 }

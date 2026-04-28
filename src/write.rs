@@ -1747,20 +1747,9 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
     let normalized = crate::component::strip_backlog_patch_attr(&lifted);
-    match crate::template::repair_conversation_tail_outside_exchange(&normalized)? {
-        Some(repaired) => {
-            eprintln!(
-                "[write] repaired: moved escaped conversation tail back into agent:exchange for {}",
-                file.display()
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_exchange_tail file={}", file.display()),
-            );
-            Ok(repaired)
-        }
-        None => Ok(normalized),
-    }
+    crate::template::guard_no_conversation_tail_outside_exchange(&normalized)
+        .with_context(|| format!("template structure guard failed for {}", file.display()))?;
+    Ok(normalized)
 }
 
 /// Detect whether a baseline is stale relative to the current snapshot.

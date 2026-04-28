@@ -475,7 +475,7 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
-<!-- agent:boundary:cd9ca441 -->
+<!-- agent:boundary:cce42f55 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -484,7 +484,6 @@ I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edi
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
 - [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
 - [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

@@ -514,7 +514,32 @@ Verification:
 
 Note:
 - I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) untouched.
-<!-- agent:boundary:b233572a -->
+
+❯ commit + push all src/agent-doc uncommitted files
+### Re: commit + push remaining `src/agent-doc` changes — gpt-5
+
+Committed and pushed the remaining uncommitted files in `src/agent-doc`.
+
+Committed:
+- `aa36218` `chore: commit remaining agent-doc updates`
+
+Pushed:
+- `origin/20260422/codex-agent-backend`
+
+Files included:
+- `specs/codex-support.md`
+- `src/git.rs`
+- `src/pending.rs`
+- `src/route.rs`
+- `src/session_check.rs`
+
+Verification run before commit:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+The remaining diff was mostly formatting/cleanup plus the Codex support wording update; I committed the whole leftover `src/agent-doc` batch exactly as requested.
+<!-- agent:boundary:0b82a497 -->
 <!-- /agent:exchange -->
 
 <!--

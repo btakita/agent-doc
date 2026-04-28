@@ -8,6 +8,7 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -636,7 +637,18 @@ Verification:
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@9a18b25` pushed to `origin/main`.
-<!-- agent:boundary:6b180d70 -->
+
+❯ #follow-up-backlog
+### Re: `#follow-up-backlog` — gpt-5
+
+Yes. The next backlog items I’d add are:
+
+1. `#vsync` — add a tsift instruction-version marker plus auto-refresh for injected `AGENTS.md` / `CLAUDE.md` content and any bundled runbooks, modeled on `agent-doc`.
+2. `#subhk` — add a repo-wide install/update path for tsift hooks across active submodules so stale-index protection does not rely on manual setup in each one.
+3. `#lerr` — surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors, without requiring a separate `tsift locks` follow-up.
+
+I added those to the backlog in this cycle.
+<!-- agent:boundary:e62d7764 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -645,6 +657,9 @@ Commit: `btakita/tsift@9a18b25` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#lerr] Surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors
+- [ ] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
+- [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->
 
 <!--

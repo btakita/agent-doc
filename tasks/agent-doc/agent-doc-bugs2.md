@@ -543,16 +543,36 @@ Verification in `src/agent-doc`:
   - `route::tests::send_keys_delivers_codex_command_with_enter`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:209ca01d -->
+
+❯ do #tmuxcrash. This document also crashed while an agent-doc turn was running. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `94dfab5`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The trace from `.agent-doc/logs/tsift-v0.1.log` pointed at the supervisor boundary, not a tmux kill:
+- the `%216` Codex session clean-exited into `resume --last`
+- the restart never re-established a prompt (`auto_trigger_timeout`)
+- the old auto-trigger worker could outlive that child and there was no provenance or fail-closed path for repeated failed resume handoffs
+
+What changed:
+- `src/start.rs`: auto-trigger workers are now per-restart lifecycle state, cancelled and joined before the next restart iteration
+- `src/start.rs`: added explicit auto-trigger outcomes (`sent`, `timeout`, `send_failed`, `cancelled`) and restart provenance logging in the session log
+- `src/start.rs`: when a resumed Codex child exits cleanly after a failed handoff, supervisor no longer chains another blind resume; it restarts fresh once, and on a second failed handoff inside 15 minutes it stops the blind loop and prompts the user instead
+- `specs/supervisor.md`: documented the failed-resume guard and the no-stale-auto-trigger-thread invariant
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+<!-- agent:boundary:c410402e -->
 <!-- /agent:exchange -->
 
 <!--
-This document also crashed while an agent-doc turn was running.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash] Repeated tmux pane crashes in /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; reconstruct the crash path, add crash provenance logging, and fail closed on short-window crash loops. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
-- [x] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
+- [x] [#tmuxcrash] Repeated tmux pane crashes in /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; reconstruct the crash path, add crash provenance logging, and fail closed on short-window crash loops. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
 <!-- /agent:backlog -->

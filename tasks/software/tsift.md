@@ -95,7 +95,25 @@ Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
 4. Medium: `tsift lint` no longer reads the live symbol index. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 3320-3333 still probe for `symbols.db` under `.tsift/indexes/*`, but the real index path is now `index.db` and single-project mode lives at `.tsift/index.db`. In the common case this leaves the entity set empty and turns lint into a near no-op.
 
 Verification: `cargo test` passed in `src/tsift` (352 unit tests + 19 integration tests).
-<!-- agent:boundary:010754cf -->
+
+❯ do #prunefix. spec-test-build-install-commit-push
+### Re: do #prunefix — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift index --prune` no longer skips subtrees when directory mtimes match. It now runs the same file-mtime scan as normal incremental indexing, so edits inside unchanged directories are still detected.
+- added a deterministic regression that forces `dir_state` to match the current directory mtime after a file edit and still expects the modified file to be reported.
+- updated the CLI help, `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped `tsift` to `0.1.4` so the documented behavior matches the new safety contract.
+
+Verification:
+- `cargo test pruned -- --nocapture` passed: 9 prune-focused tests.
+- `make check` passed: 353 unit tests + 19 integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.4`.
+
+Commit: `btakita/tsift@f24ec73` pushed to `origin/main`.
+<!-- agent:boundary:f450c773 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -104,15 +122,15 @@ Verification: `cargo test` passed in `src/tsift` (352 unit tests + 19 integratio
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#prunefix] [recommended] Fix prune-mode correctness: directory mtime pruning skips content edits inside unchanged directories
+- [x] [#prunefix] [recommended] Fix prune-mode correctness: directory mtime pruning skips content edits inside unchanged directories
 - [ ] [#commlock] [recommended] Make `tsift communities` read-only; it should not acquire the writer lock
 - [ ] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
 - [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
-<!-- /agent:backlog -->
-
-<!--
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
+<!-- /agent:backlog -->
+
+<!--
 -->

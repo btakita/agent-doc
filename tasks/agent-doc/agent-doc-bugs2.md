@@ -36,7 +36,14 @@ What changed:
 - Added regression coverage for the committed-recovery path and the ambiguous fail-closed path, and updated `specs/07-commands.md`.
 
 Verified with `cargo test` in `src/agent-doc`.
-<!-- agent:boundary:d222921e -->
+### Re: tmux session crash — gpt-5
+
+I treated this as a new `#agent-doc-bug` report and captured it as `#bugs2tmux`.
+
+Current evidence does not yet prove a hard tmux-pane death. The `b26b9957-8de6-4eae-bb98-5d7fe4d6b781` session log stops after `codex_start` for pane `%275` without a matching `codex_exit`, `restart_eval`, or `session_end`, while tmux still reports `%275` alive under `agent-doc`. That points more toward a stranded/orphaned live session or a pane-ownership mismatch than a clean crash.
+
+I added a dedicated plan in `tasks/agent-doc/plan-bugs2-tmux-session-crash.md` and put the backlog item at the top of `Pending / Not Built`. The plan focuses on reconstructing the exact owner/pane/child state, tightening supervisor and claim/route diagnostics, and making reruns fail closed when a pane is live but no longer healthy.
+<!-- agent:boundary:93f02413 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -45,7 +52,7 @@ Verified with `cargo test` in `src/agent-doc`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pfcycle] [recommended] Recover or fail closed when a response patchback lands but the persisted cycle state remains `preflight_started` and no replayable pending artifact exists. Plan: `tasks/agent-doc/plan-preflight-started-patchback-closeout.md`
+- [ ] [#bugs2tmux] Diagnose and harden the agent-doc-bugs2.md tmux crash / orphan state so reruns classify or recover the live pane deterministically. Plan: tasks/agent-doc/plan-bugs2-tmux-session-crash.md
 - [ ] [#backlogshadow] [recommended] Fail closed or warn when open backlog-shaped items drift into parked/commented sections instead of the live `agent:backlog`, so unfinished work cannot silently vanish from active tracking. Plan: `tasks/agent-doc/plan-backlog-shadow-open-items.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`

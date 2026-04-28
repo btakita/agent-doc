@@ -2,11 +2,12 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -174,7 +175,53 @@ Verification in `src/agent-doc`:
 I also checked the live CLI syntax locally: `codex resume --help` confirms interactive resume accepts `-s/--sandbox`, so preserving the original Codex sandbox flags on resume is valid.
 
 Because `src/agent-doc` already had unrelated local edits in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs`, I committed only `src/harness.rs` for this fix.
-<!-- agent:boundary:227894e1 -->
+
+❯ Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate issues concurrency issues and other workflow bugs. Let's find root causes to fix. #follow-up-backlog
+### Re: architecture review — opus-4-6
+
+Reviewed the full `src/agent-doc/src/` codebase (~76 source files, 6 integration test files, 18 spec docs). Findings organized by severity:
+
+#### Critical / High
+
+**1. TOCTOU race in `consume_queue_prompt()` (`src/write.rs:603-699`)**
+Reads the file, parses queue structure, modifies it, writes back — all without holding the document lock. Between read and write, a concurrent edit can invalidate parsed offsets, causing prompt duplication or silent loss. The advisory flock that protects snapshot writes does not extend to queue consumption.
+
+**2. Unsafe `env::set_var()` in `run_command()` (`src/write.rs:376-387`)**
+Sets `AGENT_DOC_ALLOW_REPLACE_PENDING` as a global env var with `unsafe { std::env::set_var(...) }`. The safety comment assumes single-threaded CLI, but FFI consumers (JetBrains plugin via JNA, VS Code extension) can call this from arbitrary threads. `env::set_var` has undefined behavior under concurrent calls. Should use function parameters or thread-local storage instead.
+
+**3. Pre-response snapshot saved outside lock (`src/write.rs:1979,2121`)**
+`snapshot::save_pre_response()` runs before acquiring the document lock. If the user edits between snapshot save and lock acquisition, the pre-response snapshot is stale — `undo` would restore to the wrong state. The code acknowledges this is intentional (undo regardless of merge outcome) but it creates a real data-inconsistency window.
+
+#### Important
+
+**4. Unbounded directory growth — two locations**
+- `.agent-doc/typing/` — debounce indicator files use `DefaultHasher` (non-cryptographic), accumulate indefinitely, no GC exists. Test for cleanup is `#[ignore]` in `debounce_gaps_test_plan.rs:324`.
+- `.agent-doc/repair-blocked/` — blocked repair payloads saved but never cleaned. Over months of use, grows without bound.
+
+**5. CRDT merge failure and reactive mode loop**
+- `crdt::merge` error handling is untested (blocked by private API, `debounce_gaps_test_plan.rs:382`).
+- Reactive mode (zero-debounce stream docs) has no cycle counter or infinite-loop prevention. A buggy merge could spin the watch daemon indefinitely (`debounce_gaps_test_plan.rs:435`).
+
+**6. IPC timeout orphaned patches (`src/write.rs:2441-2500`)**
+When IPC times out (2s), a fallback patch file is written for plugin pickup. If the plugin is offline or polling stopped, the patch is orphaned. Next cycle could pick up the stale patch with a wrong baseline, corrupting the document.
+
+**7. Concurrent pane auto-start collision (`src/route.rs:163-200`)**
+Between pane death detection and new pane creation, another process can claim the same window. The lazy-claim guard mitigates this for registered panes, but unregistered files always auto-start — two simultaneous auto-starts for different documents targeting the same window can collide.
+
+#### Minor
+
+**8. Dedup guard precision (`src/repair.rs:474-500`)**
+`fingerprint_lines()` extracts first 3 non-blank, non-marker lines. For very short responses (1-2 lines), this can produce false-positive dedup matches, silently skipping legitimate recovery.
+
+**9. CRDT lock stale cleanup threshold (`src/snapshot.rs:711-733`)**
+Lock files >1 hour old are removed. Legitimate CRDT operations exceeding 1 hour (large documents, slow systems) could be interrupted. Conservative but worth increasing to 24h or adding heartbeat-based renewal.
+
+**10. `unwrap()` calls in critical paths**
+- `src/start.rs:444,559`: `.expect()` on thread spawn without recovery
+- `src/write.rs:341`: `Mutex::lock().unwrap()` in supervisor IPC — panics on poisoned lock
+
+#### Follow-up items added to backlog.
+<!-- agent:boundary:f8758d98 -->
 <!-- /agent:exchange -->
 
 <!--

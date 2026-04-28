@@ -7,6 +7,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
@@ -739,7 +740,34 @@ Full-suite note:
 Scope note:
 - I committed only `VERSIONS.md`, `specs/supervisor.md`, `src/start.rs`, and `src/supervisor/pty.rs`
 - `src/route.rs` had an unrelated local edit and was left untouched
-<!-- agent:boundary:7aaf84d0 -->
+
+❯ do #pfcycle. spec-test-build-install-commit-push
+### Re: tmux pane crash for `agent-doc-bugs2.md` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `d7307a4`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The crash shape was in the failed fresh-route cleanup path, not a tmux kill from outside `agent-doc`:
+- `ops.log` shows repeated `route_cycle_start_missing` events for `tasks/agent-doc/agent-doc-bugs2.md`
+- route could create and register a new pane, then fail closed because fresh-start acknowledgment was not observed
+- the old cleanup path treated every newly-created pane as orphaned and could `kill-pane` even when that pane had already become the live registered owner for the document
+
+What changed:
+- `src/route.rs`: failed-route cleanup now skips panes that are still the registered live owner for the document and only kills truly unregistered new panes
+- added route regressions covering both preserved-live-owner and cleanup-of-unregistered-pane cases
+- updated `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the fail-closed cleanup guard
+
+Verification in `src/agent-doc`:
+- focused route regressions passed:
+  - `cargo test failed_route_cleanup_preserves_live_registered_owner`
+  - `cargo test failed_route_cleanup_does_not_preserve_unregistered_pane`
+- `cargo test` still has 3 pre-existing unrelated `autoclaim::tests::*` failures in this tree
+- `cargo build`
+- `cargo install --path . --force`
+
+Scope note:
+- I committed only the route/spec/version files for this fix
+- `src/cycle_state.rs` already had an unrelated local edit and was left untouched
+<!-- agent:boundary:9dafbc26 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -748,6 +776,7 @@ Scope note:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
 - [ ] [#pfcycle] [recommended] Recover or fail closed when a response patchback lands but the persisted cycle state remains `preflight_started` and no replayable pending artifact exists. Plan: `tasks/agent-doc/plan-preflight-started-patchback-closeout.md`
+- [ ] [#backlogshadow] [recommended] Fail closed or warn when open backlog-shaped items drift into parked/commented sections instead of the live `agent:backlog`, so unfinished work cannot silently vanish from active tracking. Plan: `tasks/agent-doc/plan-backlog-shadow-open-items.md`
+- [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 <!-- /agent:backlog -->

@@ -600,7 +600,18 @@ Tested on this repo after install:
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@12cb84f` pushed to `origin/main`.
-<!-- agent:boundary:e36222a9 -->
+
+❯ Any follow up tasks to put into the backlog?
+### Re: backlog follow-ups — gpt-5
+
+Yes. I would put these into the backlog:
+
+1. `#sprch` — extend the same locked-DB snapshot fallback to search freshness prechecks (`inspect_search_index()`), so scoped/federated/`--no-autoindex` search paths do not regress relative to `status` and `index --check`.
+2. `#sdia` — surface when snapshot fallback was used in `tsift status` human output and JSON. Right now the recovery is intentionally silent, but agents should be able to tell they are in a degraded-read path and still need a real index repair later.
+3. `#tdoc` — add a small diagnostics/remediation command for lock states (`index.lock`, `index.db-journal`, live PID hints, recommended next step). The current behavior is safer now, but the operator story is still too implicit.
+
+I added those as recommended backlog items in this cycle.
+<!-- agent:boundary:afd810bf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -609,6 +620,9 @@ Commit: `btakita/tsift@12cb84f` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#sprch] [recommended] Extend locked-db snapshot fallback to search freshness prechecks (scoped, federated, and --no-autoindex paths)
+- [ ] [#sdia] [recommended] Expose snapshot-fallback recovery in tsift status human + JSON output so agents can tell when health checks ran in degraded mode
+- [ ] [#tdoc] [recommended] Add lock diagnostics/remediation command for rollback-journal and writer-lock states
 <!-- /agent:backlog -->
 
 <!--

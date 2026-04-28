@@ -375,7 +375,7 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 ❯ do #snap1. spec-test-build-install-commit-push
-### Re: `#snap1` — gpt-5
+### Re: `#snap1` — gpt-5 (HEAD)
 
 Implemented in `src/agent-doc`, committed as `967fb8f`, and pushed to `origin/20260422/codex-agent-backend`.
 
@@ -392,7 +392,21 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:c91f4f48 -->
+
+❯ The response patchback was not committed in `src/session-share/tasks/claudescore-3.md`. `#agent-doc-bug`
+### Re: uncommitted `claudescore-3.md` patchback — codex
+
+This still maps to `#pbc2`, not the newer post-commit `#closeout-bypass` family.
+
+Why:
+- the live `src/session-share/tasks/claudescore-3.md` worktree contains a new `❯ Let's use UTC...` prompt and a visible `### Re:` response block, but there is no owning committed `agent-doc` cycle for that patchback
+- `git blame` shows the response block as uncommitted lines immediately after the last committed exchange turn
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md` currently fails with:
+  - `INTERRUPTED: found likely direct response patchback without agent-doc cycle: ### Re: use UTC day boundaries for news — codex`
+- after manually committing the repaired document in `src/session-share` as `9be7d48` (`docs: record UTC news boundary response`), `session-check` still returns the same interrupt because the missing state is not “git commit exists” but “agent-doc-owned closeout cycle exists or is recoverably reconstructed”
+
+So the active broken state is still “response landed in the session document without a completed write/commit closeout,” which is exactly the `#pbc2` tracking class. The extra detail from this reproduction is that the patched block looks structurally valid in the document and can even be manually committed, but `session-check` still classifies it as a direct patchback bypass, so the repair/detection path needs to account for this `claudescore-3.md` shape explicitly.
+<!-- agent:boundary:92ca9bb1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -405,4 +419,5 @@ Verification in `src/agent-doc`:
 - [ ] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup
 - [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
 - [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
+- [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

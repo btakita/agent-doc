@@ -159,6 +159,21 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
+fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
+    let msg = format!(
+        "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
+        reason,
+        file.display()
+    );
+    if let Err(e) = tmux.send_keys_raw(pane_id, &format!("echo '{}'", msg.replace('\'', "'\\''")))
+    {
+        eprintln!(
+            "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
+            pane_id, e
+        );
+    }
+}
+
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -369,6 +384,46 @@ fn resolve_or_create_pane(
         None
     };
 
+    // Strategy 0: If a previous startup-miss was recorded for the registered pane,
+    // deregister it immediately so we fall through to auto-start instead of
+    // reusing a pane that never successfully started a document cycle.
+    if let Some(ref registered_pane) = registered {
+        if tmux.pane_alive(registered_pane)
+            && crate::startup_miss::is_startup_miss_pane(file, registered_pane)
+        {
+            eprintln!(
+                "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
+                registered_pane, file_path
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_deregistered file={} pane={}",
+                    file_path, registered_pane
+                ),
+            );
+            let _ = sessions::deregister(session_id)?;
+            let _ = crate::startup_miss::clear(file);
+            // Fall through to Strategy 3 (auto-start)
+            eprintln!("[route] No active pane found, auto-starting...");
+            if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+                anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+            }
+            let split_before = is_first_column(file, col_args);
+            ensure_auto_start_target_session(tmux, None, target_session, harness)?;
+            return auto_start_in_session(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                target_session,
+                false,
+                split_before,
+                harness,
+            );
+        }
+    }
+
     // Strategy 1: Alive registered pane — reuse only when a live process tree
     // still proves the document is running there. Pane IDs (%N) are globally
     // unique per tmux server, so target_session matching stays irrelevant once
@@ -406,8 +461,10 @@ fn resolve_or_create_pane(
                     );
                     send_command(tmux, owner, file_path, harness)?;
                     require_routed_cycle_ack(
+                        tmux,
                         file,
                         owner,
+                        session_id,
                         harness,
                         cycle_baseline.as_ref(),
                         pending_prompt_marker.as_deref(),
@@ -444,8 +501,10 @@ fn resolve_or_create_pane(
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 send_command(tmux, registered_pane, file_path, harness)?;
                 require_routed_cycle_ack(
+                    tmux,
                     file,
                     registered_pane,
+                    session_id,
                     harness,
                     cycle_baseline.as_ref(),
                     pending_prompt_marker.as_deref(),
@@ -480,8 +539,10 @@ fn resolve_or_create_pane(
         sessions::register(session_id, &existing, file_path)?;
         send_command(tmux, &existing, file_path, harness)?;
         require_routed_cycle_ack(
+            tmux,
             file,
             &existing,
+            session_id,
             harness,
             cycle_baseline.as_ref(),
             pending_prompt_marker.as_deref(),
@@ -496,8 +557,10 @@ fn resolve_or_create_pane(
         sessions::register(session_id, &new_pane, file_path)?;
         send_command(tmux, &new_pane, file_path, harness)?;
         require_routed_cycle_ack(
+            tmux,
             file,
             &new_pane,
+            session_id,
             harness,
             cycle_baseline.as_ref(),
             pending_prompt_marker.as_deref(),
@@ -713,8 +776,10 @@ fn pending_prompt_bearing_marker_for_route(
 }
 
 fn require_routed_cycle_ack(
+    tmux: &Tmux,
     file: &Path,
     pane: &str,
+    session_id: &str,
     harness: &HarnessConfig,
     baseline: Option<&crate::cycle_state::CycleState>,
     prompt_bearing_marker: Option<&str>,
@@ -738,6 +803,7 @@ fn require_routed_cycle_ack(
                     marker
                 ),
             );
+            let _ = crate::startup_miss::clear(file);
             Ok(())
         }
         None => {
@@ -748,6 +814,24 @@ fn require_routed_cycle_ack(
                     file.display(),
                     pane,
                     harness.binary,
+                    marker
+                ),
+            );
+            let baseline_id = baseline.map(|b| b.cycle_id.as_str());
+            let _ = crate::startup_miss::record(
+                file,
+                pane,
+                session_id,
+                &harness.binary,
+                crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+                baseline_id,
+            );
+            emit_startup_miss_diagnostic(
+                tmux,
+                pane,
+                file,
+                &format!(
+                    "routed trigger accepted but no document cycle started for pending {}",
                     marker
                 ),
             );
@@ -1448,6 +1532,7 @@ fn auto_start_in_session(
                         }
                     ),
                 );
+                let _ = crate::startup_miss::clear(file);
             }
             None => {
                 crate::ops_log::log_op(
@@ -1458,6 +1543,21 @@ fn auto_start_in_session(
                         new_pane,
                         harness.binary
                     ),
+                );
+                let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
+                let _ = crate::startup_miss::record(
+                    file,
+                    &new_pane,
+                    session_id,
+                    &harness.binary,
+                    crate::startup_miss::StartupMissOrigin::FreshStart,
+                    baseline_id,
+                );
+                emit_startup_miss_diagnostic(
+                    tmux,
+                    &new_pane,
+                    file,
+                    "fresh start: trigger accepted but no document cycle started",
                 );
                 anyhow::bail!(
                     "fresh {} start for {} never acknowledged with a document cycle after trigger injection",
@@ -4032,5 +4132,97 @@ history line
             resolved, doc,
             "resolved path must point to the CWD-relative file, not a submodule shadow"
         );
+    }
+
+    #[test]
+    fn startup_miss_recorded_on_fresh_start_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::startup_miss::record(
+            &doc,
+            "%42",
+            "session-test",
+            "claude",
+            crate::startup_miss::StartupMissOrigin::FreshStart,
+            None,
+        )
+        .unwrap();
+
+        let miss = crate::startup_miss::load(&doc).unwrap().expect("should have marker");
+        assert_eq!(miss.pane_id, "%42");
+        assert_eq!(miss.origin, crate::startup_miss::StartupMissOrigin::FreshStart);
+        assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+    }
+
+    #[test]
+    fn startup_miss_cleared_on_successful_ack() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::startup_miss::record(
+            &doc,
+            "%42",
+            "session-test",
+            "claude",
+            crate::startup_miss::StartupMissOrigin::FreshStart,
+            None,
+        )
+        .unwrap();
+        assert!(crate::startup_miss::load(&doc).unwrap().is_some());
+
+        crate::startup_miss::clear(&doc).unwrap();
+        assert!(crate::startup_miss::load(&doc).unwrap().is_none());
+        assert!(!crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+    }
+
+    #[test]
+    fn startup_miss_pane_detected_on_rerun() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::startup_miss::record(
+            &doc,
+            "%99",
+            "session-test",
+            "codex",
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            Some("cycle-old"),
+        )
+        .unwrap();
+
+        assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%99"));
+        assert!(
+            !crate::startup_miss::is_startup_miss_pane(&doc, "%100"),
+            "different pane should not match"
+        );
+    }
+
+    #[test]
+    fn startup_miss_routed_trigger_records_with_baseline_id() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        crate::startup_miss::record(
+            &doc,
+            "%50",
+            "session-test",
+            "claude",
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            Some("cycle-baseline-123"),
+        )
+        .unwrap();
+
+        let miss = crate::startup_miss::load(&doc).unwrap().expect("marker");
+        assert_eq!(miss.origin, crate::startup_miss::StartupMissOrigin::RoutedTrigger);
+        assert_eq!(miss.cycle_baseline_id.as_deref(), Some("cycle-baseline-123"));
     }
 }

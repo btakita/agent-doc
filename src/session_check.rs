@@ -135,6 +135,12 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 }
             }
         }
+        if let Ok(Some(miss)) = crate::startup_miss::load(file) {
+            report.warnings.push(format!(
+                "[session-check] WARNING: startup-miss marker exists for pane {} ({:?}) — the last {} start never acknowledged a document cycle",
+                miss.pane_id, miss.origin, miss.harness
+            ));
+        }
     }
     Ok(report)
 }

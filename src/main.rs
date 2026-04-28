@@ -103,6 +103,7 @@ mod sessions;
 mod skill;
 mod snapshot;
 mod start;
+mod startup_miss;
 mod status_cmd;
 mod stream;
 mod supervisor;

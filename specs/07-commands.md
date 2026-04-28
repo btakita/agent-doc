@@ -706,6 +706,14 @@ Fresh auto-start also requires a real per-document cycle acknowledgment after tr
 
 If that fresh-start acknowledgment fails after route already created and registered a new pane, cleanup must preserve the pane when it is still the live registered owner for the document. Route may fail closed with `fresh_route_start_missing` / `fresh_route_trigger_missing`, but it must not convert that startup-ack miss into a visible tmux pane crash by killing the new live pane as "orphaned cleanup".
 
+### Startup-miss tracking
+
+When a fresh-start or routed-trigger acknowledgment times out, route now records a startup-miss marker at `.agent-doc/state/startup-miss/<doc-hash>.json` with pane provenance (pane id, session id, harness, origin, cycle baseline). Route also echoes a diagnostic into the pane via `tmux send-keys` so the user sees a visible "startup-miss" message instead of an unexplained idle shell.
+
+On the next route invocation, if the registered pane matches a persisted startup-miss marker, route deregisters the stale pane, clears the marker, and auto-starts a fresh pane instead of reusing one that never successfully started a document cycle. This prevents the "looks like a healthy pane but never runs" loop.
+
+Successful cycle acknowledgment (both `fresh_route_start_acknowledged` and `route_cycle_start_acknowledged`) clears the startup-miss marker. `session-check` also reports a warning when a startup-miss marker exists for the inspected document.
+
 ## is_tracked FFI Export
 
 `agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.

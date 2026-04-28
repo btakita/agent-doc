@@ -3,8 +3,10 @@
 //! All write paths for agent responses: inline append, template patch, stream
 //! (CRDT), IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
 //! invariant: save pending → acquire lock → compute `content_ours` (baseline +
-//! response) → merge with any concurrent user edits → atomic write → save
-//! snapshot as `final_content` (the actual post-merge disk state) → clear pending.
+//! response) → merge with any concurrent user edits → atomic write → save a
+//! snapshot that is usually `final_content` (the actual post-merge disk state),
+//! but preserves `content_ours` when an explicit baseline is active and
+//! concurrent user edits must remain visible next cycle → clear pending.
 //!
 //! ## Write dedup (v0.28.2)
 //!
@@ -107,13 +109,14 @@
 //!
 //! ## Agentic Contracts
 //!
-//! - Snapshot invariant: the snapshot saved after every write contains
+//! - Snapshot invariant: the snapshot saved after every write normally contains
 //!   `final_content` (the actual post-merge disk state), not `content_ours`.
 //!   This eliminates ghost diffs caused by stale baselines (e.g. streaming
-//!   checkpoints with an outdated baseline). Concurrent user edits made during
-//!   response generation are absorbed into the snapshot; they will not appear
-//!   in the next diff cycle, but this is preferable to phantom committed-line
-//!   drift from a mismatched snapshot.
+//!   checkpoints with an outdated baseline). Narrow exception: when the caller
+//!   supplied an explicit baseline and concurrent user edits changed the merged
+//!   disk state, the snapshot stays at `content_ours` so those late user edits
+//!   remain visible to the next diff cycle instead of being folded into the
+//!   just-finished turn.
 //! - Pending response is saved before any write attempt and cleared only after
 //!   a successful write, so an interrupted write is recoverable.
 //! - Pre-response snapshot is captured from the live document state while the
@@ -253,6 +256,64 @@ pub enum CommitMode {
     None,
     BestEffort,
     Required,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotPersistMode {
+    FinalContent,
+    ContentOurs,
+}
+
+fn snapshot_persist_mode(
+    baseline: Option<&str>,
+    content_ours: &str,
+    final_content: &str,
+) -> SnapshotPersistMode {
+    if baseline.is_none() {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    let ours_norm = strip_boundary_for_dedup(content_ours);
+    let final_norm = strip_boundary_for_dedup(final_content);
+    if ours_norm == final_norm {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    if crate::session_check::detect_bypassed_response_write_between(&ours_norm, &final_norm)
+        .is_some()
+    {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&ours_norm, &final_norm) else {
+        return SnapshotPersistMode::FinalContent;
+    };
+    let has_prompt_bearing_user_drift = crate::diff::classify_prompt_bearing_changes(&diff_text)
+        .iter()
+        .any(|change| {
+            matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::PromptTarget
+                    | crate::diff::PromptBearingChangeKind::ContentEdit
+            )
+        });
+
+    if has_prompt_bearing_user_drift {
+        SnapshotPersistMode::ContentOurs
+    } else {
+        SnapshotPersistMode::FinalContent
+    }
+}
+
+fn snapshot_content_to_persist<'a>(
+    mode: SnapshotPersistMode,
+    content_ours: &'a str,
+    final_content: &'a str,
+) -> &'a str {
+    match mode {
+        SnapshotPersistMode::FinalContent => final_content,
+        SnapshotPersistMode::ContentOurs => content_ours,
+    }
 }
 
 fn is_session_document(file: &Path) -> Result<bool> {
@@ -2018,11 +2079,14 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
+    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
-    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
-    snapshot::save(file, &final_content)?;
+    snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
 
@@ -2157,11 +2221,14 @@ pub fn run_template(
         return Ok(());
     }
 
+    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
-    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
-    snapshot::save(file, &final_content)?;
+    snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
 
@@ -2546,14 +2613,23 @@ pub fn run_stream(
                 }
             };
             let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+            let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+            let snapshot_content =
+                snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+            let snapshot_crdt_state = match snapshot_mode {
+                SnapshotPersistMode::FinalContent => crdt_state.clone(),
+                SnapshotPersistMode::ContentOurs => {
+                    crate::crdt::CrdtDoc::from_text(&content_ours).encode_state()
+                }
+            };
             // Snapshot saved BEFORE document write (#wcf5).
-            if let Err(e) = snapshot::save(file, &final_content) {
+            if let Err(e) = snapshot::save(file, snapshot_content) {
                 eprintln!(
                     "[write] WARNING: snapshot save before exit(75) failed: {}",
                     e
                 );
             }
-            if let Err(e) = snapshot::save_crdt(file, &crdt_state) {
+            if let Err(e) = snapshot::save_crdt(file, &snapshot_crdt_state) {
                 eprintln!(
                     "[write] WARNING: CRDT state save before exit(75) failed: {}",
                     e
@@ -2694,15 +2770,19 @@ pub fn run_stream(
         return Ok(());
     }
 
+    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_content = snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    let snapshot_crdt_state = match snapshot_mode {
+        SnapshotPersistMode::FinalContent => crdt_state,
+        SnapshotPersistMode::ContentOurs => crate::crdt::CrdtDoc::from_text(&content_ours).encode_state(),
+    };
+
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
-    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
-    snapshot::save(file, &final_content)?;
-    // Save the merged CRDT state — NOT a fresh state from content_ours.
-    // Using content_ours would lose user edits from the merge, causing
-    // the next merge cycle to re-insert them as duplicates.
-    snapshot::save_crdt(file, &crdt_state)?;
+    snapshot::save(file, snapshot_content)?;
+    snapshot::save_crdt(file, &snapshot_crdt_state)?;
 
     atomic_write(file, &final_content)?;
     crate::ops_log::log_cycle(
@@ -4429,6 +4509,65 @@ mod tests {
         assert!(
             snap.contains("Follow-up question"),
             "snapshot should contain merged user edit"
+        );
+    }
+
+    #[test]
+    fn explicit_baseline_preserves_concurrent_user_edits_for_next_cycle() {
+        let baseline = Some("baseline");
+        let content_ours = "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::ContentOurs
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            content_ours
+        );
+    }
+
+    #[test]
+    fn implicit_baseline_still_persists_final_merged_disk_state() {
+        let content_ours = "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(None, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(None, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+
+    #[test]
+    fn explicit_baseline_keeps_final_content_when_delta_is_prior_streamed_agent_prefix() {
+        let baseline = Some("baseline");
+        let content_ours = "<!-- agent:exchange -->\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: orchestrate streaming — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
         );
     }
 

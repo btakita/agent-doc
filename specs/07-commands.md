@@ -115,9 +115,13 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Prune stale entries from `sessions.json`
 2. Ensure session UUID in frontmatter (generate if missing)
 3. Look up pane in `sessions.json`
-4. If pane alive → send `/agent-doc <FILE>` via `send_keys`, then Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), focus pane
-5. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`) **only if the candidate pane is running an agent process** (`agent-doc`, `claude`, `node`). Non-agent panes (corky, shells, etc.) are skipped — falls through to auto-start. Unregistered files skip lazy-claim entirely.
-6. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
+4. If the registered pane is alive, first try to prove that it still owns the document via tmux process-tree match on the file path, then supervisor child-PID fallback. When that proof succeeds, route sends `/agent-doc <FILE>` via `send_keys`, runs the Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), then focuses the pane.
+5. If the registered pane is alive but no live-owner proof succeeds, route still probes the pane's supervisor health before declaring it stale:
+   - **Healthy** supervisor → reuse the registered pane and send the routed command there
+   - **Needs restart** (reachable supervisor, child halted/degraded/not running) → send supervisor `restart`, refocus the same pane, and require a fresh routed-cycle ack instead of spawning a second pane
+   - **Unreachable** or **No socket** → clear the stale registration and continue to lazy-claim / auto-start
+6. If pane dead (previously registered) → lazy-claim to active pane in `claude` tmux session (or `--pane P`) **only if the candidate pane is running an agent process** (`agent-doc`, `claude`, `node`). Non-agent panes (corky, shells, etc.) are skipped — falls through to auto-start. Unregistered files skip lazy-claim entirely.
+7. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
 
 **Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning, ignores the stale pin, and resolves a live target from the current tmux session or an already-alive harness fallback session. If the only remaining target is a dead implicit fallback name (for example `"claude"` / `"codex"`), route fails closed instead of creating that session implicitly.
 
@@ -404,7 +408,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Pane ownership verification (v0.28.2):** `verify_pane_ownership()` is called at the top of `run`, `run_template`, and `run_stream`. It reads the document's `session` frontmatter field, looks up the owning pane in the session registry, and compares it to the current tmux pane. If a different pane definitively owns the session, the write is rejected. The check is lenient: it passes silently when not in tmux, when there is no session ID, or when the pane is indeterminate.
 
-**Snapshot invariant:** All write paths (inline, template, stream, IPC) save the snapshot as `content_ours` — the baseline with the agent response applied. The working tree file may differ (due to concurrent user edits merged in), but the snapshot always reflects only the agent's contribution. This is the foundation of correct diff detection.
+**Snapshot persistence invariant:** Write paths normally persist the snapshot from the final merged on-disk content after the response write completes. Narrow exception: when the caller supplied an explicit `--baseline-file` and the live file diverged during the write merge, the snapshot and CRDT state persist from `content_ours` instead of merged `final_content`. That keeps concurrent user edits typed during `finalize` visible in the next diff rather than silently absorbing them into the new baseline. Non-baseline writes still treat the merged disk state as authoritative.
 
 **Exchange prompt normalization:** For append-mode `agent:exchange`, the write path prefixes newly added user lines with `❯ ` based on the `snapshot -> baseline` diff, but the required prefix targets come from the canonical `prompt_bearing_changes` classifier rather than a separate prompt-shape heuristic. This normalization must ignore synthetic heading-only churn from binary-owned commit markers (for example a response heading gaining ` (HEAD)` in the committed snapshot). A heading replacement may preserve existing agent content, but it must not suppress `❯ ` prefixing for the next genuine prompt-bearing user block.
 

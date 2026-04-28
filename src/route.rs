@@ -125,6 +125,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::HarnessConfig;
+use crate::supervisor::ipc::IpcMethod;
 use crate::sessions::Tmux;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
@@ -132,6 +133,14 @@ use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 enum CommandDispatchStatus {
     Accepted,
     TimedOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupervisorHealth {
+    Healthy,
+    NeedsRestart,
+    Unreachable,
+    NoSocket,
 }
 
 fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
@@ -159,8 +168,71 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
-fn startup_miss_requires_fresh_start(registered_pane: &str, live_owner: Option<&str>) -> bool {
-    live_owner != Some(registered_pane)
+fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
+    let canonical = match file.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return SupervisorHealth::NoSocket,
+    };
+    let project_root = match snapshot::find_project_root(&canonical) {
+        Some(r) => r,
+        None => return SupervisorHealth::NoSocket,
+    };
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    if !sock.exists() {
+        return SupervisorHealth::NoSocket;
+    }
+    match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
+        Ok(resp) if resp.ok => {
+            if let Some(data) = &resp.data {
+                let running = data
+                    .get("running")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                if running && state == "healthy" {
+                    SupervisorHealth::Healthy
+                } else {
+                    SupervisorHealth::NeedsRestart
+                }
+            } else {
+                SupervisorHealth::NeedsRestart
+            }
+        }
+        Ok(_) | Err(_) => SupervisorHealth::Unreachable,
+    }
+}
+
+fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
+    let canonical = match file.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let project_root = match snapshot::find_project_root(&canonical) {
+        Some(r) => r,
+        None => return false,
+    };
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    let method = IpcMethod::Restart {
+        mode: "continue".to_string(),
+    };
+    match crate::supervisor::ipc::send_command(&sock, &method) {
+        Ok(resp) => resp.ok,
+        Err(_) => false,
+    }
+}
+
+fn startup_miss_requires_fresh_start(
+    registered_pane: &str,
+    live_owner: Option<&str>,
+    supervisor_health: SupervisorHealth,
+) -> bool {
+    if live_owner == Some(registered_pane) {
+        return false;
+    }
+    matches!(
+        supervisor_health,
+        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
+    )
 }
 
 fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
@@ -386,6 +458,11 @@ fn resolve_or_create_pane(
     } else {
         None
     };
+    let supervisor_health = if registered.is_some() {
+        query_supervisor_health(file, session_id)
+    } else {
+        SupervisorHealth::NoSocket
+    };
 
     // Strategy 0: If a previous startup-miss was recorded for the registered pane,
     // deregister it immediately so we fall through to auto-start instead of
@@ -394,7 +471,11 @@ fn resolve_or_create_pane(
         if tmux.pane_alive(registered_pane)
             && crate::startup_miss::is_startup_miss_pane(file, registered_pane)
         {
-            if startup_miss_requires_fresh_start(registered_pane, live_owner.as_deref()) {
+            if startup_miss_requires_fresh_start(
+                registered_pane,
+                live_owner.as_deref(),
+                supervisor_health,
+            ) {
                 eprintln!(
                     "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
                     registered_pane, file_path
@@ -492,20 +573,83 @@ fn resolve_or_create_pane(
                 }
                 Some(_) => {}
                 None => {
-                    let provenance = pane_route_provenance(tmux, registered_pane);
-                    eprintln!(
-                        "[route] registered pane {} is alive but no live owner for {} was proven — deregistering stale entry and continuing recovery",
-                        registered_pane, file_path
-                    );
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "route_registered_pane_deregistered_no_live_owner file={} {}",
-                            file_path, provenance
-                        ),
-                    );
-                    let _ = sessions::deregister(session_id)?;
-                    stale_registration_cleared = true;
+                    match supervisor_health {
+                        SupervisorHealth::Healthy => {
+                            eprintln!(
+                                "[route] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — reusing registered pane",
+                                registered_pane, file_path
+                            );
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_reused_via_supervisor file={} pane={} health=healthy",
+                                    file_path, registered_pane
+                                ),
+                            );
+                        }
+                        SupervisorHealth::NeedsRestart => {
+                            eprintln!(
+                                "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
+                                registered_pane, file_path
+                            );
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_restart_via_supervisor file={} pane={}",
+                                    file_path, registered_pane
+                                ),
+                            );
+                            if restart_via_supervisor(file, session_id) {
+                                if let Err(e) = tmux.select_pane(registered_pane) {
+                                    eprintln!(
+                                        "[route] warning: failed to focus restarted pane {}: {}",
+                                        registered_pane, e
+                                    );
+                                }
+                                require_routed_cycle_ack(
+                                    tmux,
+                                    file,
+                                    registered_pane,
+                                    session_id,
+                                    harness,
+                                    cycle_baseline.as_ref(),
+                                    pending_prompt_marker.as_deref(),
+                                    false,
+                                )?;
+                                return Ok(registered_pane.clone());
+                            }
+                            eprintln!(
+                                "[route] supervisor restart failed for pane {} — deregistering and continuing recovery",
+                                registered_pane
+                            );
+                            let provenance = pane_route_provenance(tmux, registered_pane);
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_restart_failed file={} {}",
+                                    file_path, provenance
+                                ),
+                            );
+                            let _ = sessions::deregister(session_id)?;
+                            stale_registration_cleared = true;
+                        }
+                        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
+                            let provenance = pane_route_provenance(tmux, registered_pane);
+                            eprintln!(
+                                "[route] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
+                                registered_pane, file_path
+                            );
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "route_registered_pane_deregistered_no_live_owner file={} {}",
+                                    file_path, provenance
+                                ),
+                            );
+                            let _ = sessions::deregister(session_id)?;
+                            stale_registration_cleared = true;
+                        }
+                    }
                 }
             }
             if !stale_registration_cleared {
@@ -4336,8 +4480,101 @@ history line
 
     #[test]
     fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
-        assert!(startup_miss_requires_fresh_start("%42", None));
-        assert!(startup_miss_requires_fresh_start("%42", Some("%99")));
-        assert!(!startup_miss_requires_fresh_start("%42", Some("%42")));
+        assert!(startup_miss_requires_fresh_start(
+            "%42",
+            None,
+            SupervisorHealth::NoSocket
+        ));
+        assert!(startup_miss_requires_fresh_start(
+            "%42",
+            Some("%99"),
+            SupervisorHealth::Unreachable
+        ));
+        assert!(!startup_miss_requires_fresh_start(
+            "%42",
+            Some("%42"),
+            SupervisorHealth::NoSocket
+        ));
+        assert!(!startup_miss_requires_fresh_start(
+            "%42",
+            None,
+            SupervisorHealth::NeedsRestart
+        ));
+        assert!(!startup_miss_requires_fresh_start(
+            "%42",
+            None,
+            SupervisorHealth::Healthy
+        ));
+    }
+
+    #[test]
+    fn resolve_or_create_pane_restarts_registered_pane_with_supervisor_when_no_live_owner() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-supervisor-restart");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-supervisor-restart";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": false,
+                        "state": "halted"
+                    })),
+                    IpcMethod::Restart { .. } => {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let panes_before = iso.list_panes_ordered(&format!("{session}:0")).unwrap_or_default();
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect("route should restart the registered pane instead of autostarting a duplicate");
+        let panes_after = iso.list_panes_ordered(&format!("{session}:0")).unwrap_or_default();
+
+        assert_eq!(resolved, pane);
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route should not create a duplicate pane when the registered supervisor can restart in place"
+        );
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "route should restart the registered supervisor instead of auto-starting a new pane"
+        );
+
+        ipc.stop();
     }
 }

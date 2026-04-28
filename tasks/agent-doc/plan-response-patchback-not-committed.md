@@ -1,7 +1,7 @@
 # Plan — fix response patchback left uncommitted
 
 **Pending:** `#patchcommit`
-**Status:** Draft
+**Status:** Implemented
 
 ## Problem
 

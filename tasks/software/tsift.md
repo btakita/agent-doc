@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -801,7 +801,23 @@ Reviewed all 10 source files (~11.4K lines), integration tests, spec, and depend
 - **Edition 2024** in Cargo.toml requires nightly Rust. No CI shown to enforce this.
 
 - **Parser created per file** in \`lang/mod.rs:201-209\`. A new \`Parser\` + \`set_language()\` call for every file during indexing. Cacheable for modest throughput gain on large indexes.
-<!-- agent:boundary:947e37fb -->
+
+❯ The tmux pane for this document has crashed 2 times. #agent-doc-bug
+### Re: tmux pane crashes — gpt-5
+
+I treated this as an `agent-doc` issue rather than a `tsift` backlog item.
+
+Tracked externally:
+- added `#tmuxcrash` to `tasks/agent-doc/agent-doc-bugs2.md`
+- created plan: `tasks/agent-doc/plan-tmux-pane-crash-stability.md`
+
+The plan is intentionally diagnostic first:
+- reconstruct both crash episodes from the session/supervisor logs and tmux ownership state
+- distinguish child-harness exit vs supervisor exit/panic vs tmux pane replacement during route/sync recovery
+- add crash provenance logging and a short-window crash-loop fail-closed guard so repeated pane deaths stop churning tmux state
+
+I’m not claiming a root cause from the symptom alone yet. The main fix target is the tmux/supervisor boundary in `src/agent-doc`, not `tsift` itself.
+<!-- agent:boundary:b3b65bbb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -809,7 +825,7 @@ Reviewed all 10 source files (~11.4K lines), integration tests, spec, and depend
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
+<!-- agent:backlog -->
 - [ ] [#txn] Wrap apply_changes_inner + rebuild in SQLite transactions (index.rs:395-478, 497-501)
 - [ ] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
 - [ ] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)

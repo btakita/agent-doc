@@ -474,7 +474,38 @@ Verification:
 I pushed the minimal `#alck` patch from a clean `origin/main` worktree because the checked-out `src/tsift` submodule still had a broader local uncommitted stack.
 
 Commit: `btakita/tsift@9516710` pushed to `origin/main`.
-<!-- agent:boundary:443f66c3 -->
+
+❯ Please make autoindex default to true on `tsift search`. We should only have an opt-out option.
+
+```
+• Ran tsift search "claudescore-applies-when-plan"
+  └ Error: tsift search aborted: index is stale (10 files). Run `tsift index /home/brian/work/btakita/agent-loop/src/
+    session-share` or re-run with `--autoindex`.
+
+• Ran tsift search "session digest"
+  └ Error: tsift search aborted: index is stale (10 files). Run `tsift index /home/brian/work/btakita/agent-loop/src/
+    session-share` or re-run with `--autoindex`.
+```
+### Re: search autoindex default — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `tsift search` now autoindexes by default when the targeted index is missing or stale.
+- added `--no-autoindex` as the explicit opt-out when you want the old fail-fast non-mutating behavior.
+- kept `--autoindex` as a compatibility flag, but it is now redundant because default search already autoindexes.
+- updated the stale-index messaging, `SPEC.md`, and `CLAUDE.md` to reflect the new default.
+- added CLI/runtime coverage for default, opt-out, scoped, and federated search behavior.
+
+Verification:
+- `cargo test` passed: 307 unit tests + 10 exit-code tests.
+- `make check` passed.
+- `cargo install --path .` passed, and the local `tsift` binary now shows `--no-autoindex` in `tsift search --help`.
+
+I pushed the patch from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@66fdd19` pushed to `origin/main`.
+<!-- agent:boundary:4a7dbb5b -->
 <!-- /agent:exchange -->
 
 <!--

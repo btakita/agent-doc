@@ -125,8 +125,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::HarnessConfig;
-use crate::supervisor::ipc::IpcMethod;
 use crate::sessions::Tmux;
+use crate::supervisor::ipc::IpcMethod;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -572,85 +572,83 @@ fn resolve_or_create_pane(
                     return Ok(owner.to_string());
                 }
                 Some(_) => {}
-                None => {
-                    match supervisor_health {
-                        SupervisorHealth::Healthy => {
-                            eprintln!(
-                                "[route] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — reusing registered pane",
-                                registered_pane, file_path
-                            );
-                            crate::ops_log::log_op(
-                                file,
-                                &format!(
-                                    "route_registered_pane_reused_via_supervisor file={} pane={} health=healthy",
-                                    file_path, registered_pane
-                                ),
-                            );
-                        }
-                        SupervisorHealth::NeedsRestart => {
-                            eprintln!(
-                                "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
-                                registered_pane, file_path
-                            );
-                            crate::ops_log::log_op(
-                                file,
-                                &format!(
-                                    "route_registered_pane_restart_via_supervisor file={} pane={}",
-                                    file_path, registered_pane
-                                ),
-                            );
-                            if restart_via_supervisor(file, session_id) {
-                                if let Err(e) = tmux.select_pane(registered_pane) {
-                                    eprintln!(
-                                        "[route] warning: failed to focus restarted pane {}: {}",
-                                        registered_pane, e
-                                    );
-                                }
-                                require_routed_cycle_ack(
-                                    tmux,
-                                    file,
-                                    registered_pane,
-                                    session_id,
-                                    harness,
-                                    cycle_baseline.as_ref(),
-                                    pending_prompt_marker.as_deref(),
-                                    false,
-                                )?;
-                                return Ok(registered_pane.clone());
-                            }
-                            eprintln!(
-                                "[route] supervisor restart failed for pane {} — deregistering and continuing recovery",
-                                registered_pane
-                            );
-                            let provenance = pane_route_provenance(tmux, registered_pane);
-                            crate::ops_log::log_op(
-                                file,
-                                &format!(
-                                    "route_registered_pane_restart_failed file={} {}",
-                                    file_path, provenance
-                                ),
-                            );
-                            let _ = sessions::deregister(session_id)?;
-                            stale_registration_cleared = true;
-                        }
-                        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
-                            let provenance = pane_route_provenance(tmux, registered_pane);
-                            eprintln!(
-                                "[route] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
-                                registered_pane, file_path
-                            );
-                            crate::ops_log::log_op(
-                                file,
-                                &format!(
-                                    "route_registered_pane_deregistered_no_live_owner file={} {}",
-                                    file_path, provenance
-                                ),
-                            );
-                            let _ = sessions::deregister(session_id)?;
-                            stale_registration_cleared = true;
-                        }
+                None => match supervisor_health {
+                    SupervisorHealth::Healthy => {
+                        eprintln!(
+                            "[route] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — reusing registered pane",
+                            registered_pane, file_path
+                        );
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_reused_via_supervisor file={} pane={} health=healthy",
+                                file_path, registered_pane
+                            ),
+                        );
                     }
-                }
+                    SupervisorHealth::NeedsRestart => {
+                        eprintln!(
+                            "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
+                            registered_pane, file_path
+                        );
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_restart_via_supervisor file={} pane={}",
+                                file_path, registered_pane
+                            ),
+                        );
+                        if restart_via_supervisor(file, session_id) {
+                            if let Err(e) = tmux.select_pane(registered_pane) {
+                                eprintln!(
+                                    "[route] warning: failed to focus restarted pane {}: {}",
+                                    registered_pane, e
+                                );
+                            }
+                            require_routed_cycle_ack(
+                                tmux,
+                                file,
+                                registered_pane,
+                                session_id,
+                                harness,
+                                cycle_baseline.as_ref(),
+                                pending_prompt_marker.as_deref(),
+                                false,
+                            )?;
+                            return Ok(registered_pane.clone());
+                        }
+                        eprintln!(
+                            "[route] supervisor restart failed for pane {} — deregistering and continuing recovery",
+                            registered_pane
+                        );
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_restart_failed file={} {}",
+                                file_path, provenance
+                            ),
+                        );
+                        let _ = sessions::deregister(session_id)?;
+                        stale_registration_cleared = true;
+                    }
+                    SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        eprintln!(
+                            "[route] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
+                            registered_pane, file_path
+                        );
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_deregistered_no_live_owner file={} {}",
+                                file_path, provenance
+                            ),
+                        );
+                        let _ = sessions::deregister(session_id)?;
+                        stale_registration_cleared = true;
+                    }
+                },
             }
             if !stale_registration_cleared {
                 rescue_from_stash(
@@ -4510,8 +4508,8 @@ history line
     #[test]
     fn resolve_or_create_pane_restarts_registered_pane_with_supervisor_when_no_live_owner() {
         use std::sync::{
-            atomic::{AtomicBool, Ordering},
             Arc,
+            atomic::{AtomicBool, Ordering},
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -4550,7 +4548,9 @@ history line
             })
             .unwrap();
 
-        let panes_before = iso.list_panes_ordered(&format!("{session}:0")).unwrap_or_default();
+        let panes_before = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
         let resolved = resolve_or_create_pane(
             &iso,
             &doc,
@@ -4562,7 +4562,9 @@ history line
             &HarnessConfig::codex(),
         )
         .expect("route should restart the registered pane instead of autostarting a duplicate");
-        let panes_after = iso.list_panes_ordered(&format!("{session}:0")).unwrap_or_default();
+        let panes_after = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
 
         assert_eq!(resolved, pane);
         assert_eq!(

@@ -22,16 +22,18 @@
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,
 //!   user quit, and session end.
-//! - On `--continue` restarts, spawns a background thread that polls
-//!   `tmux capture-pane` for the harness prompt before
-//!   injecting the harness-specific trigger command into the child pty to
-//!   auto-trigger the skill workflow in the resumed conversation. This avoids
-//!   the race where DSR (Device Status Report) escape sequences interleave
-//!   with the injected command, corrupting Claude Code's input state, while
-//!   also ensuring a stale worker cannot later type into the supervisor prompt
-//!   or a replacement process in the tmux pane. If the prompt still has not
-//!   appeared after 30 seconds, the thread logs a provisional timeout but
-//!   keeps watching until the child exits or the prompt appears.
+//! - On `--continue` restarts, spawns a background thread that waits for the
+//!   harness prompt to appear in the current child process's filtered pty
+//!   output before injecting the harness-specific trigger command into the
+//!   child pty to auto-trigger the skill workflow in the resumed conversation.
+//!   This avoids the race where DSR (Device Status Report) escape sequences
+//!   interleave with the injected command, corrupting Claude Code's input
+//!   state, while also ensuring stale tmux scrollback cannot be mistaken for
+//!   the new child's prompt and a stale worker cannot later type into the
+//!   supervisor prompt or a replacement process in the tmux pane. If the
+//!   prompt still has not appeared after 30 seconds, the thread logs a
+//!   provisional timeout but keeps watching until the child exits or the
+//!   prompt appears.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -131,6 +133,7 @@ const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
+const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -285,52 +288,43 @@ fn auto_trigger_inject_command(
     AutoTriggerOutcome::Sent
 }
 
-fn capture_pane_lines(pane_id: &str) -> Option<Vec<String>> {
-    let output = std::process::Command::new("tmux")
-        .args(["capture-pane", "-t", pane_id, "-p", "-S", "-"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
     }
-    Some(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| line.to_string())
-            .collect(),
-    )
-}
-
-fn prompt_line_matches(harness: &crate::harness::HarnessConfig, line: &str) -> bool {
-    let stripped = crate::prompt::strip_ansi(line);
-    harness.matches_prompt(stripped.trim())
-}
-
-fn overlap_suffix_prefix(previous: &[String], current: &[String]) -> usize {
-    let max_overlap = previous.len().min(current.len());
-    for overlap in (1..=max_overlap).rev() {
-        if previous[previous.len() - overlap..] == current[..overlap] {
-            return overlap;
-        }
+    let mut recent = shared.recent_output.lock().unwrap();
+    recent.extend_from_slice(bytes);
+    if recent.len() > AUTO_TRIGGER_OUTPUT_BYTES_MAX {
+        let overflow = recent.len() - AUTO_TRIGGER_OUTPUT_BYTES_MAX;
+        recent.drain(..overflow);
     }
-    0
 }
 
-fn fresh_prompt_visible(
-    previous: &[String],
-    current: &[String],
+fn latest_nonempty_output_line(shared: &SupervisorShared) -> Option<String> {
+    let recent = shared.recent_output.lock().unwrap();
+    let output = String::from_utf8_lossy(&recent);
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn current_child_prompt_visible(
+    shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    let overlap = overlap_suffix_prefix(previous, current);
-    current[overlap..]
-        .iter()
-        .any(|line| prompt_line_matches(harness, line))
+    let Some(line) = latest_nonempty_output_line(shared) else {
+        return false;
+    };
+    let stripped = crate::prompt::strip_ansi(&line);
+    harness.matches_prompt(stripped.trim())
 }
 
 fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
-    pane_id: String,
     file: String,
     harness: crate::harness::HarnessConfig,
     mut session_log: Option<std::fs::File>,
@@ -339,7 +333,6 @@ fn spawn_auto_trigger_thread(
         .name("auto-trigger".into())
         .spawn(move || {
             let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
-            let mut previous_lines = capture_pane_lines(&pane_id).unwrap_or_default();
             for attempt in 0.. {
                 let delay = if attempt == 0 {
                     AUTO_TRIGGER_INITIAL_DELAY
@@ -352,51 +345,47 @@ fn spawn_auto_trigger_thread(
                         .store(monitor.stop_outcome() as u8, Ordering::Relaxed);
                     return;
                 }
-                if let Some(lines) = capture_pane_lines(&pane_id) {
-                    let prompt_visible = fresh_prompt_visible(&previous_lines, &lines, &harness);
-                    previous_lines = lines;
-                    if prompt_visible {
-                        let trigger_cmd = harness.trigger_command(&file);
-                        match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
-                            AutoTriggerOutcome::Sent => {
-                                shared
-                                    .auto_trigger_outcome
-                                    .store(AutoTriggerOutcome::Sent as u8, Ordering::Relaxed);
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "auto_trigger_sent pane={} harness={} cmd=\"{}\"",
-                                        pane_id, harness.binary, trigger_cmd
-                                    ),
-                                );
-                                eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
-                            }
-                            AutoTriggerOutcome::Cancelled => {
-                                shared
-                                    .auto_trigger_outcome
-                                    .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
-                            }
-                            AutoTriggerOutcome::SendFailed => {
-                                shared
-                                    .auto_trigger_outcome
-                                    .store(AutoTriggerOutcome::SendFailed as u8, Ordering::Relaxed);
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "auto_trigger_failed pane={} harness={} reason=pty_write",
-                                        pane_id, harness.binary
-                                    ),
-                                );
-                                eprintln!("[agent-doc] auto-trigger failed");
-                            }
-                            outcome => {
-                                shared
-                                    .auto_trigger_outcome
-                                    .store(outcome as u8, Ordering::Relaxed);
-                            }
+                if current_child_prompt_visible(&shared, &harness) {
+                    let trigger_cmd = harness.trigger_command(&file);
+                    match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
+                        AutoTriggerOutcome::Sent => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::Sent as u8, Ordering::Relaxed);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_trigger_sent harness={} cmd=\"{}\"",
+                                    harness.binary, trigger_cmd
+                                ),
+                            );
+                            eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
                         }
-                        return;
+                        AutoTriggerOutcome::Cancelled => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
+                        }
+                        AutoTriggerOutcome::SendFailed => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::SendFailed as u8, Ordering::Relaxed);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_trigger_failed harness={} reason=pty_write",
+                                    harness.binary
+                                ),
+                            );
+                            eprintln!("[agent-doc] auto-trigger failed");
+                        }
+                        outcome => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(outcome as u8, Ordering::Relaxed);
+                        }
                     }
+                    return;
                 }
                 if monitor.note_no_prompt(Instant::now()) {
                     shared
@@ -405,8 +394,8 @@ fn spawn_auto_trigger_thread(
                     log_event(
                         &mut session_log,
                         &format!(
-                            "auto_trigger_timeout pane={} harness={} reason=no_prompt_after_30s",
-                            pane_id, harness.binary
+                            "auto_trigger_timeout harness={} reason=no_prompt_after_30s",
+                            harness.binary
                         ),
                     );
                     eprintln!(
@@ -578,6 +567,8 @@ struct SupervisorShared {
     cwd_source: &'static str,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
+    /// Filtered output emitted by the current child process.
+    recent_output: Mutex<Vec<u8>>,
     /// Child PID for IPC `pid` queries and `kill` on restart/stop.
     child_pid: AtomicU32,
     /// Flag: IPC requested a restart.
@@ -600,6 +591,7 @@ impl SupervisorShared {
             running: AtomicBool::new(false),
             cwd_source,
             inject_writer: Mutex::new(None),
+            recent_output: Mutex::new(Vec::new()),
             child_pid: AtomicU32::new(0),
             restart_requested: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
@@ -674,7 +666,10 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
 }
 
 /// Spawn the master→stdout forwarding thread with escape sequence filtering.
-fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread::JoinHandle<()> {
+fn spawn_reader_thread(
+    shared: Arc<SupervisorShared>,
+    mut reader: Box<dyn std::io::Read + Send>,
+) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("pty->stdout".into())
         .spawn(move || {
@@ -724,6 +719,7 @@ fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread
                         if filtered.is_empty() {
                             continue;
                         }
+                        record_recent_output(&shared, &filtered);
                         let mut lock = stdout.lock();
                         if lock.write_all(&filtered).is_err() || lock.flush().is_err() {
                             break;
@@ -1154,9 +1150,10 @@ pub fn run(file: &Path) -> Result<()> {
         shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
+        shared.recent_output.lock().unwrap().clear();
 
         // Spawn I/O forwarding threads
-        let reader_thread = spawn_reader_thread(pty_reader);
+        let reader_thread = spawn_reader_thread(shared.clone(), pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
@@ -1188,7 +1185,6 @@ pub fn run(file: &Path) -> Result<()> {
             let handle = spawn_auto_trigger_thread(
                 shared.clone(),
                 trigger_stop.clone(),
-                pane_id.clone(),
                 file.to_string_lossy().to_string(),
                 harness.clone(),
                 trigger_log,
@@ -1980,7 +1976,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_trigger_thread_cancels_cleanly_before_tmux_poll() {
+    fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
         let shared = Arc::new(SupervisorShared::new("test"));
         shared
             .auto_trigger_outcome
@@ -1989,7 +1985,6 @@ mod tests {
         let handle = spawn_auto_trigger_thread(
             shared.clone(),
             stop,
-            "%999".to_string(),
             "tasks/software/tsift.md".to_string(),
             crate::harness::HarnessConfig::codex(),
             None,
@@ -2078,47 +2073,33 @@ mod tests {
     }
 
     #[test]
-    fn overlap_suffix_prefix_detects_append_from_same_history() {
-        let previous = vec!["old output".to_string(), "❯".to_string()];
-        let current = vec![
-            "old output".to_string(),
-            "❯".to_string(),
-            "resume banner".to_string(),
-            "❯".to_string(),
-        ];
-        assert_eq!(overlap_suffix_prefix(&previous, &current), 2);
-    }
-
-    #[test]
-    fn fresh_prompt_visible_rejects_stale_prompt_reflow() {
+    fn current_child_prompt_visible_uses_latest_nonempty_line() {
+        let shared = SupervisorShared::new("test");
         let harness = crate::harness::HarnessConfig::codex();
-        let previous = vec!["resume banner".to_string(), "❯".to_string()];
-        let current = vec!["❯".to_string()];
+        record_recent_output(&shared, b"old output\n");
+        record_recent_output(&shared, "❯\n".as_bytes());
+        record_recent_output(&shared, b"resumed child still printing\n");
         assert!(
-            !fresh_prompt_visible(&previous, &current, &harness),
-            "a pane redraw containing only the old prompt should not count as a fresh resumed prompt"
+            !current_child_prompt_visible(&shared, &harness),
+            "an earlier prompt in the current child transcript should not count once newer non-prompt output follows it"
         );
     }
 
     #[test]
-    fn fresh_prompt_visible_requires_prompt_in_new_content() {
+    fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
+        let shared = SupervisorShared::new("test");
         let harness = crate::harness::HarnessConfig::codex();
-        let previous = vec!["resume banner".to_string(), "❯".to_string()];
-        let current = vec![
-            "resume banner".to_string(),
-            "❯".to_string(),
-            "restored context".to_string(),
-            "❯".to_string(),
-        ];
-        assert!(fresh_prompt_visible(&previous, &current, &harness));
+        record_recent_output(&shared, b"resumed child ready\n");
+        record_recent_output(&shared, "❯\n".as_bytes());
+        assert!(current_child_prompt_visible(&shared, &harness));
     }
 
     #[test]
-    fn fresh_prompt_visible_accepts_clear_screen_with_new_prompt() {
+    fn current_child_prompt_visible_handles_suffix_prompt_line() {
+        let shared = SupervisorShared::new("test");
         let harness = crate::harness::HarnessConfig::codex();
-        let previous = vec!["resume banner".to_string(), "❯".to_string()];
-        let current = vec!["resumed child ready".to_string(), "❯".to_string()];
-        assert!(fresh_prompt_visible(&previous, &current, &harness));
+        record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
+        assert!(current_child_prompt_visible(&shared, &harness));
     }
 
     // --- StopSignal + writer thread tests ---
@@ -2259,8 +2240,9 @@ mod tests {
             }
         }
 
+        let shared = Arc::new(SupervisorShared::new("test"));
         let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
-        let handle = spawn_reader_thread(reader);
+        let handle = spawn_reader_thread(shared, reader);
 
         // Close the write end → reader sees EOF → thread exits
         unsafe { libc::close(fds[1]) };

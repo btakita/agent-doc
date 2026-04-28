@@ -304,7 +304,28 @@ Verification:
 - `cargo test` — 1871 tests, all passing (1 pre-existing flaky route test passes on retry)
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:f4c23a45 -->
+
+❯ do #freshack. spec-test-build-install-commit-push
+### Re: #freshack — opus-4-6
+
+Implemented `#freshack` in `src/agent-doc` and pushed commit `de6dad7` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added `startup_miss` module (`src/startup_miss.rs`) with persisted state at `.agent-doc/state/startup-miss/<doc-hash>.json` tracking pane id, session id, harness, origin (fresh start vs routed trigger), and cycle baseline.
+- `route.rs` fresh-start miss (`fresh_route_start_missing`) now records a startup-miss marker and echoes a diagnostic into the pane via `tmux send-keys` so the user sees "startup-miss: trigger accepted but no document cycle started" instead of an unexplained idle shell.
+- `route.rs` routed-trigger miss (`route_cycle_start_missing`) now records a startup-miss marker and echoes a diagnostic into the pane with the specific pending marker that failed.
+- On rerun, `resolve_or_create_pane` detects a persisted startup-miss marker for the registered pane, deregisters it, clears the marker, and auto-starts a fresh pane instead of reusing one that never started a cycle.
+- Successful cycle acknowledgment (`fresh_route_start_acknowledged` and `route_cycle_start_acknowledged`) clears the startup-miss marker.
+- `session_check.rs` warns when a startup-miss marker exists for the inspected document.
+- Updated `specs/07-commands.md` with the startup-miss tracking contract.
+- Updated `VERSIONS.md`.
+- Updated plan file status to "Implemented".
+
+Verification:
+- `cargo test` — 1876 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:3baee352 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -313,8 +334,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#startreuse] Health-aware start reuse: probe supervisor IPC before switching focus
-- [ ] [#freshack] `#tmuxcrash` fixed stale-owner ambiguity, but fresh replacement panes can still miss cycle acknowledgment and look like crashes. Track the `tsift.md` clean-exit -> fresh-start -> `route_cycle_start_missing` path and make startup misses fail visibly instead of looking like dead panes. Plan: `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`
+- [x] [#freshack] `#tmuxcrash` fixed stale-owner ambiguity, but fresh replacement panes can still miss cycle acknowledgment and look like crashes. Track the `tsift.md` clean-exit -> fresh-start -> `route_cycle_start_missing` path and make startup misses fail visibly instead of looking like dead panes. Plan: `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`
 - [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`

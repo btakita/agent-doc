@@ -376,7 +376,25 @@ Verification:
 - `cargo test` — 1885 tests, all passing
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:3d83564c -->
+
+❯ do #patchcommit. spec-test-build-install-commit-push
+### Re: #patchcommit — opus-4-6
+
+Implemented `#patchcommit` in `src/agent-doc` and pushed commit `d73cee6` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added `verify_snapshot_committed()` in `git.rs` that checks whether the current snapshot matches `git show HEAD:<file>` in the owning git root (narrowed to submodule when applicable). Returns `Committed`, `SnapshotDiffersFromHead`, `NoSnapshot`, `NoHead`, or `NotInGitRepo`.
+- Added `is_submodule_pointer_stale()` in `git.rs` that detects when the parent repo's submodule pointer needs updating.
+- `session-check` now runs a snapshot-committed guard after confirming cycle state is committed. If the snapshot differs from HEAD, it fails closed with a specific diagnostic: "cycle state is committed but the snapshot does not match HEAD in the owning repo."
+- `finalize` retries the commit once when `verify_snapshot_committed()` detects a mismatch after the initial commit, before handing off to `session-check`.
+- The `snapshot_matches_head` early return in `commit_with_outcome()` now also updates the parent submodule pointer when it detects a stale one, closing the gap where a no-op submodule commit left the parent pointer outdated.
+- Added 6 regression tests: 4 for `verify_snapshot_committed` (committed, differs, no-snapshot, no-head) and 2 for the session-check guard (fails when differs, passes when committed).
+
+Verification:
+- `cargo test` — 1891 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:dd6313f8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -385,8 +403,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
-- [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
+- [x] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

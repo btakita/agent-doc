@@ -767,7 +767,16 @@ Verification in `src/agent-doc`:
 Scope note:
 - I committed only the route/spec/version files for this fix
 - `src/cycle_state.rs` already had an unrelated local edit and was left untouched
-<!-- agent:boundary:9dafbc26 -->
+
+❯ compact exchange
+### Re: compact exchange — gpt-5
+
+For this harness, run the compact-exchange operation directly at the terminal:
+
+`agent-doc compact exchange /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+
+I did not execute it as ordinary exchange work in this cycle.
+<!-- agent:boundary:22445211 -->
 <!-- /agent:exchange -->
 
 <!--

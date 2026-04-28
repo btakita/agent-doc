@@ -330,7 +330,31 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1341 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:c78c9329 -->
+
+❯ do #gc1. spec-test-build-install-commit-push
+### Re: `#gc1` — opus-4-6
+
+Implemented in `src/agent-doc`, committed as `3e36efd`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug: `.agent-doc/typing/`, `.agent-doc/status/`, and `.agent-doc/repair-blocked/` directories grew without bound — no cleanup existed. Typing indicators accumulate one file per edited document, repair-blocked archives are write-only diagnostics, and status files are ephemeral operation markers.
+
+What changed:
+- `src/gc.rs`: added `clean_stale_ephemeral_files()` — a generic age-based cleanup function for flat directories. Called for three new targets in the GC run:
+  - `typing/` — files older than 7 days removed
+  - `status/` — files older than 24 hours removed
+  - `repair-blocked/` — files older than 7 days removed
+- `specs/07-commands.md`: added the three new GC categories to the cleanup table
+- `specs/11-debounce.md`: updated typing indicator GC gap from "blocked" to "fixed"
+- `tests/debounce_gaps_test_plan.rs`: unignored `test_hash_collision_cleanup_removes_stale_indicators`, rewrote to exercise the CLI `agent-doc gc --root` with `filetime`-backdated indicators
+- `Cargo.toml`: added `filetime = "0.2"` as dev dependency for mtime manipulation in tests
+- Unit tests in `gc.rs`: `gc_removes_stale_typing_indicators`, `gc_removes_old_repair_blocked`, `gc_removes_stale_status_files`, `gc_dry_run_preserves_ephemeral_files`
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1349 passed, 1 pre-existing codex hook test failure unrelated to this change
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:aca0f33e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -339,7 +363,7 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
+- [x] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
 - [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
 - [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk
 - [ ] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup

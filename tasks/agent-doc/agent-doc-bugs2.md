@@ -94,10 +94,56 @@ Note: I also reran the broader crate suite, but existing tmux/mock-start route t
 
 continue
 I’m blocked on one concrete recovery ambiguity. The file contains a bypassed response to `do #backlogreplay. spec-test-build-install-commit-push` that never went through `agent-doc`, and the live document also has a later `continue` edit on top of it. Should I commit that stranded `#ctrldmenu` response as the previous turn and then continue from there, or discard it and treat `continue` as the only live prompt?
-<!-- agent:boundary:04de16d5 -->
+
+❯ commit the stranded #ctrldmenu
+
+❯ do #resyncown. spec-test-build-install-commit-push
+### Re: #resyncown — gpt-5
+
+Implemented `#resyncown` in `src/agent-doc` and pushed commit `eb10a9e` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added a shared live-owner probe in `sync.rs` so both `route` and `resync` use the same ownership proof: tmux process-tree match on the document path first, then supervisor PID fallback.
+- `resync` now reports alive-but-stale registrations as `NoLiveOwner`, and `resync --fix` deregisters them without killing the pane.
+- `route` no longer fail-closes immediately when a registered pane is alive but unowned; it now clears the stale registration and continues into recovery.
+- Stash cleanup is tighter: unregistered stash panes are preserved only when they still have a provable registered document owner.
+- Updated `specs/07-commands.md`, `specs/supervisor.md`, and `VERSIONS.md`, and added regression coverage around stale-owner detection, wrong-window detection with live owners, and stash cleanup.
+
+Verification:
+- `cargo build`
+- `cargo install --path . --force`
+- Targeted regressions passed in isolation, including the new stale-owner route/resync cases.
+- Full `cargo test` remains nondeterministic in this environment: the tmux-heavy route/mock-agent suite still flakes under both the default parallel runner and `--test-threads=1`, so I did not treat the full suite as clean.
+### Re: #resyncown — gpt-5
+
+Implemented `#resyncown` in `src/agent-doc` and pushed commit `eb10a9e` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added a shared live-owner probe in `sync.rs` so both `route` and `resync` use the same ownership proof: tmux process-tree match on the document path first, then supervisor PID fallback.
+- `resync` now reports alive-but-stale registrations as `NoLiveOwner`, and `resync --fix` deregisters them without killing the pane.
+- `route` no longer fail-closes immediately when a registered pane is alive but unowned; it now clears the stale registration and continues into recovery.
+- Stash cleanup is tighter: unregistered stash panes are preserved only when they still have a provable registered document owner.
+- Updated `specs/07-commands.md`, `specs/supervisor.md`, and `VERSIONS.md`, and added regression coverage around stale-owner detection, wrong-window detection with live owners, and stash cleanup.
+
+Verification:
+- `cargo build`
+- `cargo install --path . --force`
+- Targeted regressions passed in isolation, including the new stale-owner route/resync cases.
+- Full `cargo test` remains nondeterministic in this environment: the tmux-heavy route/mock-agent suite still flakes under both the default parallel runner and `--test-threads=1`, so I did not treat the full suite as clean.
+<!-- agent:boundary:021abbbc -->
 <!-- /agent:exchange -->
 
 <!--
+Fix...spec-test-build-install-commit-push
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 03:49:35
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+Error: session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — refusing to start a duplicate live pane
+```
+
+Fix the parallel tmux test suite. commit + push
+
 do #backlogreplay. spec-test-build-install-commit-push
 ### Re: Ctrl+D supervisor quit menu regression — gpt-5
 
@@ -109,6 +155,8 @@ Current evidence points to an intentional-but-wrong behavior change in `src/agen
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#freshack] `#tmuxcrash` fixed stale-owner ambiguity, but fresh replacement panes can still miss cycle acknowledgment and look like crashes. Track the `tsift.md` clean-exit -> fresh-start -> `route_cycle_start_missing` path and make startup misses fail visibly instead of looking like dead panes. Plan: `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`
+- [x] [#resyncown] `resync` misses stale registrations that block `route`: pane alive but no live file-owning process. Add `NoLiveOwner` detection to resync, auto-recover in route instead of fail-closed, and tighten stash cleanup. Plan: `tasks/agent-doc/plan-resync-ownership-verification.md`
 - [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`

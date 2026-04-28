@@ -1624,9 +1624,47 @@ mod tests {
 
     // Serialize env var mutations across parallel test threads.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // A smaller lock for startup-sensitive isolated tmux tests that inject the
+    // first command immediately after pane creation.
+    static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
+        TMUX_START_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn test_cwd() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    struct ScopedCurrentDir {
+        prev_cwd: std::path::PathBuf,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &std::path::Path) -> Self {
+            let env_guard = env_lock();
+            let prev_cwd = std::env::current_dir().unwrap_or_else(|_| test_cwd());
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
     }
 
     fn wait_for_pane_contains(
@@ -1646,6 +1684,28 @@ mod tests {
             std::thread::sleep(poll);
         }
         last
+    }
+
+    fn send_keys_with_retry(iso: &IsolatedTmux, pane: &str, text: &str) {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(3);
+        let poll = std::time::Duration::from_millis(100);
+        let mut last_err = None;
+
+        while start.elapsed() < timeout {
+            match iso.send_keys(pane, text) {
+                Ok(()) => return,
+                Err(err) => last_err = Some(err.to_string()),
+            }
+            std::thread::sleep(poll);
+        }
+
+        panic!(
+            "failed to send keys to pane {} after {:.1}s: {}",
+            pane,
+            start.elapsed().as_secs_f64(),
+            last_err.unwrap_or_else(|| "unknown error".to_string())
+        );
     }
 
     // --- rewrite_start_path tests ---
@@ -1890,11 +1950,7 @@ mod tests {
         script: &Path,
         file: &Path,
     ) {
-        iso.send_keys(
-            pane,
-            &format!("exec {} {}", script.display(), file.display()),
-        )
-        .unwrap();
+        send_keys_with_retry(iso, pane, &format!("exec {} {}", script.display(), file.display()));
         let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
         assert!(
             content.contains("\n>"),
@@ -1903,8 +1959,7 @@ mod tests {
     }
 
     fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script: &Path) {
-        iso.send_keys(pane, &format!("exec {}", script.display()))
-            .unwrap();
+        send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
         let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
         assert!(
             content.contains("\n>"),
@@ -1937,15 +1992,22 @@ mod tests {
 
     #[test]
     fn wait_for_agent_ready_detects_prompt() {
+        let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-ready");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(&pane, &mock_agent_script(500)).unwrap();
+        send_keys_with_retry(&iso, &pane, &mock_agent_script(500));
+        let _ = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting agent...",
+            std::time::Duration::from_secs(5),
+        );
 
         let harness = HarnessConfig::claude();
-        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         assert!(ready, "should detect ❯ prompt from mock agent");
     }
 
@@ -1981,6 +2043,7 @@ mod tests {
 
     #[test]
     fn wait_for_agent_ready_codex_prompt() {
+        let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-ready");
         let session = "test";
         let cwd = test_cwd();
@@ -1989,10 +2052,16 @@ mod tests {
         // Codex uses > as prompt
         let script =
             r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
-        iso.send_keys(&pane, script).unwrap();
+        send_keys_with_retry(&iso, &pane, script);
+        let _ = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting codex...",
+            std::time::Duration::from_secs(5),
+        );
 
         let harness = HarnessConfig::codex();
-        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         assert!(ready, "should detect > prompt for codex harness");
     }
 
@@ -2036,15 +2105,15 @@ history line
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Start a shell that reads a line and echoes it back with a marker
-        iso.send_keys(
+        send_keys_with_retry(
+            &iso,
             &pane,
             r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
+        );
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let trigger = HarnessConfig::claude().trigger_command("test.md");
-        iso.send_keys(&pane, &trigger).unwrap();
+        send_keys_with_retry(&iso, &pane, &trigger);
 
         // Capture and verify the command was received
         let content = wait_for_pane_contains(
@@ -2067,15 +2136,15 @@ history line
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(
+        send_keys_with_retry(
+            &iso,
             &pane,
             r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
+        );
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let trigger = HarnessConfig::codex().trigger_command("test.md");
-        iso.send_keys(&pane, &trigger).unwrap();
+        send_keys_with_retry(&iso, &pane, &trigger);
 
         let content = wait_for_pane_contains(
             &iso,
@@ -2097,11 +2166,11 @@ history line
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(
+        send_keys_with_retry(
+            &iso,
             &pane,
             r#"exec /bin/sh -c 'printf "READY\n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
+        );
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
@@ -2262,13 +2331,14 @@ history line
     #[test]
     fn resolve_or_create_pane_fails_closed_when_registered_pane_accepts_trigger_without_new_cycle()
     {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-ack-missing");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
@@ -2313,13 +2383,14 @@ history line
 
     #[test]
     fn resolve_or_create_pane_ignores_same_committed_cycle_mutation_for_prompt_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-ack-same-cycle");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
@@ -2377,13 +2448,15 @@ history line
 
     #[test]
     fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-ack-ok");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
@@ -2444,19 +2517,20 @@ history line
 
     #[test]
     fn alive_registered_pane_without_live_owner_deregisters_and_lazy_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-owner-missing");
         let session = "claude";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
-        iso.send_keys(
+        send_keys_with_retry(
+            &iso,
             &stale_pane,
             r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
+        );
         let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
 
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
@@ -2509,20 +2583,21 @@ history line
 
     #[test]
     fn alive_registered_pane_reregisters_to_live_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-owner-reregister");
         let session = "claude";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
-        iso.send_keys(
+        send_keys_with_retry(
+            &iso,
             &stale_pane,
             r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
+        );
         let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
 
         let live_pane = iso.auto_start(session, &cwd).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
@@ -2589,13 +2664,14 @@ history line
 
     #[test]
     fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-live-owner-supervisor-pid");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
@@ -2645,14 +2721,21 @@ history line
 
     #[test]
     fn pane_has_prompt_detects_unicode() {
+        let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-has-prompt");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(&pane, &mock_agent_script(100)).unwrap();
+        send_keys_with_retry(&iso, &pane, &mock_agent_script(100));
+        let _ = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting agent...",
+            std::time::Duration::from_secs(5),
+        );
         let harness = HarnessConfig::claude();
-        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             ready && pane_has_prompt(&iso, &pane, &harness),
@@ -2663,18 +2746,25 @@ history line
 
     #[test]
     fn full_auto_start_flow() {
+        let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-e2e");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        iso.send_keys(&pane, &mock_agent_script(300)).unwrap();
+        send_keys_with_retry(&iso, &pane, &mock_agent_script(300));
+        let _ = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting agent...",
+            std::time::Duration::from_secs(5),
+        );
 
         let harness = HarnessConfig::claude();
-        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(5), &harness);
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         assert!(ready, "mock agent should become ready");
 
-        iso.send_keys(&pane, "HELLO_FROM_TEST").unwrap();
+        send_keys_with_retry(&iso, &pane, "HELLO_FROM_TEST");
 
         let content = wait_for_pane_contains(
             &iso,
@@ -2734,7 +2824,7 @@ history line
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Send a command that gets consumed immediately
-        iso.send_keys(&pane, "echo DONE").unwrap();
+        send_keys_with_retry(&iso, &pane, "echo DONE");
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // The command "echo DONE" should NOT be in the prompt anymore
@@ -3200,7 +3290,7 @@ history line
         // Run route — it will fail at auto-start (AGENT_DOC_NO_AUTOSTART),
         // but we can verify the session was never created
         let result = {
-            let _env_guard = ENV_MUTEX.lock().unwrap();
+            let _env_guard = env_lock();
             unsafe {
                 std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
             }
@@ -3248,7 +3338,7 @@ history line
         // Set AGENT_DOC_NO_AUTOSTART so we don't actually spawn Claude,
         // but we can inspect the validation behavior
         let _result = {
-            let _env_guard = ENV_MUTEX.lock().unwrap();
+            let _env_guard = env_lock();
             unsafe {
                 std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
             }
@@ -3804,10 +3894,8 @@ history line
     fn concurrent_provision_pane_serializes_same_session_auto_start() {
         use std::sync::{Arc, Barrier};
 
-        let _env_guard = ENV_MUTEX.lock().unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let session = "test";
@@ -3875,15 +3963,12 @@ history line
             "second provisioned document should be registered"
         );
 
-        std::env::set_current_dir(prev_cwd).unwrap();
     }
 
     #[test]
     fn failed_route_cleanup_preserves_live_registered_owner() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
@@ -3903,15 +3988,12 @@ history line
             "failed-route cleanup must preserve the live registered owner pane"
         );
 
-        std::env::set_current_dir(prev_cwd).unwrap();
     }
 
     #[test]
     fn failed_route_cleanup_does_not_preserve_unregistered_pane() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let iso = IsolatedTmux::new("route-test-cleanup-unregistered");
@@ -3922,7 +4004,6 @@ history line
             "failed-route cleanup should still remove panes that never became the live owner"
         );
 
-        std::env::set_current_dir(prev_cwd).unwrap();
     }
 
     #[test]
@@ -3938,9 +4019,7 @@ history line
         let doc = tasks.join("bugs.md");
         fs::write(&doc, "# Bugs\n").unwrap();
 
-        let _lock = ENV_MUTEX.lock().unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(&root);
 
         let resolved =
             crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
@@ -3953,6 +4032,5 @@ history line
             "resolved path must point to the CWD-relative file, not a submodule shadow"
         );
 
-        std::env::set_current_dir(prev_cwd).unwrap();
     }
 }

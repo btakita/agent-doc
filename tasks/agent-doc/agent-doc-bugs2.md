@@ -565,7 +565,16 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:c410402e -->
+
+❯ #code-review
+### Re: `#code-review` — gpt-5
+
+1. High: the new failed-resume path turns `auto_trigger_timeout` into a sticky terminal verdict, so a resume that becomes usable after 30s, or that the user manually recovers after the timeout fires, is still counted as a failed handoff on the next clean exit. `spawn_auto_trigger_thread()` permanently stores `Timeout` after the fixed wait window ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:296)), and the main loop later treats any clean exit with that stored outcome as `is_failed_resume()` and forces the fresh-restart / prompt path ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1157), [start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1212)). That does not match the spec language in [supervisor.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/supervisor.md:119), which says the fallback should happen when the resumed child never re-establishes a prompt.
+
+2. Medium: the lifecycle-bound auto-trigger invariant is still racy around `tmux send-keys`. After prompt detection, the worker immediately calls `send-keys` with no second cancellation or child-liveness check ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:258)), while the supervisor only cancels and joins that worker after `session.wait()` returns ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1091)). If the resumed child exits in that gap, the stale worker can still inject into the pane after its target is gone. Best case that becomes a spurious `send_failed`; worst case those bytes hit the supervisor prompt or whatever replaces the child next.
+
+I did not rerun the Rust test suite for this review; these findings are from diff and control-flow inspection.
+<!-- agent:boundary:6f8fc693 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -574,5 +583,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#tmuxcrash] Repeated tmux pane crashes in /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; reconstruct the crash path, add crash provenance logging, and fail closed on short-window crash loops. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+- [ ] [#rvlateprompt] [recommended] Treat auto-trigger timeout as provisional until the resumed child either truly never establishes a prompt or manual recovery is observed.
+- [ ] [#rvinjectrace] [recommended] Re-check child liveness/cancellation immediately before auto-trigger send-keys and add a regression for child exit during the trigger window.
 <!-- /agent:backlog -->

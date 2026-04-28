@@ -378,7 +378,7 @@ fn apply_template_response(
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     write::sanitize_patches(&mut patches);
-    write::enforce_no_replace_pending(&patches)?;
+    write::enforce_no_replace_pending(&patches, false)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");

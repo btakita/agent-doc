@@ -83,10 +83,8 @@
 //!   for deferred-work phrases ("worth revisiting", "revisit later",
 //!   "follow-up needed", "future work") case-insensitively. Returns
 //!   `Some(signal)` when a match is found and `has_pending_add` is false (i.e.,
-//!   the caller didn't already promote to pending). `warn_future_work_signals`
-//!   is the env-var wrapper: reads `AGENT_DOC_HAS_PENDING_ADD` (set to `1` by
-//!   the CLI dispatcher when `--pending-add` or `--pending-add-gated` is passed)
-//!   and emits a `[write] WARN:` message to stderr when the signal fires.
+//!   the caller didn't already promote to pending). `WriteFlags.has_pending_add`
+//!   carries this state through the call chain (no env var dependency).
 //!   Integrated into `run_stream` after patch application.
 //!
 //! - `enforce_imperative_response_contract(file, baseline, current, response)`:
@@ -244,6 +242,12 @@ pub struct CommandOptions {
     pub status: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WriteFlags {
+    pub allow_replace_pending: bool,
+    pub has_pending_add: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommitMode {
     None,
@@ -371,20 +375,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         return finalize_commit(file, commit_mode);
     }
 
-    if options.allow_replace_pending {
-        // SAFETY: single-threaded at this point in the CLI entrypoint.
-        unsafe {
-            std::env::set_var("AGENT_DOC_ALLOW_REPLACE_PENDING", "1");
-            std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1");
-        }
-    }
-
-    if !options.pending_add.is_empty() || !options.pending_add_gated.is_empty() {
-        // SAFETY: single-threaded at this point in the CLI entrypoint.
-        unsafe {
-            std::env::set_var("AGENT_DOC_HAS_PENDING_ADD", "1");
-        }
-    }
+    let write_flags = WriteFlags {
+        allow_replace_pending: options.allow_replace_pending,
+        has_pending_add: !options.pending_add.is_empty() || !options.pending_add_gated.is_empty(),
+    };
 
     let baseline = options
         .baseline_file
@@ -394,16 +388,22 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         .context("failed to read baseline file")?;
 
     let write_result = if options.is_ipc {
-        run_ipc(file, baseline.as_deref())
+        run_ipc(file, baseline.as_deref(), write_flags)
     } else if options.is_stream {
         run_stream(
             file,
             baseline.as_deref(),
             options.force_disk,
             options.origin.as_deref(),
+            write_flags,
         )
     } else if options.is_template {
-        run_template(file, baseline.as_deref(), options.origin.as_deref())
+        run_template(
+            file,
+            baseline.as_deref(),
+            options.origin.as_deref(),
+            write_flags,
+        )
     } else {
         let content =
             std::fs::read_to_string(file).context("failed to read document for mode detection")?;
@@ -414,6 +414,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 baseline.as_deref(),
                 options.force_disk,
                 options.origin.as_deref(),
+                write_flags,
             )
         } else {
             run(file, baseline.as_deref())
@@ -720,7 +721,13 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
 ///
 /// Phase 3 inversion (2026-04-14): the default is now reject. Library callers
 /// (FFI, tests, future SDK consumers) must opt in explicitly.
-pub(crate) fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Result<()> {
+pub(crate) fn enforce_no_replace_pending(
+    patches: &[template::PatchBlock],
+    allow: bool,
+) -> Result<()> {
+    if allow {
+        return Ok(());
+    }
     let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -789,7 +796,15 @@ fn normalize_backlog_patch_response(
     current_content: &str,
     mut patches: Vec<template::PatchBlock>,
     unmatched: String,
+    allow_replace: bool,
 ) -> Result<NormalizedTemplateResponse> {
+    if allow_replace {
+        return Ok(NormalizedTemplateResponse {
+            response_for_capture: None,
+            patches,
+            unmatched,
+        });
+    }
     let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -1298,15 +1313,7 @@ const FUTURE_WORK_SIGNALS: &[&str] = &[
     "future work",
 ];
 
-/// Check response for future-work signal phrases and warn if no `--pending-add`
-/// was provided. Reads `AGENT_DOC_HAS_PENDING_ADD` env var (set by CLI dispatcher).
-/// Returns the matched signal phrase if a warning was emitted, or None.
-pub fn warn_future_work_signals(response: &str) -> Option<&'static str> {
-    let has_pending_add = std::env::var("AGENT_DOC_HAS_PENDING_ADD").is_ok();
-    check_future_work_signals(response, has_pending_add)
-}
-
-/// Core detection logic (testable without env var races).
+/// Core detection logic — no env var dependency.
 pub fn check_future_work_signals(response: &str, has_pending_add: bool) -> Option<&'static str> {
     if has_pending_add {
         return None;
@@ -2063,7 +2070,12 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 /// Run the template write command: parse patch blocks and apply to components.
 ///
 /// `baseline` is the document content at the time the response was generated.
-pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -> Result<()> {
+pub fn run_template(
+    file: &Path,
+    baseline: Option<&str>,
+    origin: Option<&str>,
+    flags: WriteFlags,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2091,7 +2103,13 @@ pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    let normalized = normalize_backlog_patch_response(
+        file,
+        &current_content,
+        patches,
+        unmatched,
+        flags.allow_replace_pending,
+    )?;
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
@@ -2099,7 +2117,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>, origin: Option<&str>) -
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
-    enforce_no_replace_pending(&patches)?;
+    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
@@ -2214,6 +2232,7 @@ pub fn run_stream(
     baseline: Option<&str>,
     force_disk: bool,
     origin: Option<&str>,
+    flags: WriteFlags,
 ) -> Result<()> {
     let t_total = std::time::Instant::now();
 
@@ -2238,7 +2257,7 @@ pub fn run_stream(
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Lint: warn if response contains future-work signals without --pending-add
-    warn_future_work_signals(&response);
+    check_future_work_signals(&response, flags.has_pending_add);
 
     // Parse patch blocks from response
     let (mut patches, unmatched) =
@@ -2247,7 +2266,13 @@ pub fn run_stream(
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    let normalized = normalize_backlog_patch_response(
+        file,
+        &current_content,
+        patches,
+        unmatched,
+        flags.allow_replace_pending,
+    )?;
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
@@ -2255,7 +2280,7 @@ pub fn run_stream(
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
-    enforce_no_replace_pending(&patches)?;
+    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
@@ -2756,7 +2781,7 @@ pub fn run_stream(
 /// `.agent-doc/patches/<hash>.json`. The IDE plugin picks it up, applies
 /// patches via Document API (no external file change dialog), and deletes
 /// the file as ACK. Falls back to direct stream write on timeout.
-pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
+pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2783,7 +2808,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    let normalized = normalize_backlog_patch_response(file, &current_content, patches, unmatched)?;
+    let normalized = normalize_backlog_patch_response(
+        file,
+        &current_content,
+        patches,
+        unmatched,
+        flags.allow_replace_pending,
+    )?;
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
@@ -2794,7 +2825,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     repair::save_pending(file, &response)?;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
-    enforce_no_replace_pending(&patches)?;
+    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -2969,12 +3000,12 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched)?;
+    let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched, false)?;
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
-    enforce_no_replace_pending(&patches)?;
+    enforce_no_replace_pending(&patches, false)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
     let content_ours = template::apply_patches_with_overrides(
@@ -6738,7 +6769,7 @@ mod pending_patch_normalization_tests {
             "- [ ] [#] repair placeholder\n",
         )];
 
-        normalize_backlog_patch_response(&doc, &content, patches, String::new())
+        normalize_backlog_patch_response(&doc, &content, patches, String::new(), false)
             .expect("lone bare placeholder should be normalized");
 
         let rewritten = fs::read_to_string(&doc).unwrap();
@@ -6760,10 +6791,11 @@ mod pending_patch_normalization_tests {
             "- [ ] [#] [#ship1] release checklist\n",
         )];
 
-        let err = match normalize_backlog_patch_response(&doc, &content, patches, String::new()) {
-            Ok(_) => panic!("stacked leading id prefixes should be rejected"),
-            Err(err) => err,
-        };
+        let err =
+            match normalize_backlog_patch_response(&doc, &content, patches, String::new(), false) {
+                Ok(_) => panic!("stacked leading id prefixes should be rejected"),
+                Err(err) => err,
+            };
         let msg = err.to_string();
         assert!(
             msg.contains("pending/backlog patch"),
@@ -6775,5 +6807,31 @@ mod pending_patch_normalization_tests {
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn write_flags_allow_replace_bypasses_enforcement() {
+        let tmp = TempDir::new().unwrap();
+        let (doc, content) = doc_with_backlog(&tmp, "- [ ] [#aaaa] existing\n");
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            "- [ ] [#zzzz] new\n",
+        )];
+        normalize_backlog_patch_response(&doc, &content, patches.clone(), String::new(), true)
+            .expect("allow_replace=true should bypass enforcement");
+        super::enforce_no_replace_pending(&patches, true)
+            .expect("allow=true should bypass enforcement");
+    }
+
+    #[test]
+    fn write_flags_default_rejects_replace_pending() {
+        let tmp = TempDir::new().unwrap();
+        let (_doc, _content) = doc_with_backlog(&tmp, "- [ ] [#aaaa] existing\n");
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            "- [ ] [#zzzz] new\n",
+        )];
+        super::enforce_no_replace_pending(&patches, false)
+            .expect_err("allow=false should reject backlog replacement");
     }
 }

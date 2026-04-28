@@ -44,17 +44,17 @@ Collision probability: ~1 in 4.3 billion for random inputs. Collision is possibl
 
 **Test coverage:** `test_hash_collision_no_collisions_for_common_paths` (10k paths). `test_hash_collision_cleanup_removes_stale_indicators` — GC implemented in `gc.rs` via `clean_stale_ephemeral_files()`, removes typing indicators older than 7 days. See `tests/debounce_gaps_test_plan.rs`.
 
-## Reactive Mode Assumes CRDT Merge Convergence
+## Reactive Mode CRDT Merge Safety
 
-**Gap:** Watch daemon's reactive path (used for `agent_doc_write: crdt` documents) applies zero debounce, expecting instant re-submit on file change. This assumes the CRDT merge algorithm always converges to a consistent state.
+**Fixed:** Three issues addressed:
 
-If a CRDT merge produces unexpected results (e.g., text duplication, loss of edits), reactive mode could cause the watch daemon to re-submit with corrupted state repeatedly.
+1. **Merge failure fallback in write paths** — stream write (`write.rs:2700`) and IPC timeout fallback (`write.rs:2938`) used bare `?` on `merge_contents_crdt()`, losing the entire response on any CRDT error. Both now use `match` with `splice_pending_component()` fallback (same pattern as the IPC timeout path at `write.rs:2555`).
 
-**Impact:** Medium (data loss risk if CRDT merge is broken). Mitigated by extensive CRDT testing in `src/crdt.rs` and `src/merge.rs`.
+2. **Agent-change detection window for reactive mode** — `is_agent_change` used `debounce * 3` to detect agent-triggered changes. With reactive (zero debounce) paths, this collapsed to `Duration::ZERO`, making every change after `last_run` appear agent-triggered. Added `MIN_AGENT_CHANGE_WINDOW_MS = 500` floor so the detection window is always at least 500ms.
 
-**Mitigation:** CRDT implementation is battle-tested with golden-answer test cases (20-30 cases per session diff). See `agent-doc eval-runner` for continuous validation.
+3. **Convergence idempotency** — CRDT merge is verified idempotent: re-merging converged content with itself produces identical output, which is what the watch daemon's hash-based convergence detection relies on.
 
-**Test coverage:** `test_reactive_mode_crdt_merge_failure_handling`, `test_reactive_mode_infinite_loop_prevention` — both blocked pending `crdt::merge` and watch daemon API exposure. See `tests/debounce_gaps_test_plan.rs`.
+**Test coverage:** `test_reactive_mode_crdt_merge_failure_handling` (corrupted state returns Err, None base succeeds, valid state succeeds), `test_reactive_mode_infinite_loop_prevention` (merge idempotency, corrupted state error handling). See `tests/debounce_gaps_test_plan.rs`.
 
 ## Status File Staleness Timeout (30s Hardcoded)
 

@@ -75,6 +75,12 @@ const PID_FILE: &str = ".agent-doc/watch.pid";
 /// Default idle timeout before daemon auto-exits (seconds).
 const IDLE_TIMEOUT_SECS: u64 = 60;
 
+/// Minimum window for detecting agent-triggered changes (ms).
+/// Reactive (zero-debounce) paths would collapse `debounce * 3` to 0, making
+/// every change look agent-triggered. This floor ensures a usable detection
+/// window regardless of debounce setting.
+const MIN_AGENT_CHANGE_WINDOW_MS: u64 = 500;
+
 /// Configuration for the watch daemon.
 pub struct WatchConfig {
     pub debounce_ms: u64,
@@ -553,9 +559,13 @@ fn run_event_loop(
             let state = states.entry(path.clone()).or_insert_with(FileState::new);
 
             // Check if this is an agent-triggered change
+            let agent_change_window = std::cmp::max(
+                debounce * 3,
+                Duration::from_millis(MIN_AGENT_CHANGE_WINDOW_MS),
+            );
             let is_agent_change = state
                 .last_run
-                .is_some_and(|t| now.duration_since(t) < debounce * 3);
+                .is_some_and(|t| now.duration_since(t) < agent_change_window);
 
             if is_agent_change {
                 state.cycle_count += 1;

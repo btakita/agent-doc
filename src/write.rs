@@ -2697,7 +2697,18 @@ pub fn run_stream(
         // appends within the same region (lazily-rs.md corruption bug).
         let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
         // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
-        merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?
+        match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
+            Ok(merged) => merged,
+            Err(e) => {
+                eprintln!(
+                    "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
+                    e
+                );
+                let spliced = splice_pending_component(&content_ours, &content_current);
+                let doc = crate::crdt::CrdtDoc::from_text(&spliced);
+                (spliced, doc.encode_state())
+            }
+        }
     };
     let final_content = normalize_template_structure_or_fail(&final_content, file)?;
 
@@ -2935,7 +2946,18 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
         let crdt_state = snapshot::load_crdt(file)?;
-        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
+        match merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current) {
+            Ok(merged) => merged,
+            Err(e) => {
+                eprintln!(
+                    "[write] WARNING: CRDT merge failed in IPC fallback, falling back to splice: {}",
+                    e
+                );
+                let spliced = splice_pending_component(&content_ours, &content_current);
+                let doc = crate::crdt::CrdtDoc::from_text(&spliced);
+                (spliced, doc.encode_state())
+            }
+        }
     };
     let final_content = normalize_template_structure_or_fail(&final_content, file)?;
     atomic_write(file, &final_content)?;

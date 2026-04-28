@@ -624,7 +624,26 @@ Commit / push:
 - `f399632` `fix: preserve routed pane restart and diff visibility`
 
 Note: `src/agent-doc` still has unrelated unstaged local edits in `runbooks/pending-ops.md`, `src/preflight.rs`, and `src/repair.rs`; I left them untouched.
-<!-- agent:boundary:47b844fa -->
+
+❯ do #compactdispatch. spec-test-build-install-commit-push
+### Re: #compactdispatch — gpt-5
+
+Implemented `#compactdispatch` in `src/agent-doc` and pushed commit `4a6135b` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `run.rs` now fails closed before any agent call when the snapshot diff contains a bare `compact exchange` directive, with a direct handoff to `agent-doc compact <file> --commit`.
+- `write.rs` / `finalize` now apply the same pre-write guard from baseline→document diff, so an ordinary response closeout cannot silently consume a compaction request.
+- `plan.rs` now emits `handoff: compact` plus the binary compact command and suppresses the misleading finalize placeholder for that shape.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`; added regressions for the `run` guard, the write/finalize guard, and the plan dispatch path.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/repair.rs`, `src/route.rs`) untouched.
+<!-- agent:boundary:2535f2cc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -633,6 +652,7 @@ Note: `src/agent-doc` still has unrelated unstaged local edits in `runbooks/pend
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
+- [ ] [#patchregr] [recommended] Response patchback left uncommitted regression — `src/session-share/tasks/claudescore-3.md` currently shows the assistant patchback in the worktree while the response remains uncommitted, which should not be possible after `#patchcommit`. Reconstruct the exact closeout path, prove whether `finalize` / `write --commit` / hook-stop / `session-check` was bypassed or misclassified, and fail closed before success whenever a fresh response patchback is visible without the owning-root commit proof. Plan: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
+- [ ] [#nodiffswallow] [recommended] Preflight/repair can swallow a fresh user prompt and still return `no_changes: true`. Reproduction: `tasks/monsterrodholders.md` had a new prompt (`Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps`) inserted just before `agent:boundary`; `agent-doc preflight` logged `changes detected`, auto-committed a stale backlog cleanup, then left the prompt in both the live doc and snapshot while returning `no_changes`. The harness therefore stopped without answering. Fix by proving unresolved user deltas against pre-repair `HEAD` and failing closed if snapshot/baseline maintenance absorbs prompt-bearing text. Plan: `tasks/agent-doc/plan-preflight-no-changes-user-prompt.md`
+- [x] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->
-

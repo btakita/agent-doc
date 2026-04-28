@@ -75,7 +75,7 @@ Verification:
 - One full `cargo test` run hit that same unrelated tmux-route test nondeterministically before the targeted rerun passed
 
 Note: `src/agent-doc` still has unrelated local edits in `src/start.rs` and `specs/supervisor.md`; I left them untouched.
-### Re: #bugs2tmux follow-up — gpt-5 (HEAD)
+### Re: #bugs2tmux follow-up — gpt-5
 
 Patched back the follow-up fix for the JetBrains `Run Agent Doc` ambiguity case and pushed commit `2ca3d56` to `origin/20260422/codex-agent-backend`.
 
@@ -94,9 +94,7 @@ Note: I also reran the broader crate suite, but existing tmux/mock-start route t
 
 continue
 I’m blocked on one concrete recovery ambiguity. The file contains a bypassed response to `do #backlogreplay. spec-test-build-install-commit-push` that never went through `agent-doc`, and the live document also has a later `continue` edit on top of it. Should I commit that stranded `#ctrldmenu` response as the previous turn and then continue from there, or discard it and treat `continue` as the only live prompt?
-
-commit the stranded #ctrldmenu
-<!-- agent:boundary:81d4175a -->
+<!-- agent:boundary:04de16d5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -111,7 +109,6 @@ Current evidence points to an intentional-but-wrong behavior change in `src/agen
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#resyncown] `resync` misses stale registrations that block `route`: pane alive but no live file-owning process. Add `NoLiveOwner` detection to resync, auto-recover in route instead of fail-closed, and tighten stash cleanup. Plan: `tasks/agent-doc/plan-resync-ownership-verification.md`
 - [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`

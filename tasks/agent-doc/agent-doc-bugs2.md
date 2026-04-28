@@ -683,7 +683,63 @@ Verification in `src/agent-doc`:
 Scope note:
 - I committed only `src/start.rs` and `specs/supervisor.md`
 - there is an unrelated local edit already present in `src/route.rs`, so I left it untouched
-<!-- agent:boundary:684fb495 -->
+
+❯ do #rvinjectcancel. spec-test-build-install-commit-push
+❯ The response patchback was not committed after the `#comm` response in `src/session-share/tasks/claudescore-3.md`. `#agent-doc-bug`
+### Re: uncommitted patchback with stale `preflight_started` cycle — codex
+
+This belongs in `agent-doc-bugs2.md`, but it is narrower than the older direct-patchback `#pbc2` reproductions.
+
+Observed state:
+- the `#comm` response block is visible in `src/session-share/tasks/claudescore-3.md`
+- the repo commit for that patchback did not land
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md` now interrupts with:
+  - `cycle ... is still preflight_started`
+  - `cycle started but no write/commit followed`
+- `agent-doc repair ...` reports no pending response to replay
+
+Why this is a distinct tracking shape:
+- not `#closeout-bypass`: there is no last committed patchback for this turn
+- not the older `#pbc2` stale-HEAD/detector path: `session-check` is not blaming a direct stray `### Re:` insertion here
+- the narrower bug is that a real response patchback can land while the persisted cycle state remains at `preflight_started`, leaving neither a successful closeout nor a recoverable response artifact
+
+I added a dedicated follow-up item and plan for that failure family:
+- `[#pfcycle]` Recover or fail closed when a response patchback lands but the cycle state remains `preflight_started` with no replayable pending artifact
+- plan: `tasks/agent-doc/plan-preflight-started-patchback-closeout.md`
+### Re: `#rvinjectcancel` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `7062f02`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The shutdown stall was in the shared child-pty writer path:
+- auto-trigger could block indefinitely on the shared writer mutex while `stdin->pty` held it
+- shutdown joined the auto-trigger thread before signalling the `stdin->pty` writer to stop
+- on Unix, once either path entered a blocking pty write, cancellation had no periodic exit check
+
+What changed:
+- `src/start.rs`: wrapped the shared child-pty writer in a cancellation-aware helper; auto-trigger now waits for the writer mutex interruptibly instead of blocking unconditionally
+- `src/start.rs`: Unix writer sends now poll in short intervals and re-check stop state so shutdown can cut through backpressure
+- `src/start.rs`: supervisor now flips both stop paths before either join, then joins `stdin->pty` before waiting on the auto-trigger thread
+- `src/supervisor/pty.rs`: added a duplicated master-fd helper so the supervisor can drive interruptible Unix writes without racing the owned writer handle
+- `specs/supervisor.md` and `VERSIONS.md`: documented the new shutdown/write contract
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- focused regressions passed:
+  - `cargo test auto_trigger_inject_command_writes_carriage_return -- --nocapture`
+  - `cargo test auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock -- --nocapture`
+  - `cargo test auto_trigger_inject_command_reports_closed_writer_during_trigger_window -- --nocapture`
+  - `cargo test writer_thread_exits_on_stop_signal -- --nocapture`
+  - `cargo test writer_thread_exits_on_pty_write_failure -- --nocapture`
+- `cargo build`
+- `cargo install --path . --force`
+
+Full-suite note:
+- `cargo test` still fails in this tree on pre-existing tmux/route/autoclaim coverage unrelated to this change (`autoclaim::tests::*` plus several `route::tests::*` prompt/tmux cases). The new `start.rs` regressions passed inside that run.
+
+Scope note:
+- I committed only `VERSIONS.md`, `specs/supervisor.md`, `src/start.rs`, and `src/supervisor/pty.rs`
+- `src/route.rs` had an unrelated local edit and was left untouched
+<!-- agent:boundary:7aaf84d0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -692,6 +748,6 @@ Scope note:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#tmuxcrash2] [recommended] Reconstruct the `src/session-share/tasks/claudescore-3.md` tmux-pane crash that happened during an active Codex turn, then finish the broader crash-stability guardrails in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-- [ ] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
+- [x] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
+- [ ] [#pfcycle] [recommended] Recover or fail closed when a response patchback lands but the persisted cycle state remains `preflight_started` and no replayable pending artifact exists. Plan: `tasks/agent-doc/plan-preflight-started-patchback-closeout.md`
 <!-- /agent:backlog -->

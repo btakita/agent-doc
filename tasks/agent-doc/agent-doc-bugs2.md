@@ -144,16 +144,42 @@ What changed:
 Verification:
 - `cargo test -q --manifest-path src/agent-doc/Cargo.toml`
 - `cargo build --manifest-path src/agent-doc/Cargo.toml`
-<!-- agent:boundary:e345ddc3 -->
-<!-- /agent:exchange -->
 
-<!--
-Fix...spec-test-build-install-commit-push
+❯ Fix the following. The already running pane should be used...spec-test-build-install-commit-push
 ```
 /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
 ~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 03:49:35
 ❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
 Error: session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — refusing to start a duplicate live pane
+```
+### Re: duplicate live start pane reuse — gpt-5
+
+Implemented the duplicate `agent-doc start` pane-reuse fix in `src/agent-doc` and pushed commit `d9b2fa8` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `start` now excludes the current transient `agent-doc start <file>` pane when probing for an existing live owner, so rerunning `start` no longer mistakes the one-shot launcher for the already-running session.
+- If another pane still owns the document session, `start` now re-registers to that pane when needed, focuses it, and exits successfully instead of failing with the duplicate-live-pane error.
+- If the registry points at an alive pane but no live owner can still be proven, `start` now clears that stale binding and continues with a fresh supervisor in the current pane.
+- Added start-level regression coverage for reuse, stale-alive clearing, same-pane, and dead-pane cases.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the new reuse contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+<!-- agent:boundary:aad074a2 -->
+<!-- /agent:exchange -->
+
+<!--
+Another issue came upwith the `agent-doc start`
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:31:50
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+[sync] found alive agent-doc child (pid 3573327) in pane %291 for tasks/claudescore-3.md
+[tmux] select_pane %291 → session:window 0:1
+[start] focused existing pane %291
+session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — reusing existing live pane
 ```
 
 do #backlogreplay. spec-test-build-install-commit-push

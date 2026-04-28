@@ -143,8 +143,9 @@ on claude exit with code c:
         Clean:    harness-specific clean-exit handling, transition Healthy
                   Claude: prompt user (Enter/q)
                   Codex: auto-restart in resume mode so `codex exec` stays attached
-                         EXCEPT when stdin EOF (Ctrl+D) detected → restart fresh
-                         instead of resuming so the pane stays attached
+                         EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
+                         (Enter to restart fresh / q to exit) so the user can
+                         choose to quit the supervisor cleanly
                          AND resume auto-trigger only accepts a prompt line that
                          appears as the latest non-empty line in the current
                          resumed child's filtered pty output; stale tmux history

@@ -267,10 +267,13 @@ fn restart_continue_exit_strategy(
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
 ) -> RestartContinueExitStrategy {
+    if ctrl_d_forwarded {
+        return RestartContinueExitStrategy::PromptUser;
+    }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
     }
-    if failed_resume || ctrl_d_forwarded {
+    if failed_resume {
         return RestartContinueExitStrategy::RestartFresh;
     }
     RestartContinueExitStrategy::Resume
@@ -1750,12 +1753,26 @@ pub fn run(file: &Path) -> Result<()> {
                         ) {
                             RestartContinueExitStrategy::PromptUser => {
                                 raw_mode.suspend();
-                                eprintln!(
-                                    "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
-                                    harness.binary,
-                                    recent_failures,
-                                    FAILED_RESUME_WINDOW.as_secs()
-                                );
+                                if ctrl_d_forwarded {
+                                    eprintln!(
+                                        "\n{} exited after stdin EOF/Ctrl-D.",
+                                        harness.binary
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "ctrl_d_prompt_user restart_count={}",
+                                            restart_count
+                                        ),
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
+                                        harness.binary,
+                                        recent_failures,
+                                        FAILED_RESUME_WINDOW.as_secs()
+                                    );
+                                }
                                 eprintln!("Press Enter to restart fresh, or 'q' to exit.");
                                 let mut input = String::new();
                                 if std::io::stdin().read_line(&mut input).is_err() {
@@ -1763,7 +1780,12 @@ pub fn run(file: &Path) -> Result<()> {
                                     break;
                                 }
                                 if input.trim().eq_ignore_ascii_case("q") {
-                                    log_event(&mut session_log, "user_quit_after_resume_failure");
+                                    let event = if ctrl_d_forwarded {
+                                        "user_quit_after_ctrl_d"
+                                    } else {
+                                        "user_quit_after_resume_failure"
+                                    };
+                                    log_event(&mut session_log, event);
                                     break;
                                 }
                                 raw_mode.resume();
@@ -1771,33 +1793,19 @@ pub fn run(file: &Path) -> Result<()> {
                                 restart_count += 1;
                             }
                             RestartContinueExitStrategy::RestartFresh => {
-                                if failed_resume {
-                                    eprintln!(
-                                        "\n{} exited after a failed resume handoff ({}). Restarting fresh instead of resuming...",
-                                        harness.binary,
-                                        auto_trigger_outcome.as_str()
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "resume_restart_fresh outcome={} restart_count={}",
-                                            auto_trigger_outcome.as_str(),
-                                            restart_count + 1
-                                        ),
-                                    );
-                                } else {
-                                    eprintln!(
-                                        "\n{} exited after stdin EOF/Ctrl-D. Restarting fresh to keep the pane attached...",
-                                        harness.binary
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "ctrl_d_restart_fresh restart_count={}",
-                                            restart_count + 1
-                                        ),
-                                    );
-                                }
+                                eprintln!(
+                                    "\n{} exited after a failed resume handoff ({}). Restarting fresh instead of resuming...",
+                                    harness.binary,
+                                    auto_trigger_outcome.as_str()
+                                );
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "resume_restart_fresh outcome={} restart_count={}",
+                                        auto_trigger_outcome.as_str(),
+                                        restart_count + 1
+                                    ),
+                                );
                                 first_run = true;
                                 restart_count += 1;
                             }
@@ -2377,10 +2385,10 @@ mod tests {
     }
 
     #[test]
-    fn restart_continue_strategy_restarts_fresh_after_ctrl_d() {
+    fn restart_continue_strategy_prompts_user_after_ctrl_d() {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0),
-            RestartContinueExitStrategy::RestartFresh
+            RestartContinueExitStrategy::PromptUser
         );
     }
 
@@ -2436,7 +2444,15 @@ mod tests {
         );
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0),
-            RestartContinueExitStrategy::RestartFresh
+            RestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn ctrl_d_with_failed_resume_still_prompts_user() {
+        assert_eq!(
+            restart_continue_exit_strategy(true, true, 1),
+            RestartContinueExitStrategy::PromptUser
         );
     }
 

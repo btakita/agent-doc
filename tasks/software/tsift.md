@@ -949,7 +949,27 @@ Verification:
 - installed-binary smoke check: indexed a temp repo, then `tsift search user_name --path <tmp> --json` returned the stronger `user_name` matches ahead of the weaker partial match.
 
 Commit: `btakita/tsift@7525b5f` pushed to `origin/main`.
-<!-- agent:boundary:a2c5b6b1 -->
+
+❯ do #threadjoin. spec-test-build-install-commit-push
+### Re: do #threadjoin — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `tsift search --timeout N` now runs the bounded sift search in a hidden `__search-worker` subprocess instead of a detached thread.
+- on timeout, the parent kills and waits on that worker before returning the existing timeout error, so timed-out searches no longer keep consuming CPU in the background.
+- `--timeout 0` still uses the in-process search path.
+- added integration coverage that proves the timed-out worker process exits and that `--timeout 0` does not spawn the helper.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.1`.
+
+Verification:
+- `make check` passed: 351 unit tests + 13 integration tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+- installed-binary smoke check: forced a 1s timeout with `TSIFT_TEST_SEARCH_WORKER_SLEEP_MS=5000`; `tsift search` exited with the timeout error and the recorded worker PID was no longer alive.
+
+Commit: `btakita/tsift@fdd1609` pushed to `origin/main`.
+<!-- agent:boundary:8f0a2e83 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -958,8 +978,6 @@ Commit: `btakita/tsift@7525b5f` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
-- [ ] [#threadjoin] Join or abort search timeout thread (main.rs:5028-5030)
 - [ ] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)
 - [ ] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
 - [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands

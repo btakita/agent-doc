@@ -116,7 +116,28 @@ Verification in `src/agent-doc`:
 Field check after install:
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md`
 - result: it now repairs the historical exchange snapshot drift and points at the newer unresolved prompt instead of blaming a direct patchback bypass
-<!-- agent:boundary:0a2c437b -->
+
+❯ do #reap1. spec-test-build-install-commit-push
+### Re: `#reap1` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `3c17989`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The fix has two parts:
+- preflight now fails closed if it reaps `- [x]` backlog items from the working tree but cannot prove the same reap landed in the staged snapshot; it verifies both surfaces before continuing
+- `session-check` now fails on stale completed backlog items that survive into later committed cycles, but it explicitly allows items just marked `--pending-done` in the same committed cycle to wait for the next preflight reap
+
+Regression coverage added for:
+- successful reap persistence to both file and snapshot
+- fail-closed when snapshot backlog sync is missing
+- stale completed backlog items tripping `session-check`
+- same-cycle `--pending-done` items being allowed until the next preflight
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo test`: the new reap/session-check coverage passed, but the full suite currently hits an unrelated route/tmux failure in `route::tests::send_keys_delivers_claude_command_with_enter`
+<!-- agent:boundary:326afdb3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -126,5 +147,5 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#reap1] Completed `agent:backlog` items not reaped — template docs can still contain `- [x]` backlog entries after a later normal `agent-doc` cycle, even though the pending system contract says done items should be reaped on the next preflight pass. Track this separately from missing `--pending-done` closeout bugs: this family starts after the item is already `[x]` in the document. Plan: `tasks/agent-doc/plan-backlog-done-reap.md`
+- [x] [#reap1] Completed `agent:backlog` items not reaped — template docs can still contain `- [x]` backlog entries after a later normal `agent-doc` cycle, even though the pending system contract says done items should be reaped on the next preflight pass. Track this separately from missing `--pending-done` closeout bugs: this family starts after the item is already `[x]` in the document. Plan: `tasks/agent-doc/plan-backlog-done-reap.md`
 <!-- /agent:backlog -->

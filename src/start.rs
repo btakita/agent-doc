@@ -1282,13 +1282,6 @@ pub fn run(file: &Path) -> Result<()> {
     let pane_id = sessions::current_pane()?;
     let tmux = sessions::Tmux::default_server();
 
-    // Guard: auto-relocate if the current pane is in a different session than the project expects.
-    // This is how cross-session drift happens — a terminal in session 1 claims a document,
-    // permanently binding it to session 1 even though the project targets session 0.
-    if let Some(expected_session) = config::project_tmux_session() {
-        relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
-    }
-
     if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
         match action {
             ExistingSessionPaneAction::Reuse(existing_pane) => {
@@ -1369,6 +1362,14 @@ pub fn run(file: &Path) -> Result<()> {
                 let _ = sessions::deregister(&session_id)?;
             }
         }
+    }
+
+    // Only relocate the current launcher pane when start is actually falling through to
+    // a fresh session in this pane. If a live owner already exists elsewhere, moving the
+    // launcher pane first can rip it out of its original tmux window/session before the
+    // reuse path returns.
+    if let Some(expected_session) = config::project_tmux_session() {
+        relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
     }
 
     // Register session → pane (with relative file path)
@@ -2352,6 +2353,39 @@ mod tests {
             action,
             Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
         );
+    }
+
+    #[test]
+    fn existing_session_reuse_keeps_launcher_pane_in_original_session() {
+        let iso = IsolatedTmux::new("start-reuse-keeps-launcher-session");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let owner_pane = iso.new_session("sess-a", tmp.path()).unwrap();
+        let launcher_pane = iso.new_session("sess-b", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: owner_pane.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&owner_pane).unwrap_or_default(),
+        };
+
+        let action = existing_session_pane_action_from_entry(
+            &iso,
+            &launcher_pane,
+            Some(&entry),
+            Some(&owner_pane),
+        );
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Reuse(owner_pane.clone()))
+        );
+        assert_eq!(
+            iso.pane_session(&launcher_pane).unwrap(),
+            "sess-b",
+            "proving an existing live owner must not relocate the launcher pane"
+        );
+        assert_eq!(iso.pane_session(&owner_pane).unwrap(), "sess-a");
     }
 
     #[test]

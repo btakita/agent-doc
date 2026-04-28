@@ -102,10 +102,11 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
    - **Unreachable** (socket exists but supervisor does not respond) → deregister and start fresh in the current pane
    - **No socket** (no supervisor socket found) → deregister and start fresh in the current pane
 4. If `sessions.json` points at a different **alive** pane but no live owner can still be proven for the document, clear that stale registration before continuing in the current pane.
-5. Register session → pane in `sessions.json`
-6. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
-7. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append `--add-dir` entries for any extra writable roots needed by submodule documents: the superproject working tree for parent-repo patchback targets plus any external git metadata directories (`.git/modules/...` and the superproject `.git` when applicable). Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not, so the Codex backend strips `--add-dir` entries from resume args (the resumed session inherits writable roots from the original `exec`)
-8. Exec the configured harness (replaces process)
+5. Only when start is falling through to a fresh session in the current pane, auto-relocate that pane into the configured project tmux session if needed. Reuse/focus of an already-running owner must leave the launcher's pane in its original session.
+6. Register session → pane in `sessions.json`
+7. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
+8. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append `--add-dir` entries for any extra writable roots needed by submodule documents: the superproject working tree for parent-repo patchback targets plus any external git metadata directories (`.git/modules/...` and the superproject `.git` when applicable). Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not, so the Codex backend strips `--add-dir` entries from resume args (the resumed session inherits writable roots from the original `exec`)
+9. Exec the configured harness (replaces process)
 
 ## route
 

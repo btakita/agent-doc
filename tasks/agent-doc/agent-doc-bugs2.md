@@ -342,7 +342,41 @@ Verification:
 - `cargo test` — 1880 tests, all passing (2 pre-existing flaky tmux route tests unrelated to this change)
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:a96c7e2a -->
+
+❯ do #backlogreplay. spec-test-build-install-commit-push
+### Re: #backlogreplay — opus-4-6
+
+Implemented `#backlogreplay` in `src/agent-doc` and pushed commit `80d3acc` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added `detect_dropped_from_history()` detector in `pending.rs` that compares current document backlog against a baseline to find open items that are completely absent — not in live backlog, not in icebox, not in shadow/commented sections.
+- `session-check` now runs a backlog-replay guard after the existing shadow guard, comparing the current document against the pre-cycle baseline (`.agent-doc/baselines/`, falling back to `git show HEAD`). Items excluded by the cycle's `pending_done_ids` are allowed.
+- `preflight` runs the same check during pending maintenance, comparing against `git show HEAD` to catch user-side drops before the cycle starts.
+- Added 8 regression tests covering: missing items detected, done-in-live allowed, done-via-cycle-state allowed, icebox allowed, shadow allowed, baseline-done-items ignored, no-baseline-backlog no-op, code-blocks-in-current not treated as presence.
+- Updated `specs/07-commands.md` with both preflight and session-check spec entries.
+- Updated `VERSIONS.md`.
+
+Verification:
+- `cargo test` — 1885 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+### Re: #backlogreplay — opus-4-6
+
+Implemented `#backlogreplay` in `src/agent-doc` and pushed commit `80d3acc` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added `detect_dropped_from_history()` detector in `pending.rs` that compares current document backlog against a baseline to find open items that are completely absent — not in live backlog, not in icebox, not in shadow/commented sections.
+- `session-check` now runs a backlog-replay guard after the existing shadow guard, comparing the current document against the pre-cycle baseline (`.agent-doc/baselines/`, falling back to `git show HEAD`). Items excluded by the cycle's `pending_done_ids` are allowed.
+- `preflight` runs the same check during pending maintenance, comparing against `git show HEAD` to catch user-side drops before the cycle starts.
+- Added 8 regression tests covering: missing items detected, done-in-live allowed, done-via-cycle-state allowed, icebox allowed, shadow allowed, baseline-done-items ignored, no-baseline-backlog no-op, code-blocks-in-current not treated as presence.
+- Updated `specs/07-commands.md` with both preflight and session-check spec entries.
+- Updated `VERSIONS.md`.
+
+Verification:
+- `cargo test` — 1885 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:3d83564c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -351,8 +385,7 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
-- [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
+- [x] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`

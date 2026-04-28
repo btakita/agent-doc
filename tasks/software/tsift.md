@@ -82,7 +82,20 @@ Verification:
 - `make check` passed: 352 unit tests + 19 exit-code/integration tests.
 
 Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
-<!-- agent:boundary:2446c54c -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: `--prune` can miss ordinary file-content edits inside existing directories. In [src/tsift/src/walk.rs](../../src/tsift/src/walk.rs), lines 99-112 prune a subtree when the directory mtime is unchanged, and [src/tsift/src/index.rs](../../src/tsift/src/index.rs) wires that straight into both `compute_changes_pruned()` and `apply_changes_pruned()` at lines 528-543 and 578-599. Editing `src/foo.rs` does not normally change the parent directory mtime, so prune mode can incorrectly treat modified files as unchanged and skip re-indexing them.
+
+2. Medium: `tsift communities` is taking the writer lock even though it only reads edges. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 1854-1867 call `index::IndexDb::open()` instead of the read-only path used by `graph`, `path`, and `explain`. That means a long-running index update can block `communities`, and `communities` itself can block `index` / search autoindex unnecessarily.
+
+3. Medium: `tsift search --scope <name>` silently falls back to searching the workspace root when the scope does not exist. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 2861-2864 return an empty target list for an unknown scope, and lines 3019-3029 then keep going with an empty symbol DB and `root.clone()` as the search path. The result is a successful but wrong-scope lexical search instead of a hard error.
+
+4. Medium: `tsift lint` no longer reads the live symbol index. [src/tsift/src/main.rs](../../src/tsift/src/main.rs) lines 3320-3333 still probe for `symbols.db` under `.tsift/indexes/*`, but the real index path is now `index.db` and single-project mode lives at `.tsift/index.db`. In the common case this leaves the entity set empty and turns lint into a near no-op.
+
+Verification: `cargo test` passed in `src/tsift` (352 unit tests + 19 integration tests).
+<!-- agent:boundary:010754cf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -91,7 +104,10 @@ Commit: `btakita/tsift@6ef8b2f` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
+- [ ] [#prunefix] [recommended] Fix prune-mode correctness: directory mtime pruning skips content edits inside unchanged directories
+- [ ] [#commlock] [recommended] Make `tsift communities` read-only; it should not acquire the writer lock
+- [ ] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
+- [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 <!-- /agent:backlog -->
 
 <!--

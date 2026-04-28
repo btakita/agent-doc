@@ -564,7 +564,43 @@ Verification:
 
 Note:
 - `src/agent-doc/Cargo.lock` changed because Cargo rewrote the `tmux-router` registry metadata during verification; I committed that with the fix.
-<!-- agent:boundary:5cd503be -->
+
+❯ do #tmuxready. spec-test-build-install-commit-push
+### Re: #tmuxready — gpt-5
+
+Implemented `#tmuxready` in `src/agent-doc` and pushed commit `ca937cc` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route` tmux prompt-readiness tests now wait for an actual idle shell before injecting the mock agent, and they fail early if the startup banner never appears instead of timing out ambiguously.
+- `resync` wrong-window tests now use a stable crate-root cwd, wait for pane/window relationships instead of fixed sleeps, and harden the shared mock-agent launcher with shell-ready checks plus Enter retries when the first command sits unsubmitted at the prompt.
+- Updated `VERSIONS.md` to record the tmux full-suite stabilization without changing runtime behavior.
+
+Verification:
+- Burn-in: 8 consecutive exact runs each of `route::tests::wait_for_agent_ready_detects_prompt`, `resync::tests::no_wrong_window_when_panes_in_same_window`, and `resync::tests::detect_wrong_window_panes_in_different_windows`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` twice
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- I left the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/preflight.rs`, and `src/repair.rs` untouched.
+### Re: #tmuxready — gpt-5
+
+Implemented `#tmuxready` in `src/agent-doc` and pushed commit `ca937cc` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route` tmux prompt-readiness tests now wait for an actual idle shell before injecting the mock agent, and they fail early if the startup banner never appears instead of timing out ambiguously.
+- `resync` wrong-window tests now use a stable crate-root cwd, wait for pane/window relationships instead of fixed sleeps, and harden the shared mock-agent launcher with shell-ready checks plus Enter retries when the first command sits unsubmitted at the prompt.
+- Updated `VERSIONS.md` to record the tmux full-suite stabilization without changing runtime behavior.
+
+Verification:
+- Burn-in: 8 consecutive exact runs each of `route::tests::wait_for_agent_ready_detects_prompt`, `resync::tests::no_wrong_window_when_panes_in_same_window`, and `resync::tests::detect_wrong_window_panes_in_different_windows`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` twice
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- I left the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/preflight.rs`, and `src/repair.rs` untouched.
+<!-- agent:boundary:f2519b3d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -575,6 +611,6 @@ When I switch to tsift.md, another session attempts to open
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxready] [recommended] Stabilize tmux prompt-readiness tests that still flake under parallel full-suite load (route::tests::wait_for_agent_ready_detects_prompt, resync::tests::no_wrong_window_when_panes_in_same_window) so ownership regressions fail deterministically.
+- [x] [#tmuxready] [recommended] Stabilize tmux prompt-readiness tests that still flake under parallel full-suite load (route::tests::wait_for_agent_ready_detects_prompt, resync::tests::no_wrong_window_when_panes_in_same_window) so ownership regressions fail deterministically.
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

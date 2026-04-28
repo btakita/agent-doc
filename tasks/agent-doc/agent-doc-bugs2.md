@@ -417,19 +417,46 @@ Verification:
 - `cargo test` — 1896 tests, all passing
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:fac8f180 -->
-<!-- /agent:exchange -->
 
-<!--
-In the JB plugin, this error popped up. It seems delayed from the cause because I was not actively doing any keystrokes. I had the editor on tsift.md and it was running an agent-doc turn using Codex.
+❯ In the JB plugin, this error popped up. It seems delayed from the cause because I was not actively doing any keystrokes. I had the editor on tsift.md and it was running an agent-doc turn using Codex. spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2120199) in pane %308 for tasks/software/tsift.md [route] Pane %308 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md → pane %308 [route] Command accepted (0.3s, 0 Enter retries) Error: routed codex trigger for tasks/software/tsift.md was accepted in pane %308, but no new document cycle started for pending prompt_target: do #lintidx. spec-test-build-install-commit-push
 ```
+### Re: route spurious cycle ack failure — opus-4-6
+
+**Root cause:** When the JB plugin's file watcher fires on agent-doc's own writes (during commit/IPC), it triggers `agent-doc route`. Route finds the alive pane with a live agent-doc child, sends a command, and requires a new cycle to start within 15 seconds. But the agent is already mid-cycle — no new cycle starts, so route fails with "no new document cycle started." The startup-miss recording would also cause the next route to deregister and auto-start a fresh pane, compounding the problem.
+
+**Fix:** Added `live_child_for_file: bool` parameter to `should_require_routed_cycle_ack` and `require_routed_cycle_ack`. When a live agent-doc child process is detected for the file (via `find_live_owner_pane`), the cycle ack requirement is suppressed. Route still sends the command (in case the agent is idle), but does not fail or record a startup-miss when no new cycle starts.
+
+Call sites:
+- Strategy 1 (alive registered pane with live owner): `true`
+- Strategy 1 (live owner re-registration): `true`
+- Strategy 2 (existing running pane): `true`
+- Strategy 2 (lazy claim to agent process pane): `false` — not confirmed agent-doc for this file
+
+Verification:
+- `cargo test` — 1896 tests, all passing
+- `cargo build --release`
+- `cargo install --path . --force`
+- Pushed commit `3a1a5de` to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:91a5611f -->
+<!-- /agent:exchange -->
+
+<!--
+
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main ⇡1 !1                                            agent-loop 13:41:31
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+session 7b453f47 for tasks/claudescore-3.md is running in pane %304 — switching focus
+```
+---
+When I switch to tsift.md, another session attempts to open
+![img.png](img.png)
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

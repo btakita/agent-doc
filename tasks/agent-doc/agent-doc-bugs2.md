@@ -130,7 +130,21 @@ Verification:
 - `cargo install --path . --force`
 - Targeted regressions passed in isolation, including the new stale-owner route/resync cases.
 - Full `cargo test` remains nondeterministic in this environment: the tmux-heavy route/mock-agent suite still flakes under both the default parallel runner and `--test-threads=1`, so I did not treat the full suite as clean.
-<!-- agent:boundary:021abbbc -->
+
+❯ Fix the parallel tmux test suite. commit + push
+### Re: parallel tmux test suite — gpt-5
+
+Implemented the parallel tmux test-suite stabilization in `src/agent-doc` and pushed commit `a82cf50` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Added RAII current-dir isolation plus non-poisoning test locks for route tests that mutate process-global cwd/env state, so a failing or concurrent test cannot strand later tests on a deleted temp directory.
+- Moved the registry-backed route tests onto their own temp `.agent-doc` roots before pane creation, so `sessions::register`/`lookup` stop colliding through the shared repo registry during parallel runs.
+- Hardened startup-sensitive isolated tmux tests with first-command retry, explicit mock-start waits, and a narrow startup mutex for the few cases that were still racing fresh pane readiness.
+
+Verification:
+- `cargo test -q --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+<!-- agent:boundary:e345ddc3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -141,8 +155,6 @@ Fix...spec-test-build-install-commit-push
 ❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
 Error: session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — refusing to start a duplicate live pane
 ```
-
-Fix the parallel tmux test suite. commit + push
 
 do #backlogreplay. spec-test-build-install-commit-push
 ### Re: Ctrl+D supervisor quit menu regression — gpt-5
@@ -156,7 +168,6 @@ Current evidence points to an intentional-but-wrong behavior change in `src/agen
 
 <!-- agent:backlog -->
 - [ ] [#freshack] `#tmuxcrash` fixed stale-owner ambiguity, but fresh replacement panes can still miss cycle acknowledgment and look like crashes. Track the `tsift.md` clean-exit -> fresh-start -> `route_cycle_start_missing` path and make startup misses fail visibly instead of looking like dead panes. Plan: `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`
-- [x] [#resyncown] `resync` misses stale registrations that block `route`: pane alive but no live file-owning process. Add `NoLiveOwner` detection to resync, auto-recover in route instead of fail-closed, and tighten stash cleanup. Plan: `tasks/agent-doc/plan-resync-ownership-verification.md`
 - [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`

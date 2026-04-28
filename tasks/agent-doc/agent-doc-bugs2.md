@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -373,7 +373,26 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1349 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:56dde666 -->
+
+❯ do #snap1. spec-test-build-install-commit-push
+### Re: `#snap1` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `967fb8f`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug was in `write.rs`: pre-response undo snapshots were not consistently captured from the live locked document state. The CRDT stream path could snapshot before acquiring the doc lock, and merge/template paths could snapshot the baseline instead of the current on-disk content. That made `undo` vulnerable to restoring stale state if another write landed in the gap.
+
+What changed:
+- added `capture_locked_pre_response()` in `src/write.rs`, which acquires the doc lock, reads the current file, and saves the pre-response snapshot from that locked state
+- switched `run`, `run_template`, `run_stream`, and `run_ipc` to use that helper so local write paths capture undo from the live document rather than the baseline or a pre-lock read
+- updated `specs/03-snapshot-system.md` to document the locked pre-response snapshot contract
+- added a regression test in `src/write.rs` that holds the doc lock, mutates the file while the capture call waits, and asserts the saved pre-response snapshot matches the post-lock live content
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:c91f4f48 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -382,7 +401,7 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk
+- [x] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk
 - [ ] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup
 - [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses
 - [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide

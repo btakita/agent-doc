@@ -282,6 +282,41 @@ fn is_valid_hash_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 8 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadingCustomIdPrefix {
+    Explicit,
+    Bracketed,
+    BarePlaceholder,
+}
+
+fn detect_leading_custom_id_prefix(text: &str) -> Option<LeadingCustomIdPrefix> {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("id=") {
+        return Some(LeadingCustomIdPrefix::Explicit);
+    }
+    let after_hash = trimmed.strip_prefix("[#")?;
+    let close = after_hash.find(']')?;
+    if close == 0 {
+        Some(LeadingCustomIdPrefix::BarePlaceholder)
+    } else {
+        Some(LeadingCustomIdPrefix::Bracketed)
+    }
+}
+
+pub(crate) fn ensure_no_leading_custom_id_prefix(text: &str, context: &str) -> Result<()> {
+    match detect_leading_custom_id_prefix(text) {
+        None => Ok(()),
+        Some(LeadingCustomIdPrefix::BarePlaceholder) => bail!(
+            "{}: bare `[#]` placeholder is invalid — omit it or use `id=<id> <text>`",
+            context
+        ),
+        Some(LeadingCustomIdPrefix::Explicit) | Some(LeadingCustomIdPrefix::Bracketed) => bail!(
+            "{}: duplicate leading custom id prefix in item text — use exactly one leading `id=<id>` or `[#id]` prefix",
+            context
+        ),
+    }
+}
+
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
         "pending add: invalid custom id `{}` — ids must be 1-8 ASCII alphanumeric characters",
@@ -296,6 +331,9 @@ fn parse_explicit_custom_id_prefix(rest: &str) -> Result<(Option<String>, String
         );
     };
     let custom_id = raw_id.trim().trim_start_matches('#');
+    if custom_id.is_empty() {
+        bail!("pending add: empty custom id after `id=` — expected `id=<id> <text>`");
+    }
     if !is_valid_hash_id(custom_id) {
         return Err(custom_id_error(raw_id));
     }
@@ -305,6 +343,7 @@ fn parse_explicit_custom_id_prefix(rest: &str) -> Result<(Option<String>, String
             "pending add: custom id prefix must be followed by item text (expected `id=<id> <text>`)"
         );
     }
+    ensure_no_leading_custom_id_prefix(remainder, "pending add")?;
     Ok((Some(custom_id.to_lowercase()), remainder.to_string()))
 }
 
@@ -317,6 +356,9 @@ fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, St
     };
     let raw_id = &after_hash[..close];
     let remainder = after_hash[close + 1..].trim_start();
+    if raw_id.is_empty() {
+        bail!("pending add: bare `[#]` placeholder is invalid — use `id=<id> <text>` or omit it");
+    }
     if !is_valid_hash_id(raw_id) {
         return Err(custom_id_error(raw_id));
     }
@@ -325,6 +367,7 @@ fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, St
             "pending add: bracketed custom id prefix must be followed by item text (expected `[#id] <text>`)"
         );
     }
+    ensure_no_leading_custom_id_prefix(remainder, "pending add")?;
     Ok((Some(raw_id.to_lowercase()), remainder.to_string()))
 }
 
@@ -1004,6 +1047,18 @@ mod tests {
     }
 
     #[test]
+    fn op_add_rejects_bare_bracket_placeholder_prefix() {
+        let err = op_add("", "[#] release checklist", DOC_ID, false).unwrap_err();
+        assert!(format!("{}", err).contains("bare `[#]` placeholder"));
+    }
+
+    #[test]
+    fn op_add_rejects_empty_explicit_custom_id_prefix() {
+        let err = op_add("", "id=  release checklist", DOC_ID, false).unwrap_err();
+        assert!(format!("{}", err).contains("empty custom id"));
+    }
+
+    #[test]
     fn op_add_rejects_duplicate_custom_id_prefix() {
         let body = "- [ ] [#ship1] existing task\n";
         let err = op_add(body, "id=ship1 new task", DOC_ID, false).unwrap_err();
@@ -1021,6 +1076,26 @@ mod tests {
         let err = op_add("", "[#ship1]", DOC_ID, false).unwrap_err();
         assert!(
             format!("{}", err).contains("bracketed custom id prefix must be followed by item text")
+        );
+    }
+
+    #[test]
+    fn op_add_rejects_stacked_bracketed_custom_id_prefixes() {
+        let err = op_add("", "[#ship1] [#ship2] release checklist", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("duplicate leading custom id prefix"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn op_add_rejects_stacked_mixed_custom_id_prefixes() {
+        let err = op_add("", "id=ship1 [#ship2] release checklist", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("duplicate leading custom id prefix"),
+            "unexpected error: {}",
+            err
         );
     }
 

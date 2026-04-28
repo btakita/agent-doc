@@ -870,6 +870,10 @@ fn normalize_backlog_patch_response(
         let mut pending_done_ids = Vec::new();
 
         for item in target_items.iter().rev() {
+            crate::pending::ensure_no_leading_custom_id_prefix(
+                &item.text,
+                "ERR: pending/backlog patch",
+            )?;
             let add_text = if item.id.is_empty() {
                 item.text.clone()
             } else {
@@ -6703,5 +6707,70 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check(&doc)
             .expect("suppression marker should disable the pre-commit pending-done gate");
+    }
+}
+
+#[cfg(test)]
+mod pending_patch_normalization_tests {
+    use super::normalize_backlog_patch_response;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn doc_with_backlog(root: &TempDir, backlog_body: &str) -> (PathBuf, String) {
+        let doc = root.path().join("doc.md");
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n{backlog_body}<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        (doc, content)
+    }
+
+    #[test]
+    fn normalize_pending_patch_repairs_lone_bare_placeholder() {
+        let tmp = TempDir::new().unwrap();
+        let (doc, content) = doc_with_backlog(&tmp, "");
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            "- [ ] [#] repair placeholder\n",
+        )];
+
+        normalize_backlog_patch_response(&doc, &content, patches, String::new())
+            .expect("lone bare placeholder should be normalized");
+
+        let rewritten = fs::read_to_string(&doc).unwrap();
+        assert!(rewritten.contains("repair placeholder"));
+        assert!(rewritten.contains("- [ ] [#"));
+        assert!(
+            !rewritten.contains("- [ ] [#] repair placeholder"),
+            "bare placeholder must not persist: {}",
+            rewritten
+        );
+    }
+
+    #[test]
+    fn normalize_pending_patch_rejects_stacked_leading_id_prefixes() {
+        let tmp = TempDir::new().unwrap();
+        let (doc, content) = doc_with_backlog(&tmp, "");
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            "- [ ] [#] [#ship1] release checklist\n",
+        )];
+
+        let err = match normalize_backlog_patch_response(&doc, &content, patches, String::new()) {
+            Ok(_) => panic!("stacked leading id prefixes should be rejected"),
+            Err(err) => err,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pending/backlog patch"),
+            "unexpected error: {}",
+            msg
+        );
+        assert!(
+            msg.contains("duplicate leading custom id prefix"),
+            "unexpected error: {}",
+            msg
+        );
     }
 }

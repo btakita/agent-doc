@@ -27,7 +27,7 @@ Combine any number of flags in one `agent-doc write` call:
 
 | Flag | Purpose |
 |------|---------|
-| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Repeat for multiple adds. |
+| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
 | `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
@@ -50,6 +50,10 @@ Rules:
 - `id=#spec1 ...` is also accepted; the leading `#` is stripped.
 - Leading `[#spec1] ...` is accepted as compatibility input and normalized to the
   same custom id, but `id=<custom> ` remains the preferred form for agents.
+- Bare `[#] ...` is invalid in active add-time paths. Omit it to get a generated
+  id, or use `id=<custom> ...` / `[#custom] ...` for an explicit id.
+- Stacked leading prefixes such as `[#spec1] [#spec2] ...` or
+  `id=spec1 [#spec2] ...` are invalid. Use exactly one leading custom-id prefix.
 - The custom id must be unique within the pending component.
 - The remainder after the prefix becomes the item text.
 

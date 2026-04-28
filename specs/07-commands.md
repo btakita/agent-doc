@@ -602,6 +602,14 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
    - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail
+   - Run backlog maintenance before the commit boundary:
+     - lazy-backfill missing backlog ids / normalize checkboxes
+     - reap completed `[x]` backlog items
+     - archive reaped items into the backlog-done surface when present
+     - detect user-authored reorder and surface `pending_reordered: true` in JSON so the skill skips reordering that cycle
+     - scan for open backlog-shaped `[#id]` items outside the live `agent:backlog` block (excluding code fences and `agent:icebox`)
+       - if the same open id still exists in the live backlog, emit a warning about the shadow copy
+       - if an open id exists only in shadow/commented form outside the live backlog, fail closed before commit/diff so unfinished work cannot silently fall out of active tracking
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`
@@ -657,6 +665,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 - Pending-capture guard: after a committed cycle, `session-check` inspects the committed response capture for recommendation-like batches that were not accompanied by any `--pending-add` / `--pending-add-gated` flags in that cycle
 - Pending-done guard: after a committed cycle, `session-check` also inspects the committed response capture against still-open `agent:backlog`/`agent:pending` ids and warns or errors when the response appears to complete an existing `#id` task but the cycle recorded no matching `--pending-done <id>`
 - Completed-backlog reap guard: after a committed cycle, `session-check` fails closed if the live document still contains stale `- [x]` backlog items that were not newly marked done by that same committed cycle. Fresh `--pending-done` items are allowed to survive until the next preflight reap; anything older must either be reaped through both the working tree and snapshot or stop with an explicit failure instead of silently carrying completed items forward.
+- Backlog-shadow guard: after a committed cycle, `session-check` scans for open backlog-shaped `[#id]` items outside the live `agent:backlog` block (excluding code fences and `agent:icebox`). Duplicate shadow copies warn; shadow-only open items fail closed so the cycle cannot report success while active work is stranded outside tracked backlog scope.
 - Default guard mode is `warn` for non-session docs; session documents default the pending-done guard to `strict` so closeouts fail before commit unless the cycle records the matching `--pending-done <id>` (or the document/project explicitly downgrades the mode)
 - `pending_capture_guard: strict` in document frontmatter or `.agent-doc/config.toml` `[guards] pending_capture = "strict"` upgrades that condition to exit `1`
 - `pending_done_guard: strict` in document frontmatter or `.agent-doc/config.toml` `[guards] pending_done = "strict"` upgrades the missing-`--pending-done` condition to exit `1`

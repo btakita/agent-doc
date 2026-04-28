@@ -147,6 +147,25 @@ impl PendingItem {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShadowPendingItem {
+    pub id: String,
+    pub text: String,
+    pub line: usize,
+}
+
+impl ShadowPendingItem {
+    pub fn reference(&self) -> String {
+        format!("#{} (line {})", self.id, self.line)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ShadowPendingReport {
+    pub duplicated_in_live_backlog: Vec<ShadowPendingItem>,
+    pub shadow_only: Vec<ShadowPendingItem>,
+}
+
 /// Parse the pending component body into (prelude, items, postlude).
 ///
 /// - Prelude: leading non-list lines (whitespace, non `- ` bullets).
@@ -397,6 +416,77 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
         }
     }
     out
+}
+
+pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
+    let components = crate::component::parse(doc)?;
+    let Some(backlog_component) = components
+        .iter()
+        .find(|component| crate::component::is_backlog_component(&component.name))
+    else {
+        return Ok(ShadowPendingReport::default());
+    };
+
+    let (_, live_items, _) = parse_items(backlog_component.content(doc));
+    let live_open_ids: HashSet<String> = live_items
+        .into_iter()
+        .filter(|item| !item.id.is_empty() && !item.is_done())
+        .map(|item| item.id)
+        .collect();
+
+    let excluded_ranges: Vec<(usize, usize)> = components
+        .iter()
+        .filter(|component| {
+            crate::component::is_backlog_component(&component.name)
+                || crate::component::is_icebox_component(&component.name)
+        })
+        .map(|component| (component.open_start, component.close_end))
+        .collect();
+    let code_ranges = crate::component::find_code_ranges(doc);
+
+    let mut report = ShadowPendingReport::default();
+    let mut seen_ids = HashSet::new();
+    let mut offset = 0usize;
+
+    for (line_idx, raw_line) in doc.split_inclusive('\n').enumerate() {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let line_start = offset;
+        let line_end = offset + raw_line.len();
+        offset = line_end;
+
+        if excluded_ranges
+            .iter()
+            .any(|(start, end)| line_start < *end && line_end > *start)
+        {
+            continue;
+        }
+        if code_ranges
+            .iter()
+            .any(|(start, end)| line_start < *end && line_end > *start)
+        {
+            continue;
+        }
+
+        let Some(item) = parse_item_line(line) else {
+            continue;
+        };
+        if item.id.is_empty() || item.is_done() || !seen_ids.insert(item.id.clone()) {
+            continue;
+        }
+
+        let shadow = ShadowPendingItem {
+            id: item.id.clone(),
+            text: item.text,
+            line: line_idx + 1,
+        };
+        if live_open_ids.contains(&item.id) {
+            report.duplicated_in_live_backlog.push(shadow);
+        } else {
+            report.shadow_only.push(shadow);
+        }
+    }
+
+    Ok(report)
 }
 
 /// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
@@ -1636,5 +1726,59 @@ mod tests {
         let (_, items, _) = parse_items(body);
         assert_eq!(items[0].gate_type, Some("code-review".to_string()));
         assert_eq!(items[1].gate_type, Some("pre_release".to_string()));
+    }
+
+    #[test]
+    fn detect_shadow_open_items_classifies_duplicate_and_shadow_only_ids() {
+        let doc = concat!(
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "- [/] [#gate1] Gated live item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- parked copy\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "- [ ] [#lost1] Drifted out of backlog\n",
+            "- [x] [#done1] Already done\n",
+            "-->\n"
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert_eq!(
+            report
+                .duplicated_in_live_backlog
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["live1"]
+        );
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lost1"]
+        );
+    }
+
+    #[test]
+    fn detect_shadow_open_items_ignores_icebox_and_code_blocks() {
+        let doc = concat!(
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#cold1] Intentionally parked\n",
+            "<!-- /agent:icebox -->\n\n",
+            "```md\n",
+            "- [ ] [#code1] Example only\n",
+            "```\n"
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert!(report.duplicated_in_live_backlog.is_empty());
+        assert!(report.shadow_only.is_empty());
     }
 }

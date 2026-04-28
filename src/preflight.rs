@@ -752,6 +752,7 @@ pub fn run(file: &Path) -> Result<()> {
     // snapshot (surgically, via component replace), so the upcoming step-2
     // commit which stages from snapshot picks them up atomically.
     let (pending_reordered, pending_gated_count) = run_pending_maintenance(file)?;
+    enforce_no_shadow_open_backlog(file)?;
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -1381,6 +1382,37 @@ fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
         .into_iter()
         .filter(crate::pending::PendingItem::is_done)
         .collect()
+}
+
+fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to inspect backlog shadow state in {}",
+            file.display()
+        )
+    })?;
+    let report = crate::pending::detect_shadow_open_items(&content)?;
+    if !report.duplicated_in_live_backlog.is_empty() {
+        eprintln!(
+            "[preflight] pending shadow warning: open backlog item(s) also appear outside live agent:backlog: {}",
+            format_shadow_refs(&report.duplicated_in_live_backlog)
+        );
+    }
+    if !report.shadow_only.is_empty() {
+        anyhow::bail!(
+            "open backlog item(s) exist only outside live agent:backlog: {}. Move them back into the live backlog or mark them complete before continuing",
+            format_shadow_refs(&report.shadow_only)
+        );
+    }
+    Ok(())
+}
+
+fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
+    items
+        .iter()
+        .map(crate::pending::ShadowPendingItem::reference)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Queue component state extracted during maintenance.
@@ -2264,6 +2296,51 @@ mod tests {
             err.to_string()
                 .contains("snapshot is missing the backlog component")
         );
+    }
+
+    #[test]
+    fn preflight_fails_closed_when_open_backlog_item_exists_only_in_shadow_copy() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me live\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- parked digest\n",
+            "- [ ] [#lost1] Drifted out of backlog\n",
+            "-->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("open backlog item(s) exist only outside")
+        );
+        assert!(err.to_string().contains("#lost1"));
+    }
+
+    #[test]
+    fn preflight_allows_shadow_copy_when_live_backlog_entry_still_exists() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me live\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- parked digest\n",
+            "- [ ] [#keep1] Duplicate parked copy\n",
+            "-->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
     }
 
     #[test]

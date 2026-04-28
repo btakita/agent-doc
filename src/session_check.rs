@@ -72,7 +72,7 @@ pub struct SessionCheckReport {
     pub warnings: Vec<String>,
 }
 
-enum PendingCaptureGuardResult {
+enum GuardResult {
     None,
     Warn(Vec<String>),
     Error(String),
@@ -114,14 +114,22 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
+        match check_shadow_backlog_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
         ] {
             match guard {
-                PendingCaptureGuardResult::None => {}
-                PendingCaptureGuardResult::Warn(lines) => report.warnings.extend(lines),
-                PendingCaptureGuardResult::Error(message) => {
+                GuardResult::None => {}
+                GuardResult::Warn(lines) => report.warnings.extend(lines),
+                GuardResult::Error(message) => {
                     report.status = SessionCheckStatus::Interrupted(message);
                     break;
                 }
@@ -180,6 +188,32 @@ fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
         .into_iter()
         .filter(crate::pending::PendingItem::is_done)
         .collect()
+}
+
+fn check_shadow_backlog_guard(file: &Path) -> Result<GuardResult> {
+    let content = std::fs::read_to_string(file)?;
+    let report = crate::pending::detect_shadow_open_items(&content)?;
+    if !report.shadow_only.is_empty() {
+        return Ok(GuardResult::Error(format!(
+            "[session-check] INTERRUPTED: open backlog item(s) exist only outside live agent:backlog: {}. Re-run preflight/repair after restoring them to the live backlog or marking them complete",
+            format_shadow_refs(&report.shadow_only)
+        )));
+    }
+    if !report.duplicated_in_live_backlog.is_empty() {
+        return Ok(GuardResult::Warn(vec![format!(
+            "[session-check] warning: open backlog item(s) also appear outside live agent:backlog: {}",
+            format_shadow_refs(&report.duplicated_in_live_backlog)
+        )]));
+    }
+    Ok(GuardResult::None)
+}
+
+fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
+    items
+        .iter()
+        .map(crate::pending::ShadowPendingItem::reference)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
@@ -317,38 +351,38 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
     }
 }
 
-fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
+fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
     let mode = resolve_pending_capture_guard_mode(file)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let Some(state) = crate::cycle_state::load(file)? else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     if state.is_open() || state.had_pending_mutations {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let Some(capture_id) = state.capture_id.as_deref() else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
     if capture
         .response_body
         .contains("<!-- no-pending-capture -->")
     {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let response_text = response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
@@ -358,7 +392,7 @@ fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult>
         _ => signal.confidence < 0.5,
     };
     if skip {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let warn_line = format!(
@@ -371,15 +405,13 @@ fn check_pending_capture_guard(file: &Path) -> Result<PendingCaptureGuardResult>
 
     Ok(match mode {
         crate::frontmatter::PendingCaptureGuardMode::Warn => {
-            PendingCaptureGuardResult::Warn(vec![warn_line, hint_line])
+            GuardResult::Warn(vec![warn_line, hint_line])
         }
-        crate::frontmatter::PendingCaptureGuardMode::Strict => {
-            PendingCaptureGuardResult::Error(format!(
-                "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
-            ))
-        }
-        crate::frontmatter::PendingCaptureGuardMode::Off => PendingCaptureGuardResult::None,
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -421,39 +453,39 @@ pub(crate) fn resolve_pending_done_guard_mode(
     Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
 }
 
-fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
+fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode(file)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let Some(state) = crate::cycle_state::load(file)? else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     if state.is_open() {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let Some(capture_id) = state.capture_id.as_deref() else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     };
     if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
     if capture
         .response_body
         .contains("<!-- no-pending-done-guard -->")
     {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let response_text = response_text_for_guards(&capture.response_body);
     let missing = detect_missing_pending_done_ids(file, &response_text, &state.pending_done_ids)?;
     if missing.is_empty() {
-        return Ok(PendingCaptureGuardResult::None);
+        return Ok(GuardResult::None);
     }
 
     let ids = missing
@@ -472,21 +504,19 @@ fn check_pending_done_guard(file: &Path) -> Result<PendingCaptureGuardResult> {
     );
 
     Ok(match mode {
-        crate::frontmatter::PendingCaptureGuardMode::Warn => PendingCaptureGuardResult::Warn(vec![
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
                 "[session-check] hint: re-run with {} or add `pending_done_guard: off` for this document when the item should stay open",
                 hint
             ),
         ]),
-        crate::frontmatter::PendingCaptureGuardMode::Strict => {
-            PendingCaptureGuardResult::Error(format!(
-                "{}\n[session-check] hint: re-run with {} or set pending_done_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
-                hint
-            ))
-        }
-        crate::frontmatter::PendingCaptureGuardMode::Off => PendingCaptureGuardResult::None,
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: re-run with {} or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
+            hint
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -806,6 +836,7 @@ pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write;
     use std::process::Command;
 
     fn make_project(tmp: &Path) -> std::path::PathBuf {
@@ -1752,6 +1783,58 @@ mod tests {
 
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+    }
+
+    #[test]
+    fn session_check_interrupts_when_open_backlog_item_exists_only_in_shadow_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_done_guard: off\n---\n\n"),
+            "### Re: backlog shadow check — gpt-5\n\nInvestigated.\n",
+            false,
+            Some("- [ ] [#keep1] Keep live\n"),
+            &[],
+        );
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&doc)
+            .unwrap()
+            .write_all(b"\n<!-- parked digest\n- [ ] [#lost1] Drifted copy\n-->\n")
+            .unwrap();
+
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("open backlog item(s) exist only outside"));
+                assert!(message.contains("#lost1"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_warns_when_live_backlog_item_has_shadow_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_done_guard: off\n---\n\n"),
+            "### Re: backlog shadow check — gpt-5\n\nInvestigated.\n",
+            false,
+            Some("- [ ] [#keep1] Keep live\n"),
+            &[],
+        );
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&doc)
+            .unwrap()
+            .write_all(b"\n<!-- parked digest\n- [ ] [#keep1] Duplicate copy\n-->\n")
+            .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].contains("outside live agent:backlog"));
+        assert!(report.warnings[0].contains("#keep1"));
     }
 
     #[test]

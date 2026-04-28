@@ -28,8 +28,10 @@
 //!   are missing, or when the fallback `ops.log` event is terminal and no
 //!   likely bypassed patchback is present.
 //! - Exit 1 when the current cycle state is still open, when the fallback last
-//!   `ops.log` event is `preflight_diff_start`, or when a likely direct
-//!   assistant patchback bypassed `agent-doc write` / `finalize`.
+//!   `ops.log` event is `preflight_diff_start`, when a likely direct
+//!   assistant patchback bypassed `agent-doc write` / `finalize`, or when
+//!   the cycle state says `committed` but the snapshot does not match HEAD
+//!   in the owning git root (response patchback visible but never committed).
 //! - Exit 2 on unexpected I/O errors.
 //!
 //! ## Agentic Contracts
@@ -48,6 +50,8 @@
 //! - `detect_bypassed_response_write_ignores_plain_user_prompt`
 //! - `session_check_repairs_committed_historical_snapshot_drift`
 //! - `session_check_missing_log_exits_zero`
+//! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
+//! - `session_check_snapshot_committed_guard_passes_when_committed`
 
 use anyhow::Result;
 use std::path::Path;
@@ -130,6 +134,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_snapshot_committed_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
@@ -202,6 +214,36 @@ fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
         .into_iter()
         .filter(crate::pending::PendingItem::is_done)
         .collect()
+}
+
+fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
+    use crate::git::SnapshotCommitStatus;
+    match crate::git::verify_snapshot_committed(file)? {
+        SnapshotCommitStatus::Committed
+        | SnapshotCommitStatus::NoSnapshot
+        | SnapshotCommitStatus::NoHead
+        | SnapshotCommitStatus::NotInGitRepo => Ok(GuardResult::None),
+        SnapshotCommitStatus::SnapshotDiffersFromHead {
+            snapshot_len,
+            head_len,
+        } => {
+            let msg = format!(
+                "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed",
+                snapshot_len, head_len
+            );
+            eprintln!("{}", msg);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "snapshot_committed_guard_failed file={} snapshot_len={} head_len={}",
+                    file.display(),
+                    snapshot_len,
+                    head_len
+                ),
+            );
+            Ok(GuardResult::Error(msg))
+        }
+    }
 }
 
 fn check_shadow_backlog_guard(file: &Path) -> Result<GuardResult> {
@@ -1926,5 +1968,128 @@ mod tests {
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_snapshot_committed_guard_fails_when_snapshot_differs() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let old_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n";
+        fs::write(&doc, old_content).unwrap();
+        crate::snapshot::save(&doc, old_content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Simulate: write applied a response to the snapshot but commit never happened
+        let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
+        fs::write(&doc, new_content).unwrap();
+        crate::snapshot::save(&doc, new_content).unwrap();
+
+        // Mark cycle as committed (simulating a bug where cycle_state lied)
+        crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(new_content),
+            Some(new_content),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(
+                    msg.contains("snapshot does not match HEAD"),
+                    "expected snapshot-committed guard failure, got: {msg}"
+                );
+            }
+            SessionCheckStatus::Ok(msg) => {
+                panic!("expected Interrupted, got Ok: {msg}");
+            }
+        }
+    }
+
+    #[test]
+    fn session_check_snapshot_committed_guard_passes_when_committed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nbody\n### Re: test\nresponse\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Ok(_) => {}
+            SessionCheckStatus::Interrupted(msg) => {
+                panic!("expected Ok, got Interrupted: {msg}");
+            }
+        }
     }
 }

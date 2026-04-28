@@ -23,6 +23,13 @@
 //!   tracked.
 //! - `commit_with_outcome(file)`: same as `commit`, but also reports whether the
 //!   VCS refresh signal was available and successfully written after the commit.
+//! - `verify_snapshot_committed(file)`: verifies that the current snapshot for `file` is
+//!   committed in its owning git root (narrowed to submodule when applicable). Compares the
+//!   snapshot content (modulo transient markers) against `git show HEAD:<file>`. Returns
+//!   `Committed`, `SnapshotDiffersFromHead`, `NoSnapshot`, `NoHead`, or `NotInGitRepo`.
+//! - `is_submodule_pointer_stale(file)`: checks whether the parent repo's submodule pointer
+//!   needs updating for a file in a submodule. Returns `true` when the submodule is dirty
+//!   in the parent diff.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
 //!   file, or `None` if none exists.
 //! - `create_branch(file)`: creates and checks out `agent-doc/<stem>`, or switches to it if it
@@ -72,6 +79,11 @@
 //! - commit_repairs_committed_head_before_user_follow_up_noop: snapshot lags behind a committed response in `HEAD`, working tree adds only a new user follow-up, and commit repairs the snapshot up to `HEAD` instead of staging the stale snapshot and rewinding the doc
 //! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
 //! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
+//! - verify_snapshot_committed_returns_committed_when_matching: snapshot matches HEAD → `Committed`
+//! - verify_snapshot_committed_returns_differs_when_snapshot_ahead: snapshot has content not in HEAD → `SnapshotDiffersFromHead`
+//! - verify_snapshot_committed_no_snapshot: no snapshot file → `NoSnapshot`
+//! - verify_snapshot_committed_no_head: file not tracked → `NoHead`
+//! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
 use anyhow::Result;
 use fs2::FileExt;
@@ -1249,6 +1261,15 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             Some(&file_after_noop),
         );
 
+        // Even for no-op submodule commits, the parent pointer may be stale
+        // (e.g., submodule committed in a previous cycle but parent never updated).
+        if in_submodule && is_submodule_pointer_stale(file) {
+            eprintln!(
+                "[commit] submodule pointer stale in parent after no-op commit — updating"
+            );
+            update_parent_submodule_pointer(&super_root, &git_root, &msg);
+        }
+
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
             eprintln!("[perf] commit total: {}ms", elapsed_total);
@@ -2015,6 +2036,68 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
     }
 
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotCommitStatus {
+    Committed,
+    SnapshotDiffersFromHead { snapshot_len: usize, head_len: usize },
+    NoSnapshot,
+    NoHead,
+    NotInGitRepo,
+}
+
+/// Verify that the current snapshot for `file` is committed in its owning git root.
+///
+/// Compares the snapshot content (modulo transient markers) against `git show HEAD:<file>`
+/// in the narrowed git root (submodule when applicable). Returns `Committed` when they
+/// match, or a specific variant explaining the mismatch.
+pub fn verify_snapshot_committed(file: &Path) -> Result<SnapshotCommitStatus> {
+    if !is_in_git_repo(file) {
+        return Ok(SnapshotCommitStatus::NotInGitRepo);
+    }
+    let snapshot = match crate::snapshot::load(file)? {
+        Some(s) => s,
+        None => return Ok(SnapshotCommitStatus::NoSnapshot),
+    };
+    let head_doc = match show_head(file)? {
+        Some(h) => h,
+        None => return Ok(SnapshotCommitStatus::NoHead),
+    };
+    let normalized_snapshot = normalize_transient_agent_doc_markers(&snapshot);
+    let normalized_head = normalize_transient_agent_doc_markers(&head_doc);
+    if normalized_snapshot == normalized_head {
+        Ok(SnapshotCommitStatus::Committed)
+    } else {
+        Ok(SnapshotCommitStatus::SnapshotDiffersFromHead {
+            snapshot_len: normalized_snapshot.len(),
+            head_len: normalized_head.len(),
+        })
+    }
+}
+
+/// Check whether the parent repo's submodule pointer is current for a file in a submodule.
+/// Returns `true` if the pointer needs updating (submodule is dirty in parent), `false` otherwise.
+pub(crate) fn is_submodule_pointer_stale(file: &Path) -> bool {
+    let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
+        return false;
+    };
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    if !in_submodule {
+        return false;
+    }
+    let rel = match git_root.strip_prefix(&super_root) {
+        Ok(r) => r.to_string_lossy().to_string(),
+        Err(_) => return false,
+    };
+    let output = Command::new("git")
+        .current_dir(&super_root)
+        .args(["diff", "--name-only", "--", &rel])
+        .output();
+    match output {
+        Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
+        Err(_) => false,
+    }
 }
 
 /// Get the author timestamp of the last commit touching a file.
@@ -5373,6 +5456,171 @@ More content.
         assert!(
             !redacted.contains("Some exchange content."),
             "should redact exchange content (including nested markers)"
+        );
+    }
+
+    #[test]
+    fn verify_snapshot_committed_returns_committed_when_matching() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let content = "# Hello\n\nbody\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        assert_eq!(
+            verify_snapshot_committed(&doc).unwrap(),
+            SnapshotCommitStatus::Committed,
+        );
+    }
+
+    #[test]
+    fn verify_snapshot_committed_returns_differs_when_snapshot_ahead() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let old_content = "# Hello\n\nold body\n";
+        fs::write(&doc, old_content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let new_content = "# Hello\n\nnew response body\n";
+        crate::snapshot::save(&doc, new_content).unwrap();
+
+        match verify_snapshot_committed(&doc).unwrap() {
+            SnapshotCommitStatus::SnapshotDiffersFromHead { .. } => {}
+            other => panic!("expected SnapshotDiffersFromHead, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn verify_snapshot_committed_no_snapshot() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        fs::write(&doc, "body\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        assert_eq!(
+            verify_snapshot_committed(&doc).unwrap(),
+            SnapshotCommitStatus::NoSnapshot,
+        );
+    }
+
+    #[test]
+    fn verify_snapshot_committed_no_head() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        fs::write(&doc, "body\n").unwrap();
+        crate::snapshot::save(&doc, "body\n").unwrap();
+
+        assert_eq!(
+            verify_snapshot_committed(&doc).unwrap(),
+            SnapshotCommitStatus::NoHead,
         );
     }
 }

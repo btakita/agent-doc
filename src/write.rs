@@ -463,6 +463,15 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
         CommitMode::Required => {
             crate::git::commit(file)?;
             ensure_cycle_committed(file)?;
+            // Verify the snapshot is actually committed in the owning git root.
+            // If it isn't (e.g., post-commit mutation dirtied the file, or the commit
+            // staged wrong content), retry once before handing off to session-check.
+            if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
+                crate::git::verify_snapshot_committed(file)?
+            {
+                eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
+                crate::git::commit(file)?;
+            }
             crate::session_check::enforce_clean_closeout(file)
         }
     }

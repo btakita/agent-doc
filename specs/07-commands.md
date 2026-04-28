@@ -718,6 +718,10 @@ On the next route invocation, if the registered pane matches a persisted startup
 
 Successful cycle acknowledgment (both `fresh_route_start_acknowledged` and `route_cycle_start_acknowledged`) clears the startup-miss marker. `session-check` also reports a warning when a startup-miss marker exists for the inspected document.
 
+### Live-child ack suppression
+
+When route detects a live agent-doc child process for the target file in the resolved pane (via `find_live_owner_pane`), the cycle ack requirement is suppressed. The agent is already active for the file — either mid-cycle or between cycles — so requiring a new cycle start from a routed trigger would produce spurious failures when the JB plugin's file watcher fires on the agent's own writes. Route still sends the command (the agent may need the trigger if idle), but does not fail or record a startup-miss when no new cycle starts. Logs `route_cycle_ack_skipped_live_child` for observability.
+
 ## is_tracked FFI Export
 
 `agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.

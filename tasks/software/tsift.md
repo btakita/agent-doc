@@ -648,7 +648,32 @@ Yes. The next backlog items I’d add are:
 3. `#lerr` — surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors, without requiring a separate `tsift locks` follow-up.
 
 I added those to the backlog in this cycle.
-<!-- agent:boundary:e62d7764 -->
+
+❯ do #lerr. spec-test-build-install-commit-push
+### Re: do `#lerr` — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- all mutating index updates now flow through a shared wrapper, so `tsift index`, rebuild/prune paths, scoped/workspace indexing, and search autoindex all attach inline lock diagnostics on writer-lock or SQLite lock failures
+- stderr now includes the same `lock` / `journal` / `run` / `next` block as `tsift locks`, so you get the live pid when available, rollback-journal presence, the exact reindex command, and the recommended next step without a separate follow-up command
+- added regression coverage for both the explicit sidecar-lock case and the rollback-journal writer-block case
+- updated `SPEC.md` and `CLAUDE.md`
+
+Verification:
+- `cargo test` passed: 318 unit tests + 11 exit-code tests
+- `make check` passed
+- `cargo build --release` passed
+- `cargo install --path .` passed
+
+Tested on this repo after install:
+- `tsift index /home/brian/work/btakita/agent-loop` now fails with inline `lock diagnostics:` showing the live writer pid, lock path, reindex command, and retry guidance
+- `tsift search --path /home/brian/work/btakita/agent-loop "agent-doc"` now fails through the same inline diagnostics path instead of only surfacing a bare lock error
+
+I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@cfcad16` pushed to `origin/main`.
+<!-- agent:boundary:868c92b3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -657,7 +682,7 @@ I added those to the backlog in this cycle.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [ ] [#lerr] Surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors
+- [x] [#lerr] Surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors
 - [ ] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
 - [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->

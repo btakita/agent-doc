@@ -702,19 +702,29 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
+    Ok(detect_bypassed_response_write_between(&snapshot, &current))
+}
+
+pub(crate) fn detect_bypassed_response_write_between(
+    snapshot_doc: &str,
+    current_doc: &str,
+) -> Option<String> {
     // Normalize transient markers before comparison — (HEAD) annotations and
     // boundary IDs legitimately differ between snapshot (clean) and working tree
     // (preserves HEAD). Without this, preserved (HEAD) markers cause false-positive
     // "direct response patchback" detection.
     let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
-    let snap_norm = norm(&snapshot);
-    let cur_norm = norm(&current);
+    let snap_norm = norm(snapshot_doc);
+    let cur_norm = norm(current_doc);
     if cur_norm == snap_norm {
-        return Ok(None);
+        return None;
+    }
+    if !has_new_response_heading_marker(&snap_norm, &cur_norm) {
+        return None;
     }
 
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
-        return Ok(None);
+        return None;
     };
 
     let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
@@ -725,15 +735,36 @@ pub(crate) fn detect_bypassed_response_write(file: &Path) -> Result<Option<Strin
         let trimmed = change.value().trim();
         if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
             if let Some(bare_target) = crate::diff::first_bare_prompt_prefix_target(&diff_text) {
-                return Ok(Some(format!(
+                return Some(format!(
                     "{} (bare prompt target missing `❯ `: {})",
                     trimmed, bare_target
-                )));
+                ));
             }
-            return Ok(Some(trimmed.to_string()));
+            return Some(trimmed.to_string());
         }
     }
-    Ok(None)
+    None
+}
+
+fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
+    use std::collections::BTreeMap;
+
+    fn marker_counts(doc: &str) -> BTreeMap<String, usize> {
+        let mut counts = BTreeMap::new();
+        for line in doc.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
+                *counts.entry(trimmed.to_string()).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+
+    let snapshot_counts = marker_counts(snapshot_doc);
+    let current_counts = marker_counts(current_doc);
+    current_counts
+        .into_iter()
+        .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
 }
 
 pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
@@ -1018,6 +1049,40 @@ mod tests {
         let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
         assert!(marker.contains("### Re: test — gpt-5"));
         assert!(marker.contains("Why was this missed?"));
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_between_ignores_non_response_local_drift() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After. Tuned manually.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            detect_bypassed_response_write_between(snapshot, current),
+            None,
+            "ordinary local drift over HEAD should not look like a bypassed response write"
+        );
     }
 
     #[test]
@@ -1355,6 +1420,124 @@ mod tests {
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(repaired_snapshot.contains("### Re: do `#sgzy` — codex"));
         assert!(!repaired_snapshot.contains("What are the next steps?"));
+    }
+
+    #[test]
+    fn session_check_repairs_committed_historical_response_before_local_status_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Before.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #done. spec-test-commit-push\n",
+            "### Re: do `#done` — codex\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual repair", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
+
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After. Tuned manually.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #done. spec-test-commit-push\n",
+            "### Re: do `#done` — codex\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(
+                    message.contains("repaired committed historical exchange snapshot drift"),
+                    "unexpected session-check message: {message}"
+                );
+                assert!(
+                    !message.contains("direct response patchback"),
+                    "unexpected session-check message: {message}"
+                );
+            }
+            other => panic!("expected repaired ok status, got {other:?}"),
+        }
+
+        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(repaired_snapshot.contains("### Re: do `#done` — codex"));
+        assert!(!repaired_snapshot.contains("Tuned manually."));
     }
 
     #[test]

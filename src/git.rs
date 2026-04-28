@@ -902,13 +902,17 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     };
     let historical_reason =
         classify_safe_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc);
+    let historical_response_marker =
+        crate::session_check::detect_bypassed_response_write_between(&snapshot_doc, &head_doc);
+    let Some(reason) =
+        historical_reason.or_else(|| historical_response_marker.as_ref().map(|_| "exchange"))
+    else {
+        return Ok(None);
+    };
 
     if normalize_transient_agent_doc_markers(&current_doc)
         == normalize_transient_agent_doc_markers(&head_doc)
     {
-        let Some(reason) = historical_reason else {
-            return Ok(None);
-        };
         crate::snapshot::save(file, &current_doc)?;
         crate::ops_log::log_op(
             file,
@@ -921,15 +925,22 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
         return Ok(Some(reason));
     }
 
-    if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
-        let reason = historical_reason.unwrap_or("exchange");
+    if crate::session_check::detect_bypassed_response_write_between(&head_doc, &current_doc)
+        .is_none()
+    {
+        let basis = if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
+            "head_follow_up"
+        } else {
+            "head_local_drift"
+        };
         crate::snapshot::save(file, &head_doc)?;
         crate::ops_log::log_op(
             file,
             &format!(
-                "snapshot_repair file={} reason={} basis=head_follow_up",
+                "snapshot_repair file={} reason={} basis={}",
                 file.display(),
-                reason
+                reason,
+                basis
             ),
         );
         return Ok(Some(reason));
@@ -1041,17 +1052,25 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         ),
     );
 
-    if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {
-        eprintln!(
-            "[commit] repaired committed historical {} drift into snapshot for {}",
-            reason,
-            file.display()
-        );
-        snapshot_content = crate::snapshot::load(file)?;
-    }
+    let repaired_committed_historical =
+        if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {
+            eprintln!(
+                "[commit] repaired committed historical {} drift into snapshot for {}",
+                reason,
+                file.display()
+            );
+            snapshot_content = crate::snapshot::load(file)?;
+            true
+        } else {
+            false
+        };
 
     if let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
+        && !(repaired_committed_historical
+            && snapshot
+                .as_str()
+                .eq(head_doc.as_deref().unwrap_or_default()))
         && let Some(reason) = classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content)
     {
         eprintln!(
@@ -3710,6 +3729,179 @@ mod tests {
         assert_eq!(
             snap, committed,
             "snapshot should also be restored to clean HEAD after transient cleanup"
+        );
+    }
+
+    #[test]
+    fn commit_repairs_committed_historical_response_before_local_status_edit() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let stale_snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Before.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, stale_snapshot).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #done. spec-test-commit-push\n",
+            "### Re: do `#done` — codex\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual repair", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let working = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After. Tuned manually.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do #done. spec-test-commit-push\n",
+            "### Re: do `#done` — codex\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, working).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(working)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(stale_snapshot),
+            Some(working),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let head_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let did_commit = commit(&doc).expect("commit should adopt HEAD before later local edits");
+        let head_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !did_commit,
+            "repairing the snapshot up to committed HEAD should close as a no-op"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&head_before.stdout),
+            String::from_utf8_lossy(&head_after.stdout),
+            "HEAD should stay on the already-committed response instead of creating a rewind commit"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: do `#done` — codex"),
+            "snapshot should repair up to the already-committed response:\n{snap}"
+        );
+        assert!(
+            !snap.contains("Tuned manually."),
+            "snapshot repair must stop at HEAD, not absorb later local edits:\n{snap}"
+        );
+
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working_after.contains("Tuned manually."),
+            "working tree should keep later local edits uncommitted:\n{working_after}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("snapshot_repair file=") && log.contains("basis=head_local_drift"),
+            "snapshot repair should record the head-local-drift adoption path:\n{log}"
+        );
+        assert!(
+            log.contains("post_commit_local_drift file=")
+                && log.contains("kind=working_tree_edits"),
+            "later local edits should still be classified after repair:\n{log}"
         );
     }
 

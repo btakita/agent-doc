@@ -385,7 +385,29 @@ Commit/push:
 - that commit also carried the already-verified local summarize cache hardening changes that had been left uncommitted from the prior blocked turn.
 
 Top of backlog: `#sumscope`.
-<!-- agent:boundary:580d0ee0 -->
+
+❯ do #sumscope. spec-test-build-install-commit-push
+### Re: do #sumscope — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift summarize --extract` now resolves symbol context per extracted file, so workspace files use the matching scoped `index.db` instead of an arbitrary first workspace DB.
+- summarize symbol preload now uses exact normalized file-path matches instead of suffix matching, preventing duplicate `src/lib.rs`-style paths from bleeding across scopes.
+- added regressions in both direct helper paths (`src/main.rs`, `src/summarize.rs`) and the compiled CLI surface (`tests/exit_code.rs`), including a mocked Anthropic response + captured prompt proving `src/beta/src/lib.rs` only receives beta symbols.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.12`, and refreshed the installed binary.
+
+Verification:
+- `cargo test summarize_ -- --nocapture` passed.
+- `make check` passed: 365 unit tests + 28 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.12`.
+
+Commit/push:
+- `btakita/tsift@e40793d` (`fix: scope summarize extraction symbol context`) pushed to `origin/main`.
+
+Top of backlog: `#tmv7`.
+<!-- agent:boundary:965f1d58 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -394,8 +416,7 @@ Top of backlog: `#sumscope`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#sumpath] fix summarize --extract relative path resolution against --path root
-- [ ] [#sumscope] fix workspace summarize symbol-index selection and same-path collisions
+- [x] [#sumscope] fix workspace summarize symbol-index selection and same-path collisions
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

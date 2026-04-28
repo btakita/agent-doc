@@ -1184,20 +1184,18 @@ pub fn run(file: &Path) -> Result<()> {
                         existing_pane
                     );
                 }
-                if let Err(e) = tmux.select_pane(&existing_pane) {
-                    eprintln!(
-                        "[start] warning: failed to focus existing pane {}: {}",
-                        existing_pane, e
-                    );
-                } else {
-                    eprintln!("[start] focused existing pane {}", existing_pane);
-                }
                 eprintln!(
-                    "session {} for {} is already running in pane {} — reusing existing live pane",
+                    "session {} for {} is running in pane {} — switching focus",
                     &session_id[..8.min(session_id.len())],
                     file.display(),
                     existing_pane
                 );
+                if let Err(e) = tmux.select_pane(&existing_pane) {
+                    eprintln!(
+                        "[start] warning: failed to focus pane {}: {}",
+                        existing_pane, e
+                    );
+                }
                 return Ok(());
             }
             ExistingSessionPaneAction::ClearStale(stale_pane) => {

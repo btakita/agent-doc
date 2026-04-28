@@ -1950,7 +1950,11 @@ mod tests {
         script: &Path,
         file: &Path,
     ) {
-        send_keys_with_retry(iso, pane, &format!("exec {} {}", script.display(), file.display()));
+        send_keys_with_retry(
+            iso,
+            pane,
+            &format!("exec {} {}", script.display(), file.display()),
+        );
         let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
         assert!(
             content.contains("\n>"),
@@ -3962,7 +3966,6 @@ history line
             registry.contains_key("route-test-concurrent-provision-session-b"),
             "second provisioned document should be registered"
         );
-
     }
 
     #[test]
@@ -3987,7 +3990,6 @@ history line
             should_preserve_failed_route_pane(&iso, &pane, "session-1"),
             "failed-route cleanup must preserve the live registered owner pane"
         );
-
     }
 
     #[test]
@@ -4003,7 +4005,6 @@ history line
             !should_preserve_failed_route_pane(&iso, &pane, "session-1"),
             "failed-route cleanup should still remove panes that never became the live owner"
         );
-
     }
 
     #[test]
@@ -4031,6 +4032,5 @@ history line
             resolved, doc,
             "resolved path must point to the CWD-relative file, not a submodule shadow"
         );
-
     }
 }

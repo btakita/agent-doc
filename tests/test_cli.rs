@@ -761,6 +761,9 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CODEX_CLI", "1");
+    cmd.env_remove("CLAUDE_CODE");
+    cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+    cmd.env_remove("OPENCODE");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 

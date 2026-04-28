@@ -534,7 +534,7 @@ Added:
 3. `#sumdiff` — `[recommended]` summarize diff mode: include untracked files, not just `git diff --name-only HEAD`.
 
 Verification: review-only turn. I validated the findings with direct CLI repros against the current `tsift` binary; I did not change code or run the full suite.
-<!-- agent:boundary:7577ef16 -->
+<!-- agent:boundary:94cb9b17 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -264,7 +264,26 @@ session 7b453f47 for tasks/claudescore-3.md is running in pane %291 — switchin
 If the issue is that the session in %291 is unresponsive despite having live processes, that's a session health problem (not a start bug). A possible improvement: add a supervisor health check that distinguishes "supervisor with active agent child" from "supervisor at restart prompt" — and only reuse when the agent child is actually healthy. Adding to backlog as `#startreuse`.
 
 **Committed:** `b690284` on `20260422/codex-agent-backend`, pushed.
-<!-- agent:boundary:e7719c15 -->
+
+❯ Should we have this case call the equivalent of `agent-doc fix` since we should never get here?
+### Re: start reuse → auto-fix — opus-4-6
+
+Yes, that's the right instinct. If a user manually runs `agent-doc start <file>` and hits the reuse path, it almost always means one of:
+
+1. **Session is stuck** — the user wants it unstuck, not switched to
+2. **Registry is stale** — the pane is alive but the session inside is dead/at restart prompt
+3. **Routing failed** — the editor plugin or `route` should have handled this, so reaching `start` manually means something broke
+
+In all three cases, silently switching focus is the wrong action. The right sequence would be:
+
+1. Probe the target pane's health (supervisor IPC → active child PID, or tmux capture → prompt detection)
+2. If healthy and responsive → switch focus (current behavior, but only for the genuinely-alive case)
+3. If supervisor alive but no agent child (restart prompt) → send restart signal via IPC or `send-keys Enter`
+4. If pane alive but no supervisor → `resync --fix` to deregister, then start fresh in current pane
+5. If pane dead → deregister and start fresh
+
+This is essentially `resync --fix` + health probe + conditional restart, which is what `agent-doc fix` should encapsulate. Adding as a concrete shape to `#startreuse`.
+<!-- agent:boundary:6b12307f -->
 <!-- /agent:exchange -->
 
 <!--

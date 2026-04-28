@@ -701,7 +701,16 @@ Verification:
 Scope note:
 - this commit included all currently uncommitted changes in `src/agent-doc` (14 tracked files)
 - the first push ran before the new commit existed and reported `Everything up-to-date`; the follow-up push published `0e18871`
-<!-- agent:boundary:54783a15 -->
+
+❯ compact exchange
+### Re: compact exchange — gpt-5
+
+For this harness, run the compact-exchange operation directly at the terminal:
+
+`agent-doc compact exchange /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+
+I did not execute it as ordinary exchange work in this cycle.
+<!-- agent:boundary:3a6c9438 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -113,7 +113,26 @@ Verification:
 - `cargo install --path .` passed, and `tsift --version` now reports `0.1.4`.
 
 Commit: `btakita/tsift@f24ec73` pushed to `origin/main`.
-<!-- agent:boundary:c7caa368 -->
+
+❯ do #commlock. spec-test-build-install-commit-push
+### Re: do #commlock — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift communities` now opens `index.db` through the shared read-only query path instead of the writable opener, so it no longer acquires `index.lock` for a graph-only command.
+- added lock regressions at both layers: an in-process command test in `src/main.rs` and a compiled-CLI test in `tests/exit_code.rs`, both asserting `communities` still succeeds while a live writer lock exists.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.5` to record the read-only graph-query lock contract.
+
+Verification:
+- `cargo test communities_cmd_succeeds_while_writer_lock_is_held -- --nocapture` passed.
+- `cargo test communities_stays_read_only_while_writer_lock_exists --test exit_code -- --nocapture` passed.
+- `make check` passed: 354 unit tests + 20 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.5`.
+
+Commit: `btakita/tsift@6b4b001` pushed to `origin/main`.
+<!-- agent:boundary:90163e98 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -122,8 +141,7 @@ Commit: `btakita/tsift@f24ec73` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#prunefix] [recommended] Fix prune-mode correctness: directory mtime pruning skips content edits inside unchanged directories
-- [ ] [#commlock] [recommended] Make `tsift communities` read-only; it should not acquire the writer lock
+- [x] [#commlock] [recommended] Make `tsift communities` read-only; it should not acquire the writer lock
 - [ ] [#badscope] [recommended] Make `tsift search --scope` fail on unknown scopes instead of silently searching the workspace root
 - [ ] [#lintdb] [recommended] Repair `tsift lint` index discovery; it still looks for `symbols.db` and ignores root `.tsift/index.db`
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

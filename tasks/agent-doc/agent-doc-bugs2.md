@@ -668,7 +668,7 @@ Verification:
 Note: I left the unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/route.rs`, and the unstaged non-#patchregr portions of `src/repair.rs`) untouched.
 
 ❯ do #nodiffswallow. spec-test-build-install-commit-push
-### Re: #nodiffswallow — gpt-5 (HEAD)
+### Re: #nodiffswallow — gpt-5
 
 Implemented `#nodiffswallow` in `src/agent-doc` and pushed commit `fb00851` to `origin/20260422/codex-agent-backend`.
 
@@ -688,8 +688,26 @@ Verification:
 
 Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/route.rs`) untouched.
 
-#commit-push
-<!-- agent:boundary:5e6d0893 -->
+❯ #commit-push
+### Re: #commit-push — gpt-5
+
+Committed and pushed every pre-existing uncommitted workspace change I found across the dirty repos.
+
+Repos pushed:
+- `src/session-share/claudescore.com`: `de77deb`
+- `src/session-share`: `65b20fc`
+- `src/boost-client`: `fc15913`
+- `src/tmux-router`: `c0cd52c`
+- `src/tsift`: `61bd2f2`
+- `src/agent-doc`: `c7dc441`
+- `agent-loop` root: `ca957e6c3`
+
+Notes:
+- I included the untracked `src/session-share/claudescore.com/.tsift/` sqlite state because the request was to commit all uncommitted files.
+- `src/session-share`'s pre-commit hook passed and emitted only an advisory about a possible news entry; it did not block the commit.
+
+This response closeout will be committed locally by `agent-doc finalize` as the normal document-cycle commit.
+<!-- agent:boundary:e6cc4a34 -->
 <!-- /agent:exchange -->
 
 <!--

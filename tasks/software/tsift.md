@@ -407,7 +407,9 @@ Commit/push:
 - `btakita/tsift@e40793d` (`fix: scope summarize extraction symbol context`) pushed to `origin/main`.
 
 Top of backlog: `#tmv7`.
-<!-- agent:boundary:965f1d58 -->
+
+#code-review
+<!-- agent:boundary:6e5bcda7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -416,7 +418,6 @@ Top of backlog: `#tmv7`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#sumscope] fix workspace summarize symbol-index selection and same-path collisions
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

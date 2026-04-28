@@ -91,21 +91,25 @@ Verification:
 - `cargo test route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path -- --exact`
 
 Note: I also reran the broader crate suite, but existing tmux/mock-start route tests remain flaky in this environment. I left the unrelated local edits in `src/start.rs` and `specs/supervisor.md` untouched.
-<!-- agent:boundary:7faefcf7 -->
+
+continue
+I’m blocked on one concrete recovery ambiguity. The file contains a bypassed response to `do #backlogreplay. spec-test-build-install-commit-push` that never went through `agent-doc`, and the live document also has a later `continue` edit on top of it. Should I commit that stranded `#ctrldmenu` response as the previous turn and then continue from there, or discard it and treat `continue` as the only live prompt?
+<!-- agent:boundary:8c85156f -->
 <!-- /agent:exchange -->
 
 <!--
-In a previous session in this document I saw:
-```
-• Ran agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md
-  └ [session-check] INTERRUPTED: cycle `cycle-1777359800675` is still `preflight_started` (preflight_started) — cycle
-    started but no write/commit followed
-```
+do #backlogreplay. spec-test-build-install-commit-push
+### Re: Ctrl+D supervisor quit menu regression — gpt-5
+
+Captured this as `#ctrldmenu` and added a plan in `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`.
+
+Current evidence points to an intentional-but-wrong behavior change in `src/agent-doc/src/start.rs`: the clean-exit strategy now treats Codex `Ctrl+D` / stdin EOF as `RestartFresh`, and the active branch logs `ctrl_d_restart_fresh` instead of presenting the cooked-mode `Press Enter to restart, or 'q' to exit.` menu. `src/agent-doc/specs/supervisor.md` was updated to match that restart-fresh behavior, so the fix needs to restore the quit-prompt contract in both code and spec and add a regression that proves `Ctrl+D` does not bypass the quit menu.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`
 - [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`

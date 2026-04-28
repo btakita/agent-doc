@@ -673,7 +673,7 @@ Tested on this repo after install:
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@cfcad16` pushed to `origin/main`.
-<!-- agent:boundary:868c92b3 -->
+<!-- agent:boundary:51211df4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -682,7 +682,6 @@ Commit: `btakita/tsift@cfcad16` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#lerr] Surface lock-owner and rollback-journal diagnostics directly in autoindex/write-contention errors
 - [ ] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
 - [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->

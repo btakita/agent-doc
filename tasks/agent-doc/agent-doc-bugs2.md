@@ -174,7 +174,7 @@ Verification in `src/agent-doc`:
 I also checked the live CLI syntax locally: `codex resume --help` confirms interactive resume accepts `-s/--sandbox`, so preserving the original Codex sandbox flags on resume is valid.
 
 Because `src/agent-doc` already had unrelated local edits in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs`, I committed only `src/harness.rs` for this fix.
-<!-- agent:boundary:a84f49cc -->
+<!-- agent:boundary:227894e1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -183,5 +183,4 @@ Because `src/agent-doc` already had unrelated local edits in `runbooks/pending-o
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#permresume] [recommended] Preserve Codex sandbox args across interactive resume so codex_args like -s danger-full-access still apply after restart
 <!-- /agent:backlog -->

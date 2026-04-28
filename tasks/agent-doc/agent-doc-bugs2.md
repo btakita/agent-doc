@@ -23,8 +23,8 @@ prompt_presets:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-Compacted exchange summary: this session tracked agent-doc workflow bugs across patchback/commit-boundary recovery, tmux route/start/resync ownership, startup-miss and routed-cycle acknowledgment, backlog shadow/replay guards, compaction dispatch, tail-patch fail-closed behavior, and prompt-diff visibility. Implemented fixes were pushed across src/agent-doc, most recently #patchbypass () for exchange-only recovery of missing commit boundaries. Key outcomes: route/start now health-check or reuse live panes instead of spawning/killing duplicates; resync preserves correctly bound live sessions; closeout paths share strict commit/session-check enforcement; backlog/history guards fail closed when work drifts out of tracked components; and explicit-baseline writes keep concurrent user prompts visible in the next diff. No open backlog items remain in this document and no unanswered user prompt remained beyond the compaction request.
-<!-- agent:boundary:fe3a4909 -->
+Compacted exchange summary: this session tracked agent-doc workflow bugs across patchback/commit-boundary recovery, tmux route/start/resync ownership, startup-miss and routed-cycle acknowledgment, backlog shadow/replay guards, compaction dispatch, tail-patch fail-closed behavior, and prompt-diff visibility. Implemented fixes were pushed across src/agent-doc, most recently #patchbypass (b1874f1) for exchange-only recovery of missing commit boundaries. Key outcomes: route/start now health-check or reuse live panes instead of spawning/killing duplicates; resync preserves correctly bound live sessions; closeout paths share strict commit/session-check enforcement; backlog/history guards fail closed when work drifts out of tracked components; and explicit-baseline writes keep concurrent user prompts visible in the next diff. No open backlog items remain in this document and no unanswered user prompt remained beyond the compaction request.
+<!-- agent:boundary:5d1e66dd -->
 <!-- /agent:exchange -->
 
 <!--

@@ -240,6 +240,9 @@ Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 - each restart spawns at most one auto-trigger thread
 - when the child exits, that thread is explicitly cancelled and joined before
   the next restart iteration begins
+- if a resumed child exits cleanly before the auto-trigger ever sends, that
+  still counts as a failed resume handoff; clean exit alone does not clear the
+  failed-resume guard
 - stale auto-trigger workers must never outlive the child they were waiting on,
   so they cannot inject commands into a later replacement child in the same pane
 - after the prompt appears, the trigger command is written through the

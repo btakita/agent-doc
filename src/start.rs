@@ -168,10 +168,6 @@ impl AutoTriggerOutcome {
             Self::Cancelled => "cancelled",
         }
     }
-
-    fn is_failed_resume(self) -> bool {
-        matches!(self, Self::Timeout | Self::SendFailed)
-    }
 }
 
 #[derive(Debug)]
@@ -246,6 +242,23 @@ fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitRe
         crate::harness::CleanExitBehavior::PromptUser => CleanExitResolution::PromptUser,
         crate::harness::CleanExitBehavior::RestartContinue => CleanExitResolution::RestartContinue,
     }
+}
+
+fn resume_handoff_failed(
+    auto_trigger_enabled: bool,
+    ctrl_d_forwarded: bool,
+    outcome: AutoTriggerOutcome,
+) -> bool {
+    if !auto_trigger_enabled || ctrl_d_forwarded {
+        return false;
+    }
+    matches!(
+        outcome,
+        AutoTriggerOutcome::Pending
+            | AutoTriggerOutcome::Timeout
+            | AutoTriggerOutcome::SendFailed
+            | AutoTriggerOutcome::Cancelled
+    )
 }
 
 fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
@@ -1261,6 +1274,10 @@ pub fn run(file: &Path) -> Result<()> {
         let auto_trigger_outcome =
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed));
 
+        let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
+        let failed_resume =
+            resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
+
         if matches!(
             auto_trigger_outcome,
             AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
@@ -1283,7 +1300,7 @@ pub fn run(file: &Path) -> Result<()> {
                 harness.binary,
                 code,
                 auto_trigger_outcome.as_str(),
-                shared.ctrl_d_forwarded.load(Ordering::Relaxed),
+                ctrl_d_forwarded,
                 policy.state.as_str(),
                 action_name
             ),
@@ -1313,7 +1330,7 @@ pub fn run(file: &Path) -> Result<()> {
                         restart_count += 1;
                     }
                     CleanExitResolution::RestartContinue => {
-                        if auto_trigger_outcome.is_failed_resume() {
+                        if failed_resume {
                             let now = Instant::now();
                             let recent_failures = failed_resume_tracker.record(now);
                             log_event(
@@ -1357,7 +1374,7 @@ pub fn run(file: &Path) -> Result<()> {
                             raw_mode.resume();
                             first_run = true;
                             restart_count += 1;
-                        } else if shared.ctrl_d_forwarded.load(Ordering::Relaxed) {
+                        } else if ctrl_d_forwarded {
                             raw_mode.suspend();
                             eprintln!("\n{} exited (stdin closed).", harness.binary);
                             eprintln!("Press Enter to restart, or 'q' to exit.");
@@ -1953,11 +1970,51 @@ mod tests {
     }
 
     #[test]
-    fn auto_trigger_outcome_marks_resume_failures() {
-        assert!(AutoTriggerOutcome::Timeout.is_failed_resume());
-        assert!(AutoTriggerOutcome::SendFailed.is_failed_resume());
-        assert!(!AutoTriggerOutcome::Sent.is_failed_resume());
-        assert!(!AutoTriggerOutcome::Cancelled.is_failed_resume());
+    fn resume_handoff_failed_treats_cancelled_resume_as_failure() {
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Cancelled
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Pending
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Timeout
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::SendFailed
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Sent
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::NotNeeded
+        ));
+    }
+
+    #[test]
+    fn resume_handoff_failed_ignores_ctrl_d_shutdown() {
+        assert!(!resume_handoff_failed(
+            true,
+            true,
+            AutoTriggerOutcome::Cancelled
+        ));
+        assert!(!resume_handoff_failed(
+            false,
+            false,
+            AutoTriggerOutcome::Cancelled
+        ));
     }
 
     #[test]

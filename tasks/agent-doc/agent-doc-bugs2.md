@@ -486,7 +486,35 @@ Verification:
 
 Note:
 - I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) and `src/tmux-router/src/tmux.rs` untouched.
-<!-- agent:boundary:cefa139c -->
+
+❯ Why was tmux window from a previous tmux window swapped into the wrong tmux session? Why did the entire tmux window just crash? spec-test-build-install-commit-push
+### Re: cross-session `start` pane swap/crash — gpt-5
+
+Root cause was the order of operations in `start.rs`, not the new focus helper itself.
+
+`agent-doc start <file>` was doing `relocate_if_wrong_session()` on the **current launcher pane** before it checked whether the document already had a live owner somewhere else. That relocation is a real cross-session `join-pane` move into the project session anchor. So when you invoked `start` from another tmux session, the transient launcher pane could be physically moved out of its original window/session first.
+
+That explains both symptoms:
+- the pane/window looked like it "swapped into the wrong tmux session" because `join-pane` literally moved it there
+- the original tmux window could appear to "crash" because removing the only pane from that window makes tmux close the source window
+
+The follow-up reuse/focus path was then running after that damage, so even a successful reuse could leave the caller seeing a vanished window and no useful activity in the moved launcher pane.
+
+Fixed in `src/agent-doc` and pushed as `1996517` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `start` now checks for an existing live owner first and only auto-relocates the current pane if it is actually falling through to a **fresh start in the current pane**
+- documented the invariant in `SPEC.md` and `specs/07-commands.md`
+- added a regression in `src/start.rs` covering the launcher-pane/session invariant
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) untouched.
+<!-- agent:boundary:b233572a -->
 <!-- /agent:exchange -->
 
 <!--

@@ -638,6 +638,70 @@ enum ExistingSessionPaneAction {
     ClearStale(String),
 }
 
+/// Supervisor health as observed by the `start` reuse probe.
+#[derive(Debug)]
+enum SupervisorHealth {
+    /// Supervisor is reachable, child is running and healthy.
+    Healthy,
+    /// Supervisor is reachable but child is not running or supervisor is halted/degraded.
+    NeedsRestart,
+    /// Socket exists but supervisor did not respond or errored.
+    Unreachable,
+    /// No supervisor socket found at all.
+    NoSocket,
+}
+
+fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
+    let canonical = match file.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return SupervisorHealth::NoSocket,
+    };
+    let project_root = match snapshot::find_project_root(&canonical) {
+        Some(r) => r,
+        None => return SupervisorHealth::NoSocket,
+    };
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    if !sock.exists() {
+        return SupervisorHealth::NoSocket;
+    }
+    match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
+        Ok(resp) if resp.ok => {
+            if let Some(data) = &resp.data {
+                let running = data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                if running && state == "healthy" {
+                    SupervisorHealth::Healthy
+                } else {
+                    SupervisorHealth::NeedsRestart
+                }
+            } else {
+                SupervisorHealth::NeedsRestart
+            }
+        }
+        Ok(_) => SupervisorHealth::Unreachable,
+        Err(_) => SupervisorHealth::Unreachable,
+    }
+}
+
+fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
+    let canonical = match file.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let project_root = match snapshot::find_project_root(&canonical) {
+        Some(r) => r,
+        None => return false,
+    };
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    let method = IpcMethod::Restart {
+        mode: "continue".to_string(),
+    };
+    match crate::supervisor::ipc::send_command(&sock, &method) {
+        Ok(resp) => resp.ok,
+        Err(_) => false,
+    }
+}
+
 fn existing_session_pane_action(
     tmux: &sessions::Tmux,
     session_id: &str,
@@ -1184,19 +1248,62 @@ pub fn run(file: &Path) -> Result<()> {
                         existing_pane
                     );
                 }
-                eprintln!(
-                    "session {} for {} is running in pane {} — switching focus",
-                    &session_id[..8.min(session_id.len())],
-                    file.display(),
-                    existing_pane
-                );
-                if let Err(e) = tmux.select_pane(&existing_pane) {
-                    eprintln!(
-                        "[start] warning: failed to focus pane {}: {}",
-                        existing_pane, e
-                    );
+                match query_supervisor_health(file, &session_id) {
+                    SupervisorHealth::Healthy => {
+                        eprintln!(
+                            "session {} for {} is running in pane {} — switching focus",
+                            &session_id[..8.min(session_id.len())],
+                            file.display(),
+                            existing_pane
+                        );
+                        if let Err(e) = tmux.select_pane(&existing_pane) {
+                            eprintln!(
+                                "[start] warning: failed to focus pane {}: {}",
+                                existing_pane, e
+                            );
+                        }
+                        return Ok(());
+                    }
+                    SupervisorHealth::NeedsRestart => {
+                        eprintln!(
+                            "session {} for {} in pane {} is not healthy — restarting via supervisor",
+                            &session_id[..8.min(session_id.len())],
+                            file.display(),
+                            existing_pane
+                        );
+                        if restart_via_supervisor(file, &session_id) {
+                            if let Err(e) = tmux.select_pane(&existing_pane) {
+                                eprintln!(
+                                    "[start] warning: failed to focus pane {}: {}",
+                                    existing_pane, e
+                                );
+                            }
+                            return Ok(());
+                        }
+                        eprintln!(
+                            "[start] supervisor restart failed — deregistering and starting fresh"
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                    SupervisorHealth::Unreachable => {
+                        eprintln!(
+                            "session {} for {} in pane {} has unreachable supervisor — deregistering and starting fresh",
+                            &session_id[..8.min(session_id.len())],
+                            file.display(),
+                            existing_pane
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                    SupervisorHealth::NoSocket => {
+                        eprintln!(
+                            "session {} for {} in pane {} has no supervisor socket — deregistering and starting fresh",
+                            &session_id[..8.min(session_id.len())],
+                            file.display(),
+                            existing_pane
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
                 }
-                return Ok(());
             }
             ExistingSessionPaneAction::ClearStale(stale_pane) => {
                 eprintln!(
@@ -2724,5 +2831,141 @@ mod tests {
             // the code uses tcflush as best-effort cleanup.
             let _ = ret;
         }
+    }
+
+    #[test]
+    fn supervisor_health_no_socket_for_nonexistent_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let fake_file = tmp.path().join("nonexistent.md");
+        let health = query_supervisor_health(&fake_file, "no-such-session");
+        assert!(matches!(health, SupervisorHealth::NoSocket));
+    }
+
+    #[test]
+    fn supervisor_health_no_socket_when_no_agent_doc_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let health = query_supervisor_health(&file, "some-session-id");
+        assert!(matches!(health, SupervisorHealth::NoSocket));
+    }
+
+    #[test]
+    fn supervisor_health_unreachable_with_stale_socket() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc").join("supervisor");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        let sock_path = agent_doc_dir.join("test-session.sock");
+        std::fs::write(&sock_path, "").unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let health = query_supervisor_health(&file, "test-session");
+        assert!(matches!(health, SupervisorHealth::Unreachable));
+    }
+
+    #[test]
+    fn supervisor_health_healthy_with_live_supervisor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let session_id = "health-test-session";
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            tmp.path(),
+            session_id,
+            |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "cwd_source": "test",
+                })),
+                _ => IpcResponse::err("not implemented"),
+            },
+        )
+        .unwrap();
+        let health = query_supervisor_health(&file, session_id);
+        assert!(matches!(health, SupervisorHealth::Healthy));
+        drop(ipc);
+    }
+
+    #[test]
+    fn supervisor_health_needs_restart_when_halted() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let session_id = "halted-test-session";
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            tmp.path(),
+            session_id,
+            |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": false,
+                    "state": "halted",
+                    "restart_count": 5,
+                    "cwd_source": "test",
+                })),
+                _ => IpcResponse::err("not implemented"),
+            },
+        )
+        .unwrap();
+        let health = query_supervisor_health(&file, session_id);
+        assert!(matches!(health, SupervisorHealth::NeedsRestart));
+        drop(ipc);
+    }
+
+    #[test]
+    fn supervisor_health_needs_restart_when_not_running() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let session_id = "notrun-test-session";
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            tmp.path(),
+            session_id,
+            |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": false,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "cwd_source": "test",
+                })),
+                _ => IpcResponse::err("not implemented"),
+            },
+        )
+        .unwrap();
+        let health = query_supervisor_health(&file, session_id);
+        assert!(matches!(health, SupervisorHealth::NeedsRestart));
+        drop(ipc);
+    }
+
+    #[test]
+    fn restart_via_supervisor_returns_false_for_nonexistent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        assert!(!restart_via_supervisor(&file, "no-such-session"));
+    }
+
+    #[test]
+    fn restart_via_supervisor_succeeds_with_live_supervisor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "# test").unwrap();
+        let session_id = "restart-test-session";
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            tmp.path(),
+            session_id,
+            |method| match method {
+                IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+                _ => IpcResponse::err("not implemented"),
+            },
+        )
+        .unwrap();
+        assert!(restart_via_supervisor(&file, session_id));
+        drop(ipc);
     }
 }

@@ -96,7 +96,11 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 
 1. Ensure session UUID in frontmatter (generate if missing)
 2. Read `$TMUX_PANE` (must be inside tmux)
-3. If another tmux pane still proves live ownership of that same document session, focus and reuse that pane instead of registering or spawning a duplicate supervisor in the current pane.
+3. If another tmux pane still proves live ownership of that same document session, probe its health before deciding what to do:
+   - **Healthy** (supervisor IPC returns `running=true, state="healthy"`) → focus and reuse that pane
+   - **Needs restart** (supervisor reachable but child not running or state is degraded/halted) → send `restart` via supervisor IPC, focus pane on success; deregister and start fresh on failure
+   - **Unreachable** (socket exists but supervisor does not respond) → deregister and start fresh in the current pane
+   - **No socket** (no supervisor socket found) → deregister and start fresh in the current pane
 4. If `sessions.json` points at a different **alive** pane but no live owner can still be proven for the document, clear that stale registration before continuing in the current pane.
 5. Register session → pane in `sessions.json`
 6. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.

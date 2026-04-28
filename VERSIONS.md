@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`start` reuse now probes supervisor health before switching focus.** When `start` finds a live owner pane, it queries the supervisor IPC `state` method. Healthy sessions get focus-switched as before. Unhealthy sessions (halted/degraded/not-running) get a `restart` IPC command; if that fails, the stale registration is cleared and a fresh supervisor starts in the current pane. Panes with unreachable or missing supervisor sockets are deregistered and replaced. This closes the case where `agent-doc start <file>` silently switched to a stuck or dead session.
+
 - **Successful duplicate `start` reuse no longer prints shared `[sync]` probe diagnostics.** `start.rs` now uses a quiet live-owner lookup when it is only deciding whether to reuse an already-running pane, so the happy path emits only the start-level reuse/focus messages. `route` and `resync` keep the richer `[sync]` owner-proof logging they use for recovery and diagnostics.
 
 - **Duplicate live `start` now reuses the existing pane instead of erroring.** `start.rs` now excludes the current transient `agent-doc start <file>` pane when probing for live owners, focuses any already-running owner it proves, and re-registers to that pane when the registry was stale. If the registry points at a different alive pane but no live owner can still be proven, `start` now clears that stale binding and proceeds in the current pane instead of failing closed forever. Added start-level regression coverage for reuse, stale-alive clearing, and same-pane/dead-pane cases.

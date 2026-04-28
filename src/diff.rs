@@ -1440,7 +1440,7 @@ fn normalize_imperative_candidate(line: &str) -> Option<String> {
         && let Some(close) = rest.find(']')
     {
         let id = &rest[..close];
-        if !id.is_empty() && id.len() <= 8 && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        if crate::pending::is_valid_pending_id(id) {
             trimmed = rest[close + 1..].trim_start();
         }
     }
@@ -3365,6 +3365,18 @@ Please fix the bug.\n\
         assert_eq!(
             directives,
             vec!["Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE"]
+        );
+        assert!(diff_contains_imperative_directive(diff));
+    }
+
+    #[test]
+    fn extract_imperative_directives_detects_long_custom_pending_id() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n\
+            +- [ ] [#sdig2matrix] Fix the custom backlog id normalization path\n";
+        let directives = extract_imperative_directives(diff);
+        assert_eq!(
+            directives,
+            vec!["Fix the custom backlog id normalization path"]
         );
         assert!(diff_contains_imperative_directive(diff));
     }

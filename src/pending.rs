@@ -119,7 +119,7 @@ pub fn validate_transition(from: PendingState, op: PendingOp) -> Result<Transiti
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingItem {
     /// Pending item id (no `#` prefix). Generated ids are lowercase base32; custom ids
-    /// may be any 1-8 ASCII alphanumeric string and are normalized to lowercase.
+    /// may be any non-empty ASCII alphanumeric string and are normalized to lowercase.
     pub id: String,
     /// Lifecycle state encoded by the GFM checkbox.
     pub state: PendingState,
@@ -255,7 +255,7 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         if let Some(close) = after_hash.find(']') {
             let id_raw = &after_hash[..close];
             let tail = after_hash[close + 1..].trim_start();
-            if is_valid_hash_id(id_raw) {
+            if is_valid_pending_id(id_raw) {
                 (id_raw.to_lowercase(), tail.to_string())
             } else if id_raw.is_empty() {
                 // Bare [#] placeholder — consume it, text starts after ]
@@ -278,8 +278,8 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
     })
 }
 
-fn is_valid_hash_id(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 8 && s.chars().all(|c| c.is_ascii_alphanumeric())
+pub(crate) fn is_valid_pending_id(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,7 +319,7 @@ pub(crate) fn ensure_no_leading_custom_id_prefix(text: &str, context: &str) -> R
 
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
-        "pending add: invalid custom id `{}` — ids must be 1-8 ASCII alphanumeric characters",
+        "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings",
         raw_id.trim()
     )
 }
@@ -334,7 +334,7 @@ fn parse_explicit_custom_id_prefix(rest: &str) -> Result<(Option<String>, String
     if custom_id.is_empty() {
         bail!("pending add: empty custom id after `id=` — expected `id=<id> <text>`");
     }
-    if !is_valid_hash_id(custom_id) {
+    if !is_valid_pending_id(custom_id) {
         return Err(custom_id_error(raw_id));
     }
     let remainder = remainder.trim();
@@ -359,7 +359,7 @@ fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, St
     if raw_id.is_empty() {
         bail!("pending add: bare `[#]` placeholder is invalid — use `id=<id> <text>` or omit it");
     }
-    if !is_valid_hash_id(raw_id) {
+    if !is_valid_pending_id(raw_id) {
         return Err(custom_id_error(raw_id));
     }
     if remainder.is_empty() {
@@ -1035,6 +1035,13 @@ mod tests {
     }
 
     #[test]
+    fn op_add_accepts_long_bracketed_custom_id_prefix() {
+        let (new_body, id) = op_add("", "[#sdig2matrix] release checklist", DOC_ID, false).unwrap();
+        assert_eq!(id, "sdig2matrix");
+        assert!(new_body.contains("- [ ] [#sdig2matrix] release checklist"));
+    }
+
+    #[test]
     fn op_add_rejects_invalid_custom_id_prefix() {
         let err = op_add("", "id=bad-id release checklist", DOC_ID, false).unwrap_err();
         assert!(format!("{}", err).contains("invalid custom id"));
@@ -1193,6 +1200,14 @@ mod tests {
             "second text has residual [#]: {}",
             items[1].text
         );
+    }
+
+    #[test]
+    fn backfill_preserves_long_custom_id() {
+        let body = "- [ ] [#sdig2matrix] Fixture evidence matrix\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(!changed);
+        assert_eq!(new_body, body);
     }
 
     #[test]

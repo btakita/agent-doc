@@ -105,6 +105,22 @@ fn pending_add_accepts_bracketed_custom_id_prefix() {
 }
 
 #[test]
+fn pending_add_accepts_long_bracketed_custom_id_prefix() {
+    let (_tmp, doc) = setup_doc("");
+    agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "add",
+            "[#sdig2matrix] first task",
+        ])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#sdig2matrix] first task"));
+}
+
+#[test]
 fn pending_add_rejects_invalid_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
@@ -243,6 +259,24 @@ fn write_pending_add_accepts_bracketed_custom_id_prefix() {
 }
 
 #[test]
+fn write_pending_add_accepts_long_bracketed_custom_id_prefix() {
+    let (_tmp, doc) = setup_doc("");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add",
+            "[#sdig2matrix] new task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#sdig2matrix] new task"));
+}
+
+#[test]
 fn write_normalizes_replace_pending_block_into_pending_ops() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
     let payload = concat!(
@@ -266,6 +300,35 @@ fn write_normalizes_replace_pending_block_into_pending_ops() {
     assert!(content.contains("- [x] [#aaaa] existing"));
     assert!(content.contains("- [ ] [#bbbb] add regression coverage"));
     assert!(!content.contains("replace:pending"));
+}
+
+#[test]
+fn write_normalizes_replace_pending_block_preserves_long_custom_id() {
+    let (_tmp, doc) = setup_doc("");
+    let payload = concat!(
+        "<!-- patch:exchange -->\n",
+        "### Re: topic — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /patch:exchange -->\n",
+        "<!-- replace:pending -->\n",
+        "- [ ] [#sdig2matrix] Fixture evidence matrix\n",
+        "<!-- /replace:pending -->\n",
+    );
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(payload)
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#sdig2matrix] Fixture evidence matrix"));
+    assert_eq!(
+        content.matches("[#").count(),
+        1,
+        "unexpected duplicate id in: {}",
+        content
+    );
+    assert_eq!(content.matches("[#sdig2matrix]").count(), 1);
 }
 
 #[test]

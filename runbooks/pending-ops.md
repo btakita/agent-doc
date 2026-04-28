@@ -46,7 +46,7 @@ agent-doc write plan.md --pending-add "id=fix42 add regression test"
 ```
 
 Rules:
-- `custom` is 1-8 ASCII alphanumeric characters.
+- `custom` is a non-empty ASCII alphanumeric string.
 - `id=#spec1 ...` is also accepted; the leading `#` is stripped.
 - Leading `[#spec1] ...` is accepted as compatibility input and normalized to the
   same custom id, but `id=<custom> ` remains the preferred form for agents.

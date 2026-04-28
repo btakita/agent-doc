@@ -287,7 +287,7 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1334 passed, 3 pre-existing tmux failures unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:a7564739 -->
+<!-- agent:boundary:45aa90a1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -296,7 +296,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#toctou1] TOCTOU race in write.rs consume_queue_prompt — read/parse/write cycle not atomic under document lock
 - [ ] [#envvar1] Unsafe env::set_var in write.rs run_command — not thread-safe for FFI/plugin callers
 - [ ] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
 - [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing

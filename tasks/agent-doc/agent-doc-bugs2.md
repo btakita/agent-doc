@@ -373,7 +373,7 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1349 passed, 1 pre-existing codex hook test failure unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:a345d768 -->
+<!-- agent:boundary:56dde666 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -382,7 +382,6 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
 - [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk
 - [ ] [#ipc1] IPC timeout leaves orphaned patch files — stale baseline could corrupt on next pickup
 - [ ] [#dedup1] Dedup guard fingerprint uses only 3 lines — false positive risk on short responses

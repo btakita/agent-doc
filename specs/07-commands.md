@@ -704,7 +704,7 @@ The sync path uses `provision_pane` instead of the standard auto-start. This var
 
 The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `provision_pane` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
 
-Before lazy-claim or auto-start, route also scans tmux for an already-running pane whose process tree is executing the same document and re-registers that pane when found. This prevents stale-registry drift from spawning a parallel fallback session for a document that is already live somewhere else.
+Before lazy-claim or auto-start, route also scans tmux for an already-running pane whose process tree is executing the same document and re-registers that pane when found. This prevents stale-registry drift from spawning a parallel fallback session for a document that is already live somewhere else. The same ownership proof now applies to an *alive* registered pane: if the registered pane is still up but no live process tree in tmux proves it owns the document anymore, route fails closed instead of blindly sending `agent-doc <file>` into that pane. If another pane does prove ownership, route re-registers there first and dispatches to the recovered live owner.
 
 Cross-session stash rescue is intentionally non-destructive: if sync finds a live stashed pane for the document in another tmux session, it logs the mismatch and preserves that pane in place instead of moving it across sessions or killing it during rescue.
 
@@ -850,7 +850,7 @@ Orchestration items are classified before execution. Items starting with `/` are
 
 1. **Inline execution** — `/model <tier>` updates the orchestrate-local model override for subsequent prompts (no document mutation); `/compact [file]` delegates to `agent-doc compact` + `agent-doc commit` as subprocesses.
 2. **Supervisor IPC** — if a supervisor socket is active for the document session (`.agent-doc/supervisor/<uuid>.sock`), the command text is sent via the `inject` IPC method, which writes it to the harness's pty stdin.
-3. **tmux send-keys** — if the document's session has a registered pane in `sessions.json`, the command is sent via `tmux send-keys` with Enter-retry polling (30s timeout).
+3. **tmux send-keys** — if the document's session has a registered pane in `sessions.json`, route first verifies that some live tmux process tree still proves document ownership for that session. When the registered pane is stale but another pane is the live owner, route re-registers there and sends via `tmux send-keys` with Enter-retry polling (30s timeout). When no live owner can be proven, dispatch fails closed instead of sending the command into an ambiguous pane.
 4. **Failure** — commands that cannot be dispatched through any path fail immediately; orchestration halts.
 
 **`/model` state:** the model override updated by `/model <tier>` applies to subsequent prompt items in the same orchestration batch. It does not persist to frontmatter.

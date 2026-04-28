@@ -16,11 +16,14 @@
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
 //!   5. Looks up the registered pane in `sessions.json`.
-//!   6. If pane is alive: sends the trigger command via `send_command`. Pane IDs (`%N`)
-//!      are globally unique per tmux server, so `target_session` matching is not required
-//!      for routing. `rescue_from_stash` is attempted (it self-gates on session match) so
-//!      panes stashed within the target session get rescued, but panes in other sessions
-//!      are left in place. When the document already has prompt-bearing user drift after a
+//!   6. If pane is alive: first verify that a live process tree still proves the
+//!      document is running there. If the live owner is another pane, re-register there;
+//!      if no live owner exists, fail closed instead of sending the trigger into an
+//!      ambiguous shell. Pane IDs (`%N`) are globally unique per tmux server, so
+//!      `target_session` matching is not required once ownership is proven.
+//!      `rescue_from_stash` is attempted (it self-gates on session match) so panes
+//!      stashed within the target session get rescued, but panes in other sessions are
+//!      left in place. When the document already has prompt-bearing user drift after a
 //!      closed cycle, the routed trigger must also produce a new per-document cycle
 //!      acknowledgment before route returns success; otherwise route fails closed.
 //!   7. If pane is dead and was previously registered: lazy-claims to an active pane via
@@ -70,10 +73,13 @@
 //!   currently lives in. This matters when `route run` is invoked from outside tmux (e.g.
 //!   IDE `Run Agent Doc`), where `target_session` falls back to a constant and may not
 //!   match the real session of the claimed pane.
+//! - **Registered-pane ownership proof**: an alive registered pane is not sufficient on
+//!   its own. Route first scans tmux for a live process tree that still mentions the
+//!   document path. If that owner is another pane, route re-registers there. If no live
+//!   owner exists, route fails closed instead of dispatching into an ambiguous pane.
 //! - **Non-agent process guard (lazy-claim only)**: `is_agent_process()` gates the
 //!   lazy-claim path — `find_target_pane` will not adopt a pane running corky/shell
-//!   when the registered pane is dead. Strategy 1 (alive registered pane) does NOT apply
-//!   this guard: the registration is trusted as the source of truth for routing.
+//!   when the registered pane is dead.
 //! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
 //!   automatically rejoined into the `agent-doc` window before routing, without
 //!   swapping another visible pane back into stash.
@@ -105,6 +111,10 @@
 //! - (aspirational) `stash_rescue`: pane in stash window → rescued to agent-doc window before send
 //! - `wrong_session_pane_still_receives_send`: alive pane in a session different from
 //!   `target_session` → trigger command is sent to that pane (no new pane created)
+//! - `alive_registered_pane_without_live_owner_fails_closed`: live registered pane with no
+//!   file-owning process tree → route fails closed before sending into the pane
+//! - `alive_registered_pane_reregisters_to_live_owner`: stale live registration + another
+//!   pane running the file → route re-registers to the real live owner
 //! - (aspirational) `debounce_idle`: file written rapidly → routing waits for mtime to settle
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
@@ -122,6 +132,31 @@ use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 enum CommandDispatchStatus {
     Accepted,
     TimedOut,
+}
+
+fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-t", pane_id, "-p", format])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
+    let pane_pid = pane_display_value(tmux, pane_id, "#{pane_pid}")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "?".to_string());
+    let pane_session = pane_display_value(tmux, pane_id, "#{session_name}")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "?".to_string());
+    let current_command = pane_display_value(tmux, pane_id, "#{pane_current_command}")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "?".to_string());
+    format!(
+        "pane={} pane_pid={} pane_session={} current_command={}",
+        pane_id, pane_pid, pane_session, current_command
+    )
 }
 
 /// Returns true if the pane is running an agent process for the given harness.
@@ -328,16 +363,74 @@ fn resolve_or_create_pane(
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_marker =
         pending_prompt_bearing_marker_for_route(file, cycle_baseline.as_ref())?;
+    let live_owner = if registered.is_some() {
+        crate::sync::find_alive_pane_for_file(tmux, file_path)
+    } else {
+        None
+    };
 
-    // Strategy 1: Alive registered pane — unconditional send.
-    // Pane IDs (%N) are globally unique per tmux server, so target_session
-    // matching is irrelevant for routing. The registered pane was explicitly
-    // claimed for this document; send there regardless of session or process.
+    // Strategy 1: Alive registered pane — reuse only when a live process tree
+    // still proves the document is running there. Pane IDs (%N) are globally
+    // unique per tmux server, so target_session matching stays irrelevant once
+    // ownership is proven.
     //
     // rescue_from_stash self-gates on target_session match, so it is a no-op
     // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
+            match live_owner.as_deref() {
+                Some(owner) if owner != registered_pane => {
+                    eprintln!(
+                        "[route] registered pane {} is alive, but live owner for {} is pane {} — re-registering",
+                        registered_pane, file_path, owner
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_live_owner_reregistered file={} registered={} live_owner={} {}",
+                            file_path,
+                            registered_pane,
+                            owner,
+                            pane_route_provenance(tmux, registered_pane)
+                        ),
+                    );
+                    sessions::register(session_id, owner, file_path)?;
+                    rescue_from_stash(
+                        tmux,
+                        owner,
+                        session_id,
+                        file_path,
+                        target_session,
+                        is_first_column(file, col_args),
+                    );
+                    send_command(tmux, owner, file_path, harness)?;
+                    require_routed_cycle_ack(
+                        file,
+                        owner,
+                        harness,
+                        cycle_baseline.as_ref(),
+                        pending_prompt_marker.as_deref(),
+                    )?;
+                    return Ok(owner.to_string());
+                }
+                Some(_) => {}
+                None => {
+                    let provenance = pane_route_provenance(tmux, registered_pane);
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_registered_pane_ambiguous file={} {}",
+                            file_path, provenance
+                        ),
+                    );
+                    anyhow::bail!(
+                        "registered pane {} is alive but no live agent-doc session currently owns {} ({}). Refusing to route into an ambiguous pane; restart or reclaim the session instead",
+                        registered_pane,
+                        file_path,
+                        provenance
+                    );
+                }
+            }
             rescue_from_stash(
                 tmux,
                 registered_pane,
@@ -375,7 +468,7 @@ fn resolve_or_create_pane(
         .map(|e| e.pane.clone())
         .collect();
     if registered.is_some()
-        && let Some(existing) = crate::sync::find_alive_pane_for_file(tmux, file_path)
+        && let Some(existing) = live_owner
     {
         eprintln!(
             "[route] found existing running pane {} for {}, re-registering",
@@ -1773,6 +1866,41 @@ mod tests {
         )
     }
 
+    fn write_mock_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf \"> \\n\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\ncat\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
+    fn launch_mock_registered_agent_doc(
+        iso: &IsolatedTmux,
+        pane: &str,
+        script: &Path,
+        file: &Path,
+    ) {
+        iso.send_keys(
+            pane,
+            &format!("exec {} {}", script.display(), file.display()),
+        )
+        .unwrap();
+        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
+        assert!(
+            content.contains("\n>"),
+            "mock agent-doc session should present a prompt, got: {content}"
+        );
+    }
+
     #[test]
     fn wait_for_agent_ready_detects_prompt() {
         let iso = IsolatedTmux::new("route-test-ready");
@@ -2104,12 +2232,6 @@ history line
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
-        iso.send_keys(
-            &pane,
-            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
-        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2117,6 +2239,8 @@ history line
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         crate::snapshot::save(&doc, snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
@@ -2159,12 +2283,6 @@ history line
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
-        iso.send_keys(
-            &pane,
-            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
-        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2172,6 +2290,8 @@ history line
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         crate::snapshot::save(&doc, snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
@@ -2227,12 +2347,6 @@ history line
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
-        iso.send_keys(
-            &pane,
-            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
-        )
-        .unwrap();
-        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2240,6 +2354,8 @@ history line
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         crate::snapshot::save(&doc, snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
@@ -2289,6 +2405,130 @@ history line
         assert!(
             content.contains("GOT:agent-doc "),
             "route should dispatch the trigger before observing the ack: {content}"
+        );
+    }
+
+    #[test]
+    fn alive_registered_pane_without_live_owner_fails_closed() {
+        let iso = IsolatedTmux::new("route-test-live-owner-missing");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        iso.send_keys(
+            &pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-owner-missing", &pane, &file_path).unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-owner-missing",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect_err("route should fail closed before sending into an ambiguous pane");
+        let err_text = err.to_string();
+        assert!(
+            err_text.contains("no live agent-doc session currently owns"),
+            "unexpected error: {err_text}"
+        );
+
+        let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !content.contains("GOT:agent-doc "),
+            "route should not dispatch into an ambiguous pane: {content}"
+        );
+    }
+
+    #[test]
+    fn alive_registered_pane_reregisters_to_live_owner() {
+        let iso = IsolatedTmux::new("route-test-live-owner-reregister");
+        let session = "claude";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        iso.send_keys(
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        )
+        .unwrap();
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+
+        let live_pane = iso.auto_start(session, &cwd).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-owner-reregister", &stale_pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-owner-reregister",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect("route should recover by re-registering to the live owner");
+        assert_eq!(resolved, live_pane);
+
+        let live_content = wait_for_pane_contains(
+            &iso,
+            &live_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            live_content.contains("GOT:agent-doc "),
+            "route should dispatch to the recovered live owner: {live_content}"
+        );
+
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_content.contains("STALE:agent-doc "),
+            "route should not dispatch to the stale registered pane: {stale_content}"
         );
     }
 

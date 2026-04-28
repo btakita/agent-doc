@@ -97,7 +97,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Ensure session UUID in frontmatter (generate if missing)
 2. Read `$TMUX_PANE` (must be inside tmux)
 3. If another tmux pane still proves live ownership of that same document session, probe its health before deciding what to do:
-   - **Healthy** (supervisor IPC returns `running=true, state="healthy"`) → focus and reuse that pane
+   - **Healthy** (supervisor IPC returns `running=true, state="healthy"`) → focus and reuse that pane; if it lives in another tmux session, switch the caller's current client to that session before selecting the target window/pane
    - **Needs restart** (supervisor reachable but child not running or state is degraded/halted) → send `restart` via supervisor IPC, focus pane on success; deregister and start fresh on failure
    - **Unreachable** (socket exists but supervisor does not respond) → deregister and start fresh in the current pane
    - **No socket** (no supervisor socket found) → deregister and start fresh in the current pane

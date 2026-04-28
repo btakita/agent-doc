@@ -11,7 +11,9 @@
 //! - Requires an active tmux session; bails immediately if not inside tmux.
 //! - If another pane already proves live ownership of the same document
 //!   session, focuses and reuses that pane instead of spawning a duplicate
-//!   supervisor in the current pane.
+//!   supervisor in the current pane. When that pane lives in another tmux
+//!   session, `start` switches the caller's current client to the target
+//!   session before selecting the pane.
 //! - If `sessions.json` points at an alive pane but no live owner can still be
 //!   proven for the document, clears that stale registration before starting in
 //!   the current pane.
@@ -23,9 +25,11 @@
 //!   2-second delay using `--continue` to resume the previous conversation.
 //! - On clean exit (code 0): honors the active harness policy.
 //!   Claude prompts on stderr and waits for Enter (fresh restart) or `q` + Enter (exit).
-//!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session,
-//!   except when stdin EOF/Ctrl-D was forwarded or the resume handoff just failed;
-//!   those cases restart fresh instead of dropping to the supervisor prompt.
+//!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
+//!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
+//!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
+//!   If the resume handoff just failed, the first failure restarts fresh and
+//!   repeated failures escalate to that same prompt instead of looping blindly.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,
@@ -670,7 +674,10 @@ fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
     match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
         Ok(resp) if resp.ok => {
             if let Some(data) = &resp.data {
-                let running = data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let running = data
+                    .get("running")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
                 if running && state == "healthy" {
                     SupervisorHealth::Healthy
@@ -743,6 +750,48 @@ fn existing_session_pane_action_from_entry(
         return None;
     }
     Some(ExistingSessionPaneAction::ClearStale(entry.pane.clone()))
+}
+
+fn focus_existing_session_pane(
+    tmux: &sessions::Tmux,
+    current_pane: &str,
+    target_pane: &str,
+) -> Result<()> {
+    let target_session = tmux.pane_session(target_pane).ok();
+    let current_session = tmux.pane_session(current_pane).ok();
+
+    let mut cmd = tmux.cmd();
+    if should_switch_client_for_focus(
+        current_session.as_deref(),
+        target_session.as_deref(),
+        std::env::var_os("TMUX").is_some(),
+    ) && let Some(target_session) = target_session.as_deref()
+    {
+        cmd.args(["switch-client", "-t", target_session]);
+        cmd.arg(";");
+    }
+    cmd.args(["select-window", "-t", target_pane]);
+    cmd.arg(";");
+    cmd.args(["select-pane", "-t", target_pane]);
+    let status = cmd
+        .status()
+        .context("failed to execute tmux focus command for existing session pane")?;
+    if !status.success() {
+        anyhow::bail!("tmux focus command failed for pane {}", target_pane);
+    }
+    Ok(())
+}
+
+fn should_switch_client_for_focus(
+    current_session: Option<&str>,
+    target_session: Option<&str>,
+    inside_tmux: bool,
+) -> bool {
+    inside_tmux
+        && matches!(
+            (current_session, target_session),
+            (Some(current), Some(target)) if current != target
+        )
 }
 
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate
@@ -1259,7 +1308,8 @@ pub fn run(file: &Path) -> Result<()> {
                             file.display(),
                             existing_pane
                         );
-                        if let Err(e) = tmux.select_pane(&existing_pane) {
+                        if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane)
+                        {
                             eprintln!(
                                 "[start] warning: failed to focus pane {}: {}",
                                 existing_pane, e
@@ -1275,7 +1325,9 @@ pub fn run(file: &Path) -> Result<()> {
                             existing_pane
                         );
                         if restart_via_supervisor(file, &session_id) {
-                            if let Err(e) = tmux.select_pane(&existing_pane) {
+                            if let Err(e) =
+                                focus_existing_session_pane(&tmux, &pane_id, &existing_pane)
+                            {
                                 eprintln!(
                                     "[start] warning: failed to focus pane {}: {}",
                                     existing_pane, e
@@ -2361,6 +2413,33 @@ mod tests {
     }
 
     #[test]
+    fn focus_existing_session_switches_client_for_cross_session_target() {
+        assert!(should_switch_client_for_focus(
+            Some("sess-a"),
+            Some("sess-b"),
+            true
+        ));
+    }
+
+    #[test]
+    fn focus_existing_session_skips_switch_when_target_session_matches() {
+        assert!(!should_switch_client_for_focus(
+            Some("sess-a"),
+            Some("sess-a"),
+            true
+        ));
+    }
+
+    #[test]
+    fn focus_existing_session_skips_switch_outside_tmux() {
+        assert!(!should_switch_client_for_focus(
+            Some("sess-a"),
+            Some("sess-b"),
+            false
+        ));
+    }
+
+    #[test]
     fn clean_exit_resolution_prompts_for_claude() {
         assert_eq!(
             clean_exit_resolution(&crate::harness::HarnessConfig::claude()),
@@ -2886,10 +2965,8 @@ mod tests {
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "# test").unwrap();
         let session_id = "health-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
-            tmp.path(),
-            session_id,
-            |method| match method {
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
+            match method {
                 IpcMethod::State => IpcResponse::ok(serde_json::json!({
                     "running": true,
                     "state": "healthy",
@@ -2897,8 +2974,8 @@ mod tests {
                     "cwd_source": "test",
                 })),
                 _ => IpcResponse::err("not implemented"),
-            },
-        )
+            }
+        })
         .unwrap();
         let health = query_supervisor_health(&file, session_id);
         assert!(matches!(health, SupervisorHealth::Healthy));
@@ -2912,10 +2989,8 @@ mod tests {
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "# test").unwrap();
         let session_id = "halted-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
-            tmp.path(),
-            session_id,
-            |method| match method {
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
+            match method {
                 IpcMethod::State => IpcResponse::ok(serde_json::json!({
                     "running": false,
                     "state": "halted",
@@ -2923,8 +2998,8 @@ mod tests {
                     "cwd_source": "test",
                 })),
                 _ => IpcResponse::err("not implemented"),
-            },
-        )
+            }
+        })
         .unwrap();
         let health = query_supervisor_health(&file, session_id);
         assert!(matches!(health, SupervisorHealth::NeedsRestart));
@@ -2938,10 +3013,8 @@ mod tests {
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "# test").unwrap();
         let session_id = "notrun-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
-            tmp.path(),
-            session_id,
-            |method| match method {
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
+            match method {
                 IpcMethod::State => IpcResponse::ok(serde_json::json!({
                     "running": false,
                     "state": "healthy",
@@ -2949,8 +3022,8 @@ mod tests {
                     "cwd_source": "test",
                 })),
                 _ => IpcResponse::err("not implemented"),
-            },
-        )
+            }
+        })
         .unwrap();
         let health = query_supervisor_health(&file, session_id);
         assert!(matches!(health, SupervisorHealth::NeedsRestart));
@@ -2972,14 +3045,12 @@ mod tests {
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "# test").unwrap();
         let session_id = "restart-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(
-            tmp.path(),
-            session_id,
-            |method| match method {
+        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
+            match method {
                 IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
                 _ => IpcResponse::err("not implemented"),
-            },
-        )
+            }
+        })
         .unwrap();
         assert!(restart_via_supervisor(&file, session_id));
         drop(ipc);

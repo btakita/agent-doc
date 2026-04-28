@@ -290,7 +290,30 @@ Then, in your failing session, the next step also broke: the callback server bin
 That is why you saw neither a popup nor a completed OAuth flow.
 
 So the precise answer is: **`corky` probably did attempt to open OAuth, but browser launch is non-guaranteed, and that session then failed on the callback-server step anyway.**
-<!-- agent:boundary:66aed381 -->
+
+❯ release + publish
+### Re: release + publish — gpt-5
+
+I executed the release-prep work that is safe to do without changing the declared version:
+- `make check` passed cleanly in `src/corky` (clippy + full test suite; 293 unit tests plus the integration suites)
+- `make release` succeeded and refreshed `.bin/corky`
+- `cargo publish --dry-run` succeeded through packaging and verification
+
+The actual publish step is blocked on two concrete release-boundary issues:
+
+1. **`0.27.0` is already published**
+   - `cargo publish --dry-run` warns: `crate corky@0.27.0 already exists on crates.io index`
+   - so I cannot publish the current tree under the existing version
+
+2. **`src/corky`'s own release policy requires an explicit new version and mainline release path**
+   - `src/corky/AGENTS.md` says versions are bumped explicitly by the user, not automatically
+   - the same file's release process is: bump version, merge to `main`, tag `v<version>`, then `cargo publish` / `maturin publish`
+   - the unreleased work is currently on branch `20260413/corky-gsc` at `cf63185`, not on `main`
+
+So I did **not** run the real `cargo publish` / PyPI publish, because doing so now would either fail immediately on crates.io version reuse or violate the repo's stated release process.
+
+If you want me to finish the release, the next explicit step is to tell me the new version to cut for this branch work. Then I can bump version files, update `VERSIONS.md`, merge/release per the repo policy, and publish.
+<!-- agent:boundary:47f5921d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

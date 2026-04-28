@@ -142,6 +142,13 @@ on claude exit with code c:
                   Claude: prompt user (Enter/q)
                   Codex: auto-restart in resume mode so `codex exec` stays attached
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user (Enter/q)
+                         AND when the resumed child never re-establishes a prompt
+                         (`auto_trigger_timeout` / `send_keys` failure), treat the
+                         handoff as failed provenance:
+                         - first failure in the 15-minute window → restart fresh
+                           instead of chaining another blind `resume --last`
+                         - second failure in the 15-minute window → stop the
+                           blind loop and prompt the user (Enter fresh / q exit)
         Transient: sleep 2s, restart with --continue, state Healthy
         Flapping:  sleep 30s, restart with --continue, state Degraded
                    on 5th consecutive failure → state Halted
@@ -217,7 +224,16 @@ Example:
 [1713041390] [supervisor] codex_exit code=0
 [1713041390] [supervisor] auto_restart_clean with_continue=true
 [1713041391] [supervisor] codex_spawn pid=54444 mode=continue
+[1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_30s
+[1713041425] [supervisor] resume_restart_failed pane=%12 harness=codex outcome=timeout recent_failures=1 window_secs=900 restart_count=1
 ```
+
+Auto-trigger provenance is lifecycle-bound to a single restart iteration:
+- each restart spawns at most one auto-trigger thread
+- when the child exits, that thread is explicitly cancelled and joined before
+  the next restart iteration begins
+- stale auto-trigger workers must never outlive the child they were waiting on,
+  so they cannot inject commands into a later replacement child in the same pane
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.
 

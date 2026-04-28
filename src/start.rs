@@ -65,10 +65,12 @@
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::supervisor::{
     cwd,
@@ -120,6 +122,76 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     }
 }
 
+const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
+const FAILED_RESUME_THRESHOLD: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum AutoTriggerOutcome {
+    NotNeeded = 0,
+    Pending = 1,
+    Sent = 2,
+    Timeout = 3,
+    SendFailed = 4,
+    Cancelled = 5,
+}
+
+impl AutoTriggerOutcome {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Pending,
+            2 => Self::Sent,
+            3 => Self::Timeout,
+            4 => Self::SendFailed,
+            5 => Self::Cancelled,
+            _ => Self::NotNeeded,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NotNeeded => "not_needed",
+            Self::Pending => "pending",
+            Self::Sent => "sent",
+            Self::Timeout => "timeout",
+            Self::SendFailed => "send_failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    fn is_failed_resume(self) -> bool {
+        matches!(self, Self::Timeout | Self::SendFailed)
+    }
+}
+
+#[derive(Debug, Default)]
+struct FailedResumeTracker {
+    events: VecDeque<Instant>,
+}
+
+impl FailedResumeTracker {
+    fn record(&mut self, now: Instant) -> usize {
+        self.events.push_back(now);
+        self.prune(now);
+        self.events.len()
+    }
+
+    fn reset(&mut self) {
+        self.events.clear();
+    }
+
+    fn prune(&mut self, now: Instant) {
+        let cutoff = now.checked_sub(FAILED_RESUME_WINDOW).unwrap_or(now);
+        while let Some(front) = self.events.front() {
+            if *front < cutoff {
+                self.events.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CleanExitResolution {
     PromptUser,
@@ -131,6 +203,112 @@ fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitRe
         crate::harness::CleanExitBehavior::PromptUser => CleanExitResolution::PromptUser,
         crate::harness::CleanExitBehavior::RestartContinue => CleanExitResolution::RestartContinue,
     }
+}
+
+fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
+    let deadline = Instant::now() + total;
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        std::thread::sleep(std::cmp::min(remaining, Duration::from_millis(100)));
+    }
+}
+
+fn spawn_auto_trigger_thread(
+    shared: Arc<SupervisorShared>,
+    stop: Arc<AtomicBool>,
+    pane_id: String,
+    file: String,
+    harness: crate::harness::HarnessConfig,
+    mut session_log: Option<std::fs::File>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("auto-trigger".into())
+        .spawn(move || {
+            for attempt in 0..60 {
+                let delay = if attempt == 0 {
+                    Duration::from_secs(2)
+                } else {
+                    Duration::from_millis(500)
+                };
+                if !sleep_with_stop(&stop, delay) {
+                    shared
+                        .auto_trigger_outcome
+                        .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
+                    return;
+                }
+                if let Ok(output) = std::process::Command::new("tmux")
+                    .args(["capture-pane", "-t", &pane_id, "-p"])
+                    .output()
+                    && output.status.success()
+                {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let lines: Vec<&str> = text.lines().collect();
+                    let tail = if lines.len() > 20 {
+                        &lines[lines.len() - 20..]
+                    } else {
+                        &lines
+                    };
+                    if tail.iter().any(|line| harness.matches_prompt(line.trim())) {
+                        let trigger_cmd = harness.trigger_command(&file);
+                        let status = std::process::Command::new("tmux")
+                            .args(["send-keys", "-t", &pane_id, &trigger_cmd, "Enter"])
+                            .output();
+                        match status {
+                            Ok(output) if output.status.success() => {
+                                shared
+                                    .auto_trigger_outcome
+                                    .store(AutoTriggerOutcome::Sent as u8, Ordering::Relaxed);
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "auto_trigger_sent pane={} harness={} cmd=\"{}\"",
+                                        pane_id, harness.binary, trigger_cmd
+                                    ),
+                                );
+                                eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
+                            }
+                            _ => {
+                                shared
+                                    .auto_trigger_outcome
+                                    .store(AutoTriggerOutcome::SendFailed as u8, Ordering::Relaxed);
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "auto_trigger_failed pane={} harness={} reason=send_keys",
+                                        pane_id, harness.binary
+                                    ),
+                                );
+                                eprintln!("[agent-doc] auto-trigger failed");
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+
+            shared
+                .auto_trigger_outcome
+                .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
+            log_event(
+                &mut session_log,
+                &format!(
+                    "auto_trigger_timeout pane={} harness={} reason=no_prompt_after_30s",
+                    pane_id, harness.binary
+                ),
+            );
+            eprintln!(
+                "[agent-doc] auto-trigger: timed out waiting for {} prompt",
+                harness.binary
+            );
+        })
+        .expect("spawn auto-trigger thread")
 }
 
 fn conflicting_live_session_pane(
@@ -302,6 +480,8 @@ struct SupervisorShared {
     restart_mode: Mutex<String>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
+    /// Outcome of the most recent auto-trigger attempt after a restart.
+    auto_trigger_outcome: AtomicU8,
 }
 
 impl SupervisorShared {
@@ -317,6 +497,7 @@ impl SupervisorShared {
             stop_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
+            auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
         }
     }
 
@@ -800,6 +981,7 @@ pub fn run(file: &Path) -> Result<()> {
     let mut first_run = true;
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
+    let mut failed_resume_tracker = FailedResumeTracker::default();
     loop {
         // Build args for this iteration
         let auto_trigger;
@@ -861,6 +1043,9 @@ pub fn run(file: &Path) -> Result<()> {
         shared.restart_requested.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
+        shared
+            .auto_trigger_outcome
+            .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
 
         // Spawn I/O forwarding threads
         let reader_thread = spawn_reader_thread(pty_reader);
@@ -885,85 +1070,22 @@ pub fn run(file: &Path) -> Result<()> {
         .ok();
 
         // For restarts, poll for agent prompt then re-send trigger command
+        let mut auto_trigger_thread: Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)> = None;
         if auto_trigger {
-            let trigger_pane = pane_id.clone();
-            let trigger_file = file.to_string_lossy().to_string();
-            let mut trigger_log = session_log.as_ref().and_then(|f| f.try_clone().ok());
-            let trigger_harness = harness.clone();
-            std::thread::spawn(move || {
-                // Poll tmux capture-pane for the agent prompt character.
-                // This avoids the race where DSR escape sequences interleave
-                // with injected command bytes when using a fixed sleep.
-                let mut ready = false;
-                for attempt in 0..60 {
-                    if attempt == 0 {
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                    } else {
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                    }
-                    if let Ok(output) = std::process::Command::new("tmux")
-                        .args(["capture-pane", "-t", &trigger_pane, "-p"])
-                        .output()
-                        && output.status.success()
-                    {
-                        let text = String::from_utf8_lossy(&output.stdout);
-                        let lines: Vec<&str> = text.lines().collect();
-                        let tail = if lines.len() > 20 {
-                            &lines[lines.len() - 20..]
-                        } else {
-                            &lines
-                        };
-                        if tail
-                            .iter()
-                            .any(|l| trigger_harness.matches_prompt(l.trim()))
-                        {
-                            ready = true;
-                            break;
-                        }
-                    }
-                }
-                if !ready {
-                    if let Some(ref mut f) = trigger_log {
-                        let ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        let _ = writeln!(f, "[{}] auto_trigger_timeout (no prompt after 30s)", ts);
-                    }
-                    eprintln!(
-                        "[agent-doc] auto-trigger: timed out waiting for {} prompt",
-                        trigger_harness.binary
-                    );
-                    return;
-                }
-
-                let trigger_cmd = trigger_harness.trigger_command(&trigger_file);
-                let status = std::process::Command::new("tmux")
-                    .args(["send-keys", "-t", &trigger_pane, &trigger_cmd, "Enter"])
-                    .output();
-                match status {
-                    Ok(output) if output.status.success() => {
-                        if let Some(ref mut f) = trigger_log {
-                            let ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            let _ = writeln!(f, "[{}] auto_trigger sent=\"{}\"", ts, trigger_cmd);
-                        }
-                        eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
-                    }
-                    _ => {
-                        if let Some(ref mut f) = trigger_log {
-                            let ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            let _ = writeln!(f, "[{}] auto_trigger_failed", ts);
-                        }
-                        eprintln!("[agent-doc] auto-trigger failed");
-                    }
-                }
-            });
+            shared
+                .auto_trigger_outcome
+                .store(AutoTriggerOutcome::Pending as u8, Ordering::Relaxed);
+            let trigger_stop = Arc::new(AtomicBool::new(false));
+            let trigger_log = session_log.as_ref().and_then(|f| f.try_clone().ok());
+            let handle = spawn_auto_trigger_thread(
+                shared.clone(),
+                trigger_stop.clone(),
+                pane_id.clone(),
+                file.to_string_lossy().to_string(),
+                harness.clone(),
+                trigger_log,
+            );
+            auto_trigger_thread = Some((trigger_stop, handle));
         }
 
         // Block until child exits
@@ -971,6 +1093,11 @@ pub fn run(file: &Path) -> Result<()> {
             .wait()
             .with_context(|| format!("failed waiting on {}", harness.binary))?;
         first_run = false;
+
+        if let Some((stop, handle)) = auto_trigger_thread.take() {
+            stop.store(true, Ordering::Relaxed);
+            let _ = handle.join();
+        }
 
         // Stop the stdin→pty writer thread so stdin is free for the restart
         // prompt (or for the next iteration's fresh writer thread).
@@ -1027,9 +1154,36 @@ pub fn run(file: &Path) -> Result<()> {
                 harness.binary, code, restart_count
             ),
         );
+        let auto_trigger_outcome =
+            AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed));
+
+        if matches!(
+            auto_trigger_outcome,
+            AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
+        ) {
+            failed_resume_tracker.reset();
+        }
 
         let action = policy.on_exit(code);
         *shared.supervisor_state.lock().unwrap() = policy.state;
+        let action_name = match &action {
+            RestartAction::PromptUser => "prompt_user",
+            RestartAction::RestartAfter { .. } => "restart_after",
+            RestartAction::Halt => "halt",
+        };
+        log_event(
+            &mut session_log,
+            &format!(
+                "restart_eval pane={} harness={} exit_code={} auto_trigger_outcome={} ctrl_d={} state={} action={}",
+                pane_id,
+                harness.binary,
+                code,
+                auto_trigger_outcome.as_str(),
+                shared.ctrl_d_forwarded.load(Ordering::Relaxed),
+                policy.state.as_str(),
+                action_name
+            ),
+        );
 
         match action {
             RestartAction::PromptUser => {
@@ -1055,7 +1209,51 @@ pub fn run(file: &Path) -> Result<()> {
                         restart_count += 1;
                     }
                     CleanExitResolution::RestartContinue => {
-                        if shared.ctrl_d_forwarded.load(Ordering::Relaxed) {
+                        if auto_trigger_outcome.is_failed_resume() {
+                            let now = Instant::now();
+                            let recent_failures = failed_resume_tracker.record(now);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "resume_restart_failed pane={} harness={} outcome={} recent_failures={} window_secs={} restart_count={}",
+                                    pane_id,
+                                    harness.binary,
+                                    auto_trigger_outcome.as_str(),
+                                    recent_failures,
+                                    FAILED_RESUME_WINDOW.as_secs(),
+                                    restart_count
+                                ),
+                            );
+
+                            raw_mode.suspend();
+                            if recent_failures >= FAILED_RESUME_THRESHOLD {
+                                eprintln!(
+                                    "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
+                                    harness.binary,
+                                    recent_failures,
+                                    FAILED_RESUME_WINDOW.as_secs()
+                                );
+                                eprintln!("Press Enter to restart fresh, or 'q' to exit.");
+                                let mut input = String::new();
+                                if std::io::stdin().read_line(&mut input).is_err() {
+                                    log_event(&mut session_log, "stdin_read_failed — exiting loop");
+                                    break;
+                                }
+                                if input.trim().eq_ignore_ascii_case("q") {
+                                    log_event(&mut session_log, "user_quit_after_resume_failure");
+                                    break;
+                                }
+                            } else {
+                                eprintln!(
+                                    "\n{} exited after a failed resume handoff ({}). Restarting fresh instead of resuming...",
+                                    harness.binary,
+                                    auto_trigger_outcome.as_str()
+                                );
+                            }
+                            raw_mode.resume();
+                            first_run = true;
+                            restart_count += 1;
+                        } else if shared.ctrl_d_forwarded.load(Ordering::Relaxed) {
                             raw_mode.suspend();
                             eprintln!("\n{} exited (stdin closed).", harness.binary);
                             eprintln!("Press Enter to restart, or 'q' to exit.");
@@ -1618,6 +1816,27 @@ mod tests {
     }
 
     #[test]
+    fn auto_trigger_outcome_defaults_to_not_needed() {
+        let shared = SupervisorShared::new("test");
+        assert_eq!(
+            AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
+            AutoTriggerOutcome::NotNeeded
+        );
+    }
+
+    #[test]
+    fn failed_resume_tracker_prunes_old_events() {
+        let mut tracker = FailedResumeTracker::default();
+        let now = Instant::now();
+        tracker
+            .events
+            .push_back(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
+        tracker.events.push_back(now - Duration::from_secs(5));
+        let count = tracker.record(now);
+        assert_eq!(count, 2, "only recent failures should remain in the window");
+    }
+
+    #[test]
     fn ctrl_d_overrides_codex_auto_restart() {
         let harness = crate::harness::HarnessConfig::codex();
         assert_eq!(
@@ -1627,6 +1846,36 @@ mod tests {
         let shared = SupervisorShared::new("test");
         shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
         assert!(shared.ctrl_d_forwarded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn auto_trigger_outcome_marks_resume_failures() {
+        assert!(AutoTriggerOutcome::Timeout.is_failed_resume());
+        assert!(AutoTriggerOutcome::SendFailed.is_failed_resume());
+        assert!(!AutoTriggerOutcome::Sent.is_failed_resume());
+        assert!(!AutoTriggerOutcome::Cancelled.is_failed_resume());
+    }
+
+    #[test]
+    fn auto_trigger_thread_cancels_cleanly_before_tmux_poll() {
+        let shared = Arc::new(SupervisorShared::new("test"));
+        shared
+            .auto_trigger_outcome
+            .store(AutoTriggerOutcome::Pending as u8, Ordering::Relaxed);
+        let stop = Arc::new(AtomicBool::new(true));
+        let handle = spawn_auto_trigger_thread(
+            shared.clone(),
+            stop,
+            "%999".to_string(),
+            "tasks/software/tsift.md".to_string(),
+            crate::harness::HarnessConfig::codex(),
+            None,
+        );
+        handle.join().unwrap();
+        assert_eq!(
+            AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
+            AutoTriggerOutcome::Cancelled
+        );
     }
 
     // --- StopSignal + writer thread tests ---

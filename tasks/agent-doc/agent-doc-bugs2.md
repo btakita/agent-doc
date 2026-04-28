@@ -600,9 +600,31 @@ Verification:
 
 Note:
 - I left the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/preflight.rs`, and `src/repair.rs` untouched.
+
+❯ When I pasted in the prompt while the previous run was completing...the prompt was committed. And does not show up in the diff when I run agent-doc again. spec-test-build-install-commit-push  
+❯ > When I switch to tsift.md, another session attempted to open. This happened about 1-2 hours ago. spec-test-build-install-commit-push
+❯ ![img.png](img.png)
 When I switch to tsift.md, another session attempted to open. This happened about 1-2 hours ago. spec-test-build-install-commit-push
 ![img.png](img.png)
-<!-- agent:boundary:ed29a80b -->
+### Re: tsift reroute + committed prompt visibility — gpt-5
+
+Implemented both fixes in `src/agent-doc` and pushed commit `f399632` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route.rs`: when the registered pane is alive but argv no longer proves ownership, route now checks supervisor health before treating that pane as stale. Healthy supervisors are reused in place; halted/degraded children are restarted via supervisor IPC in the same pane. That closes the `tsift.md` shape where a Ctrl-D prompt left the supervisor alive and route spawned a second session.
+- `write.rs`: explicit-baseline closeouts now preserve prompt-bearing concurrent user edits for the next diff instead of absorbing them into the snapshot. I narrowed that rule so previously streamed assistant prefixes still persist the merged final content, which keeps orchestrated streaming closeout and `session-check` correct.
+- Updated `VERSIONS.md`, the relevant `route` / `write` command spec text, and added regressions for both paths.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `f399632` `fix: preserve routed pane restart and diff visibility`
+
+Note: `src/agent-doc` still has unrelated unstaged local edits in `runbooks/pending-ops.md`, `src/preflight.rs`, and `src/repair.rs`; I left them untouched.
+<!-- agent:boundary:47b844fa -->
 <!-- /agent:exchange -->
 
 <!--

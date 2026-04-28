@@ -300,6 +300,8 @@ struct SupervisorShared {
     stop_requested: AtomicBool,
     /// Restart mode requested via IPC ("fresh" or "continue").
     restart_mode: Mutex<String>,
+    /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
+    ctrl_d_forwarded: AtomicBool,
 }
 
 impl SupervisorShared {
@@ -314,6 +316,7 @@ impl SupervisorShared {
             restart_requested: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
+            ctrl_d_forwarded: AtomicBool::new(false),
         }
     }
 
@@ -452,6 +455,7 @@ fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread
 fn spawn_writer_thread(
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     stop_fd: std::os::unix::io::RawFd,
+    ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("stdin->pty".into())
@@ -504,8 +508,19 @@ fn spawn_writer_thread(
                         }
                         break; // EOF or error
                     }
+                    let data = &buf[..n as usize];
+                    // Detect Ctrl+D (\x04) — in raw mode this is a byte, not EOF.
+                    // The pty slave's line discipline interprets it as EOF for the child.
+                    if let Some(ref flag) = ctrl_d_flag {
+                        if data.contains(&0x04) {
+                            if debug {
+                                eprintln!("[stdin->pty] Ctrl+D (\\x04) detected in forwarded data");
+                            }
+                            flag.store(true, Ordering::Relaxed);
+                        }
+                    }
                     let mut w = writer.lock().unwrap();
-                    if w.write_all(&buf[..n as usize]).is_err() || w.flush().is_err() {
+                    if w.write_all(data).is_err() || w.flush().is_err() {
                         if debug {
                             eprintln!("[stdin->pty] pty write failed, exiting");
                         }
@@ -535,6 +550,7 @@ fn spawn_writer_thread(
 fn spawn_writer_thread(
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     _stop_fd: (),
+    ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("stdin->pty".into())
@@ -547,6 +563,11 @@ fn spawn_writer_thread(
                     Ok(0) => break,
                     Ok(n) => {
                         drop(lock);
+                        if let Some(ref flag) = ctrl_d_flag {
+                            if buf[..n].contains(&0x04) {
+                                flag.store(true, Ordering::Relaxed);
+                            }
+                        }
                         let mut w = writer.lock().unwrap();
                         if w.write_all(&buf[..n]).is_err() || w.flush().is_err() {
                             break;
@@ -839,14 +860,17 @@ pub fn run(file: &Path) -> Result<()> {
         shared.restart_count.store(restart_count, Ordering::Relaxed);
         shared.restart_requested.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
+        shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
 
         // Spawn I/O forwarding threads
         let reader_thread = spawn_reader_thread(pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
+        let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
-        let writer_thread = spawn_writer_thread(writer_arc, writer_stop.read_fd());
+        let writer_thread =
+            spawn_writer_thread(writer_arc, writer_stop.read_fd(), Some(ctrl_d_flag.clone()));
         #[cfg(not(unix))]
-        let writer_thread = spawn_writer_thread(writer_arc, ());
+        let writer_thread = spawn_writer_thread(writer_arc, (), Some(ctrl_d_flag.clone()));
 
         // Start resize watcher (stop previous one first)
         if let Some(mut rw) = resize_watcher.take() {
@@ -952,6 +976,9 @@ pub fn run(file: &Path) -> Result<()> {
         // prompt (or for the next iteration's fresh writer thread).
         writer_stop.signal();
         let _ = writer_thread.join();
+        if ctrl_d_flag.load(Ordering::Relaxed) {
+            shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
+        }
 
         // Clean up shared state (must happen before dropping session so the
         // inject_writer Arc is released before the pty master closes).
@@ -1028,19 +1055,37 @@ pub fn run(file: &Path) -> Result<()> {
                         restart_count += 1;
                     }
                     CleanExitResolution::RestartContinue => {
-                        eprintln!(
-                            "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",
-                            harness.binary
-                        );
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "auto_restart_clean with_continue=true restart_count={}",
-                                restart_count + 1
-                            ),
-                        );
-                        restart_count += 1;
-                        continue;
+                        if shared.ctrl_d_forwarded.load(Ordering::Relaxed) {
+                            raw_mode.suspend();
+                            eprintln!("\n{} exited (stdin closed).", harness.binary);
+                            eprintln!("Press Enter to restart, or 'q' to exit.");
+                            let mut input = String::new();
+                            if std::io::stdin().read_line(&mut input).is_err() {
+                                log_event(&mut session_log, "stdin_eof_quit");
+                                break;
+                            }
+                            if input.trim().eq_ignore_ascii_case("q") {
+                                log_event(&mut session_log, "user_quit_after_eof");
+                                break;
+                            }
+                            raw_mode.resume();
+                            first_run = true;
+                            restart_count += 1;
+                        } else {
+                            eprintln!(
+                                "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",
+                                harness.binary
+                            );
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_restart_clean with_continue=true restart_count={}",
+                                    restart_count + 1
+                                ),
+                            );
+                            restart_count += 1;
+                            continue;
+                        }
                     }
                 }
             }
@@ -1566,6 +1611,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ctrl_d_flag_initialized_false() {
+        let shared = SupervisorShared::new("test");
+        assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn ctrl_d_overrides_codex_auto_restart() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            clean_exit_resolution(&harness),
+            CleanExitResolution::RestartContinue
+        );
+        let shared = SupervisorShared::new("test");
+        shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
+        assert!(shared.ctrl_d_forwarded.load(Ordering::Relaxed));
+    }
+
     // --- StopSignal + writer thread tests ---
 
     #[cfg(unix)]
@@ -1615,7 +1678,7 @@ mod tests {
         let writer_arc = Arc::new(Mutex::new(writer));
 
         let stop = StopSignal::new().unwrap();
-        let handle = spawn_writer_thread(writer_arc, stop.read_fd());
+        let handle = spawn_writer_thread(writer_arc, stop.read_fd(), None);
 
         // Writer thread should be alive, blocked in poll()
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1666,7 +1729,7 @@ mod tests {
 
         let stop = StopSignal::new().unwrap();
         let stop_fd = stop.read_fd();
-        let handle = spawn_writer_thread(writer_arc, stop_fd);
+        let handle = spawn_writer_thread(writer_arc, stop_fd, None);
 
         // Inject a byte into stdin to trigger a write attempt.
         // The write will fail (EPIPE) and the thread should exit.

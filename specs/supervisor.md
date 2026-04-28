@@ -141,6 +141,7 @@ on claude exit with code c:
         Clean:    harness-specific clean-exit handling, transition Healthy
                   Claude: prompt user (Enter/q)
                   Codex: auto-restart in resume mode so `codex exec` stays attached
+                         EXCEPT when stdin EOF (Ctrl+D) detected → prompt user (Enter/q)
         Transient: sleep 2s, restart with --continue, state Healthy
         Flapping:  sleep 30s, restart with --continue, state Degraded
                    on 5th consecutive failure → state Halted

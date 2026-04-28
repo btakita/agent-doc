@@ -516,14 +516,43 @@ This was a repo-scoped commit of the four previously uncommitted files:
 - `src/diff.rs`
 - `src/pending.rs`
 - `tests/pending_integration.rs`
-<!-- agent:boundary:e0d5547e -->
+
+❯ do #pbc2. spec-test-build-install-commit-push
+### Re: `#pbc2` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `4023365`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The fix closes the stale-snapshot/manual-commit `#pbc2` shape: when `HEAD` already contains the committed assistant response, historical repair can now advance the snapshot up to committed `HEAD` before classifying later local drift, as long as that later drift did not add a newer assistant patchback.
+
+What changed:
+- `src/session_check.rs`: factored `detect_bypassed_response_write_between(...)` and tightened bypass detection so non-response local drift over committed `HEAD` does not get misclassified as a fresh direct patchback just because a line diff re-inserts an existing `### Re:` heading.
+- `src/git.rs`: historical snapshot repair now has an explicit committed-`HEAD` fallback when the stale snapshot lags a committed response block, and it records whether the remaining drift is a true exchange follow-up or broader local drift.
+- `src/git.rs`: after that historical repair, `commit` no longer re-absorbs later local status edits back into the snapshot; it leaves them as post-commit local drift and closes as `commit_already_current` when `HEAD` already owns the assistant response.
+- Added regressions covering both `session-check` and `commit` on the committed-head-plus-local-status-edit case.
+- Updated `README.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the committed-`HEAD` historical-repair behavior.
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- targeted regressions passed:
+  - `cargo test commit_repairs_committed_historical_response_before_local_status_edit`
+  - `cargo test session_check_repairs_committed_historical_response_before_local_status_edit`
+  - `cargo test detect_bypassed_response_write_between_ignores_non_response_local_drift`
+- `cargo test` ran to completion with this current tree and still has 3 unrelated route/tmux failures:
+  - `route::tests::pane_has_prompt_detects_unicode`
+  - `route::tests::send_keys_delivers_claude_command_with_enter`
+  - `route::tests::send_keys_delivers_codex_command_with_enter`
+- `cargo build`
+- `cargo install --path . --force`
+<!-- agent:boundary:209ca01d -->
 <!-- /agent:exchange -->
 
 <!--
+This document also crashed while an agent-doc turn was running.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
+- [ ] [#tmuxcrash] Repeated tmux pane crashes in /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; reconstruct the crash path, add crash provenance logging, and fail closed on short-window crash loops. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+- [x] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

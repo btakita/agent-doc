@@ -137,14 +137,30 @@ Verification in `src/agent-doc`:
 - `cargo build`
 - `cargo install --path . --force`
 - `cargo test`: the new reap/session-check coverage passed, but the full suite currently hits an unrelated route/tmux failure in `route::tests::send_keys_delivers_claude_command_with_enter`
-<!-- agent:boundary:0ec33735 -->
+
+❯ Why is there Codex permission prompts when `codex_args: -s danger-full-access` frontmatter is set?
+### Re: Codex permission prompts despite `codex_args` — gpt-5
+
+Short answer: in the current `agent-doc start` supervisor path, `codex_args` are only guaranteed on the first fresh Codex launch, not on later auto-resume turns.
+
+What the code does now:
+- `start.rs` resolves frontmatter `codex_args` and builds `base_args` from them, so the first launch does pick up `-s danger-full-access` (`src/start.rs:581-582`, `src/start.rs:701-717`).
+- But Codex restart is configured as `Replace(["resume", "--last"])` in `src/harness.rs:78-82`, and `restart_args()` returns only that replacement vector for later turns (`src/harness.rs:114-122`).
+- In the supervisor loop, every non-first run uses `harness.restart_args(&base_args)` instead of reusing `base_args` (`src/start.rs:783-799`). So after the first clean exit / auto-restart, the session is resumed with bare `codex resume --last`, not with the original `-s danger-full-access` args.
+
+So if the prompts you mean are happening inside an `agent-doc start` Codex session after it has already auto-restarted once, that is an `agent-doc` bug in the interactive supervisor path, not a frontmatter parsing issue.
+
+Separate nuance: if you mean permission prompts from the outer Codex harness running this turn, the document frontmatter does not control that layer at all; `codex_args` only affect the child Codex sessions that `agent-doc` launches.
+
+The concrete fix is to preserve the resolved Codex sandbox/launch args across resume instead of replacing them with plain `resume --last`.
+<!-- agent:boundary:bfdaa0e3 -->
 <!-- /agent:exchange -->
 
 <!--
-Why is there Codex permission prompts when `codex_args: -s danger-full-access` frontmatter is set?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#permresume] [recommended] Preserve Codex sandbox args across interactive resume so codex_args like -s danger-full-access still apply after restart
 <!-- /agent:backlog -->

@@ -233,7 +233,28 @@ Verification:
 Commit: `btakita/tsift@23a112c` pushed to `origin/main`.
 
 Top of backlog: `#lintidx`.
-<!-- agent:boundary:ede063a3 -->
+
+❯ do #lintidx. spec-test-build-install-commit-push
+### Re: do #lintidx — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift lint --index .tsift/indexes` now treats the scoped-index directory itself as a valid discovery root and loads `.tsift/indexes/*/index.db` correctly.
+- added regressions in both the helper-level discovery path (`src/lint.rs`) and the compiled CLI surface (`tests/exit_code.rs`).
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.9` so the explicit scoped-index contract is versioned.
+
+Verification:
+- `cargo test collect_entities_from_explicit_indexes_dir -- --nocapture` passed.
+- `cargo test lint_accepts_explicit_indexes_dir --test exit_code -- --nocapture` passed.
+- `make check` passed: 361 unit tests + 24 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.9`.
+
+Commit: `btakita/tsift@bfb4df2` pushed to `origin/main`.
+
+Top of backlog: `#sumro`.
+<!-- agent:boundary:ae00329c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -242,8 +263,7 @@ Top of backlog: `#lintidx`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#lintlock] Fix `tsift lint` to use lock-aware read-only index access and snapshot fallback so active writers do not fail with `database is locked`.
-- [ ] [#lintidx] Fix `tsift lint --index .tsift/indexes` discovery so scoped index roots load `.tsift/indexes/*/index.db`, and add a CLI regression for that path.
+- [x] [#lintidx] Fix `tsift lint --index .tsift/indexes` discovery so scoped index roots load `.tsift/indexes/*/index.db`, and add a CLI regression for that path.
 - [ ] [#sumro] Make `tsift summarize --stats` and summary query mode open `summaries.db` read-only so lookup paths do not create or contend on the cache DB.
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

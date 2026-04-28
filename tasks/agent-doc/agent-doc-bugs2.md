@@ -623,15 +623,48 @@ Verification in `src/agent-doc`:
 2. Medium: cancellation is still not interruptible once the auto-trigger path starts waiting on the shared writer or doing the pty write. `auto_trigger_inject_command()` only checks `stop` before locking/writing (`src/start.rs:268-283`), while the stdin forwarder holds that same mutex across its own blocking `write_all`/`flush` (`src/start.rs:777-778`). The supervisor then joins the auto-trigger thread before it signals the stdin writer to stop (`src/start.rs:1171-1178`). Under PTY backpressure, shutdown can stall behind that shared writer path instead of cancelling promptly.
 
 I did not rerun the Rust test suite for this review; the findings are from code inspection of commit `3d4c157`.
-<!-- agent:boundary:bfa9202f -->
+
+❯ do #rvpromptfresh. spec-test-build-install-commit-push
+### Re: `#rvpromptfresh` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `82715d0`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The fix removes tmux scrollback from restart prompt proof:
+- `src/start.rs` now records filtered PTY output from the current child only and clears that buffer on each restart.
+- The auto-trigger watcher now waits until the latest non-empty line from that current child output is a harness prompt before injecting `agent-doc <file>`.
+- `specs/supervisor.md` and `VERSIONS.md` now document that stronger resume contract.
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+This closes the race you flagged: a stale prompt still visible in tmux history can no longer satisfy resume readiness by itself.
+<!-- agent:boundary:af1157fa -->
 <!-- /agent:exchange -->
 
 <!--
+❯ The tmux pane for claudescore-3.md crashed while a codex session was running. `#agent-doc-bug`
+### Re: live `claudescore-3.md` pane crash during an active Codex turn — codex
+
+This stays under the existing tmux-crash stability line, not a new bug family.
+
+Why:
+- the failure is the same class as `#tmuxcrash`: pane/session death at the supervisor/tmux boundary rather than a scorer or session-doc logic problem
+- the current open work is still broader than one isolated restart bug; we need crash provenance and a reproducer that covers both failed-resume and in-flight-turn death
+- `plan-tmux-pane-crash-stability.md` already exists for exactly this gap, so the right move is to extend that plan with this `claudescore-3.md` repro instead of fragmenting tracking again
+
+What I changed in the backlog surface:
+- added this `claudescore-3.md` crash as a third required evidence-backed incident in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`
+- tightened the reproducer scope so it explicitly covers pane/child death during an in-flight Codex turn
+- added a new pending item to reconstruct this exact crash and close the remaining supervisor/tmux stability gaps
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rvpromptfresh] [recommended] Make restart auto-trigger wait for a prompt proven to come from the current resumed child, not any stale prompt still visible in tmux history.
+- [ ] [#tmuxcrash2] [recommended] Reconstruct the `src/session-share/tasks/claudescore-3.md` tmux-pane crash that happened during an active Codex turn, then finish the broader crash-stability guardrails in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
+- [x] [#rvpromptfresh] [recommended] Make restart auto-trigger wait for a prompt proven to come from the current resumed child, not any stale prompt still visible in tmux history.
 - [ ] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
 <!-- /agent:backlog -->

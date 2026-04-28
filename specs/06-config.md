@@ -60,6 +60,8 @@ After the IDE plugin consumes an IPC patch file:
 1. **File-change check:** If the document file is unchanged on disk, the plugin failed to apply — falls back to disk write.
 2. **Content verification:** If the document changed but none of the patch content appears in the result, the plugin partially failed — falls back to disk write.
 3. **Force-disk cleanup:** When `--force-disk` is set, any pending IPC patch files are deleted before disk write to prevent the plugin from applying stale patches (double-write prevention).
+4. **Claimed timeout cleanup:** If the CLI already completed a local IPC-timeout closeout, it writes `.agent-doc/claimed-patches/<patch_id>`. Plugins must treat that sentinel as a one-shot skip signal and delete the stale patch file instead of replaying it into the editor buffer.
+5. **Snapshot freshness cleanup:** On pending-patch pickup, if `.agent-doc/snapshots/<hash>.md` is newer than the patch file, the patch is stale and must be deleted without apply.
 
 ## Sync Layout Authority
 

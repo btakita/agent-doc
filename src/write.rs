@@ -2561,11 +2561,18 @@ pub fn run_stream(
                     e
                 );
             }
-            if let Err(e) = atomic_write(file, &final_content) {
-                eprintln!(
-                    "[write] WARNING: failed to write to working tree before exit(75): {}",
-                    e
-                );
+            let local_write_applied = match atomic_write(file, &final_content) {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!(
+                        "[write] WARNING: failed to write to working tree before exit(75): {}",
+                        e
+                    );
+                    false
+                }
+            };
+            if local_write_applied {
+                write_claimed_patch_sentinel(&project_root, &ipc_result.patch_id);
             }
             if crate::git::is_in_git_repo(file)
                 && let Err(e) = crate::git::commit(file)
@@ -2592,23 +2599,7 @@ pub fn run_stream(
                         serde_json::from_str::<serde_json::Value>(&stale_content)
                     && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
                 {
-                    let claimed_dir = project_root.join(".agent-doc/claimed-patches");
-                    match std::fs::create_dir_all(&claimed_dir) {
-                        Err(e) => {
-                            eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}")
-                        }
-                        Ok(_) => {
-                            let sentinel = claimed_dir.join(patch_id);
-                            if let Err(e) = std::fs::write(&sentinel, "") {
-                                eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
-                            } else {
-                                eprintln!(
-                                    "[write] patch_id {} claimed (sentinel written)",
-                                    &patch_id[..8]
-                                );
-                            }
-                        }
-                    }
+                    write_claimed_patch_sentinel(&project_root, patch_id);
                 }
                 let _ = std::fs::remove_file(&patch_file);
             }
@@ -3093,6 +3084,26 @@ pub struct IpcResult {
     /// The patch_id used for this write attempt. Reuse in fallback writes
     /// so the plugin can deduplicate.
     pub patch_id: String,
+}
+
+fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
+    let claimed_dir = project_root.join(".agent-doc/claimed-patches");
+    match std::fs::create_dir_all(&claimed_dir) {
+        Err(e) => {
+            eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}");
+        }
+        Ok(_) => {
+            let sentinel = claimed_dir.join(patch_id);
+            if let Err(e) = std::fs::write(&sentinel, "") {
+                eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
+            } else {
+                eprintln!(
+                    "[write] patch_id {} claimed (sentinel written)",
+                    &patch_id[..patch_id.len().min(8)]
+                );
+            }
+        }
+    }
 }
 
 /// Attempt to write via IPC (socket-first, file-based fallback).

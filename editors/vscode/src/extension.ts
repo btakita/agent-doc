@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
+import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 
 // ---------------------------------------------------------------------------
@@ -631,6 +632,7 @@ interface IpcPatch {
     reposition_boundary_id?: string;
     preserve_head?: boolean;
     normalize_prefix_lines?: string[];
+    patch_id?: string;
 }
 
 class PatchWatcher implements vscode.Disposable {
@@ -747,6 +749,18 @@ class PatchWatcher implements vscode.Disposable {
 
             if (!patch.file) {
                 this.outputChannel.appendLine(`PatchWatcher: invalid patch (no file field): ${uri.fsPath}`);
+                return;
+            }
+
+            if (consumeClaimedPatch(patch.patch_id, patch.file)) {
+                this.outputChannel.appendLine(`PatchWatcher: claimed patch_id ${patch.patch_id} already closed out locally, deleting ${path.basename(uri.fsPath)}`);
+                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
+                return;
+            }
+
+            if (isPatchAlreadyApplied(patch.file, uri.fsPath)) {
+                this.outputChannel.appendLine(`PatchWatcher: snapshot newer than patch file, deleting stale ${path.basename(uri.fsPath)}`);
+                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
                 return;
             }
 

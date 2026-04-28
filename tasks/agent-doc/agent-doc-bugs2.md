@@ -496,7 +496,7 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 I committed only `src/route.rs`, `specs/07-commands.md`, and `specs/08-session-routing.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
-<!-- agent:boundary:123efb79 -->
+<!-- agent:boundary:758de8eb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -505,6 +505,5 @@ I committed only `src/route.rs`, `specs/07-commands.md`, and `specs/08-session-r
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
 - [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

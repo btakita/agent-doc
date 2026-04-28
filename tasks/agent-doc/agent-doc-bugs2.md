@@ -643,7 +643,29 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/repair.rs`, `src/route.rs`) untouched.
-<!-- agent:boundary:2535f2cc -->
+
+❯ do #patchregr. spec-test-build-install-commit-push
+### Re: #patchregr — gpt-5
+
+Implemented `#patchregr` in `src/agent-doc` and pushed commit `7aea983` to `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- `finalize` already had the strict post-write closeout contract, but `run`, `repair`, and the Codex Stop-hook still used weaker ad hoc `git::commit()` paths.
+- That let some response paths look successful after a commit/no-op closeout without proving the same post-commit invariants: closed cycle state, snapshot-vs-`HEAD` proof, and `session-check`.
+
+What changed:
+- `write.rs` now exposes one shared strict closeout helper that runs `git::commit()`, requires a closed cycle, retries once if the snapshot still differs from `HEAD`, and then enforces `session-check`.
+- `run.rs`, `repair.rs`, and `codex_hook.rs` now use that helper instead of bespoke `git::commit()` sequences, so these paths fail closed on the same conditions as `finalize`.
+- Added regression coverage for the already-committed-plus-later-prompt-drift shape, and updated `README.md`, `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the stricter shared contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml required_closeout_fails_when_only_later_prompt_drift_remains`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note: I left the unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/pending-ops.md`, `src/preflight.rs`, `src/route.rs`, and the unstaged non-#patchregr portions of `src/repair.rs`) untouched.
+<!-- agent:boundary:58ee01fa -->
 <!-- /agent:exchange -->
 
 <!--
@@ -652,7 +674,6 @@ Note: I left unrelated local edits in `src/agent-doc` (`Cargo.lock`, `runbooks/p
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#patchregr] [recommended] Response patchback left uncommitted regression — `src/session-share/tasks/claudescore-3.md` currently shows the assistant patchback in the worktree while the response remains uncommitted, which should not be possible after `#patchcommit`. Reconstruct the exact closeout path, prove whether `finalize` / `write --commit` / hook-stop / `session-check` was bypassed or misclassified, and fail closed before success whenever a fresh response patchback is visible without the owning-root commit proof. Plan: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
+- [x] [#patchregr] [recommended] Response patchback left uncommitted regression — `src/session-share/tasks/claudescore-3.md` currently shows the assistant patchback in the worktree while the response remains uncommitted, which should not be possible after `#patchcommit`. Reconstruct the exact closeout path, prove whether `finalize` / `write --commit` / hook-stop / `session-check` was bypassed or misclassified, and fail closed before success whenever a fresh response patchback is visible without the owning-root commit proof. Plan: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
 - [ ] [#nodiffswallow] [recommended] Preflight/repair can swallow a fresh user prompt and still return `no_changes: true`. Reproduction: `tasks/monsterrodholders.md` had a new prompt (`Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps`) inserted just before `agent:boundary`; `agent-doc preflight` logged `changes detected`, auto-committed a stale backlog cleanup, then left the prompt in both the live doc and snapshot while returning `no_changes`. The harness therefore stopped without answering. Fix by proving unresolved user deltas against pre-repair `HEAD` and failing closed if snapshot/baseline maintenance absorbs prompt-bearing text. Plan: `tasks/agent-doc/plan-preflight-no-changes-user-prompt.md`
-- [x] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->

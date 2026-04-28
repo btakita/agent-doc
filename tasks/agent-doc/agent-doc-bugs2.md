@@ -600,17 +600,17 @@ Verification:
 
 Note:
 - I left the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/preflight.rs`, and `src/repair.rs` untouched.
-<!-- agent:boundary:f2519b3d -->
+When I switch to tsift.md, another session attempted to open. This happened about 1-2 hours ago. spec-test-build-install-commit-push
+![img.png](img.png)
+<!-- agent:boundary:ed29a80b -->
 <!-- /agent:exchange -->
 
 <!--
-When I switch to tsift.md, another session attempts to open
-![img.png](img.png)
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#tmuxready] [recommended] Stabilize tmux prompt-readiness tests that still flake under parallel full-suite load (route::tests::wait_for_agent_ready_detects_prompt, resync::tests::no_wrong_window_when_panes_in_same_window) so ownership regressions fail deterministically.
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`
 <!-- /agent:backlog -->
+

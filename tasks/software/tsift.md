@@ -1,17 +1,18 @@
 ---
 agent_doc_session: tsift-v0.1
+resume: 019dd526-7958-77e3-9a41-92b8944fc550
+agent: codex
+claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
-  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
-  "#spec-test-commit-push": update spec + tests. commit + push
+  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': update spec + tests. commit + push
 ---
 
 ## Status
@@ -254,7 +255,68 @@ Verification:
 Commit: `btakita/tsift@bfb4df2` pushed to `origin/main`.
 
 Top of backlog: `#sumro`.
-<!-- agent:boundary:ae00329c -->
+
+I’m treating this as an `agent-doc` cycle for the `tsift` session document. First I’m locating the backing markdown file and running the required `agent-doc` preflight so I can respond and persist through the normal commit boundary.
+`agent-doc` is newer than the embedded skill version, so I’m running the required skill reload step before normal preflight. If it requests a compaction reload, I have to stop there instead of continuing the cycle.
+The reload path is clear, so I’m moving to `preflight` on [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md). That will tell me whether there’s a real diff, whether any claims or built-in commands need handling first, and which baseline file must be used for the final write.
+`preflight` found one real user request: `do #sumro. spec-test-build-install-commit-push`. I’m inspecting the summarize path and current repo state in `src/tsift`, then I’ll patch the read-only open path, run the full suite plus build/install, and only then write the response back through `agent-doc finalize`.
+I’ve confirmed the bug surface: `cmd_summarize` still calls the writable `SummaryDb::open()` for both `--stats` and lookup mode, which creates `.tsift/summaries.db` and opts into WAL even when the command is supposed to be read-only. I’m checking the existing tests and docs next so I can patch the behavior and pin it with regressions instead of only swapping the opener.
+I have enough context to patch this cleanly.
+
+Plan:
+1. Change `cmd_summarize` so `--stats` and lookup mode fail closed when `.tsift/summaries.db` is absent and otherwise open it through `SummaryDb::open_read_only()`.
+2. Add regressions for both user-visible failures this review called out: `summarize --stats` must not create the DB, and read-only summarize commands must still work while an extract writer holds the summaries DB open.
+3. Update the versioned surfaces (`SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, crate version) to record the new read-only summary-cache contract.
+4. Run the requested verification in `src/tsift`: full `make check`, `cargo build`, `cargo install --path .`, then commit. I’ll attempt `git push`, but network restrictions may block that step.
+I’m at the edit step now. The fix is small in code, but I’m also tightening the contract around it: `--stats` on a missing cache should error instead of creating `.tsift/summaries.db`, and compiled CLI coverage will assert that summary reads remain non-mutating.
+I’m patching four files in `src/tsift`: the summarize command path, compiled CLI regressions, and the versioned docs/version metadata. After that I’ll run the targeted summarize tests first, then the full requested suite.
+The code and versioned surface are patched. I’m running the summarize-specific regressions now to catch compile or contract issues before the full `make check` / build / install cycle.
+The targeted test run hit Cargo’s package/artifact locks because I launched three compilations in parallel. I’m letting one finish and then I’ll serialize the rest; the change itself is still localized to the summarize path.
+The regressions are passing. I’m on the requested full verification cycle now in `src/tsift`: `make check`, then `cargo build`, then `cargo install --path .`, and after that I’ll commit and attempt the requested push.
+The full verification step also serialized itself behind Cargo locks, and `cargo install` is already at the dependency/update phase. I’m waiting this through before I decide whether I need to rerun anything serially; I’m not changing files further unless verification says I have to.
+The full requested verification is green: `make check` passed with 362 unit tests and 26 integration tests, `cargo build` succeeded, and `cargo install --path .` replaced the local binary with `tsift v0.1.10`. I’m doing a quick diff review now, then I’ll commit in the `src/tsift` submodule and see whether `git push` is possible from this environment.
+The diff is clean. One expected extra file changed is `src/tsift/Cargo.lock`, reflecting the crate version bump to `0.1.10`; I’m including that in the submodule commit.
+The code/test/build/install part is finished. The only blocker now is Git metadata: committing inside the `src/tsift` submodule failed because the submodule gitdir under `.git/modules/src/tsift` is mounted read-only in this environment, so I can’t create the Git index lock needed for `git commit` or any subsequent push.
+I’m at the document write-back step now. I’m checking how this repo expects `agent:backlog` patches to be expressed so I can mark `#sumro` correctly without bypassing `agent-doc`’s component rules.
+`finalize` was blocked by `agent-doc`’s pane-ownership guard, not by the response content. The session is still owned by pane `%308` while this harness is on `%309`, so I’m reclaiming the document with `agent-doc claim` and then I’ll rerun the normal write/commit path instead of patching the file directly.
+The reclaim worked. `preflight` reaped `#sumro` from the live backlog during recovery, so I only need to write the exchange response now and then run `session-check` immediately.
+The response content is in the document now, but `agent-doc` cannot cross its commit boundary because this environment also blocks writes to the root repo’s `.git/index.lock`. I’m verifying the exact session state once so I can report the real blocker precisely instead of guessing.
+Implemented locally in `tsift`: [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs), [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs), plus the versioned docs/version bump in [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md), [src/tsift/CLAUDE.md](/home/brian/work/btakita/agent-loop/src/tsift/CLAUDE.md), [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md), and [src/tsift/Cargo.toml](/home/brian/work/btakita/agent-loop/src/tsift/Cargo.toml). `tsift summarize --stats`, `tsift summarize <symbol>`, and `tsift summarize --file <path>` now open `summaries.db` read-only and fail closed when the cache is missing. I added regressions for missing-cache failure and read-only-cache lookup, and `tsift --version` now reports `0.1.10`.
+
+Verification is green: the targeted summarize tests passed, `make check` passed with 362 unit tests and 26 integration tests, `cargo build` passed, and `cargo install --path .` succeeded.
+
+Two blockers remain, both caused by this environment mounting Git metadata read-only:
+- `git commit` in `src/tsift` failed on `.git/modules/src/tsift/index.lock`, so there is no new `btakita/tsift@...` commit or push.
+- `agent-doc finalize` wrote the response into [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md) and reaped `#sumro`, but it could not cross the document commit boundary because root `.git/index.lock` is also read-only. `agent-doc session-check tasks/software/tsift.md` currently fails with cycle state `response_captured`.
+
+Once Git writes are available again, the recovery path is:
+```bash
+agent-doc preflight tasks/software/tsift.md
+```
+That should replay/close the open document cycle, after which you can commit/push `src/tsift` normally.
+❯ do #sumro. spec-test-build-install-commit-push
+### Re: do #sumro — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift summarize --stats`, `tsift summarize <symbol>`, and `tsift summarize --file <path>` now share a read-only summary-cache opener that fails closed when `.tsift/summaries.db` is missing, so lookup paths no longer create or contend on the cache DB.
+- added regressions in both the direct command path (`src/main.rs`) and the compiled CLI surface (`tests/exit_code.rs`), including missing-cache failure and read-only-cache lookup coverage.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.10`, and refreshed the installed binary.
+
+Verification:
+- `cargo test summarize_stats_fails_closed_when_cache_missing -- --nocapture` passed.
+- `cargo test summarize_stats_fails_closed_when_cache_missing --test exit_code -- --nocapture` passed.
+- `cargo test summarize_symbol_query_accepts_read_only_cache_permissions --test exit_code -- --nocapture` passed.
+- `make check` passed: 362 unit tests + 26 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.10`.
+
+Commit/push:
+- blocked in this environment. `git commit` in `src/tsift` failed with `fatal: Unable to create '/home/brian/work/btakita/agent-loop/.git/modules/src/tsift/index.lock': Read-only file system`, so no new `btakita/tsift@...` commit or push was produced.
+
+Top of backlog: `#tmv7`.
+<!-- agent:boundary:98264f7b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -263,8 +325,6 @@ Top of backlog: `#sumro`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#lintidx] Fix `tsift lint --index .tsift/indexes` discovery so scoped index roots load `.tsift/indexes/*/index.db`, and add a CLI regression for that path.
-- [ ] [#sumro] Make `tsift summarize --stats` and summary query mode open `summaries.db` read-only so lookup paths do not create or contend on the cache DB.
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

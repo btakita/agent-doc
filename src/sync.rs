@@ -1477,6 +1477,7 @@ fn find_alive_pane_for_file_inner(
     tmux: &Tmux,
     file_path: &str,
     excluded_pane: Option<&str>,
+    log_hits: bool,
 ) -> Option<String> {
     let output = tmux
         .cmd()
@@ -1500,10 +1501,12 @@ fn find_alive_pane_for_file_inner(
 
         // Check the pane's process and its children for agent-doc + file_path
         if pid_has_agent_doc_for_file(pid_str, file_path) {
-            eprintln!(
-                "[sync] found alive agent-doc pane {} (pid {}) for {}",
-                pane_id, pid_str, file_path
-            );
+            if log_hits {
+                eprintln!(
+                    "[sync] found alive agent-doc pane {} (pid {}) for {}",
+                    pane_id, pid_str, file_path
+                );
+            }
             return Some(pane_id.to_string());
         }
 
@@ -1515,10 +1518,12 @@ fn find_alive_pane_for_file_inner(
             for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
                 let child_pid = child_pid.trim();
                 if !child_pid.is_empty() && pid_has_agent_doc_for_file(child_pid, file_path) {
-                    eprintln!(
-                        "[sync] found alive agent-doc child (pid {}) in pane {} for {}",
-                        child_pid, pane_id, file_path
-                    );
+                    if log_hits {
+                        eprintln!(
+                            "[sync] found alive agent-doc child (pid {}) in pane {} for {}",
+                            child_pid, pane_id, file_path
+                        );
+                    }
                     return Some(pane_id.to_string());
                 }
             }
@@ -1528,7 +1533,7 @@ fn find_alive_pane_for_file_inner(
 }
 
 pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
-    find_alive_pane_for_file_inner(tmux, file_path, None)
+    find_alive_pane_for_file_inner(tmux, file_path, None, true)
 }
 
 pub(crate) fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
@@ -1541,11 +1546,32 @@ pub(crate) fn find_live_owner_pane_excluding(
     session_id: &str,
     excluded_pane: Option<&str>,
 ) -> Option<String> {
+    find_live_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, true)
+}
+
+pub(crate) fn find_live_owner_pane_excluding_quiet(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+) -> Option<String> {
+    find_live_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, false)
+}
+
+fn find_live_owner_pane_excluding_with_logging(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    log_hits: bool,
+) -> Option<String> {
     let file_path = file.to_string_lossy();
-    find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane).or_else(|| {
-        find_alive_pane_via_supervisor_pid(tmux, file, session_id)
-            .filter(|pane| excluded_pane != Some(pane.as_str()))
-    })
+    find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits).or_else(
+        || {
+            find_alive_pane_via_supervisor_pid(tmux, file, session_id)
+                .filter(|pane| excluded_pane != Some(pane.as_str()))
+        },
+    )
 }
 
 fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {

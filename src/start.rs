@@ -645,8 +645,12 @@ fn existing_session_pane_action(
     current_pane: &str,
 ) -> Result<Option<ExistingSessionPaneAction>> {
     let entry = sessions::lookup_entry(session_id)?;
-    let live_owner =
-        crate::sync::find_live_owner_pane_excluding(tmux, file, session_id, Some(current_pane));
+    let live_owner = crate::sync::find_live_owner_pane_excluding_quiet(
+        tmux,
+        file,
+        session_id,
+        Some(current_pane),
+    );
     Ok(existing_session_pane_action_from_entry(
         tmux,
         current_pane,

@@ -648,7 +648,7 @@ Commit / push:
 
 Scope note:
 - `src/agent-doc` still has unrelated pre-existing local edits in other files; this commit staged only `VERSIONS.md`, `runbooks/pending-ops.md`, `specs/07-commands.md`, `src/pending.rs`, and `src/write.rs`.
-<!-- agent:boundary:d6596480 -->
+<!-- agent:boundary:abbeb540 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -661,5 +661,4 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#q8p2] [recommended] Fix bare `[#]` pending-id placeholders being accepted into backlog write-back; reject or normalize them before they can persist in `tasks/agent-doc/agent-doc-bugs2.md`. See `tasks/agent-doc/plan-bare-pending-id-placeholder.md`
 <!-- /agent:backlog -->

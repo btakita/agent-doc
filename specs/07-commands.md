@@ -458,6 +458,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 1. Run the same recovery engine as `preflight` step 1:
    - replay a pending/captured response when the response still needs to be written
    - dedup and clean stale pending/capture state when the response is already present in the document
+   - already-applied detection must match the response's normalized visible lines as one contiguous block; do not treat scattered matching phrases elsewhere in the document as a replay hit just because the first few lines happen to recur
    - for template docs, that `AlreadyApplied` dedup path still runs transcript/tail canonicalization before cleanup, including restoring required `❯ ` prompt prefixes from the prompt-bearing classifier
    - respect safe manual removal of an escaped template conversation tail
    - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly

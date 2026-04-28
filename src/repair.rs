@@ -23,7 +23,7 @@
 //!   the normal commit boundary instead of waiting for a later `preflight`.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
-//! - `fingerprint_lines(response)` — extracts the first 3 non-empty, non-marker lines from a response for dedup checking.
+//! - `normalized_response_lines(response)` — extracts the response's non-empty, non-marker lines for dedup checking and normalizes transient ` (HEAD)` response-heading churn.
 //!
 //! ## Agentic Contracts
 //! - `run(file)` — returns a `RepairOutcome` describing whether nothing happened, the response was replayed, the response was already present, manual tail cleanup was respected, or a stale `preflight_started` lock was repaired. Returns `Err` on I/O failure or if the write-back itself fails.
@@ -468,35 +468,52 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 
 /// Returns true if the pending response content appears to already be applied to the document.
 ///
-/// Checks each fingerprint line individually against the document. This handles
-/// blank-line separation (document paragraphs have blank lines between them but
-/// fingerprint skips blanks) and boundary marker suffixes like `(HEAD)`.
+/// Checks whether the document contains the response's normalized visible lines
+/// as one contiguous block. This tolerates blank-line separation and transient
+/// ` (HEAD)` suffixes on response headings without treating scattered matching
+/// phrases elsewhere in the document as an already-applied replay.
 fn is_already_applied(doc: &str, response: &str) -> bool {
-    let lines = fingerprint_lines(response);
-    if lines.is_empty() {
+    let response_lines = normalized_response_lines(response);
+    if response_lines.is_empty() {
         return false;
     }
-    lines.iter().all(|line| doc.contains(line.as_str()))
+    let doc_lines = normalized_response_lines(doc);
+    doc_lines
+        .windows(response_lines.len())
+        .any(|window| window == response_lines.as_slice())
 }
 
-fn fingerprint_lines(response: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    for line in response.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("<!-- patch:")
-            || trimmed.starts_with("<!-- /patch:")
-            || trimmed.starts_with("<!-- agent:")
-            || trimmed.starts_with("<!-- /agent:")
-        {
-            continue;
-        }
-        lines.push(line.to_string());
-        if lines.len() >= 3 {
-            break;
+fn normalized_response_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(normalize_response_line)
+        .collect()
+}
+
+fn normalize_response_line(line: &str) -> Option<String> {
+    let raw = line.trim_end_matches('\r');
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("<!-- patch:")
+        || trimmed.starts_with("<!-- /patch:")
+        || trimmed.starts_with("<!-- agent:")
+        || trimmed.starts_with("<!-- /agent:")
+    {
+        return None;
+    }
+    Some(strip_transient_response_head_marker(raw))
+}
+
+fn strip_transient_response_head_marker(line: &str) -> String {
+    if let Some(stripped) = line.strip_suffix(" (HEAD)") {
+        let trimmed = stripped.trim_start();
+        let is_re_heading = trimmed.starts_with("### Re:");
+        let is_bold_re_heading = trimmed.starts_with("**Re:") && trimmed.ends_with("**");
+        if is_re_heading || is_bold_re_heading {
+            return stripped.to_string();
         }
     }
-    lines
+    line.to_string()
 }
 
 /// Save a response to the pending store before attempting write-back.
@@ -914,6 +931,42 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn dedup_requires_contiguous_normalized_response_block() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — opus-4-6\n",
+            "Implemented in `src/agent-doc`.\n",
+            "- `cargo test`\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: topic — opus-4-6 (HEAD)\n",
+            "Earlier answer.\n\n",
+            "Implemented in `src/agent-doc`.\n\n",
+            "Unrelated text.\n",
+            "- `cargo test`\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        assert!(
+            !is_already_applied(doc, response),
+            "scattered matching lines should not trigger dedup"
+        );
+    }
+
+    #[test]
+    fn dedup_short_response_still_requires_contiguous_match() {
+        let response = "Implemented.\nDone.\n";
+        let doc = "Implemented.\nOther line.\nDone.\n";
+
+        assert!(
+            !is_already_applied(doc, response),
+            "short responses should not dedup from non-contiguous matches"
+        );
     }
 
     #[test]

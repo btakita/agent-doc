@@ -313,11 +313,11 @@ The actual publish step is blocked on two concrete release-boundary issues:
 So I did **not** run the real `cargo publish` / PyPI publish, because doing so now would either fail immediately on crates.io version reuse or violate the repo's stated release process.
 
 If you want me to finish the release, the next explicit step is to tell me the new version to cut for this branch work. Then I can bump version files, update `VERSIONS.md`, merge/release per the repo policy, and publish.
-<!-- agent:boundary:161f2552 -->
+<!-- agent:boundary:97c3d152 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#gscsa] GSC auth bug: Search Console users UI rejected service-account email with 'Failed to add user: email not found'. Rework  + docs so GSC does not assume SA identities are addable to properties; verify product support, prefer or cleanly fall back to user OAuth, and improve diagnostics/spec for this case.
+- [ ] [#gscsa] GSC auth bug: Search Console users UI rejected service-account email with 'Failed to add user: email not found'. Rework src/corky/src/gsc/auth.rs plus docs so GSC does not assume SA identities are addable to properties; verify product support, prefer or cleanly fall back to user OAuth, and improve diagnostics/spec for this case.
 <!-- /agent:pending -->

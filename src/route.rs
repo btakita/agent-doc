@@ -159,6 +159,102 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
+fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {
+    let mut frontier = vec![pane_pid.to_string()];
+    let target = target_pid.to_string();
+
+    while let Some(pid) = frontier.pop() {
+        if pid == target {
+            return true;
+        }
+
+        let output = match std::process::Command::new("pgrep")
+            .args(["-P", &pid])
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
+            let child_pid = child_pid.trim();
+            if child_pid.is_empty() {
+                continue;
+            }
+            if child_pid == target {
+                return true;
+            }
+            frontier.push(child_pid.to_string());
+        }
+    }
+
+    false
+}
+
+fn find_alive_pane_via_supervisor_pid(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    let project_root = snapshot::find_project_root(file)?;
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    if !sock.exists() {
+        return None;
+    }
+
+    let response =
+        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::Pid)
+            .ok()?;
+    if !response.ok {
+        return None;
+    }
+
+    let target_pid = response
+        .data
+        .as_ref()?
+        .get("pid")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())?;
+    if target_pid == 0 {
+        return None;
+    }
+
+    let output = tmux
+        .cmd()
+        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.splitn(2, ' ');
+        let Some(pane_id) = parts.next() else {
+            continue;
+        };
+        let Some(pane_pid) = parts.next() else {
+            continue;
+        };
+        let pane_id = pane_id.trim();
+        let pane_pid = pane_pid.trim();
+        if pane_id.is_empty() || pane_pid.is_empty() {
+            continue;
+        }
+        if pane_process_tree_contains_pid(pane_pid, target_pid) {
+            eprintln!(
+                "[route] recovered live pane {} for session {} via supervisor pid {}",
+                pane_id,
+                &session_id[..std::cmp::min(8, session_id.len())],
+                target_pid
+            );
+            return Some(pane_id.to_string());
+        }
+    }
+
+    None
+}
+
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -365,6 +461,7 @@ fn resolve_or_create_pane(
         pending_prompt_bearing_marker_for_route(file, cycle_baseline.as_ref())?;
     let live_owner = if registered.is_some() {
         crate::sync::find_alive_pane_for_file(tmux, file_path)
+            .or_else(|| find_alive_pane_via_supervisor_pid(tmux, file, session_id))
     } else {
         None
     };
@@ -1620,6 +1717,7 @@ fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
 
     // Serialize env var mutations across parallel test threads.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1899,6 +1997,39 @@ mod tests {
             content.contains("\n>"),
             "mock agent-doc session should present a prompt, got: {content}"
         );
+    }
+
+    fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script: &Path) {
+        iso.send_keys(pane, &format!("exec {}", script.display()))
+            .unwrap();
+        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
+        assert!(
+            content.contains("\n>"),
+            "mock agent-doc session should present a prompt, got: {content}"
+        );
+    }
+
+    fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if let Ok(output) = std::process::Command::new("pgrep")
+                .args(["-f", pattern])
+                .output()
+                && output.status.success()
+            {
+                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                    let pid = line.trim();
+                    if pid.is_empty() {
+                        continue;
+                    }
+                    if let Ok(parsed) = pid.parse::<u32>() {
+                        return parsed;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        panic!("timed out waiting for process matching pattern: {pattern}");
     }
 
     #[test]
@@ -2530,6 +2661,62 @@ history line
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch to the stale registered pane: {stale_content}"
         );
+    }
+
+    #[test]
+    fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path() {
+        let iso = IsolatedTmux::new("route-test-live-owner-supervisor-pid");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-owner-supervisor";
+
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_agent_doc_without_file_arg(&iso, &pane, &mock_agent);
+        let mock_agent_pid =
+            wait_for_process_pid(&mock_agent.display().to_string(), Duration::from_secs(3));
+
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": mock_agent_pid })),
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+        )
+        .expect("route should recover the live owner via supervisor pid");
+        assert_eq!(resolved, pane);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should dispatch to the registered pane recovered from supervisor pid: {content}"
+        );
+
+        ipc.stop();
     }
 
     #[test]
@@ -3470,7 +3657,7 @@ history line
         let result = provision_pane(
             &iso,
             file_a,
-            "session-a",
+            "route-test-provision-first-col-session-a",
             "tasks/file_a.md",
             Some(session),
             &col_args,
@@ -3528,7 +3715,7 @@ history line
         let result = provision_pane(
             &iso,
             file_b,
-            "session-b",
+            "route-test-provision-second-col-session-b",
             "tasks/file_b.md",
             Some(session),
             &col_args,
@@ -3660,7 +3847,7 @@ history line
         let result = provision_pane(
             &iso,
             file_b,
-            "session-b",
+            "route-test-provision-rearranged-session-b",
             "tasks/file_b.md",
             Some(session),
             &col_args,
@@ -3715,7 +3902,7 @@ history line
             provision_pane(
                 &iso_a,
                 &doc_a_thread,
-                "session-a",
+                "route-test-concurrent-provision-session-a",
                 doc_a_thread.to_string_lossy().as_ref(),
                 Some(session),
                 &[],
@@ -3730,7 +3917,7 @@ history line
             provision_pane(
                 &iso_b,
                 &doc_b_thread,
-                "session-b",
+                "route-test-concurrent-provision-session-b",
                 doc_b_thread.to_string_lossy().as_ref(),
                 Some(session),
                 &[],
@@ -3755,7 +3942,14 @@ history line
         );
 
         let registry = sessions::load().unwrap();
-        assert_eq!(registry.len(), 2, "both documents should be registered");
+        assert!(
+            registry.contains_key("route-test-concurrent-provision-session-a"),
+            "first provisioned document should be registered"
+        );
+        assert!(
+            registry.contains_key("route-test-concurrent-provision-session-b"),
+            "second provisioned document should be registered"
+        );
 
         std::env::set_current_dir(prev_cwd).unwrap();
     }

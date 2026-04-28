@@ -27,11 +27,21 @@ pub enum RestartBehavior {
     Replace(Vec<String>),
 }
 
+/// What the supervisor should do after a clean child exit (code 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanExitBehavior {
+    /// Show the local restart prompt and let the human choose.
+    PromptUser,
+    /// Immediately restart the harness in its resume/continue mode.
+    RestartContinue,
+}
+
 /// Per-agent harness configuration for the supervisor.
 #[derive(Debug, Clone)]
 pub struct HarnessConfig {
     pub binary: String,
     pub restart_behavior: RestartBehavior,
+    pub clean_exit_behavior: CleanExitBehavior,
     pub prompt_patterns: Vec<String>,
     /// Template for the trigger command sent via tmux send-keys.
     /// `{file}` is replaced with the document path.
@@ -54,6 +64,7 @@ impl HarnessConfig {
         Self {
             binary: "claude".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
+            clean_exit_behavior: CleanExitBehavior::PromptUser,
             prompt_patterns: vec!["❯".into(), "⏵".into()],
             trigger_command_template: "/agent-doc {file}".into(),
             env_remove: vec!["CLAUDECODE".into()],
@@ -68,6 +79,7 @@ impl HarnessConfig {
         Self {
             binary: "codex".into(),
             restart_behavior: RestartBehavior::Replace(vec!["resume".into(), "--last".into()]),
+            clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec!["❯".into(), ">".into()],
             trigger_command_template: "agent-doc {file}".into(),
             env_remove: vec!["CODEX_CLI".into(), "CODEX".into()],
@@ -158,6 +170,7 @@ mod tests {
             h.restart_behavior,
             RestartBehavior::Append(vec!["--continue".into()])
         );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::PromptUser);
         assert!(h.env_remove.contains(&"CLAUDECODE".to_string()));
         assert_eq!(h.tmux_session_fallback, "claude");
         assert!(h.process_names.contains(&"claude".to_string()));
@@ -174,6 +187,7 @@ mod tests {
             h.restart_behavior,
             RestartBehavior::Replace(vec!["resume".into(), "--last".into()])
         );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::RestartContinue);
         assert!(h.env_remove.contains(&"CODEX_CLI".to_string()));
         assert!(h.env_remove.contains(&"CODEX".to_string()));
         assert_eq!(h.tmux_session_fallback, "codex");
@@ -432,6 +446,11 @@ mod tests {
         assert!(
             !codex_args.contains(&"--flag".to_string()),
             "codex replaces base"
+        );
+        assert_eq!(claude.clean_exit_behavior, CleanExitBehavior::PromptUser);
+        assert_eq!(
+            codex.clean_exit_behavior,
+            CleanExitBehavior::RestartContinue
         );
     }
 

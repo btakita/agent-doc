@@ -11,12 +11,13 @@
 //! - Requires an active tmux session; bails immediately if not inside tmux.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
-//! - Runs `claude` as a blocking child process inside a persistent restart loop
+//! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
 //!   so the tmux pane never dies on its own.
 //! - On non-zero exit (context exhaustion, crash, etc.): auto-restarts after a
 //!   2-second delay using `--continue` to resume the previous conversation.
-//! - On clean exit (code 0): prints a prompt to stderr and reads stdin; pressing
-//!   Enter restarts fresh (no `--continue`), typing `q` + Enter exits.
+//! - On clean exit (code 0): honors the active harness policy.
+//!   Claude prompts on stderr and waits for Enter (fresh restart) or `q` + Enter (exit).
+//!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,
@@ -116,6 +117,19 @@ fn timestamp() -> String {
 fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     if let Some(f) = log {
         let _ = writeln!(f, "[{}] {}", timestamp(), msg);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CleanExitResolution {
+    PromptUser,
+    RestartContinue,
+}
+
+fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitResolution {
+    match harness.clean_exit_behavior {
+        crate::harness::CleanExitBehavior::PromptUser => CleanExitResolution::PromptUser,
+        crate::harness::CleanExitBehavior::RestartContinue => CleanExitResolution::RestartContinue,
     }
 }
 
@@ -992,24 +1006,43 @@ pub fn run(file: &Path) -> Result<()> {
 
         match action {
             RestartAction::PromptUser => {
-                // Temporarily restore cooked mode so read_line() works with
-                // normal line editing (echo, backspace, etc.)
-                raw_mode.suspend();
-                eprintln!("\n{} exited cleanly.", harness.binary);
-                eprintln!("Press Enter to restart, or 'q' to exit.");
-                let mut input = String::new();
-                if std::io::stdin().read_line(&mut input).is_err() {
-                    log_event(&mut session_log, "stdin_read_failed — exiting loop");
-                    break;
+                match clean_exit_resolution(&harness) {
+                    CleanExitResolution::PromptUser => {
+                        // Temporarily restore cooked mode so read_line() works with
+                        // normal line editing (echo, backspace, etc.)
+                        raw_mode.suspend();
+                        eprintln!("\n{} exited cleanly.", harness.binary);
+                        eprintln!("Press Enter to restart, or 'q' to exit.");
+                        let mut input = String::new();
+                        if std::io::stdin().read_line(&mut input).is_err() {
+                            log_event(&mut session_log, "stdin_read_failed — exiting loop");
+                            break;
+                        }
+                        if input.trim().eq_ignore_ascii_case("q") {
+                            log_event(&mut session_log, "user_quit");
+                            break;
+                        }
+                        // User pressed Enter — restart fresh
+                        raw_mode.resume();
+                        first_run = true;
+                        restart_count += 1;
+                    }
+                    CleanExitResolution::RestartContinue => {
+                        eprintln!(
+                            "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",
+                            harness.binary
+                        );
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "auto_restart_clean with_continue=true restart_count={}",
+                                restart_count + 1
+                            ),
+                        );
+                        restart_count += 1;
+                        continue;
+                    }
                 }
-                if input.trim().eq_ignore_ascii_case("q") {
-                    log_event(&mut session_log, "user_quit");
-                    break;
-                }
-                // User pressed Enter — restart fresh
-                raw_mode.resume();
-                first_run = true;
-                restart_count += 1;
             }
             RestartAction::RestartAfter {
                 delay,
@@ -1515,6 +1548,22 @@ mod tests {
 
         let conflict = conflicting_live_session_pane_from_entry(&iso, &pane, Some(&entry));
         assert_eq!(conflict, None);
+    }
+
+    #[test]
+    fn clean_exit_resolution_prompts_for_claude() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::claude()),
+            CleanExitResolution::PromptUser
+        );
+    }
+
+    #[test]
+    fn clean_exit_resolution_auto_restarts_for_codex() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::codex()),
+            CleanExitResolution::RestartContinue
+        );
     }
 
     // --- StopSignal + writer thread tests ---

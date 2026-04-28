@@ -138,7 +138,9 @@ on claude exit with code c:
         c != 0 AND exits_in_last_60s < 3 → Transient
         c != 0 AND exits_in_last_60s >= 3 → Flapping
     action:
-        Clean:    prompt user (Enter/q), transition Healthy
+        Clean:    harness-specific clean-exit handling, transition Healthy
+                  Claude: prompt user (Enter/q)
+                  Codex: auto-restart in resume mode so `codex exec` stays attached
         Transient: sleep 2s, restart with --continue, state Healthy
         Flapping:  sleep 30s, restart with --continue, state Degraded
                    on 5th consecutive failure → state Halted
@@ -211,6 +213,9 @@ Example:
 [1713041290] [supervisor] claude_exit code=0
 [1713041291] [supervisor] user_action=restart
 [1713041291] [supervisor] claude_spawn pid=54398 mode=continue
+[1713041390] [supervisor] codex_exit code=0
+[1713041390] [supervisor] auto_restart_clean with_continue=true
+[1713041391] [supervisor] codex_spawn pid=54444 mode=continue
 ```
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.

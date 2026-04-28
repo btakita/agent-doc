@@ -114,6 +114,7 @@ Key differences from Claude Code:
 3. ✅ Refactored `start.rs::run()`:
    - Binary name parameterized (spawn, error messages, log events)
    - Restart args use `harness.restart_args()` (append vs replace)
+   - Clean exit handling is harness-aware: Codex auto-restarts in resume mode after a normal `codex exec` turn instead of dropping into the Claude-style `Enter`/`q` prompt
    - Prompt detection uses `harness.matches_prompt()`
    - Trigger command uses `harness.trigger_command()`
    - `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by `supports_*` flags

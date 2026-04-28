@@ -1725,6 +1725,66 @@ fn pid_is_agent_session(pid: &str) -> bool {
     cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex")
 }
 
+fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
+    let path_components: Vec<_> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect();
+    let suffix_components: Vec<_> = suffix
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect();
+
+    if suffix_components.is_empty() || suffix_components.len() > path_components.len() {
+        return false;
+    }
+
+    path_components[path_components.len() - suffix_components.len()..] == suffix_components[..]
+}
+
+fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
+    if cmdline.contains(file_path) {
+        return true;
+    }
+
+    let target = Path::new(file_path);
+    let canonical_target = target.canonicalize().ok();
+    if let Some(ref canonical) = canonical_target
+        && cmdline.contains(canonical.to_string_lossy().as_ref())
+    {
+        return true;
+    }
+
+    for token in cmdline.split_whitespace() {
+        let candidate = Path::new(token);
+        if candidate.is_absolute() {
+            if let Some(ref canonical) = canonical_target
+                && candidate.canonicalize().ok().as_ref() == Some(canonical)
+            {
+                return true;
+            }
+            continue;
+        }
+
+        if path_has_component_suffix(target, candidate) {
+            return true;
+        }
+        if let Some(ref canonical) = canonical_target
+            && path_has_component_suffix(canonical, candidate)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let output = match std::process::Command::new("ps")
         .args(["-p", pid, "-o", "command="])
@@ -1736,7 +1796,7 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let cmdline = String::from_utf8_lossy(&output.stdout);
     let has_agent =
         cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex");
-    let has_file = cmdline.contains(file_path);
+    let has_file = cmdline_has_file_match(&cmdline, file_path);
     has_agent && has_file
 }
 
@@ -1771,6 +1831,28 @@ mod tests {
                 Some((idx, name))
             })
             .collect()
+    }
+
+    #[test]
+    fn cmdline_file_match_accepts_submodule_relative_start_path() {
+        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
+        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/docs.md";
+
+        assert!(
+            cmdline_has_file_match(cmdline, file_path),
+            "root-relative target should match pane-relative start path"
+        );
+    }
+
+    #[test]
+    fn cmdline_file_match_rejects_different_relative_path() {
+        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
+        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/other.md";
+
+        assert!(
+            !cmdline_has_file_match(cmdline, file_path),
+            "different relative path should not match by basename alone"
+        );
     }
 
     #[test]

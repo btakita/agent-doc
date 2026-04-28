@@ -601,6 +601,9 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
 /// removed from both the file and the snapshot. When the queue drains to
 /// empty, `auto` is stripped and `queue_active` is cleared.
 fn consume_queue_prompt(file: &Path) -> Result<bool> {
+    // Hold the document lock for the entire read-parse-write cycle to prevent
+    // concurrent edits from invalidating parsed offsets (TOCTOU fix).
+    let _lock = acquire_doc_lock(file)?;
     let content =
         std::fs::read_to_string(file).context("queue consume: failed to read document")?;
     let (fm, _) = frontmatter::parse(&content)?;

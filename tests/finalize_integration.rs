@@ -540,3 +540,67 @@ fn finalize_does_not_consume_when_queue_inactive() {
         "prompt should NOT be consumed when queue is inactive"
     );
 }
+
+#[test]
+fn finalize_queue_consume_updates_snapshot_atomically() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = queue_doc_content();
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    // Write snapshot so consume_queue_prompt has something to update
+    let snap_dir = tmp.path().join(".agent-doc/snapshots");
+    // Find snapshot path by running agent-doc to create it via the baseline
+    let baseline = write_baseline(tmp.path(), &content);
+    // Also write snapshot manually to match the document
+    let snap_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let canonical = doc.canonicalize().unwrap();
+        let mut hasher = DefaultHasher::new();
+        canonical.to_str().unwrap().hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    };
+    // Use agent-doc snapshot path convention — just write the snapshot content
+    // The binary will create the correct snapshot via finalize
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let file_content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !file_content.contains("- do #fix1"),
+        "first prompt consumed from file"
+    );
+
+    // Verify snapshot was also updated — read all .md files in snapshots dir
+    let mut snapshot_updated = false;
+    for entry in fs::read_dir(&snap_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().is_some_and(|e| e == "md") {
+            let snap = fs::read_to_string(entry.path()).unwrap();
+            if snap.contains("queue") {
+                assert!(
+                    !snap.contains("- do #fix1"),
+                    "first prompt must also be consumed from snapshot: {}",
+                    snap
+                );
+                snapshot_updated = true;
+            }
+        }
+    }
+    assert!(snapshot_updated, "snapshot should exist and be updated");
+}

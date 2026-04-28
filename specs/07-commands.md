@@ -1020,6 +1020,7 @@ Preflight performs these mutations before emitting queue state:
 
 After a successful response commit (`finalize` or `write --commit`), the consumed prompt is removed from the `agent:queue` block. This happens between the write step and the commit step so the consumption is included atomically in the same git commit as the response.
 
+- Acquire the document advisory lock (`acquire_doc_lock`) before reading the file. The lock is held for the entire read-parse-write cycle to prevent concurrent edits from invalidating parsed offsets.
 - Read frontmatter: if `queue_active != true`, skip.
 - Parse the queue component body.
 - Remove the first `Prompt` entry via `remove_first_prompt()`.

@@ -62,6 +62,16 @@ When the user submits multiple documents (`/agent-doc A`, `/agent-doc B`), the s
 
 **Since:** v0.9.6
 
+### Queue consume read-parse-write
+
+**Location:** `agent-doc/src/write.rs`
+
+`consume_queue_prompt()` reads the document, parses the queue component, removes the first prompt, and writes back. Without protection, a concurrent edit between read and write could invalidate parsed byte offsets, causing prompt duplication or silent loss.
+
+**Mitigation:** `acquire_doc_lock()` (flock-based advisory lock) held for the entire read-parse-write cycle.
+
+**Since:** v0.33.17
+
 ## Mitigated (Low Residual Risk)
 
 ### Watch daemon write window

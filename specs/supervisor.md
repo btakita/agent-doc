@@ -125,6 +125,8 @@ Socket is created with mode `0600`. Opaque to anything except the FFI library, w
 2. **Editor plugin "restart claude" button:** IntelliJ plugin opens the socket, calls `restart`, displays the returned pid.
 3. **Crash-state introspection for health dashboards:** `state` returns last exit code + restart count so a cleanup hook can escalate (e.g., "5 restarts in 60s → stop and notify").
 
+Both `route` and `resync` also use the supervisor socket's `Pid` method as a secondary ownership proof when tmux argv/path inspection no longer proves which pane owns a registered document. That fallback maps the live child PID back to the tmux pane before treating the registration as stale.
+
 ## Crash Recovery Policy
 
 Replaces the current "sleep 2s + `--continue`" with a state machine:

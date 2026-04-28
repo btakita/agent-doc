@@ -233,6 +233,17 @@ pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
     register_with_pid(session_id, pane_id, file, std::process::id())
 }
 
+pub fn deregister(session_id: &str) -> Result<bool> {
+    let registry_path = registry_path();
+    let _lock = RegistryLock::acquire(&registry_path)?;
+    let mut registry = load()?;
+    let removed = registry.remove(session_id).is_some();
+    if removed {
+        save(&registry)?;
+    }
+    Ok(removed)
+}
+
 pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
     // Query the window ID for this pane
     let window = pane_window(pane_id).unwrap_or_default();

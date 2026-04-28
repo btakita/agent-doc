@@ -159,102 +159,6 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
-fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {
-    let mut frontier = vec![pane_pid.to_string()];
-    let target = target_pid.to_string();
-
-    while let Some(pid) = frontier.pop() {
-        if pid == target {
-            return true;
-        }
-
-        let output = match std::process::Command::new("pgrep")
-            .args(["-P", &pid])
-            .output()
-        {
-            Ok(o) if o.status.success() => o,
-            _ => continue,
-        };
-
-        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
-            let child_pid = child_pid.trim();
-            if child_pid.is_empty() {
-                continue;
-            }
-            if child_pid == target {
-                return true;
-            }
-            frontier.push(child_pid.to_string());
-        }
-    }
-
-    false
-}
-
-fn find_alive_pane_via_supervisor_pid(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-) -> Option<String> {
-    let project_root = snapshot::find_project_root(file)?;
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
-    if !sock.exists() {
-        return None;
-    }
-
-    let response =
-        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::Pid)
-            .ok()?;
-    if !response.ok {
-        return None;
-    }
-
-    let target_pid = response
-        .data
-        .as_ref()?
-        .get("pid")
-        .and_then(|value| value.as_u64())
-        .and_then(|value| u32::try_from(value).ok())?;
-    if target_pid == 0 {
-        return None;
-    }
-
-    let output = tmux
-        .cmd()
-        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let mut parts = line.splitn(2, ' ');
-        let Some(pane_id) = parts.next() else {
-            continue;
-        };
-        let Some(pane_pid) = parts.next() else {
-            continue;
-        };
-        let pane_id = pane_id.trim();
-        let pane_pid = pane_pid.trim();
-        if pane_id.is_empty() || pane_pid.is_empty() {
-            continue;
-        }
-        if pane_process_tree_contains_pid(pane_pid, target_pid) {
-            eprintln!(
-                "[route] recovered live pane {} for session {} via supervisor pid {}",
-                pane_id,
-                &session_id[..std::cmp::min(8, session_id.len())],
-                target_pid
-            );
-            return Some(pane_id.to_string());
-        }
-    }
-
-    None
-}
-
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -460,8 +364,7 @@ fn resolve_or_create_pane(
     let pending_prompt_marker =
         pending_prompt_bearing_marker_for_route(file, cycle_baseline.as_ref())?;
     let live_owner = if registered.is_some() {
-        crate::sync::find_alive_pane_for_file(tmux, file_path)
-            .or_else(|| find_alive_pane_via_supervisor_pid(tmux, file, session_id))
+        crate::sync::find_live_owner_pane(tmux, file, session_id)
     } else {
         None
     };
@@ -475,6 +378,7 @@ fn resolve_or_create_pane(
     // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
+            let mut stale_registration_cleared = false;
             match live_owner.as_deref() {
                 Some(owner) if owner != registered_pane => {
                     eprintln!(
@@ -513,39 +417,41 @@ fn resolve_or_create_pane(
                 Some(_) => {}
                 None => {
                     let provenance = pane_route_provenance(tmux, registered_pane);
+                    eprintln!(
+                        "[route] registered pane {} is alive but no live owner for {} was proven — deregistering stale entry and continuing recovery",
+                        registered_pane, file_path
+                    );
                     crate::ops_log::log_op(
                         file,
                         &format!(
-                            "route_registered_pane_ambiguous file={} {}",
+                            "route_registered_pane_deregistered_no_live_owner file={} {}",
                             file_path, provenance
                         ),
                     );
-                    anyhow::bail!(
-                        "registered pane {} is alive but no live agent-doc session currently owns {} ({}). Refusing to route into an ambiguous pane; restart or reclaim the session instead",
-                        registered_pane,
-                        file_path,
-                        provenance
-                    );
+                    let _ = sessions::deregister(session_id)?;
+                    stale_registration_cleared = true;
                 }
             }
-            rescue_from_stash(
-                tmux,
-                registered_pane,
-                session_id,
-                file_path,
-                target_session,
-                is_first_column(file, col_args),
-            );
-            eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-            send_command(tmux, registered_pane, file_path, harness)?;
-            require_routed_cycle_ack(
-                file,
-                registered_pane,
-                harness,
-                cycle_baseline.as_ref(),
-                pending_prompt_marker.as_deref(),
-            )?;
-            return Ok(registered_pane.clone());
+            if !stale_registration_cleared {
+                rescue_from_stash(
+                    tmux,
+                    registered_pane,
+                    session_id,
+                    file_path,
+                    target_session,
+                    is_first_column(file, col_args),
+                );
+                eprintln!("[route] Pane {} is alive, sending command", registered_pane);
+                send_command(tmux, registered_pane, file_path, harness)?;
+                require_routed_cycle_ack(
+                    file,
+                    registered_pane,
+                    harness,
+                    cycle_baseline.as_ref(),
+                    pending_prompt_marker.as_deref(),
+                )?;
+                return Ok(registered_pane.clone());
+            }
         }
         eprintln!("[route] Pane {} is dead", registered_pane);
     } else {
@@ -1969,7 +1875,7 @@ mod tests {
         let script = bin_dir.join("agent-doc");
         std::fs::write(
             &script,
-            "#!/bin/sh\nprintf \"> \\n\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\ncat\n",
+            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -2537,26 +2443,45 @@ history line
     }
 
     #[test]
-    fn alive_registered_pane_without_live_owner_fails_closed() {
+    fn alive_registered_pane_without_live_owner_deregisters_and_lazy_claims() {
         let iso = IsolatedTmux::new("route-test-live-owner-missing");
         let session = "claude";
         let cwd = test_cwd();
-        let pane = iso.auto_start(session, &cwd).unwrap();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
         iso.send_keys(
-            &pane,
-            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "GOT:%s\n" "$CMD"; cat'"#,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
         )
         .unwrap();
-        let _ = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(3));
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-owner-missing", &pane, &file_path).unwrap();
+        sessions::register("route-live-owner-missing", &stale_pane, &file_path).unwrap();
 
-        let err = resolve_or_create_pane(
+        let doc_for_thread = doc.clone();
+        let current_for_thread = format!("# Session\n❯ follow-up question\n");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some("# Session\n"),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -2566,17 +2491,19 @@ history line
             session,
             &HarnessConfig::codex(),
         )
-        .expect_err("route should fail closed before sending into an ambiguous pane");
-        let err_text = err.to_string();
+        .expect("route should continue recovery after clearing the stale registration");
+        assert_ne!(resolved, stale_pane);
+
+        let reassigned = sessions::lookup("route-live-owner-missing").unwrap();
         assert!(
-            err_text.contains("no live agent-doc session currently owns"),
-            "unexpected error: {err_text}"
+            reassigned.as_deref() == Some(resolved.as_str()),
+            "route should re-register to the recovered pane, got: {reassigned:?}"
         );
 
-        let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
-            !content.contains("GOT:agent-doc "),
-            "route should not dispatch into an ambiguous pane: {content}"
+            !stale_content.contains("STALE:agent-doc "),
+            "route should not dispatch into the stale registered pane: {stale_content}"
         );
     }
 

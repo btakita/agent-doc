@@ -713,7 +713,7 @@ The sync path uses `provision_pane` instead of the standard auto-start. This var
 
 The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `provision_pane` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
 
-Before lazy-claim or auto-start, route also scans tmux for an already-running pane whose process tree is executing the same document and re-registers that pane when found. This prevents stale-registry drift from spawning a parallel fallback session for a document that is already live somewhere else. The same ownership proof now applies to an *alive* registered pane: route first tries the tmux process-tree match on the document path, then falls back to the per-session supervisor socket by asking it for the live child PID and mapping that PID back to the owning tmux pane. If another pane does prove ownership, route re-registers there first and dispatches to the recovered live owner. Only when neither the tmux process tree nor the supervisor PID can prove a live owner does route fail closed instead of blindly sending `agent-doc <file>` into an ambiguous pane.
+Before lazy-claim or auto-start, route also scans tmux for an already-running pane whose process tree is executing the same document and re-registers that pane when found. This prevents stale-registry drift from spawning a parallel fallback session for a document that is already live somewhere else. The same ownership proof now applies to an *alive* registered pane: route first tries the tmux process-tree match on the document path, then falls back to the per-session supervisor socket by asking it for the live child PID and mapping that PID back to the owning tmux pane. If another pane does prove ownership, route re-registers there first and dispatches to the recovered live owner. If neither the tmux process tree nor the supervisor PID can prove that the registered pane still owns the file, route deregisters that stale binding and continues with lazy-claim / auto-start recovery instead of dispatching into the ambiguous pane.
 
 Cross-session stash rescue is intentionally non-destructive: if sync finds a live stashed pane for the document in another tmux session, it logs the mismatch and preserves that pane in place instead of moving it across sessions or killing it during rescue.
 
@@ -726,6 +726,8 @@ When `context_session` (from `sync --window`) differs from the document's `tmux_
 ## Sync Resync Report-Only
 
 The post-sync `resync` call runs with `--fix` disabled (report only). `auto_start` with `context_session` intentionally places panes in a different session than the frontmatter originally specified — `resync --fix` would incorrectly kill these cross-session panes. The resync still reports anomalies for operator awareness.
+
+`resync` uses that same live-owner proof for registered documents: direct tmux process-tree match on the document path, then supervisor PID fallback. An alive registered pane whose file can no longer be proven is reported as `NoLiveOwner`; `resync --fix` deregisters that stale binding without killing the pane. During stash cleanup, an unregistered agent pane is preserved only when that proof still ties it to some registered document; otherwise it is treated as orphaned and may be killed.
 
 ## Sync Visible-Window Split
 

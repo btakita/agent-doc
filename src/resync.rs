@@ -8,27 +8,29 @@
 //! - `run(fix)`: verbose counterpart to `prune()` for the `agent-doc resync` CLI
 //!   subcommand. Prints which entries were removed, which issues were detected, and
 //!   the post-resync active session list.
-//! - Issue detection (`detect_issues`): inspects every alive registry pane for four
+//! - Issue detection (`detect_issues`): inspects every alive registry pane for five
 //!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
 //!   (pane running a non-agent process such as `corky watch`), `WrongSession`
 //!   (pane's tmux session differs from the document's `tmux_session` frontmatter
 //!   field, or from `config::project_tmux_session()` when frontmatter field is absent),
-//!   and `WrongWindow` (panes for the same tmux session are scattered across
-//!   multiple non-stash windows, determined by majority-window vote).
+//!   `NoLiveOwner` (alive registered pane no longer proves ownership of its
+//!   document), and `WrongWindow` (panes for the same tmux session are scattered
+//!   across multiple non-stash windows, determined by majority-window vote).
 //! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry (default),
 //!   or when `relocate_session = Some(target)` → `join-pane` to target session (registry kept);
-//!   `WrongProcess` → deregister only (foreign process is not killed); `InStash` →
-//!   deregister only (pane left intact for potential manual recovery); `WrongWindow`
-//!   → stash the outlier pane so the next route consolidates it.
+//!   `WrongProcess` → deregister only (foreign process is not killed); `NoLiveOwner`
+//!   → deregister only (pane left intact for route/later manual recovery);
+//!   `InStash` → deregister only (pane left intact for potential manual recovery);
+//!   `WrongWindow` → stash the outlier pane so the next route consolidates it.
 //! - Stash management: `return_stashed_panes` moves registered active panes back to
 //!   their original window (or first non-stash window of the frontmatter session);
 //!   `purge_stash_windows` kills entire stash windows where all panes are idle
 //!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
-//!   kills individual unregistered idle shell panes in stash windows (agent processes
-//!   like claude/agent-doc/node are never auto-killed even if unregistered — the
-//!   registry can go stale); `purge_orphaned_agent_panes` removes unregistered
-//!   agent-doc/claude/node panes from any window, but only when the window has at
-//!   least one other pane (never orphans the last pane).
+//!   kills individual unregistered idle shell panes in stash windows. Unregistered
+//!   agent panes in stash are preserved only when they still prove ownership of
+//!   some registered document; otherwise they are purged as orphaned. `purge_orphaned_agent_panes`
+//!   removes unregistered agent-doc/claude/node panes from any window, but only when
+//!   the window has at least one other pane (never orphans the last pane).
 //! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `codex`, `node`) are
 //!   expected occupants of registered panes. `IDLE_SHELLS` (`zsh`, `bash`, `sh`,
 //!   `fish`) are treated as empty/unused slots. Short-lived shell startup helpers
@@ -152,6 +154,12 @@ enum Issue {
         pane: String,
         process: String,
     },
+    /// Pane is alive but no live owner can still be proven for its file.
+    NoLiveOwner {
+        key: String,
+        file: String,
+        pane: String,
+    },
     /// Panes for the same session are in different windows (excluding stash windows).
     WrongWindow {
         file: String,
@@ -191,6 +199,11 @@ impl std::fmt::Display for Issue {
                 f,
                 "{} (pane {}) running '{}', expected agent-doc/claude",
                 file, pane, process
+            ),
+            Issue::NoLiveOwner { file, pane, .. } => write!(
+                f,
+                "{} (pane {}) has no provable live owner and would be deregistered",
+                file, pane
             ),
             Issue::WrongWindow {
                 file,
@@ -378,14 +391,16 @@ fn purge_unregistered_stash_panes_with_registry(tmux: &Tmux, registry: &sessions
             if registered_panes.contains(pane_id.as_str()) {
                 continue; // Registered — leave it
             }
+            if let Some(owner_file) = live_owned_registered_file_for_pane(tmux, pane_id, registry) {
+                eprintln!(
+                    "resync: stash pane {} ({}) is unregistered but still owns {} — skipping kill",
+                    pane_id, session_name, owner_file
+                );
+                continue;
+            }
             match classify_pane_process(tmux, pane_id) {
                 PaneProcessKind::IdleShell(_) => panes_to_kill.push(pane_id.clone()),
-                PaneProcessKind::Agent(cmd) => {
-                    eprintln!(
-                        "resync: stash pane {} ({}) running '{}' is unregistered — skipping kill (may be rescuable)",
-                        pane_id, session_name, cmd
-                    );
-                }
+                PaneProcessKind::Agent(_) => panes_to_kill.push(pane_id.clone()),
                 PaneProcessKind::Foreign(_) | PaneProcessKind::UnknownTransient => {}
             }
         }
@@ -416,6 +431,24 @@ fn purge_unregistered_stash_panes_with_registry(tmux: &Tmux, registry: &sessions
     if killed_count > 0 {
         eprintln!("resync: purged {} orphaned stash pane(s)", killed_count);
     }
+}
+
+fn live_owned_registered_file_for_pane(
+    tmux: &Tmux,
+    pane_id: &str,
+    registry: &sessions::SessionRegistry,
+) -> Option<String> {
+    registry.iter().find_map(|(session_id, entry)| {
+        if entry.file.is_empty() {
+            return None;
+        }
+        let file = std::path::Path::new(&entry.file);
+        if !file.exists() {
+            return None;
+        }
+        (crate::sync::find_live_owner_pane(tmux, file, session_id).as_deref() == Some(pane_id))
+            .then(|| entry.file.clone())
+    })
 }
 
 /// Return active (non-idle) panes from stash windows back to their original sessions.
@@ -1129,6 +1162,7 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
                         actual_session: actual,
                         expected_session: expected.clone(),
                     });
+                    continue;
                 }
                 Err(e) => {
                     eprintln!(
@@ -1138,6 +1172,17 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
                 }
                 _ => {} // Matches expected session — no issue
             }
+        }
+
+        let live_owner =
+            crate::sync::find_live_owner_pane(tmux, std::path::Path::new(&entry.file), key);
+        if live_owner.is_none() {
+            issues.push(Issue::NoLiveOwner {
+                key: key.clone(),
+                file: label.to_string(),
+                pane: entry.pane.clone(),
+            });
+            continue;
         }
 
         // Collect window info for wrong-window detection
@@ -1381,6 +1426,11 @@ fn apply_fixes_to_registry(
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
             }
+            Issue::NoLiveOwner { key, .. } => {
+                registry.remove(key);
+                eprintln!("  fixed: {}", issue);
+                fixed += 1;
+            }
             Issue::InStash { key, pane, .. } => {
                 // Deregister — the pane is in the stash, not the active workspace.
                 // Don't kill it; just remove the registry entry so auto-start can
@@ -1526,6 +1576,88 @@ mod tests {
         }
     }
 
+    fn write_mock_agent_doc(base: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
+    fn wait_for_pane_contains(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        needle: &str,
+        timeout: std::time::Duration,
+    ) -> String {
+        let start = std::time::Instant::now();
+        loop {
+            let content = sessions::capture_pane(tmux, pane).unwrap_or_default();
+            if content.contains(needle) || start.elapsed() >= timeout {
+                return content;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn launch_mock_agent_doc(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        script: &std::path::Path,
+        file: &std::path::Path,
+    ) {
+        tmux.send_keys(
+            pane,
+            &format!("exec {} {}", script.display(), file.display()),
+        )
+        .unwrap();
+        let content = wait_for_pane_contains(tmux, pane, "\n>", std::time::Duration::from_secs(3));
+        assert!(
+            content.contains("\n>"),
+            "mock agent should be ready, got: {content}"
+        );
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(3) {
+            if crate::sync::find_alive_pane_for_file(tmux, &file.to_string_lossy()).as_deref()
+                == Some(pane)
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!(
+            "mock agent pane {} never became the live owner for {}",
+            pane,
+            file.display()
+        );
+    }
+
+    fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if let Ok(output) = std::process::Command::new("pgrep")
+                .args(["-f", pattern])
+                .output()
+                && output.status.success()
+                && let Some(pid) = String::from_utf8_lossy(&output.stdout).lines().next()
+                && let Ok(pid) = pid.trim().parse::<u32>()
+            {
+                return pid;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("timed out waiting for process matching {pattern}");
+    }
+
     #[test]
     fn detect_dead_pane_not_flagged_as_issue() {
         // Dead panes are handled by prune(), not detect_issues.
@@ -1624,6 +1756,33 @@ mod tests {
     }
 
     #[test]
+    fn detect_no_live_owner_pane() {
+        let iso = IsolatedTmux::new("resync-test-no-live-owner");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        assert!(wait_for_shell(&iso, &pane, 5000));
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_path = tmp.path().join("test.md");
+        std::fs::write(&doc_path, "# Test\n").unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "sess-no-owner".to_string(),
+            test_entry(&pane, &doc_path.to_string_lossy()),
+        );
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert_eq!(issues.len(), 1, "should detect 1 no-live-owner issue");
+        assert!(
+            matches!(&issues[0], Issue::NoLiveOwner { .. }),
+            "issue should be NoLiveOwner, got: {}",
+            &issues[0]
+        );
+    }
+
+    #[test]
     fn fix_wrong_session_kills_pane_and_deregisters() {
         let iso = IsolatedTmux::new("resync-test-fix-sess");
         let cwd = std::env::current_dir().unwrap();
@@ -1680,6 +1839,35 @@ mod tests {
         assert!(
             iso.pane_alive(&pane),
             "pane should NOT be killed (foreign process)"
+        );
+    }
+
+    #[test]
+    fn fix_no_live_owner_deregisters_but_keeps_pane() {
+        let iso = IsolatedTmux::new("resync-test-fix-no-owner");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        assert!(iso.pane_alive(&pane));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert("sess-no-owner".to_string(), test_entry(&pane, "test.md"));
+
+        let issues = vec![Issue::NoLiveOwner {
+            key: "sess-no-owner".to_string(),
+            file: "test.md".to_string(),
+            pane: pane.clone(),
+        }];
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        assert_eq!(fixed, 1);
+        assert!(
+            !registry.contains_key("sess-no-owner"),
+            "entry should be removed from registry"
+        );
+        assert!(
+            iso.pane_alive(&pane),
+            "pane should remain alive after NoLiveOwner deregister"
         );
     }
 
@@ -1741,20 +1929,34 @@ mod tests {
         // should trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-wrong-win");
         let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let doc_a = dir.path().join("a.md");
+        let doc_b = dir.path().join("b.md");
+        std::fs::write(&doc_a, "# A\n").unwrap();
+        std::fs::write(&doc_b, "# B\n").unwrap();
 
         // Create two panes in separate windows in the same session
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.auto_start("test", &cwd).unwrap(); // creates new window
+        launch_mock_agent_doc(&iso, &pane1, &script, &doc_a);
+        launch_mock_agent_doc(&iso, &pane2, &script, &doc_b);
 
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
         let w1 = iso.pane_window(&pane1).unwrap();
         let w2 = iso.pane_window(&pane2).unwrap();
         assert_ne!(w1, w2, "panes should be in different windows");
 
         let mut registry = SessionRegistry::new();
-        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
-        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+        registry.insert(
+            "sess-1".to_string(),
+            test_entry(&pane1, &doc_a.to_string_lossy()),
+        );
+        registry.insert(
+            "sess-2".to_string(),
+            test_entry(&pane2, &doc_b.to_string_lossy()),
+        );
 
         let issues = detect_issues_in_registry(&iso, &registry);
         let wrong_window_count = issues
@@ -1774,19 +1976,33 @@ mod tests {
         // Two panes in the same window should NOT trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-same-win");
         let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let doc_a = dir.path().join("a.md");
+        let doc_b = dir.path().join("b.md");
+        std::fs::write(&doc_a, "# A\n").unwrap();
+        std::fs::write(&doc_b, "# B\n").unwrap();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        launch_mock_agent_doc(&iso, &pane1, &script, &doc_a);
+        launch_mock_agent_doc(&iso, &pane2, &script, &doc_b);
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
         let w1 = iso.pane_window(&pane1).unwrap();
         let w2 = iso.pane_window(&pane2).unwrap();
         assert_eq!(w1, w2, "panes should be in the same window");
 
         let mut registry = SessionRegistry::new();
-        registry.insert("sess-1".to_string(), test_entry(&pane1, "a.md"));
-        registry.insert("sess-2".to_string(), test_entry(&pane2, "b.md"));
+        registry.insert(
+            "sess-1".to_string(),
+            test_entry(&pane1, &doc_a.to_string_lossy()),
+        );
+        registry.insert(
+            "sess-2".to_string(),
+            test_entry(&pane2, &doc_b.to_string_lossy()),
+        );
 
         let issues = detect_issues_in_registry(&iso, &registry);
         let wrong_window_count = issues
@@ -1963,40 +2179,88 @@ mod tests {
     }
 
     #[test]
-    fn purge_preserves_unregistered_agent_process_in_stash() {
-        // An unregistered pane running an agent process (e.g., claude) in stash
-        // should NOT be killed — the registry can go stale and we must not kill
-        // active Claude sessions just because they're temporarily unregistered.
-        let iso = IsolatedTmux::new("resync-purge-agent-stash");
+    fn purge_kills_unregistered_agent_in_stash_without_live_owner() {
+        let iso = IsolatedTmux::new("resync-purge-agent-no-owner");
         let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
-        // Spawn a pane running `sleep 60` to simulate an agent process.
-        // We can't easily spawn a real `agent-doc` binary in tests, but
-        // the key behavior is: pane_current_command returns a non-shell,
-        // non-user process. For this test we use `sleep` which is NOT in
-        // AGENT_PROCESSES — so we also test with an idle shell renamed.
-        // Instead, let's send `exec sleep 60` to make the shell become sleep.
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        // Move pane2 to stash first (while it's still a shell)
+        iso.send_keys(&pane2, &format!("exec {}", script.display()))
+            .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         iso.stash_pane(&pane2, "test").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
-        // The pane is now an idle shell in stash — purge would kill it.
-        // But since our fix only targets idle shells and skips agent processes,
-        // we verify that: (1) idle shells still get killed, and
-        // (2) the skip-log path works for agent processes via the bulk variant.
-
-        // Empty registry — pane2 is NOT registered
         let registry = SessionRegistry::new();
-
-        // This pane is a shell, so it SHOULD be killed (regression check)
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(
             !iso.pane_alive(&pane2),
-            "unregistered idle shell in stash should still be killed"
+            "unregistered agent pane with no live owner should be killed"
         );
+    }
+
+    #[test]
+    fn purge_preserves_unregistered_agent_in_stash_with_live_owner() {
+        let iso = IsolatedTmux::new("resync-purge-agent-live-owner");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, "# Test\n").unwrap();
+        let session_id = "sess-live-owner";
+
+        let stale_pane = iso.auto_start("test", &cwd).unwrap();
+        let live_pane = iso.split_window(&stale_pane, &cwd, "-dh").unwrap();
+        launch_mock_agent_doc(&iso, &live_pane, &script, &doc);
+        let live_pid = wait_for_process_pid(
+            &script.display().to_string(),
+            std::time::Duration::from_secs(3),
+        );
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    crate::supervisor::ipc::IpcMethod::Pid => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "pid": live_pid }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::State => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "running": true }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "n": bytes.len() }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::Restart { .. }
+                    | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                        crate::supervisor::ipc::IpcResponse::ok_empty()
+                    }
+                }
+            })
+            .unwrap();
+        iso.stash_pane(&live_pane, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            session_id.to_string(),
+            test_entry(&stale_pane, &doc.to_string_lossy()),
+        );
+
+        purge_unregistered_stash_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            iso.pane_alive(&live_pane),
+            "unregistered agent pane that still owns a registered file should survive purge"
+        );
+        ipc.stop();
     }
 
     #[test]

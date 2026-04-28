@@ -1520,6 +1520,108 @@ pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<S
     None
 }
 
+pub(crate) fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
+    let file_path = file.to_string_lossy();
+    find_alive_pane_for_file(tmux, file_path.as_ref())
+        .or_else(|| find_alive_pane_via_supervisor_pid(tmux, file, session_id))
+}
+
+fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {
+    let mut frontier = vec![pane_pid.to_string()];
+    let target = target_pid.to_string();
+
+    while let Some(pid) = frontier.pop() {
+        if pid == target {
+            return true;
+        }
+
+        let output = match std::process::Command::new("pgrep")
+            .args(["-P", &pid])
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
+            let child_pid = child_pid.trim();
+            if child_pid.is_empty() {
+                continue;
+            }
+            if child_pid == target {
+                return true;
+            }
+            frontier.push(child_pid.to_string());
+        }
+    }
+
+    false
+}
+
+fn find_alive_pane_via_supervisor_pid(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    let project_root = crate::snapshot::find_project_root(file)?;
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    if !sock.exists() {
+        return None;
+    }
+
+    let response =
+        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::Pid)
+            .ok()?;
+    if !response.ok {
+        return None;
+    }
+
+    let target_pid = response
+        .data
+        .as_ref()?
+        .get("pid")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())?;
+    if target_pid == 0 {
+        return None;
+    }
+
+    let output = tmux
+        .cmd()
+        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.splitn(2, ' ');
+        let Some(pane_id) = parts.next() else {
+            continue;
+        };
+        let Some(pane_pid) = parts.next() else {
+            continue;
+        };
+        let pane_id = pane_id.trim();
+        let pane_pid = pane_pid.trim();
+        if pane_id.is_empty() || pane_pid.is_empty() {
+            continue;
+        }
+        if pane_process_tree_contains_pid(pane_pid, target_pid) {
+            eprintln!(
+                "[sync] recovered live pane {} for session {} via supervisor pid {}",
+                pane_id,
+                &session_id[..std::cmp::min(8, session_id.len())],
+                target_pid
+            );
+            return Some(pane_id.to_string());
+        }
+    }
+
+    None
+}
+
 /// Check if a process (by PID) is running agent-doc for a specific file.
 ///
 /// Uses `ps -p <pid> -o command=` which works on both Linux and macOS.

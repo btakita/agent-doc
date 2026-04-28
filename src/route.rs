@@ -934,10 +934,7 @@ fn resolve_target_session(
         );
     }
 
-    let resolved =
-        current_tmux_session(tmux).unwrap_or_else(|| harness.tmux_session_fallback.clone());
-
-    resolved
+    current_tmux_session(tmux).unwrap_or_else(|| harness.tmux_session_fallback.clone())
 }
 
 fn ensure_auto_start_target_session(

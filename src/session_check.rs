@@ -692,11 +692,10 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
     let last = content
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter(|line| {
+        .rfind(|line| {
             line.contains(&format!("file={canonical_display}"))
                 || line.contains(&format!("file={requested_display}"))
         })
-        .next_back()
         .or_else(|| content.lines().rfind(|l| !l.trim().is_empty()))
         .map(|l| strip_timestamp_prefix(l).to_string());
     Ok(last)
@@ -753,9 +752,7 @@ pub(crate) fn detect_bypassed_response_write_between(
         return None;
     }
 
-    let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
-        return None;
-    };
+    let diff_text = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
 
     let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
     for change in diff.iter_all_changes() {

@@ -1875,12 +1875,10 @@ fn repair_clean_head_if_only_transient_worktree_drift(
     }
     if normalize_transient_agent_doc_markers(file_content)
         != normalize_transient_agent_doc_markers(&head_doc)
-    {
-        if normalize_post_commit_re_heading_drift(file_content)
+        && normalize_post_commit_re_heading_drift(file_content)
             != normalize_post_commit_re_heading_drift(&head_doc)
-        {
-            return Ok(None);
-        }
+    {
+        return Ok(None);
     }
 
     crate::write::atomic_write_pub(file, &head_doc)?;

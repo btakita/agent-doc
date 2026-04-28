@@ -7,6 +7,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -443,11 +444,32 @@ corky gsc sites --format table
 ```
 
 If that succeeds, then the earlier `#cgb1` framing is stale for the GSC auth path, and the remaining blocker is whatever comes after successful user OAuth, not Search Console permissions and not redirect registration.
-<!-- agent:boundary:6faae5b4 -->
+
+❯ Please implement a desktop notify whenever an oauth is encountered. spec-test-build-install-commit-push
+### Re: desktop OAuth notify — gpt-5
+
+Implemented and pushed.
+
+What changed in `src/corky`:
+- interactive OAuth flows now emit a best-effort desktop notification before the browser handoff for Gmail, Calendar, GSC, Google Contacts, and social auth flows
+- the behavior is centralized in `src/desktop_notify.rs` and documented in `SPEC.md`
+
+Verification and delivery:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (GPU path, `transcribe-cuda`)
+- pushed `20260413/corky-gsc` to `origin`
+
+Commits now on the branch:
+- `f8aff38` — `fix: notify interactive oauth flows`
+- `7b3a95c` — `docs: simplify corky skill command list`
+
+You can retry `corky gsc auth` from a normal desktop shell; when OAuth is encountered, corky should now raise a desktop notification in addition to the terminal/browser output.
+<!-- agent:boundary:83864991 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#0ptw] [recommended] Re-run `corky gsc auth` and `corky gsc sites --format table` from a normal desktop shell to confirm the shared 8484 redirect fix resolves the Google OAuth error.
 <!-- /agent:pending -->

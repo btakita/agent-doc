@@ -1807,7 +1807,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 /// New entries are appended AFTER any existing archive body. The component
 /// is always rendered with a trailing blank line so successive turns don't
 /// pack entries onto one line.
-fn archive_pending_done(content: &str, removed: &[crate::pending::PendingItem]) -> Option<String> {
+pub(crate) fn archive_pending_done(
+    content: &str,
+    removed: &[crate::pending::PendingItem],
+) -> Option<String> {
     if removed.is_empty() {
         return None;
     }
@@ -2573,6 +2576,86 @@ mod tests {
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted,
             "ambiguous patchback must not be auto-committed"
+        );
+    }
+
+    #[test]
+    fn preflight_completed_backlog_reap_does_not_swallow_live_prompt() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do #scopeid — gpt-5\n",
+            "Implemented.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#scopeid] completed item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do #scopeid — gpt-5\n",
+            "Implemented.\n",
+            "do #statusws. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#scopeid] completed item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "preflight should still open a response cycle for the live prompt"
+        );
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(file_after.contains("do #statusws. spec-test-build-install-commit-push"));
+        assert!(!file_after.contains("- [x] [#scopeid] completed item"));
+
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains("do #statusws. spec-test-build-install-commit-push"),
+            "snapshot must not absorb the live prompt during backlog reap"
+        );
+        assert!(!snapshot_after.contains("- [x] [#scopeid] completed item"));
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "git show HEAD:session.md failed");
+        let head_text = String::from_utf8_lossy(&head.stdout);
+        assert!(
+            !head_text.contains("do #statusws. spec-test-build-install-commit-push"),
+            "repair/commit must not silently commit the live prompt:\n{head_text}"
         );
     }
 

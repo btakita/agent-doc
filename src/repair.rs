@@ -21,6 +21,9 @@
 //! - `repair(file)` — runs the same recovery logic as `run(file)` and, when recovery work happened
 //!   inside a git repo, immediately attempts `git::commit(file)` so the repaired response crosses
 //!   the normal commit boundary instead of waiting for a later `preflight`.
+//! - When there is no pending response/capture to replay, `run(file)` also reaps stale completed
+//!   backlog items (`- [x] ...`) that should already have been removed, synchronizing the reap
+//!   into the snapshot and `agent:pending-done` archive when present.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
 //! - `normalized_response_lines(response)` — extracts the response's non-empty, non-marker lines for dedup checking and normalizes transient ` (HEAD)` response-heading churn.
@@ -55,6 +58,7 @@ pub enum RepairOutcome {
     AlreadyApplied,
     ManualTailRemovalRespected,
     StalePreflightLockRepaired,
+    CompletedBacklogReaped,
 }
 
 impl RepairOutcome {
@@ -169,6 +173,97 @@ fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     }
 
     Ok(RepairOutcome::Noop)
+}
+
+fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} for completed backlog reap repair",
+            file.display()
+        )
+    })?;
+    let components = crate::component::parse(&content).with_context(|| {
+        format!(
+            "failed to parse {} for completed backlog reap repair",
+            file.display()
+        )
+    })?;
+    let Some(backlog) = components
+        .iter()
+        .find(|component| crate::component::is_backlog_component(&component.name))
+    else {
+        return Ok(RepairOutcome::Noop);
+    };
+
+    let (new_body, removed) = crate::pending::reap_with_items(backlog.content(&content));
+    if removed.is_empty() {
+        return Ok(RepairOutcome::Noop);
+    }
+
+    let mut repaired = backlog.replace_content(&content, &new_body);
+    if let Some(archived) = crate::preflight::archive_pending_done(&repaired, &removed) {
+        repaired = archived;
+    }
+
+    write::atomic_write_pub(file, &repaired)?;
+
+    let repaired_snapshot = if let Some(snap_content) = snapshot::load(file)? {
+        let snap_components = crate::component::parse(&snap_content).with_context(|| {
+            format!(
+                "failed to parse snapshot for completed backlog reap repair {}",
+                file.display()
+            )
+        })?;
+        let snap_backlog = snap_components
+            .iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .with_context(|| {
+                format!(
+                    "completed backlog reap repair requires the snapshot backlog component in {}",
+                    file.display()
+                )
+            })?;
+
+        let mut new_snapshot = snap_backlog.replace_content(&snap_content, &new_body);
+        if let Some(archived) = crate::preflight::archive_pending_done(&new_snapshot, &removed) {
+            new_snapshot = archived;
+        }
+        snapshot::save(file, &new_snapshot)?;
+        Some(new_snapshot)
+    } else {
+        None
+    };
+
+    if repaired_snapshot.as_deref() == Some(repaired.as_str()) {
+        let _ = crate::cycle_state::mark_committed(
+            file,
+            "repair_completed_backlog_reap",
+            Some(&repaired),
+            Some(&repaired),
+        );
+    }
+
+    let refs = removed
+        .iter()
+        .map(|item| format!("#{}", item.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_completed_backlog_reap file={} count={} ids={}",
+            file.display(),
+            removed.len(),
+            refs
+        ),
+    );
+    eprintln!(
+        "[repair] reaped stale completed backlog item(s) in {}: {}",
+        file.display(),
+        refs
+    );
+
+    Ok(RepairOutcome::CompletedBacklogReaped)
 }
 
 fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
@@ -384,7 +479,11 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let pending_path = snapshot::pending_path_for(&canonical)?;
     let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
     if !pending_path.exists() && capture.is_none() {
-        return repair_stale_preflight_started_cycle(file);
+        let outcome = repair_stale_preflight_started_cycle(file)?;
+        if outcome != RepairOutcome::Noop {
+            return Ok(outcome);
+        }
+        return repair_completed_backlog_items(file);
     }
 
     let pending_response = if pending_path.exists() {
@@ -655,6 +754,128 @@ mod tests {
 
         clear_pending(&doc).unwrap();
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn repair_reaps_completed_backlog_without_pending_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#aaaa] keep\n",
+            "- [x] [#bbbb] drop\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("- [ ] [#aaaa] keep"));
+        assert!(!repaired.contains("- [x] [#bbbb] drop"));
+        assert!(repaired.contains("[#bbbb] drop"));
+
+        let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(repaired_snapshot.contains("- [ ] [#aaaa] keep"));
+        assert!(!repaired_snapshot.contains("- [x] [#bbbb] drop"));
+        assert!(repaired_snapshot.contains("[#bbbb] drop"));
+    }
+
+    #[test]
+    fn repair_commits_reaped_completed_backlog_in_git_repo() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#aaaa] keep\n",
+            "- [x] [#bbbb] drop\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let outcome = repair(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
+
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(_) => {}
+            other => panic!("expected clean closeout after repair, got {other:?}"),
+        }
+
+        let head = ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["show", "HEAD:test.md"])
+            .output()
+            .unwrap();
+        let head_text = String::from_utf8_lossy(&head.stdout);
+        assert!(head_text.contains("- [ ] [#aaaa] keep"));
+        assert!(!head_text.contains("- [x] [#bbbb] drop"));
+        assert!(head_text.contains("[#bbbb] drop"));
+    }
+
+    #[test]
+    fn repair_completed_backlog_reap_preserves_live_prompt_outside_snapshot() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [x] [#bbbb] drop\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        let live_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "do #statusws. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [x] [#bbbb] drop\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, live_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("do #statusws. spec-test-build-install-commit-push"));
+        assert!(!repaired.contains("- [x] [#bbbb] drop"));
+
+        let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !repaired_snapshot.contains("do #statusws. spec-test-build-install-commit-push"),
+            "snapshot must not absorb the live prompt"
+        );
+        assert!(!repaired_snapshot.contains("- [x] [#bbbb] drop"));
+
+        let diff = crate::diff::compute(&doc).unwrap().unwrap();
+        assert!(diff.contains("do #statusws. spec-test-build-install-commit-push"));
     }
 
     #[test]

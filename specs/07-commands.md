@@ -481,6 +481,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 3. If no pending/captured repair path exists, repair still checks for stale completed backlog items:
    - if the live `agent:backlog` / `agent:pending` still contains `- [x]` items, reap them immediately, mirror the same reap into the snapshot, and archive them into `agent:pending-done` when that component exists
    - snapshot sync for that reap must stay surgical to the backlog/archive components; it must not absorb unrelated live exchange/user prompt edits into the snapshot
+   - if prompt-bearing exchange drift already exists (for example plain text inserted immediately before `agent:boundary`), that drift must remain visible to the next preflight diff after the reap; `repair` must not convert it into `no_changes`
    - otherwise stop without committing
 
 **Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content. For template docs that means `AlreadyApplied` is still a document-mutation-capable repair outcome when transcript canonicalization is needed.

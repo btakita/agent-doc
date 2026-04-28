@@ -212,7 +212,28 @@ Added:
 1. `#lintlock` — make `tsift lint` use the same lock-aware read-only/snapshot path as the other query commands.
 2. `#lintidx` — make `tsift lint --index .tsift/indexes` discover scoped `index.db` files correctly and pin it with a regression.
 3. `#sumro` — make summarize stats/query paths read-only so they stop creating or contending on `summaries.db`.
-<!-- agent:boundary:acba24e7 -->
+
+❯ do #lintlock. spec-test-build-install-commit-push
+### Re: do #lintlock — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift lint` now reads discovered `index.db` files through `IndexDb` instead of raw `rusqlite`, so symbol collection uses rollback-journal snapshot fallback instead of failing on `database is locked`.
+- added lock regressions at both layers: a helper-level test in `src/lint.rs` and a compiled CLI test in `tests/exit_code.rs`, both asserting lint still succeeds while `.tsift/index.db` is held under `BEGIN EXCLUSIVE`.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the binary version to `0.1.8` so the lint lock contract is versioned.
+
+Verification:
+- `cargo test collect_entities_uses_snapshot_fallback_when_rollback_journal_is_locked -- --nocapture` passed.
+- `cargo test lint_stays_read_only_while_rollback_journal_lock_exists --test exit_code -- --nocapture` passed.
+- `make check` passed: 360 unit tests + 23 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.8`.
+
+Commit: `btakita/tsift@23a112c` pushed to `origin/main`.
+
+Top of backlog: `#lintidx`.
+<!-- agent:boundary:ede063a3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -221,7 +242,7 @@ Added:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lintlock] Fix `tsift lint` to use lock-aware read-only index access and snapshot fallback so active writers do not fail with `database is locked`.
+- [x] [#lintlock] Fix `tsift lint` to use lock-aware read-only index access and snapshot fallback so active writers do not fail with `database is locked`.
 - [ ] [#lintidx] Fix `tsift lint --index .tsift/indexes` discovery so scoped index roots load `.tsift/indexes/*/index.db`, and add a CLI regression for that path.
 - [ ] [#sumro] Make `tsift summarize --stats` and summary query mode open `summaries.db` read-only so lookup paths do not create or contend on the cache DB.
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

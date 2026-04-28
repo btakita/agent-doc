@@ -817,7 +817,27 @@ The plan is intentionally diagnostic first:
 - add crash provenance logging and a short-window crash-loop fail-closed guard so repeated pane deaths stop churning tmux state
 
 I’m not claiming a root cause from the symptom alone yet. The main fix target is the tmux/supervisor boundary in `src/agent-doc`, not `tsift` itself.
-<!-- agent:boundary:b3b65bbb -->
+
+❯ do #txn. spec-test-build-install-commit-push
+### Re: do #txn — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `apply_changes` now wraps the full file-state / symbol / edge / dir-state mutation batch in a SQLite savepoint and rolls back the whole batch on any mid-update failure.
+- `rebuild` now wraps its table-clearing phase in an outer savepoint, so a failure after the bulk DELETEs still restores the prior index.
+- added rollback regression tests that inject failures inside both paths and prove the old index contents survive.
+- updated `SPEC.md` and `CLAUDE.md` to document the transactional index contract.
+
+Verification:
+- `make check` passed: 342 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+
+I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
+
+Commit: `btakita/tsift@b4a3c5b` pushed to `origin/main`.
+<!-- agent:boundary:3c0b63ac -->
 <!-- /agent:exchange -->
 
 <!--
@@ -826,7 +846,7 @@ I’m not claiming a root cause from the symptom alone yet. The main fix target 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#txn] Wrap apply_changes_inner + rebuild in SQLite transactions (index.rs:395-478, 497-501)
+- [x] [#txn] Wrap apply_changes_inner + rebuild in SQLite transactions (index.rs:395-478, 497-501)
 - [ ] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
 - [ ] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
 - [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)

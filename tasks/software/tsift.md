@@ -721,7 +721,7 @@ Smoke checks:
 I pushed from a fresh `origin/main` clone because the checked-out `src/tsift` submodule still had unrelated local edits and `origin/main` moved during the turn.
 
 Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
-<!-- agent:boundary:eb4581a7 -->
+<!-- agent:boundary:97165a9e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -730,7 +730,6 @@ Commit: `btakita/tsift@7145b9c` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#subhk] Add repo-wide tsift hook install/update for active submodules so stale-index protection does not depend on manual per-submodule setup
 - [ ] [#vsync] Add tsift instruction version markers plus auto-refresh for injected AGENTS.md/CLAUDE.md content and bundled runbooks
 <!-- /agent:backlog -->
 

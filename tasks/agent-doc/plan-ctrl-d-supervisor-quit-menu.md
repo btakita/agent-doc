@@ -1,7 +1,7 @@
 # Plan — restore Codex `Ctrl+D` supervisor quit menu
 
 **Pending:** `#ctrldmenu` in `tasks/agent-doc/agent-doc-bugs2.md`
-**Status:** Draft
+**Status:** Implemented
 
 ## Problem
 

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Duplicate live `start` now reuses the existing pane instead of erroring.** `start.rs` now excludes the current transient `agent-doc start <file>` pane when probing for live owners, focuses any already-running owner it proves, and re-registers to that pane when the registry was stale. If the registry points at a different alive pane but no live owner can still be proven, `start` now clears that stale binding and proceeds in the current pane instead of failing closed forever. Added start-level regression coverage for reuse, stale-alive clearing, and same-pane/dead-pane cases.
+
 - **`resync` now shares route's live-owner proof and stale-owner recovery.** `sync.rs` now exposes a shared ownership probe that first scans tmux process trees for the document path and then falls back to the per-session supervisor PID. `resync.rs` reports alive-but-unowned registrations as `NoLiveOwner`, `resync --fix` deregisters them without killing the pane, and `route.rs` now clears that same stale binding before continuing with lazy-claim / auto-start recovery instead of failing closed immediately.
 
 - **Stash cleanup no longer preserves every unregistered agent pane by default.** During `resync --fix`, unregistered `agent-doc` / `codex` / `claude` panes in stash are now kept only when the shared live-owner proof still ties them to some registered document. Otherwise they are purged as orphaned agent panes. Added regressions for stale-owner detection, lazy-claim recovery, and stash cleanup.

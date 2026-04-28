@@ -1473,7 +1473,11 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
 /// This catches panes that were pruned from the registry but are still alive.
 ///
 /// Uses `ps -p <pid> -o command=` for cross-platform compatibility (Linux + macOS).
-pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
+fn find_alive_pane_for_file_inner(
+    tmux: &Tmux,
+    file_path: &str,
+    excluded_pane: Option<&str>,
+) -> Option<String> {
     let output = tmux
         .cmd()
         .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
@@ -1490,6 +1494,9 @@ pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<S
         }
         let pane_id = parts[0];
         let pid_str = parts[1];
+        if excluded_pane.is_some_and(|excluded| excluded == pane_id) {
+            continue;
+        }
 
         // Check the pane's process and its children for agent-doc + file_path
         if pid_has_agent_doc_for_file(pid_str, file_path) {
@@ -1520,10 +1527,25 @@ pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<S
     None
 }
 
+pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
+    find_alive_pane_for_file_inner(tmux, file_path, None)
+}
+
 pub(crate) fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
+    find_live_owner_pane_excluding(tmux, file, session_id, None)
+}
+
+pub(crate) fn find_live_owner_pane_excluding(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+) -> Option<String> {
     let file_path = file.to_string_lossy();
-    find_alive_pane_for_file(tmux, file_path.as_ref())
-        .or_else(|| find_alive_pane_via_supervisor_pid(tmux, file, session_id))
+    find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane).or_else(|| {
+        find_alive_pane_via_supervisor_pid(tmux, file, session_id)
+            .filter(|pane| excluded_pane != Some(pane.as_str()))
+    })
 }
 
 fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {

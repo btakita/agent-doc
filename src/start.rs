@@ -9,6 +9,12 @@
 //!   - Codex: frontmatter `agent_args` > frontmatter `codex_args` >
 //!     config `agent_args` > config `codex_args`
 //! - Requires an active tmux session; bails immediately if not inside tmux.
+//! - If another pane already proves live ownership of the same document
+//!   session, focuses and reuses that pane instead of spawning a duplicate
+//!   supervisor in the current pane.
+//! - If `sessions.json` points at an alive pane but no live owner can still be
+//!   proven for the document, clears that stale registration before starting in
+//!   the current pane.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
@@ -626,32 +632,46 @@ fn spawn_auto_trigger_thread(
         .expect("spawn auto-trigger thread")
 }
 
-fn conflicting_live_session_pane(
+#[derive(Debug, PartialEq, Eq)]
+enum ExistingSessionPaneAction {
+    Reuse(String),
+    ClearStale(String),
+}
+
+fn existing_session_pane_action(
     tmux: &sessions::Tmux,
     session_id: &str,
+    file: &Path,
     current_pane: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<ExistingSessionPaneAction>> {
     let entry = sessions::lookup_entry(session_id)?;
-    Ok(conflicting_live_session_pane_from_entry(
+    let live_owner =
+        crate::sync::find_live_owner_pane_excluding(tmux, file, session_id, Some(current_pane));
+    Ok(existing_session_pane_action_from_entry(
         tmux,
         current_pane,
         entry.as_ref(),
+        live_owner.as_deref(),
     ))
 }
 
-fn conflicting_live_session_pane_from_entry(
+fn existing_session_pane_action_from_entry(
     tmux: &sessions::Tmux,
     current_pane: &str,
     entry: Option<&sessions::SessionEntry>,
-) -> Option<String> {
+    live_owner: Option<&str>,
+) -> Option<ExistingSessionPaneAction> {
+    if let Some(owner) = live_owner
+        && owner != current_pane
+    {
+        return Some(ExistingSessionPaneAction::Reuse(owner.to_string()));
+    }
+
     let entry = entry?;
-    if entry.pane == current_pane {
+    if entry.pane == current_pane || !tmux.pane_alive(&entry.pane) {
         return None;
     }
-    if tmux.pane_alive(&entry.pane) {
-        return Some(entry.pane.clone());
-    }
-    None
+    Some(ExistingSessionPaneAction::ClearStale(entry.pane.clone()))
 }
 
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate
@@ -1149,13 +1169,42 @@ pub fn run(file: &Path) -> Result<()> {
         relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
     }
 
-    if let Some(existing_pane) = conflicting_live_session_pane(&tmux, &session_id, &pane_id)? {
-        anyhow::bail!(
-            "session {} for {} is already running in pane {} — refusing to start a duplicate live pane",
-            &session_id[..8.min(session_id.len())],
-            file.display(),
-            existing_pane
-        );
+    if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
+        match action {
+            ExistingSessionPaneAction::Reuse(existing_pane) => {
+                if sessions::lookup(&session_id)?.as_deref() != Some(existing_pane.as_str()) {
+                    sessions::register(&session_id, &existing_pane, &file.to_string_lossy())?;
+                    eprintln!(
+                        "[start] recovered live owner for {} in pane {}",
+                        file.display(),
+                        existing_pane
+                    );
+                }
+                if let Err(e) = tmux.select_pane(&existing_pane) {
+                    eprintln!(
+                        "[start] warning: failed to focus existing pane {}: {}",
+                        existing_pane, e
+                    );
+                } else {
+                    eprintln!("[start] focused existing pane {}", existing_pane);
+                }
+                eprintln!(
+                    "session {} for {} is already running in pane {} — reusing existing live pane",
+                    &session_id[..8.min(session_id.len())],
+                    file.display(),
+                    existing_pane
+                );
+                return Ok(());
+            }
+            ExistingSessionPaneAction::ClearStale(stale_pane) => {
+                eprintln!(
+                    "[start] registered pane {} is alive but no live owner for {} was proven — clearing stale entry",
+                    stale_pane,
+                    file.display()
+                );
+                let _ = sessions::deregister(&session_id)?;
+            }
+        }
     }
 
     // Register session → pane (with relative file path)
@@ -2114,7 +2163,7 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_live_session_pane_detects_other_alive_pane() {
+    fn existing_session_pane_action_reuses_proven_live_owner() {
         let iso = IsolatedTmux::new("start-duplicate-live-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
@@ -2128,12 +2177,16 @@ mod tests {
             window: iso.pane_window(&pane_a).unwrap_or_default(),
         };
 
-        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane_b, Some(&entry));
-        assert_eq!(conflict.as_deref(), Some(pane_a.as_str()));
+        let action =
+            existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), Some(&pane_a));
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
+        );
     }
 
     #[test]
-    fn conflicting_live_session_pane_ignores_same_pane() {
+    fn existing_session_pane_action_ignores_same_pane() {
         let iso = IsolatedTmux::new("start-duplicate-same-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane = iso.new_session("test", tmp.path()).unwrap();
@@ -2146,12 +2199,34 @@ mod tests {
             window: iso.pane_window(&pane).unwrap_or_default(),
         };
 
-        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane, Some(&entry));
-        assert_eq!(conflict, None);
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        assert_eq!(action, None);
     }
 
     #[test]
-    fn conflicting_live_session_pane_ignores_dead_registered_pane() {
+    fn existing_session_pane_action_clears_alive_stale_registration_without_owner() {
+        let iso = IsolatedTmux::new("start-stale-alive-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane_a = iso.new_session("test", tmp.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane_a.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane_a).unwrap_or_default(),
+        };
+
+        let action = existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None);
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::ClearStale(pane_a.clone()))
+        );
+    }
+
+    #[test]
+    fn existing_session_pane_action_ignores_dead_registered_pane() {
         let iso = IsolatedTmux::new("start-duplicate-dead-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane = iso.new_session("test", tmp.path()).unwrap();
@@ -2164,8 +2239,8 @@ mod tests {
             window: String::new(),
         };
 
-        let conflict = conflicting_live_session_pane_from_entry(&iso, &pane, Some(&entry));
-        assert_eq!(conflict, None);
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        assert_eq!(action, None);
     }
 
     #[test]

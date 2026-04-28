@@ -636,7 +636,7 @@ Verification:
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule inside `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@9a18b25` pushed to `origin/main`.
-<!-- agent:boundary:8c16d150 -->
+<!-- agent:boundary:6b180d70 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -645,9 +645,6 @@ Commit: `btakita/tsift@9a18b25` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
-- [x] [#sprch] [recommended] Extend locked-db snapshot fallback to search freshness prechecks (scoped, federated, and --no-autoindex paths)
-- [x] [#sdia] [recommended] Expose snapshot-fallback recovery in tsift status human + JSON output so agents can tell when health checks ran in degraded mode
-- [x] [#tdoc] [recommended] Add lock diagnostics/remediation command for rollback-journal and writer-lock states
 <!-- /agent:backlog -->
 
 <!--

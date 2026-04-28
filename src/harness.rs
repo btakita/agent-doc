@@ -5,7 +5,8 @@
 //! - Parameterizes binary name, restart behavior, prompt patterns, trigger command,
 //!   env vars to remove, and feature support flags.
 //! - `RestartBehavior`: how the supervisor restarts after a crash — either append args
-//!   to base_args (Claude: `--continue`) or replace them entirely (Codex: `resume --last`).
+//!   to base_args (Claude: `--continue`) or prefix a resume subcommand while preserving
+//!   the resolved base args (Codex: `resume --last` + existing sandbox/model flags).
 //! - `HarnessConfig::claude()` and `HarnessConfig::codex()` provide defaults.
 //! - `HarnessConfig::from_context()` resolves from frontmatter `agent` field,
 //!   config `default_agent`, with Claude as fallback.
@@ -23,8 +24,8 @@ use crate::frontmatter::Frontmatter;
 pub enum RestartBehavior {
     /// Append these args to base_args (Claude: `["--continue"]`).
     Append(Vec<String>),
-    /// Replace base_args entirely with these args (Codex: `["resume", "--last"]`).
-    Replace(Vec<String>),
+    /// Prefix these args ahead of base_args (Codex: `["resume", "--last"]`).
+    Prepend(Vec<String>),
 }
 
 /// What the supervisor should do after a clean child exit (code 0).
@@ -78,7 +79,7 @@ impl HarnessConfig {
     pub fn codex() -> Self {
         Self {
             binary: "codex".into(),
-            restart_behavior: RestartBehavior::Replace(vec!["resume".into(), "--last".into()]),
+            restart_behavior: RestartBehavior::Prepend(vec!["resume".into(), "--last".into()]),
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec!["❯".into(), ">".into()],
             trigger_command_template: "agent-doc {file}".into(),
@@ -118,7 +119,11 @@ impl HarnessConfig {
                 args.extend(extra.iter().cloned());
                 args
             }
-            RestartBehavior::Replace(new_args) => new_args.clone(),
+            RestartBehavior::Prepend(prefix) => {
+                let mut args = prefix.clone();
+                args.extend(base_args.iter().cloned());
+                args
+            }
         }
     }
 
@@ -185,7 +190,7 @@ mod tests {
         assert!(!h.supports_enable_tool_search);
         assert_eq!(
             h.restart_behavior,
-            RestartBehavior::Replace(vec!["resume".into(), "--last".into()])
+            RestartBehavior::Prepend(vec!["resume".into(), "--last".into()])
         );
         assert_eq!(h.clean_exit_behavior, CleanExitBehavior::RestartContinue);
         assert!(h.env_remove.contains(&"CODEX_CLI".to_string()));
@@ -251,11 +256,11 @@ mod tests {
     }
 
     #[test]
-    fn restart_args_replace() {
+    fn restart_args_prepend() {
         let h = HarnessConfig::codex();
         let base = vec!["--some-flag".to_string()];
         let args = h.restart_args(&base);
-        assert_eq!(args, vec!["resume", "--last"]);
+        assert_eq!(args, vec!["resume", "--last", "--some-flag"]);
     }
 
     #[test]
@@ -444,8 +449,13 @@ mod tests {
             "claude appends to base"
         );
         assert!(
-            !codex_args.contains(&"--flag".to_string()),
-            "codex replaces base"
+            codex_args.contains(&"--flag".to_string()),
+            "codex preserves base args across resume"
+        );
+        assert_eq!(
+            codex_args[..2],
+            ["resume".to_string(), "--last".to_string()],
+            "codex restart still prefixes resume mode"
         );
         assert_eq!(claude.clean_exit_behavior, CleanExitBehavior::PromptUser);
         assert_eq!(

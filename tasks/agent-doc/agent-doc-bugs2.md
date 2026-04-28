@@ -283,23 +283,37 @@ In all three cases, silently switching focus is the wrong action. The right sequ
 5. If pane dead → deregister and start fresh
 
 This is essentially `resync --fix` + health probe + conditional restart, which is what `agent-doc fix` should encapsulate. Adding as a concrete shape to `#startreuse`.
-<!-- agent:boundary:6b12307f -->
+
+❯ I don't see #startreuse in this file. Do it. spec-test-build-install-commit-push
+### Re: #startreuse — opus-4-6
+
+Added `#startreuse` to backlog and implemented it in `src/agent-doc`.
+
+Pushed commit `675ab61` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `start.rs` now queries supervisor IPC `state` before deciding what to do in the reuse path.
+- **Healthy** (running + healthy state) → switch focus as before.
+- **Needs restart** (supervisor reachable but child not running / halted / degraded) → send `restart` via IPC, focus on success; deregister + start fresh on failure.
+- **Unreachable** (socket exists, supervisor unresponsive) → deregister + start fresh.
+- **No socket** (supervisor socket missing entirely) → deregister + start fresh.
+- Added 8 regression tests covering all health probe states and restart-via-supervisor paths.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test` — 1871 tests, all passing (1 pre-existing flaky route test passes on retry)
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:f4c23a45 -->
 <!-- /agent:exchange -->
 
 <!--
-Should we have this case call the equivalent of `agent-doc fix` since we should never get here?
-
-do #backlogreplay. spec-test-build-install-commit-push
-### Re: Ctrl+D supervisor quit menu regression — gpt-5
-
-Captured this as `#ctrldmenu` and added a plan in `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`.
-
-Current evidence points to an intentional-but-wrong behavior change in `src/agent-doc/src/start.rs`: the clean-exit strategy now treats Codex `Ctrl+D` / stdin EOF as `RestartFresh`, and the active branch logs `ctrl_d_restart_fresh` instead of presenting the cooked-mode `Press Enter to restart, or 'q' to exit.` menu. `src/agent-doc/specs/supervisor.md` was updated to match that restart-fresh behavior, so the fix needs to restore the quit-prompt contract in both code and spec and add a regression that proves `Ctrl+D` does not bypass the quit menu.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [x] [#startreuse] Health-aware start reuse: probe supervisor IPC before switching focus
 - [ ] [#freshack] `#tmuxcrash` fixed stale-owner ambiguity, but fresh replacement panes can still miss cycle acknowledgment and look like crashes. Track the `tsift.md` clean-exit -> fresh-start -> `route_cycle_start_missing` path and make startup misses fail visibly instead of looking like dead panes. Plan: `tasks/agent-doc/plan-fresh-start-cycle-ack-miss.md`
 - [ ] [#ctrldmenu] Restore the `agent-doc` supervisor quit menu on Codex `Ctrl+D` / stdin EOF so clean exit does not auto-restart before the user can press `q`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`
 - [ ] [#backlogreplay] Detect and fail closed or guide recovery when recent committed history proves open backlog items were dropped entirely from the live backlog, even if no shadow/commented copy remains. Plan: `tasks/agent-doc/plan-backlog-recovery-from-history.md`

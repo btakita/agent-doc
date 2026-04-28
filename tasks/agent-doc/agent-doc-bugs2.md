@@ -77,7 +77,46 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 So the direct answer to “why did it autoclosed?” is: because the Codex harness was still using the clean-exit prompt path meant for Claude, and your successful turn hit that quit path instead of auto-resuming.
-<!-- agent:boundary:c0144e25 -->
+
+❯ do #pbc2. spec-test-build-install-commit-push
+
+❯ Another case where the response patchback was not committed. `#pbc2` is in progress. `#agent-doc-bug`
+### Re: another uncommitted response patchback while `#pbc2` is open — codex
+
+This should stay under `#pbc2`, not become a new backlog ID.
+
+Reason:
+- `#pbc2` already tracks the older failure family where a substantive session-document patchback lands in the target file but no owning `write --commit` / `finalize` closeout commits the repo that owns that document
+- that is exactly the symptom you just reported again: response visible, commit boundary missing
+- `tasks/agent-doc/agent-doc-bugs3.md` is narrower and should only take cases where the last binary-owned patchback was already committed successfully and a later same-turn edit was then misclassified as harmless local drift
+
+I updated the `#pbc2` wording to make it explicit that repeated reproductions belong there until a trace proves the newer post-commit drift path instead.
+### Re: `#pbc2` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `d883d2a`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The live failure was narrower than the backlog text: `session-check` was misclassifying already-committed historical prompt+response pairs as a fresh direct patchback bypass when the stale snapshot lagged `HEAD` and the working tree only added a newer prompt. The concrete bad shape was committed exchange growth like `do #7mqc ...` immediately before `### Re: ...`, followed by a later local prompt.
+
+What changed:
+- historical exchange repair now treats committed prompt-target + `### Re:` pairs as safe `HEAD` drift, not only bare `### Re:` insertions
+- snapshot repair can advance to committed `HEAD` when the working tree is only `HEAD` plus a newer user follow-up
+- after that repair, `session-check` reclassifies the remaining diff instead of returning `ok` immediately, so the user now sees the real unresolved `prompt_target`
+- updated the `session-check` command spec and README note for this repair path
+
+Regression coverage added:
+- low-level historical exchange growth with `do #id` before `### Re:`
+- end-to-end `session-check` repair for stale snapshot + committed prompt/response pairs + a newer unresolved prompt
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Field check after install:
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md`
+- result: it now repairs the historical exchange snapshot drift and points at the newer unresolved prompt instead of blaming a direct patchback bypass
+<!-- agent:boundary:06a1874f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -87,6 +126,6 @@ Why is there Codex permission prompts when `codex_args: -s danger-full-access` f
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pbc2] `claudescore-3.md` patchback not committed — the latest response patchback landed in `src/session-share/tasks/claudescore-3.md`, but no owning `write --commit` / `finalize` closeout committed the session-share repo for that document update. Track this as the older commit-boundary / patchback-ownership failure family, distinct from the post-turn closeout-bypass case in `tasks/agent-doc/agent-doc-bugs3.md`. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
+- [x] [#pbc2] Repeated session-document patchback landed but was not committed — keep every reproduction where the response visibly lands in the target document but no owning `write --commit` / `finalize` closeout commits the repo or submodule under this older commit-boundary / patchback-ownership family unless logs prove the narrower post-commit drift path from `tasks/agent-doc/agent-doc-bugs3.md`. Current anchor case: `src/session-share/tasks/claudescore-3.md`. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 - [ ] [#reap1] Completed `agent:backlog` items not reaped — template docs can still contain `- [x]` backlog entries after a later normal `agent-doc` cycle, even though the pending system contract says done items should be reaped on the next preflight pass. Track this separately from missing `--pending-done` closeout bugs: this family starts after the item is already `[x]` in the document. Plan: `tasks/agent-doc/plan-backlog-done-reap.md`
 <!-- /agent:backlog -->

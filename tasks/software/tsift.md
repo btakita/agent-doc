@@ -530,7 +530,34 @@ The minimal design would be:
 4. if we want more than the single AGENTS/CLAUDE block, add bundled runbooks the way `agent-doc` does
 
 If you want, I can turn that into a backlog item and implement it next.
-<!-- agent:boundary:a5eb2ca2 -->
+
+❯ An agent-doc turn in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md got this issue. Why?
+```
+• Ran tsift status
+  └ Error: database is locked
+
+    Caused by:
+        Error code 5: The database file is locked
+```
+### Re: `agent-doc-bugs2.md` status lock — gpt-5
+
+That one is the root-repo writer-lock case, not an autoindex precheck case.
+
+`tsift status` itself stays on the read-only path: `status::check_status()` opens `.tsift/index.db` through `IndexDb::open_read_only()` and then reads `file_state` to compute freshness. It does not try to rebuild the index.
+
+The reason it still failed is that the root `agent-loop` index is currently in a bad live lock state:
+- there is still a long-running `tsift search --autoindex ...` process stuck in `D` state (`PID 927595`, now over an hour old)
+- the root repo has `.tsift/index.db-journal`, which means that writer is holding the DB in rollback-journal mode instead of a clean WAL sidecar
+- in that state, even a read-only status open/read can hit SQLite `Error code 5: database is locked`
+
+So the immediate cause for that `agent-doc-bugs2.md` note is: `tsift status` tried to read the root `.tsift/index.db` while an already-wedged root writer still owned a lock-prone rollback-journal session.
+
+That is different from the earlier `search --autoindex` failure:
+- `search --autoindex` failed because it escalated into the write path and collided with another writer
+- this `status` failure happened without any write attempt; the read-only status path itself was blocked by the existing bad writer state
+
+So the short answer is: the current root `.tsift/index.db` is still contaminated by an older stuck writer, and `status` touched the same DB.
+<!-- agent:boundary:a6b160a1 -->
 <!-- /agent:exchange -->
 
 <!--

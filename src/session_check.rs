@@ -110,6 +110,10 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         warnings: Vec::new(),
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
+        if let Some(message) = check_completed_pending_reap_guard(file)? {
+            report.status = SessionCheckStatus::Interrupted(message);
+            return Ok(report);
+        }
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
@@ -125,6 +129,47 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         }
     }
     Ok(report)
+}
+
+fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(None);
+    };
+    let Some(backlog) = components
+        .into_iter()
+        .find(|component| is_backlog_component(&component.name))
+    else {
+        return Ok(None);
+    };
+    let completed = completed_pending_items(backlog.content(&content));
+    if completed.is_empty() {
+        return Ok(None);
+    }
+
+    let refs = completed
+        .into_iter()
+        .map(|item| {
+            if item.id.is_empty() {
+                format!("<missing-id> {}", item.text)
+            } else {
+                format!("#{}", item.id)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Some(format!(
+        "[session-check] INTERRUPTED: document still contains completed backlog item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
+        refs
+    )))
+}
+
+fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
+    let (_, items, _) = crate::pending::parse_items(body);
+    items
+        .into_iter()
+        .filter(crate::pending::PendingItem::is_done)
+        .collect()
 }
 
 pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
@@ -1477,6 +1522,27 @@ mod tests {
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_interrupts_when_completed_backlog_items_remain() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: `#reap1` — gpt-5\n\nImplemented.\n",
+            false,
+            Some("- [x] [#reap1] Completed but not reaped\n"),
+            &["reap1"],
+        );
+
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("completed backlog item(s)"));
+                assert!(message.contains("#reap1"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
     }
 
     #[test]

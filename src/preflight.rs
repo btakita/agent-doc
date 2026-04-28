@@ -733,11 +733,7 @@ pub fn run(file: &Path) -> Result<()> {
     // Maintenance applies its mutations to BOTH the working tree file AND the
     // snapshot (surgically, via component replace), so the upcoming step-2
     // commit which stages from snapshot picks them up atomically.
-    let (pending_reordered, pending_gated_count) =
-        run_pending_maintenance(file).unwrap_or_else(|e| {
-            eprintln!("[preflight] pending maintenance warning: {}", e);
-            (false, 0)
-        });
+    let (pending_reordered, pending_gated_count) = run_pending_maintenance(file)?;
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -1222,6 +1218,7 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
 
     let mut current_body = body.to_string();
     let mut mutated = false;
+    let saw_completed_before = !completed_pending_items(&current_body).is_empty();
 
     // 1. Lazy backfill: assign missing hash ids and normalize checkboxes.
     let (after_backfill, changed) =
@@ -1285,6 +1282,20 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         }
     }
 
+    if saw_completed_before {
+        let persisted_content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to verify reap in {}", file.display()))?;
+        ensure_no_completed_backlog_items(&persisted_content, "working tree")?;
+
+        let snapshot_content = snapshot::load(file)?.with_context(|| {
+            format!(
+                "pending maintenance reaped completed backlog items in {} but the snapshot is missing",
+                file.display()
+            )
+        })?;
+        ensure_no_completed_backlog_items(&snapshot_content, "snapshot")?;
+    }
+
     // 4. Reorder detection: compare the snapshot's pending component to the current body.
     let reordered = match snapshot::load(file).unwrap_or(None) {
         Some(snap) => {
@@ -1315,6 +1326,43 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     }
 
     Ok((reordered, gated_count))
+}
+
+fn ensure_no_completed_backlog_items(content: &str, surface: &str) -> Result<()> {
+    let components = crate::component::parse(content).with_context(|| {
+        format!("failed to parse {surface} components during pending reap check")
+    })?;
+    let backlog = components
+        .into_iter()
+        .find(|component| is_backlog_component(&component.name))
+        .with_context(|| {
+            format!("pending reap check: {surface} is missing the backlog component")
+        })?;
+    let completed = completed_pending_items(backlog.content(content));
+    if completed.is_empty() {
+        return Ok(());
+    }
+
+    let refs = completed
+        .into_iter()
+        .map(|item| {
+            if item.id.is_empty() {
+                format!("<missing-id> {}", item.text)
+            } else {
+                format!("#{}", item.id)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    anyhow::bail!("pending maintenance left completed backlog items in the {surface}: {refs}");
+}
+
+fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
+    let (_, items, _) = crate::pending::parse_items(body);
+    items
+        .into_iter()
+        .filter(crate::pending::PendingItem::is_done)
+        .collect()
 }
 
 /// Queue component state extracted during maintenance.
@@ -2146,6 +2194,57 @@ mod tests {
         assert!(
             log.contains("resume_commit_success file="),
             "resume commit success should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn pending_maintenance_reaps_completed_items_from_file_and_snapshot() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#reap1] Reap me\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
+        assert!(!reordered);
+        assert_eq!(gated_count, 0);
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(!file_after.contains("[#reap1]"));
+        assert!(file_after.contains("[#keep1]"));
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snapshot_after.contains("[#reap1]"));
+        assert!(snapshot_after.contains("[#keep1]"));
+    }
+
+    #[test]
+    fn pending_maintenance_fails_closed_when_snapshot_backlog_cannot_be_synced() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let file_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#reap1] Reap me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let snapshot_content =
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\nNo backlog here.\n";
+        std::fs::write(&doc, file_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let err = run_pending_maintenance(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("snapshot is missing the backlog component")
         );
     }
 

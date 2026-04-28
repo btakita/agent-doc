@@ -36,7 +36,8 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
 - Generated on first insert (via `--pending-add`) unless the caller explicitly
   provides a custom id with canonical `id=<custom> ` syntax; leading
   `[#custom] ` is accepted as compatibility input and normalized to the same
-  custom id. Lazy backfill still generates IDs.
+  custom id. Custom ids are non-empty ASCII alphanumeric strings. Lazy
+  backfill still generates IDs.
 - Stable across reorders, text edits, and cycles.
 - Visible in rendered markdown (like a GitHub issue number) — no hidden state.
 - Opaque: the hash is not meaningful, just unique within the component.
@@ -114,6 +115,7 @@ On every preflight run:
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
    - (Optional, deferred) Append an archive entry to `agent:backlog-done` if the component exists.
+   - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed backlog items still present.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
 **Migration of existing items:** No auto-migration. Existing `[ ]` items with "✅ landed" / "shipped" / "awaiting release" prose stay as-is until touched manually. Auto-classifying prose is fuzzy (what counts?); blast radius is unclear. With only a handful of real gated items in-tree, retagging by hand via `--pending-gate` is faster and safer than writing a heuristic.

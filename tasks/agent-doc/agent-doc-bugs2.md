@@ -641,12 +641,11 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 This closes the race you flagged: a stale prompt still visible in tmux history can no longer satisfy resume readiness by itself.
-<!-- agent:boundary:af1157fa -->
-<!-- /agent:exchange -->
 
-<!--
+❯ do #tmuxcrash2. spec-test-build-install-commit-push
+
 ❯ The tmux pane for claudescore-3.md crashed while a codex session was running. `#agent-doc-bug`
-### Re: live `claudescore-3.md` pane crash during an active Codex turn — codex
+❯ ### Re: live `claudescore-3.md` pane crash during an active Codex turn — codex
 
 This stays under the existing tmux-crash stability line, not a new bug family.
 
@@ -659,12 +658,40 @@ What I changed in the backlog surface:
 - added this `claudescore-3.md` crash as a third required evidence-backed incident in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`
 - tightened the reproducer scope so it explicitly covers pane/child death during an in-flight Codex turn
 - added a new pending item to reconstruct this exact crash and close the remaining supervisor/tmux stability gaps
+
+### Re: `#tmuxcrash2` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `a914981`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The live `claudescore-3.md` supervisor log (`src/session-share/.agent-doc/logs/7b453f47-23b2-4418-85e4-378270d2345d.log`) showed the real failure shape:
+- after a normal Codex turn closeout, the resume path entered `codex_restart mode=continue`
+- those resumed children then exited cleanly before re-establishing a prompt
+- because that path was being treated as a benign clean exit, the supervisor kept auto-restarting blindly instead of failing closed, which churned the pane and made the session look like a tmux/pane crash
+
+What changed:
+- `src/start.rs`: a resumed child that exits before the auto-trigger succeeds now counts as a failed resume handoff even when the child exit code is `0`
+- that failed handoff now flows through the existing failed-resume guard, so the supervisor restarts fresh once and then prompts instead of looping indefinitely on promptless `resume --last` exits
+- `specs/supervisor.md`: documented that “clean exit before prompt” is still a failed resume handoff
+- added `start.rs` regressions covering cancelled/pending resume handoffs and the Ctrl+D exemption
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — the new `start.rs` regressions passed; the full suite still has unrelated existing/flaky `route.rs` tmux failures (`eviction_skipped_when_agent_process_active`, `pane_has_prompt_detects_unicode`, `send_keys_delivers_*`, `resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts`, `full_auto_start_flow`, `wait_for_agent_ready_*`)
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Scope note:
+- I committed only `src/start.rs` and `specs/supervisor.md`
+- there is an unrelated local edit already present in `src/route.rs`, so I left it untouched
+<!-- agent:boundary:684fb495 -->
+<!-- /agent:exchange -->
+
+<!--
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash2] [recommended] Reconstruct the `src/session-share/tasks/claudescore-3.md` tmux-pane crash that happened during an active Codex turn, then finish the broader crash-stability guardrails in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-- [x] [#rvpromptfresh] [recommended] Make restart auto-trigger wait for a prompt proven to come from the current resumed child, not any stale prompt still visible in tmux history.
+- [x] [#tmuxcrash2] [recommended] Reconstruct the `src/session-share/tasks/claudescore-3.md` tmux-pane crash that happened during an active Codex turn, then finish the broader crash-stability guardrails in `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
 - [ ] [#rvinjectcancel] [recommended] Make child-pty auto-trigger cancellation non-blocking around the shared writer lock/write path so supervisor shutdown cannot stall behind stdin->pty.
 <!-- /agent:backlog -->

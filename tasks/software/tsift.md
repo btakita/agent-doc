@@ -877,7 +877,23 @@ Verification:
 I pushed from a clean `origin/main` worktree because the checked-out `src/tsift` submodule in `agent-loop` still has unrelated local edits.
 
 Commit: `btakita/tsift@62c35bf` pushed to `origin/main`.
-<!-- agent:boundary:f1e387f4 -->
+
+❯ commit all uncommited files in src/tsift + push
+### Re: commit all uncommited files in src/tsift + push — gpt-5
+
+Done.
+
+What changed:
+- committed the checked-out `src/tsift` worktree and rebased it onto `origin/main` before pushing, because the local checkout was still 12 commits behind remote.
+- the rebase conflicted in files that had already changed upstream; after resolving against the current `origin/main` side, the remaining net local delta was in `src/config.rs`, `src/graph.rs`, `src/lang/mod.rs`, `src/lint.rs`, and `src/walk.rs`.
+- `src/tsift` is now clean and aligned with `origin/main`.
+
+Verification:
+- `make check` passed: 345 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+
+Commit: `btakita/tsift@8e0c5ef` pushed to `origin/main`.
+<!-- agent:boundary:ed38ef48 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -886,7 +902,6 @@ Commit: `btakita/tsift@62c35bf` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
 - [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
 - [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
 - [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)

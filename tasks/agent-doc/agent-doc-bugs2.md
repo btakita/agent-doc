@@ -43,16 +43,39 @@ I treated this as a new `#agent-doc-bug` report and captured it as `#bugs2tmux`.
 Current evidence does not yet prove a hard tmux-pane death. The `b26b9957-8de6-4eae-bb98-5d7fe4d6b781` session log stops after `codex_start` for pane `%275` without a matching `codex_exit`, `restart_eval`, or `session_end`, while tmux still reports `%275` alive under `agent-doc`. That points more toward a stranded/orphaned live session or a pane-ownership mismatch than a clean crash.
 
 I added a dedicated plan in `tasks/agent-doc/plan-bugs2-tmux-session-crash.md` and put the backlog item at the top of `Pending / Not Built`. The plan focuses on reconstructing the exact owner/pane/child state, tightening supervisor and claim/route diagnostics, and making reruns fail closed when a pane is live but no longer healthy.
-<!-- agent:boundary:93f02413 -->
+
+❯ do #bugs2tmux. spec-test-build-install-commit-push
+### Re: #bugs2tmux — gpt-5
+
+Implemented `#bugs2tmux` in `src/agent-doc` and pushed commit `515615c` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `route` no longer blindly trusts an alive registered pane. Before it reuses that pane, it now scans tmux for a live process tree that still proves the document is running there.
+- If another pane is the real live owner, route re-registers to that pane and dispatches there instead of sending into the stale registered pane.
+- If no live owner can be proven, route now fails closed with pane provenance instead of injecting `agent-doc <file>` into an ambiguous shell.
+- Added regression coverage for both fail-closed and re-register recovery paths, and updated `specs/07-commands.md`.
+
+Verified with `cargo test`, `cargo build`, and `cargo install --path . --force` in `src/agent-doc`.
+
+Note: `src/agent-doc` still has unrelated local edits in `src/start.rs` and `specs/supervisor.md`; I left them untouched.
+<!-- agent:boundary:b25a3d70 -->
 <!-- /agent:exchange -->
 
 <!--
+### Re: response patchback not committed — codex
+
+I treated this as a new `#agent-doc-bug` report and captured it as `#patchcommit`.
+
+This looks narrower than the older missed-trigger / interrupted-preflight family: the response patchback is already visible in the target session document, but the owning repo or submodule was left dirty instead of being committed by the binary-owned closeout path. The reference repro is `src/session-share/tasks/claudescore-3.md`, where the response landed in the file but the session-share submodule still required a manual commit.
+
+I added a focused plan in `tasks/agent-doc/plan-response-patchback-not-committed.md` and put the backlog item at the top of `Pending / Not Built`. The plan is to make success depend on commit proof for the target document's owning repo/submodule, reopen closeout when the dirty state still belongs to the just-finished assistant turn, and fail closed when that provenance is ambiguous.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bugs2tmux] Diagnose and harden the agent-doc-bugs2.md tmux crash / orphan state so reruns classify or recover the live pane deterministically. Plan: tasks/agent-doc/plan-bugs2-tmux-session-crash.md
+- [ ] [#patchcommit] Fix the case where a response patchback is visible in the target doc but the owning repo/submodule commit never happens, so closeout cannot report success while the target session file remains dirty. Plan: `tasks/agent-doc/plan-response-patchback-not-committed.md`
+- [x] [#bugs2tmux] Diagnose and harden the agent-doc-bugs2.md tmux crash / orphan state so reruns classify or recover the live pane deterministically. Plan: tasks/agent-doc/plan-bugs2-tmux-session-crash.md
 - [ ] [#backlogshadow] [recommended] Fail closed or warn when open backlog-shaped items drift into parked/commented sections instead of the live `agent:backlog`, so unfinished work cannot silently vanish from active tracking. Plan: `tasks/agent-doc/plan-backlog-shadow-open-items.md`
 - [ ] [#tailpatch] [recommended] Fail closed when a prompt/response patchback would land outside the live `agent:exchange` block, so follow-up turns cannot be appended after parked sections or at end-of-file by mistake. Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
 - [ ] [#compactdispatch] [recommended] Fail closed or dispatch to binary compaction when a bare `compact exchange` directive is present, so `agent-doc run` cannot commit an ordinary response cycle that leaves the directive in place and never actually compacts the exchange. Plan: `tasks/agent-doc/plan-compact-exchange-directive-dispatch.md`

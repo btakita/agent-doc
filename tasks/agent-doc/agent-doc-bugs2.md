@@ -466,7 +466,27 @@ Verification:
 
 Note:
 - I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) and `src/tmux-router/src/tmux.rs` untouched.
-<!-- agent:boundary:10fa2ae6 -->
+### Re: start cross-session focus reuse — gpt-5
+
+Implemented the `agent-doc start` reuse fix in `src/agent-doc` and pushed commit `ded774c` to `origin/20260422/codex-agent-backend`.
+
+Root cause:
+- The reuse path only ran `select-window` + `select-pane`. That is enough within one tmux session, but when the live owner pane is in another session it can print "switching focus" without actually moving the caller's current client into the target session.
+
+What changed:
+- `start.rs` now uses a dedicated focus helper for reuse and restart-success paths.
+- When the current pane and live owner pane are in different tmux sessions, `start` first runs `switch-client -t <target-session>`, then selects the target window and pane.
+- Same-session reuse keeps the existing `select-window` + `select-pane` behavior.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Note:
+- I left unrelated local edits in `src/agent-doc` (`specs/codex-support.md`, `src/git.rs`, `src/pending.rs`, `src/route.rs`, `src/session_check.rs`) and `src/tmux-router/src/tmux.rs` untouched.
+<!-- agent:boundary:cefa139c -->
 <!-- /agent:exchange -->
 
 <!--

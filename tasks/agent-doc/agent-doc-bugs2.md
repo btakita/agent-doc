@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -198,7 +198,30 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 Note: I did not create a git commit this cycle because `src/agent-doc` already had unrelated local changes in `Cargo.lock` and `src/route.rs`, and your edit did not explicitly ask for commit/push. I left those untouched.
-<!-- agent:boundary:fc39af69 -->
+
+❯ `agent-doc start` is still failing:
+```
+/home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+~/work/btakita/agent-loop/src/session-share main !1                                               agent-loop 04:39:21
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+[tmux] select_pane %291 → session:window 0:1
+[start] focused existing pane %291
+session 7b453f47 for tasks/claudescore-3.md is already running in pane %291 — reusing existing live pane
+```
+### Re: agent-doc start still noisy on reuse — opus-4-6
+
+Two sources of noise remained after the `[sync]` fix:
+
+1. **`[tmux] select_pane` debug log** — unconditionally printed by the shared `tmux-router` library on every `select_pane()` call. Removed the eprintln from `src/tmux-router/src/tmux.rs` — callers already log their own context.
+2. **Redundant start.rs messages** — `[start] focused existing pane` and `session ... — reusing existing live pane` both printed on successful reuse. Removed both success lines; the reuse path is now silent on success, only printing a warning if the focus call fails.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+No commit created — `src/agent-doc` and `src/tmux-router` have pre-existing uncommitted changes. Please test with `agent-doc start tasks/claudescore-3.md` to confirm the output is clean.
+<!-- agent:boundary:a2f5cd42 -->
 <!-- /agent:exchange -->
 
 <!--

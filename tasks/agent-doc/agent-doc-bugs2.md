@@ -46,7 +46,33 @@ Verification I ran:
 What I’d do next operationally:
 1. Run `agent-doc session set 14` in the root repo to replace the dead session-`0` pin.
 2. After that, decide whether you want `agent-doc resync --fix` to clean the stash registrations or whether those panes should be manually resumed/reclaimed first.
-<!-- agent:boundary:5aa6bc46 -->
+
+❯ do #endreap. spec-test-build-install-commit-push
+### Re: #endreap terminal backlog reap gap — gpt-5
+I fixed `#endreap` in `src/agent-doc` and pushed `0053fe6` on `20260422/codex-agent-backend`.
+
+The bug was exactly the allow-path in `session-check`: closeouts that recorded `--pending-done <id>` were still allowed to leave `[x]` items in the live backlog, assuming some later preflight would reap them. That left terminal closeouts stranded when no later cycle revisited the document.
+
+The fix moves reap/archive maintenance into commit-required closeouts themselves. `finalize` and `write --commit` now run the same backlog maintenance helper that preflight uses before the commit boundary, including the `--pending-only` path, so freshly completed items are removed from the live backlog and archived in `agent:pending-done` in the same persisted cycle. I also tightened `session-check` so committed docs no longer exempt newly recorded done ids; if a `[x]` item still survives after closeout, the turn fails closed.
+
+I added regression coverage for the new closeout path and updated the pending docs/spec text to match the real invariant.
+
+Verification:
+- `cargo test finalize_reaps_completed_pending_items_in_same_closeout_commit`
+- `cargo test session_check_interrupts_when_completed_backlog_items_were_recorded_this_cycle`
+- `cargo test autoclaim::tests::autoclaim_focuses_pane_with_claim -- --exact`
+- `cargo test autoclaim::tests::autoclaim_no_claim_skips_focus -- --exact`
+- `cargo test autoclaim::tests::autoclaim_syncs_layout_with_multiple_files -- --exact`
+- `cargo test resync::tests::no_wrong_window_when_panes_in_same_window -- --exact`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: an initial default-threaded `cargo test` run tripped four tmux/autoclaim tests that all passed in isolation; the full serial suite passed cleanly end to end.
+
+Commit / push:
+- `0053fe6` `fix: reap pending done during closeout`
+<!-- agent:boundary:aea54bf7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -55,5 +81,4 @@ What I’d do next operationally:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#endreap] Terminal backlog reap gap — completed items marked done in a document's last closeout can survive forever because `session-check` allows fresh `--pending-done` ids to wait for a future preflight reap that may never happen. Repro: `src/session-share/tasks/claudescore-3.md` published `#sdoccov` / `#snewtool` inside live backlog after closeout. Plan: `tasks/agent-doc/plan-terminal-backlog-reap.md`
 <!-- /agent:backlog -->

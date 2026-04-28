@@ -929,7 +929,27 @@ Verification:
 - installed-binary smoke check: `tsift locks /home/brian/work/btakita/agent-loop/src/tsift` reports `lock: absent`
 
 Commit: `btakita/tsift@654b0bb` pushed to `origin/main`.
-<!-- agent:boundary:2ab76cdb -->
+
+❯ do #symlimit. spec-test-build-install-commit-push
+### Re: do #symlimit — gpt-5
+
+Implemented in tsift.
+
+What changed:
+- `IndexDb::symbol_search()` now uses a bounded SQLite candidate query instead of loading the full `symbols` table into memory.
+- the SQL path keeps exact-name rows plus overlapping-tag candidates only, orders them by exact/tag strength, and applies the requested search limit before Rust-side scoring/truncation.
+- added regression tests for bounded best-match selection and `limit=0`.
+- updated `SPEC.md` and `CLAUDE.md`.
+
+Verification:
+- `cargo test symbol_search -- --nocapture` passed.
+- `make check` passed: 351 unit tests + 11 exit-code tests.
+- `cargo build --release` passed.
+- `cargo install --path .` passed.
+- installed-binary smoke check: indexed a temp repo, then `tsift search user_name --path <tmp> --json` returned the stronger `user_name` matches ahead of the weaker partial match.
+
+Commit: `btakita/tsift@7525b5f` pushed to `origin/main`.
+<!-- agent:boundary:a2c5b6b1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -938,8 +958,7 @@ Commit: `btakita/tsift@654b0bb` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
-- [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
+- [x] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
 - [ ] [#threadjoin] Join or abort search timeout thread (main.rs:5028-5030)
 - [ ] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)
 - [ ] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)

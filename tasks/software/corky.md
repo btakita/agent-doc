@@ -384,11 +384,70 @@ Push result:
 - `git status` is clean
 
 That means `#gscsa` is complete, so I closed it.
-<!-- agent:boundary:d8063af0 -->
+
+❯ I followed the instructions:
+```
+• #corky-bug is already complete in corky, not in this repo.
+
+  The closure is recorded in /home/brian/work/btakita/agent-loop/tasks/software/corky.md:372: the GSC auth fix was
+  committed, pushed, and [#gscsa] was marked done at /home/brian/work/btakita/agent-loop/tasks/software/corky.md:386.
+
+  The Monster Rod Holders follow-up is at tasks/monsterrodholders.md:1634. Current state:
+
+  - corky gsc no longer depends on adding the service-account email in Search Console.
+  - It now falls back to user OAuth correctly.
+  - The remaining blocker is this session’s loopback callback bind on 127.0.0.1:8485, not Search Console permissions.
+
+  Next step is to run from a normal desktop shell:
+
+  cd /home/brian/work/btakita/agent-loop/mail
+  corky gsc auth
+  corky gsc sites --format table
+
+  If that works, #cgb1 should be treated as obsolete for the corky gsc path, and the next real checkpoint is #v81s.
+```
+
+❯ When I ran `corky gsc auth`, I got an error:
+```
+Access blocked: This app’s request is invalid
+
+You can’t sign in because this app sent an invalid request. You can try again later, or contact the developer about this issue. Learn more about this error
+If you are a developer of this app, see error details.
+Error 400: redirect_uri_mismatch
+```
+### Re: GSC auth bug — gpt-5
+
+The `redirect_uri_mismatch` is another real corky bug.
+
+Root cause: `corky gsc auth` was the only Google OAuth flow using `http://127.0.0.1:8485/callback`, while the rest of corky's reused Gmail/Calendar client surfaces use `http://127.0.0.1:8484/callback`. So a custom Google OAuth client that already works for Gmail / Calendar can still fail only on GSC with:
+- `Error 400: redirect_uri_mismatch`
+
+I fixed that locally in `src/corky`:
+- `src/gsc/auth.rs` now uses the shared `127.0.0.1:8484/callback` redirect instead of `8485`
+- `SPEC.md` was updated to match the real callback behavior
+
+Verification passed again end-to-end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+I did **not** commit or push this follow-up yet.
+
+The next real check is to retry from a normal desktop shell:
+
+```bash
+cd /home/brian/work/btakita/agent-loop/mail
+corky gsc auth
+corky gsc sites --format table
+```
+
+If that succeeds, then the earlier `#cgb1` framing is stale for the GSC auth path, and the remaining blocker is whatever comes after successful user OAuth, not Search Console permissions and not redirect registration.
+<!-- agent:boundary:6faae5b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#gscsa] GSC auth bug: Search Console users UI rejected service-account email with 'Failed to add user: email not found'. Rework src/corky/src/gsc/auth.rs plus docs so GSC does not assume SA identities are addable to properties; verify product support, prefer or cleanly fall back to user OAuth, and improve diagnostics/spec for this case.
+- [ ] [#0ptw] [recommended] Re-run `corky gsc auth` and `corky gsc sites --format table` from a normal desktop shell to confirm the shared 8484 redirect fix resolves the Google OAuth error.
 <!-- /agent:pending -->

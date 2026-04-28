@@ -475,7 +475,28 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
-<!-- agent:boundary:cce42f55 -->
+
+❯ do #tmux1. spec-test-build-install-commit-push
+### Re: `#tmux1` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `70eeebd`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug was the auto-start guard only using a best-effort per-document timestamp file. It was not atomic, and it did nothing to serialize two different documents provisioning into the same tmux session/window, so concurrent `route` / `sync` calls could both choose the same pre-registration state and collide.
+
+What changed:
+- `src/route.rs`: replaced the timestamp check with flock-backed startup locks for both the document hash and the target tmux session
+- `src/route.rs`: after acquiring those locks, `auto_start_in_session()` re-checks the registry and reuses an already-registered live pane for the same document instead of double-starting
+- added a regression that launches two concurrent `provision_pane()` calls for different docs in one isolated tmux session and asserts both panes converge into the same window
+- updated the route/session-routing specs to document the new startup-lock contract
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1349 passed, 0 failed
+- `cargo build --release`
+- `cargo install --path . --force`
+
+I committed only `src/route.rs`, `specs/07-commands.md`, and `specs/08-session-routing.md`; unrelated local edits already present in `runbooks/pending-ops.md`, `src/diff.rs`, `src/pending.rs`, and `tests/pending_integration.rs` were left untouched.
+<!-- agent:boundary:123efb79 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -484,6 +505,6 @@ I committed only `src/repair.rs` and `specs/07-commands.md`; unrelated local edi
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
+- [x] [#tmux1] Concurrent pane auto-start race — two documents targeting same window can collide
 - [ ] [#pbc2] `src/session-share/tasks/claudescore-3.md` can still receive a visible response patchback with no owning committed `agent-doc` cycle; even after a manual git commit, detection still lands in direct-patchback interrupt state instead of a clean closeout or deterministic recovery. Plan: `tasks/agent-doc/plan-claudescore-3-patchback-commit-boundary.md`
 <!-- /agent:backlog -->

@@ -514,7 +514,7 @@ Commit/push:
 - `btakita/tsift@ab7f349` (`fix: fail closed unknown submodule indexing`) pushed to `origin/main`.
 
 Top of backlog: `#tmv7`.
-<!-- agent:boundary:6666c02e -->
+<!-- agent:boundary:c1c64e50 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -523,7 +523,6 @@ Top of backlog: `#tmv7`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#substrict] [recommended] Make `tsift index --submodule <name>` fail closed on unknown scope names instead of indexing `root/<name>` into an unreachable scope DB
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

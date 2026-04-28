@@ -287,7 +287,30 @@ Verification in `src/agent-doc`:
 - `cargo test` — 1334 passed, 3 pre-existing tmux failures unrelated to this change
 - `cargo build --release`
 - `cargo install --path . --force`
-<!-- agent:boundary:45aa90a1 -->
+
+❯ do #envvar1. spec-test-build-install-commit-push
+### Re: `#envvar1` — opus-4-6
+
+Implemented in `src/agent-doc`, committed as `7388493`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The bug: `run_command()` in `src/write.rs` used `unsafe { std::env::set_var() }` to propagate `--allow-replace-pending` and `--pending-add` state to downstream write pipeline functions via global env vars (`AGENT_DOC_ALLOW_REPLACE_PENDING`, `AGENT_DOC_ALLOW_PATCH_PENDING`, `AGENT_DOC_HAS_PENDING_ADD`). This has undefined behavior when FFI consumers (JetBrains plugin via JNA, VS Code extension) call from arbitrary threads.
+
+What changed:
+- `src/write.rs`: Added `WriteFlags` struct carrying `allow_replace_pending` and `has_pending_add`, threaded explicitly through `run_template()`, `run_stream()`, `run_ipc()`, and their downstream calls to `enforce_no_replace_pending()` and `normalize_backlog_patch_response()`
+- `enforce_no_replace_pending()` and `normalize_backlog_patch_response()` now accept an explicit `allow: bool` / `allow_replace: bool` parameter, checked before the env var fallback
+- `check_future_work_signals()` called directly with `flags.has_pending_add` instead of through the removed `warn_future_work_signals()` env-var wrapper
+- `src/run.rs`: Updated `apply_template_response()` call site
+- `specs/pending-system.md`: Documented the thread-safety fix
+- Regression tests: `write_flags_allow_replace_bypasses_enforcement` and `write_flags_default_rejects_replace_pending`
+
+Env var reads (`std::env::var`) retained in `enforce_no_replace_pending` and `normalize_backlog_patch_response` as backwards-compat fallback for external scripts. The unsafe `set_var` calls are removed.
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` — 1339 passed, 1 pre-existing codex hook test failure unrelated to this change
+- `cargo build --release`
+- `cargo install --path . --force`
+<!-- agent:boundary:6a3de429 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -296,7 +319,7 @@ Verification in `src/agent-doc`:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#envvar1] Unsafe env::set_var in write.rs run_command — not thread-safe for FFI/plugin callers
+- [x] [#envvar1] Unsafe env::set_var in write.rs run_command — not thread-safe for FFI/plugin callers
 - [ ] [#gc1] Unbounded .agent-doc/typing/ and .agent-doc/repair-blocked/ directory growth — implement GC
 - [ ] [#crdt1] CRDT merge failure handling untested + reactive mode infinite loop prevention missing
 - [ ] [#snap1] Pre-response snapshot saved outside document lock in write.rs — stale undo baseline risk

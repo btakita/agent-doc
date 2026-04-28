@@ -8,6 +8,7 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#follow-up-backlog': Any follow-up items to place in the backlog?
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
@@ -749,7 +750,58 @@ Updated SPEC.md (version markers section), CLAUDE.md (command table), and VERSIO
 I pushed from a clean `origin/main` tsift worktree because the checked-out `src/tsift` submodule still has unrelated local edits.
 
 Commit: `btakita/tsift@f27c761` pushed to `origin/main`.
-<!-- agent:boundary:1d002a2d -->
+
+❯ do #code-review
+### Re: \`#code-review\` — opus-4-6
+
+Reviewed all 10 source files (~11.4K lines), integration tests, spec, and dependencies. Findings organized by severity.
+
+#### Critical (data corruption / incorrect behavior)
+
+1. **No SQLite transactions in \`apply_changes_inner\`** — \`index.rs:395-478\`. Multiple DELETEs and INSERTs per file run without a transaction. A crash between \`delete_symbols\` and \`insert_symbol\` leaves the index missing symbols for that file. Same issue in \`rebuild\` (\`index.rs:497-501\`): sequential deletes without atomicity.
+
+2. **Inverted path filter in diff-mode summarize** — \`main.rs:2309-2318\`. The condition \`extract_path.starts_with(f.parent().unwrap_or(f))\` is backwards. If extracting a directory, it should filter files *within* that directory. Currently filters the opposite way, causing wrong files to be summarized in \`--diff\` mode.
+
+3. **Partial DB writes in summarize loop** — \`main.rs:2353-2362\`. \`summary_db.delete_by_file(&rel_path)\` runs before the insert loop. If any \`summary_db.insert(&s)\` fails mid-loop, old data is deleted but not replaced. Needs a transaction wrapper.
+
+4. **API response status not checked** — \`summarize.rs:425-440\`. HTTP 4xx/5xx from the Anthropic API is deserialized as JSON without status code validation. The \`response["content"]\` extraction silently returns \`""\` on error responses, producing empty summaries stored as if they succeeded.
+
+#### High (concurrency / resource)
+
+5. **Write lock vulnerable to PID recycling** — \`index.rs:750-775\`. Lock stores PID, checks \`/proc/<pid>\` on Linux. If a PID recycles, the stale lock is never cleared. On non-Linux, \`process_exists()\` always returns \`true\`, so stale locks permanently block. Two threads can also race through \`clear_stale_lock_if_possible\` simultaneously.
+
+6. **Unbounded symbol loading in \`symbol_search\`** — \`index.rs:610-695\`. Loads every row from \`symbols\` table into memory with no LIMIT. On a large codebase (100K+ symbols), this allocates 20MB+ per search call.
+
+7. **Search timeout thread never joined** — \`main.rs:5028-5030\`. \`std::thread::spawn\` runs the Sift search with a channel timeout, but the thread is never joined on timeout. The search continues consuming CPU/memory in the background. Multiple timeouts accumulate leaked threads.
+
+8. **WAL checkpoint never triggered** — \`index.rs:117\`. WAL mode enabled but no \`wal_autocheckpoint\` pragma set and no manual checkpoint. The \`-wal\` file grows unbounded across sessions.
+
+#### Medium (edge cases / silent failures)
+
+9. **Silent file read/parse failures** — \`index.rs:435-436, 456-457\`. \`std::fs::read(&change.path).ok()\` and \`extract_call_sites().ok()\` swallow permission errors and parse failures. Files are marked as indexed in \`file_state\` but have no symbols or edges. No warning emitted.
+
+10. **Directory mtime pruning fragility** — \`walk.rs:107-112\`. Mtime equality check for pruning decisions is filesystem-dependent. HFS+ has 1-second granularity; a directory modified within the same second appears unchanged and gets pruned, missing new files.
+
+11. **File metadata failure masks stale index** — \`status.rs:81-87\`. If \`.metadata()\` or \`.modified()\` fails, returns 0 seconds ago (appears freshly indexed). Could prevent users from noticing a stale or corrupted index.
+
+12. **SQL table name interpolation** — \`main.rs:4567, 4581\`. \`format!("SELECT COUNT(*) FROM \\\"{}\\\"", tbl)\` uses string interpolation for table names. A table name containing \`"\` breaks the query. Low practical risk since table names come from the schema, but the pattern is fragile.
+
+13. **Init unwrap after contains** — \`init.rs:165\`. \`content.find(SECTION_MARKER_PREFIX).unwrap()\` after a \`contains()\` check. Safe in single-threaded CLI, but panics on impossible-but-theoretically-concurrent modification. Should use \`if let\`.
+
+14. **Kotlin tree-sitter queries may miss interfaces** — \`lang/mod.rs:161-165\`. Pattern \`(class_declaration "interface" ...)\` looks for literal "interface" as child of \`class_declaration\`, but Kotlin's grammar uses a separate node type for interfaces.
+
+15. **Token estimation is bytes/4** — \`summarize.rs:280\`. Divides byte count by 4, which is inaccurate for multi-byte UTF-8 and operator-heavy code. Borderline files may exceed the API context window.
+
+#### Architecture observations
+
+- **No E2E test coverage for core commands.** Integration tests only cover \`index --check\` and lock behavior. Search, graph, explain, communities, path, edit, sql, lint, audit, summarize, status, and init have zero end-to-end tests. Unit tests exist for internal logic but don't exercise the CLI→index→search→output pipeline.
+
+- **\`sift\` is a git dependency** (Cargo.toml), not versioned on crates.io. HEAD changes can silently break tsift without any version gate.
+
+- **Edition 2024** in Cargo.toml requires nightly Rust. No CI shown to enforce this.
+
+- **Parser created per file** in \`lang/mod.rs:201-209\`. A new \`Parser\` + \`set_language()\` call for every file during indexing. Cacheable for modest throughput gain on large indexes.
+<!-- agent:boundary:947e37fb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -758,6 +810,16 @@ Commit: `btakita/tsift@f27c761` pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:backlog patch=replace -->
+- [ ] [#txn] Wrap apply_changes_inner + rebuild in SQLite transactions (index.rs:395-478, 497-501)
+- [ ] [#diffpath] Fix inverted path filter in diff-mode summarize (main.rs:2309-2318)
+- [ ] [#sumtxn] Wrap summarize delete+insert loop in transaction (main.rs:2353-2362)
+- [ ] [#apicheck] Check HTTP status before parsing API response (summarize.rs:425-440)
+- [ ] [#lockfix] Replace PID-based write lock with flock() or SQLite pragma exclusive (index.rs:698-775)
+- [ ] [#symlimit] Add LIMIT to symbol_search query (index.rs:610-695)
+- [ ] [#threadjoin] Join or abort search timeout thread (main.rs:5028-5030)
+- [ ] [#walckpt] Set wal_autocheckpoint pragma (index.rs:117)
+- [ ] [#silentok] Log warnings on silent .ok() file read/parse failures (index.rs:435-436, 456-457)
+- [ ] [#e2e] Add E2E integration tests for search, graph, explain, communities, path commands
 <!-- /agent:backlog -->
 
 <!--

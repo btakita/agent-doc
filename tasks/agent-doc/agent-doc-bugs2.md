@@ -574,7 +574,27 @@ Verification in `src/agent-doc`:
 2. Medium: the lifecycle-bound auto-trigger invariant is still racy around `tmux send-keys`. After prompt detection, the worker immediately calls `send-keys` with no second cancellation or child-liveness check ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:258)), while the supervisor only cancels and joins that worker after `session.wait()` returns ([start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1091)). If the resumed child exits in that gap, the stale worker can still inject into the pane after its target is gone. Best case that becomes a spurious `send_failed`; worst case those bytes hit the supervisor prompt or whatever replaces the child next.
 
 I did not rerun the Rust test suite for this review; these findings are from diff and control-flow inspection.
-<!-- agent:boundary:6f8fc693 -->
+
+❯ do #rvlateprompt. spec-test-build-install-commit-push
+### Re: `#rvlateprompt` — gpt-5
+
+Implemented in `src/agent-doc`, committed as `8ed93cd`, and pushed to `origin/20260422/codex-agent-backend`.
+
+The fix keeps `auto_trigger_timeout` provisional instead of terminal:
+- `spawn_auto_trigger_thread()` now keeps polling after the 30s timeout, logs that timeout once, and only leaves `Timeout` in place if the child exits without a later prompt/send success.
+- `AutoTriggerMonitor` now owns the timeout-vs-cancel distinction, so supervisor shutdown no longer overwrites a real timed-out resume with `Cancelled`.
+- `specs/supervisor.md` now matches the runtime contract and documents that late prompt recovery clears the provisional timeout.
+
+Regression coverage added:
+- `auto_trigger_monitor_cancels_before_timeout`
+- `auto_trigger_monitor_preserves_timeout_after_deadline`
+
+Verification in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+<!-- agent:boundary:8c4fcfd0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -583,6 +603,6 @@ I did not rerun the Rust test suite for this review; these findings are from dif
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rvlateprompt] [recommended] Treat auto-trigger timeout as provisional until the resumed child either truly never establishes a prompt or manual recovery is observed.
+- [x] [#rvlateprompt] [recommended] Treat auto-trigger timeout as provisional until the resumed child either truly never establishes a prompt or manual recovery is observed.
 - [ ] [#rvinjectrace] [recommended] Re-check child liveness/cancellation immediately before auto-trigger send-keys and add a regression for child exit during the trigger window.
 <!-- /agent:backlog -->

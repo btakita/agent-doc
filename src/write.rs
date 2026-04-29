@@ -522,11 +522,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     // Phase 3: consume queue prompt after successful write, before commit.
     // Included in the same commit as the response for atomicity.
-    if write_result.is_ok()
-        && commit_mode != CommitMode::None
-        && let Err(e) = consume_queue_prompt(file)
-    {
-        eprintln!("[queue] warning: consumption failed: {}", e);
+    if write_result.is_ok() {
+        match commit_mode {
+            CommitMode::None => {}
+            CommitMode::BestEffort => {
+                if let Err(e) = consume_queue_prompt(file) {
+                    eprintln!("[queue] warning: consumption failed: {}", e);
+                }
+            }
+            CommitMode::Required => {
+                consume_queue_prompt(file)?;
+            }
+        }
     }
 
     if write_result.is_ok() {
@@ -721,9 +728,9 @@ fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Res
 /// is included in the same git commit as the response (atomic).
 ///
 /// Reads frontmatter for `queue_active: true`; if the queue is not active
-/// or has no prompts, this is a no-op. On consumption, the first prompt is
-/// removed from both the file and the snapshot. When the queue drains to
-/// empty, `auto` is stripped and `queue_active` is cleared.
+/// this is a no-op. On consumption, the first prompt is removed from both
+/// the file and the snapshot. When the queue drains to empty, `auto` is
+/// stripped and `queue_active` is cleared.
 fn consume_queue_prompt(file: &Path) -> Result<bool> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
@@ -737,21 +744,26 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
     }
 
     let components = component::parse(&content)?;
-    let comp = match components.iter().find(|c| c.name == "queue") {
-        Some(c) => c,
-        None => return Ok(false),
-    };
+    let comp = components
+        .iter()
+        .find(|c| c.name == "queue")
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: queue_active is true but document has no agent:queue component"
+            )
+        })?;
 
     let body = &content[comp.open_end..comp.close_start];
-    let entries = match crate::queue::parse(body) {
-        Ok(e) => e,
-        Err(_) => return Ok(false),
-    };
+    let entries =
+        crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
 
-    let consumed_text = match crate::queue::first_prompt(&entries) {
-        Some(p) => p.text.clone(),
-        None => return Ok(false),
-    };
+    let consumed_text = crate::queue::first_prompt(&entries)
+        .map(|p| p.text.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: queue_active is true but document queue has no prompt to consume"
+            )
+        })?;
 
     let new_entries = crate::queue::remove_first_prompt(&entries);
     let new_body = crate::queue::render(&new_entries);
@@ -781,38 +793,66 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
 
     std::fs::write(file, &current).context("queue consume: failed to write document")?;
 
-    // Update snapshot in sync
-    if let Ok(Some(snap)) = snapshot::load(file) {
-        let mut new_snap = snap.clone();
-        if let Ok(snap_comps) = component::parse(&new_snap)
-            && let Some(sq) = snap_comps.iter().find(|c| c.name == "queue")
+    // Update snapshot in sync. Required closeouts must be able to prove the
+    // same head prompt was removed from both the file and the snapshot.
+    let snap = snapshot::load(file)?.ok_or_else(|| {
+        anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
+    })?;
+    let snap_comps = component::parse(&snap)?;
+    let snap_queue = snap_comps
+        .iter()
+        .find(|c| c.name == "queue")
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: queue_active is true but snapshot has no agent:queue component"
+            )
+        })?;
+    let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
+    let snap_entries =
+        crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
+    let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
+    let snapshot_head = crate::queue::first_prompt(&snap_entries)
+        .map(|p| p.text.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: queue_active is true but snapshot queue has no prompt to consume"
+            )
+        })?;
+    if snapshot_head != consumed_text {
+        anyhow::bail!(
+            "queue consume: snapshot head prompt {:?} does not match document head {:?}",
+            snapshot_head,
+            consumed_text
+        );
+    }
+    let snap_new_entries = crate::queue::remove_first_prompt(&snap_entries);
+    if snap_new_entries != new_entries {
+        anyhow::bail!(
+            "queue consume: snapshot queue state diverged from document queue after removing head prompt"
+        );
+    }
+
+    let mut new_snap = snap_queue.replace_content(&snap, &new_body);
+    if drained {
+        if snap_has_auto
+            && let Ok(sc2) = component::parse(&new_snap)
+            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
         {
-            new_snap = sq.replace_content(&new_snap, &new_body);
-
-            if drained {
-                if has_auto
-                    && let Ok(sc2) = component::parse(&new_snap)
-                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
-                {
-                    let raw = &new_snap[sq2.open_start..sq2.open_end];
-                    let new_tag = crate::queue::strip_auto_from_tag(raw);
-                    if new_tag != raw {
-                        let mut rebuilt = String::with_capacity(new_snap.len());
-                        rebuilt.push_str(&new_snap[..sq2.open_start]);
-                        rebuilt.push_str(&new_tag);
-                        rebuilt.push_str(&new_snap[sq2.open_end..]);
-                        new_snap = rebuilt;
-                    }
-                }
-                if let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false") {
-                    new_snap = merged;
-                }
-            }
-
-            if new_snap != snap {
-                snapshot::save(file, &new_snap)?;
+            let raw = &new_snap[sq2.open_start..sq2.open_end];
+            let new_tag = crate::queue::strip_auto_from_tag(raw);
+            if new_tag != raw {
+                let mut rebuilt = String::with_capacity(new_snap.len());
+                rebuilt.push_str(&new_snap[..sq2.open_start]);
+                rebuilt.push_str(&new_tag);
+                rebuilt.push_str(&new_snap[sq2.open_end..]);
+                new_snap = rebuilt;
             }
         }
+        new_snap = frontmatter::merge_fields(&new_snap, "queue_active: false")?;
+    }
+
+    if new_snap != snap {
+        snapshot::save(file, &new_snap)?;
     }
 
     eprintln!(

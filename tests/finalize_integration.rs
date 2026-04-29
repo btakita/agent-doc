@@ -67,6 +67,15 @@ fn write_baseline(root: &Path, content: &str) -> PathBuf {
     baseline
 }
 
+fn head_blob(root: &Path) -> String {
+    let output = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
 fn enable_strict_pending_capture(doc: &Path) {
     let current = fs::read_to_string(doc).unwrap();
     let updated = current.replace(
@@ -666,4 +675,74 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
         }
     }
     assert!(snapshot_updated, "snapshot should exist and be updated");
+}
+
+#[test]
+fn finalize_fails_closed_when_active_queue_component_is_missing() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "queue consume: queue_active is true but document has no agent:queue component",
+        ));
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re: describe the project — gpt-5\nResponse text."),
+        "HEAD blob should remain unchanged when required queue closeout cannot prove consumption"
+    );
+}
+
+#[test]
+fn finalize_fails_closed_when_active_queue_is_malformed() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\nnot a queue entry\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "queue consume: failed to parse document queue",
+        ));
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re: describe the project — gpt-5\nResponse text."),
+        "HEAD blob should remain unchanged when required queue closeout cannot prove queue consumption"
+    );
 }

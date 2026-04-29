@@ -57,6 +57,13 @@ pub struct SessionLogStatus {
     pub saw_session_end_after_latest_run: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupMissSupersession {
+    pub registered_pane: String,
+    pub latest_start_pane: String,
+    pub latest_open_timestamp: u64,
+}
+
 impl SessionLogStatus {
     fn latest_anchor_timestamp(&self) -> Option<u64> {
         self.latest_run_timestamp.or(self.latest_start_timestamp)
@@ -113,6 +120,13 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         root.join(".agent-doc/logs")
             .join(format!("{session_id}.log")),
     ))
+}
+
+fn project_root(file: &Path) -> Option<PathBuf> {
+    let canonical = std::fs::canonicalize(file)
+        .ok()
+        .unwrap_or_else(|| file.to_path_buf());
+    crate::snapshot::find_project_root(&canonical)
 }
 
 pub fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> Result<bool> {
@@ -359,6 +373,43 @@ pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<St
         latest_start
     };
     Ok(Some(detail))
+}
+
+pub fn superseded_by_newer_registered_start(
+    file: &Path,
+    miss: &StartupMiss,
+) -> Result<Option<StartupMissSupersession>> {
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    let Some(registered_pane) = crate::sessions::load_in(&root)?
+        .get(&miss.session_id)
+        .map(|entry| entry.pane.clone())
+    else {
+        return Ok(None);
+    };
+    if registered_pane == miss.pane_id {
+        return Ok(None);
+    }
+
+    let Some(status) = session_log_status(file, &miss.session_id)? else {
+        return Ok(None);
+    };
+    let Some(latest_open_timestamp) = latest_open_run_timestamp(&status) else {
+        return Ok(None);
+    };
+    let Some(latest_start_pane) = status.latest_start_pane.clone() else {
+        return Ok(None);
+    };
+    if latest_start_pane != registered_pane || latest_open_timestamp <= miss.timestamp {
+        return Ok(None);
+    }
+
+    Ok(Some(StartupMissSupersession {
+        registered_pane,
+        latest_start_pane,
+        latest_open_timestamp,
+    }))
 }
 
 pub fn latest_open_run_timestamp(status: &SessionLogStatus) -> Option<u64> {
@@ -619,5 +670,51 @@ mod tests {
         assert!(log.contains("supervisor_exit code=missing_pane"));
         assert!(log.contains("reason=registered_pane_missing"));
         assert!(log.contains("last_known_window=@9"));
+    }
+
+    #[test]
+    fn superseded_by_newer_registered_start_detects_stale_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            "session-123".to_string(),
+            crate::sessions::SessionEntry {
+                pane: "%408".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-04-29T00:00:00Z".to_string(),
+                file: doc.display().to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        crate::sessions::save_in(tmp.path(), &registry).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/session-123.log"),
+            concat!(
+                "[1] session_start file=test.md pane=%401 session=session-123\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[10] session_start file=test.md pane=%408 session=session-123\n",
+                "[11] codex_start mode=fresh restart_count=0\n",
+            ),
+        )
+        .unwrap();
+        let miss = StartupMiss {
+            file: doc.display().to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        let supersession = superseded_by_newer_registered_start(&doc, &miss)
+            .unwrap()
+            .expect("stale marker should be superseded");
+        assert_eq!(supersession.registered_pane, "%408");
+        assert_eq!(supersession.latest_start_pane, "%408");
+        assert_eq!(supersession.latest_open_timestamp, 11);
     }
 }

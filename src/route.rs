@@ -621,6 +621,29 @@ fn resolve_or_create_pane(
         preferred_active_window.as_deref(),
     );
 
+    if let Ok(Some(miss)) = crate::startup_miss::load(file)
+        && let Some(supersession) =
+            crate::startup_miss::superseded_by_newer_registered_start(file, &miss)?
+    {
+        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+        eprintln!(
+            "[route] startup-miss on pane {} from {} for {} is superseded by newer registered owner {} — clearing stale marker",
+            miss.pane_id, miss_ts, file_path, supersession.registered_pane
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_startup_miss_cleared_superseded_owner file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                file_path,
+                miss.pane_id,
+                supersession.registered_pane,
+                miss_ts,
+                supersession.latest_open_timestamp
+            ),
+        );
+        let _ = crate::startup_miss::clear(file);
+    }
+
     // Strategy 0: If a previous startup-miss was recorded for the registered pane,
     // deregister it immediately so we fall through to auto-start instead of
     // reusing a pane that never successfully started a document cycle.

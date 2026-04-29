@@ -35,8 +35,10 @@
 //! - Exit 2 on unexpected I/O errors.
 //!
 //! ## Agentic Contracts
-//! - Mutates only the snapshot in the narrow committed-historical-drift repair
-//!   case above; otherwise read-only.
+//! - May also clear a persisted startup-miss marker when the marker is proven
+//!   stale because a later registered session start has already superseded it.
+//! - Otherwise mutates only the snapshot in the narrow committed-historical-drift
+//!   repair case above.
 //! - Called by supervisors / watchdogs (and directly from skill) to
 //!   detect the "started but never wrote" invariant violation flagged
 //!   as bug #a011.
@@ -156,15 +158,31 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
         if let Ok(Some(miss)) = crate::startup_miss::load(file) {
-            let detail = crate::startup_miss::session_log_diagnostic(file, &miss.session_id)
-                .ok()
-                .flatten()
-                .map(|detail| format!("; {detail}"))
-                .unwrap_or_default();
-            report.warnings.push(format!(
-                "[session-check] WARNING: startup-miss marker exists for pane {} ({:?}) — the last {} start never acknowledged a document cycle{}",
-                miss.pane_id, miss.origin, miss.harness, detail
-            ));
+            if let Some(supersession) =
+                crate::startup_miss::superseded_by_newer_registered_start(file, &miss)?
+            {
+                crate::startup_miss::clear(file)?;
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "session_check_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} latest_open_timestamp={}",
+                        file.display(),
+                        miss.pane_id,
+                        supersession.registered_pane,
+                        supersession.latest_open_timestamp
+                    ),
+                );
+            } else {
+                let detail = crate::startup_miss::session_log_diagnostic(file, &miss.session_id)
+                    .ok()
+                    .flatten()
+                    .map(|detail| format!("; {detail}"))
+                    .unwrap_or_default();
+                report.warnings.push(format!(
+                    "[session-check] WARNING: startup-miss marker exists for pane {} ({:?}) — the last {} start never acknowledged a document cycle{}",
+                    miss.pane_id, miss.origin, miss.harness, detail
+                ));
+            }
         }
     }
     Ok(report)
@@ -2013,6 +2031,58 @@ mod tests {
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert_eq!(report.warnings.len(), 2);
         assert!(report.warnings[0].contains("recommendation-like items"));
+    }
+
+    #[test]
+    fn session_check_clears_startup_miss_superseded_by_newer_registered_owner() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        fs::create_dir_all(tmp.path().join(".agent-doc/state/startup-miss")).unwrap();
+        let miss = crate::startup_miss::StartupMiss {
+            file: doc.display().to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+        let miss_path = tmp
+            .path()
+            .join(".agent-doc/state/startup-miss")
+            .join(format!("{}.json", crate::snapshot::doc_hash(&doc).unwrap()));
+        fs::write(&miss_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            "session-123".to_string(),
+            crate::sessions::SessionEntry {
+                pane: "%408".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-04-29T00:00:00Z".to_string(),
+                file: doc.display().to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        crate::sessions::save_in(tmp.path(), &registry).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/session-123.log"),
+            concat!(
+                "[1] session_start file=doc.md pane=%401 session=session-123\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[10] session_start file=doc.md pane=%408 session=session-123\n",
+                "[11] codex_start mode=fresh restart_count=0\n",
+            ),
+        )
+        .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+        assert!(
+            !miss_path.exists(),
+            "session-check should clear stale superseded startup-miss markers"
+        );
     }
 
     #[test]

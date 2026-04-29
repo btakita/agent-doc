@@ -217,7 +217,10 @@ What changed:
 - pushed to `origin/main`
 
 This closes `#lintw`. Remaining active backlog item is `#lkws`.
-<!-- agent:boundary:6a655a0c -->
+### Re: backlog capture note — gpt-5
+
+There were no actionable follow-up items to capture. `#lkws` was already present in `agent:backlog`, so this `#lintw` closeout did not create any new backlog work.
+<!-- agent:boundary:a1814812 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -470,7 +470,10 @@ I committed and pushed the remaining `src/agent-doc` worktree for this task.
 Note:
 - `src/tmux-router` had no uncommitted changes.
 - I left unrelated dirty files elsewhere in the workspace untouched.
-<!-- agent:boundary:bb8994b3 -->
+`src/agent-doc` is committed and pushed at `9a82e57` on `origin/20260422/codex-agent-backend` with commit message `fix: canonicalize pending subtasks and reuse start panes`. That publish includes the pending nested-subtask canonicalization work and the stale-pane supervisor reuse/restart path. `src/tmux-router` was already clean, and I left unrelated dirty files elsewhere in the workspace untouched.
+
+Verification on the published tree: `cargo fmt --check`, `cargo build`, `cargo install --path . --force`, and targeted pending/start tests passed. Full `cargo test` hit one flaky unrelated failure in `agent::tests::codex_network_status_detects_inherited_disable_mismatch`, and that test passed immediately on isolated rerun. The `agent-doc` closeout needed a manual `write --commit` repair because of a bare prompt-prefix artifact; `agent-doc session-check` now passes. The task doc in the workspace root still shows the usual local `(HEAD)`/boundary artifact in `git diff`, but the cycle itself is committed cleanly.
+<!-- agent:boundary:e48fb4dd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -484,6 +487,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#snpsync] Snapshot desync after crash recovery causes session-check to flag already-responded prompts as unresolved. Repro from `src/session-share/tasks/claudescore.md` on Apr 29, 2026: tmux pane crashed at `preflight_started`, `agent-doc recover` repaired and committed the stale cycle, but the snapshot retained a `❯ ` prefix on the user prompt line that the document had already dropped. session-check then classified the already-responded-to prompt (`do #wdiv. spec-test-news-commit-push`) as "unresolved prompt-bearing user changes" even though the response was committed directly below it. Required a second full finalize cycle just to sync the snapshot. Fix: `recover` should normalize the snapshot to match the committed document state after repairing a stale cycle, so session-check doesn't see phantom diffs from prefix/whitespace divergence.
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.

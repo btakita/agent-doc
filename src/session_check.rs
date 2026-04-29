@@ -439,15 +439,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 if let Some(state) = repaired_cycle {
                     return Ok(SessionCheckStatus::Ok(format!(
                         "[session-check] ok — last event: {}; recovered the missing commit boundary from {} into cycle `{}`",
-                        event,
-                        reason,
-                        state.cycle_id
+                        event, reason, state.cycle_id
                     )));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
                     "[session-check] ok — last event: {}; recovered the missing commit boundary from {}",
-                    event,
-                    reason
+                    event, reason
                 )));
             }
             Ok(SessionCheckStatus::Interrupted(format!(

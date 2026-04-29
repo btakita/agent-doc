@@ -112,6 +112,7 @@ On every preflight run:
    - No hash prefix → generate and insert a hash.
    - No checkbox → insert `- [ ] ` before the hash.
 3. Reap `- [x]` bullets **only**:
+   - If a completed item still lacks an id (legacy/manual form such as `- [x] shipped` or `- [x] [#] shipped`), backfill its hash first, then reap/archive that canonicalized item in the same pass. Reap must never silently drop a done line that cannot be referenced in the archive or logs.
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
    - (Optional, deferred) Append an archive entry to `agent:backlog-done` if the component exists.

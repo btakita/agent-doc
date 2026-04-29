@@ -858,7 +858,8 @@ fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool 
         if snap_comp.name != file_comp.name {
             return true;
         }
-        if !is_backlog_component(&snap_comp.name) && snap_comp.patch_mode() != file_comp.patch_mode()
+        if !is_backlog_component(&snap_comp.name)
+            && snap_comp.patch_mode() != file_comp.patch_mode()
         {
             return true;
         }
@@ -885,9 +886,11 @@ fn classify_safe_committed_historical_agent_doc_mutation(
     } else {
         match classify_committed_historical_agent_doc_mutation(snapshot_doc, file_doc) {
             Some("exchange") => Some("exchange"),
-            None
-                if crate::session_check::detect_bypassed_response_write_between(snapshot_doc, file_doc)
-                    .is_some() =>
+            None if crate::session_check::detect_bypassed_response_write_between(
+                snapshot_doc,
+                file_doc,
+            )
+            .is_some() =>
             {
                 Some("exchange")
             }
@@ -1121,19 +1124,20 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             marker
         );
     }
-    let committed_historical_patchback = snapshot_content
-        .as_deref()
-        .zip(head_doc.as_deref())
-        .map(|(snapshot, head)| {
-            let mutation = classify_committed_historical_agent_doc_mutation(snapshot, head);
-            (
-                mutation.or_else(|| {
-                    has_non_exchange_component_drift(snapshot, head)
-                        .then_some("typed_component_drift")
-                }),
-                crate::session_check::detect_bypassed_response_write_between(snapshot, head),
-            )
-        });
+    let committed_historical_patchback =
+        snapshot_content
+            .as_deref()
+            .zip(head_doc.as_deref())
+            .map(|(snapshot, head)| {
+                let mutation = classify_committed_historical_agent_doc_mutation(snapshot, head);
+                (
+                    mutation.or_else(|| {
+                        has_non_exchange_component_drift(snapshot, head)
+                            .then_some("typed_component_drift")
+                    }),
+                    crate::session_check::detect_bypassed_response_write_between(snapshot, head),
+                )
+            });
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     crate::ops_log::log_op(
@@ -3995,7 +3999,8 @@ mod tests {
             .unwrap();
 
         assert!(
-            err.to_string().contains("committed historical response patchback"),
+            err.to_string()
+                .contains("committed historical response patchback"),
             "error should explain the blocked historical patchback:\n{err}"
         );
         assert_eq!(
@@ -4011,7 +4016,10 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured
+        );
         assert_eq!(state.last_event, "response_captured");
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -4397,7 +4405,8 @@ mod tests {
         )
         .unwrap();
 
-        let err = commit(&doc).expect_err("status-mutating historical patchback should fail closed");
+        let err =
+            commit(&doc).expect_err("status-mutating historical patchback should fail closed");
         let message = err.to_string();
         assert!(
             message.contains("committed historical response patchback"),

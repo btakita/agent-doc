@@ -152,13 +152,27 @@ pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
 pub fn reap(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, removed) = pending::reap(existing);
+    let doc_id = doc_id_for(file);
+    let (canonical_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
+    let (new_content, removed) = pending::reap(&canonical_content)?;
+    let final_content = if removed.is_empty() {
+        canonical_content
+    } else {
+        new_content
+    };
+    if !changed && removed.is_empty() {
+        eprintln!("[pending] no [x] items to reap");
+        return Ok(());
+    }
+    let new_doc = comp.replace_content(&full_content, &final_content);
+    std::fs::write(file, &new_doc)?;
+    if changed {
+        eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");
+    }
     if removed.is_empty() {
         eprintln!("[pending] no [x] items to reap");
         return Ok(());
     }
-    let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
     eprintln!(
         "[pending] reaped {} item(s): {}",
         removed.len(),

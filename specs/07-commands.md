@@ -626,7 +626,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
    - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail
    - Run backlog maintenance before the commit boundary:
      - lazy-backfill missing backlog ids / normalize checkboxes
-     - reap completed `[x]` backlog items
+     - reap completed `[x]` backlog items; if a done line is still missing an id, backfill it first so repair/archive paths can reference it instead of dropping it silently
      - archive reaped items into the backlog-done surface when present
      - detect user-authored reorder and surface `pending_reordered: true` in JSON so the skill skips reordering that cycle
      - scan for open backlog-shaped `[#id]` items outside the live `agent:backlog` block (excluding code fences and `agent:icebox`)

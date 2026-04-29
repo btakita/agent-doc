@@ -47,6 +47,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{frontmatter, snapshot, write};
@@ -198,8 +199,12 @@ pub(crate) fn recover_missing_commit_boundary(
         return Ok(None);
     }
 
-    let current_doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} for commit-boundary recovery", file.display()))?;
+    let current_doc = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} for commit-boundary recovery",
+            file.display()
+        )
+    })?;
     let head_doc = crate::git::show_head(file)?;
     let reason = match crate::git::verify_snapshot_committed(file)? {
         crate::git::SnapshotCommitStatus::Committed => head_doc
@@ -256,7 +261,10 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
         return Ok(RepairOutcome::Noop);
     };
 
-    let (new_body, removed) = crate::pending::reap_with_items(backlog.content(&content));
+    let doc_id = crate::pending_cmd::doc_id_for(file);
+    let (canonical_body, _) =
+        crate::pending::backfill(backlog.content(&content), &doc_id, &HashSet::new());
+    let (new_body, removed) = crate::pending::reap_with_items(&canonical_body)?;
     if removed.is_empty() {
         return Ok(RepairOutcome::Noop);
     }
@@ -850,6 +858,53 @@ mod tests {
         assert!(repaired_snapshot.contains("- [ ] [#aaaa] keep"));
         assert!(!repaired_snapshot.contains("- [x] [#bbbb] drop"));
         assert!(repaired_snapshot.contains("[#bbbb] drop"));
+    }
+
+    #[test]
+    fn repair_backfills_legacy_done_ids_before_reaping_completed_backlog() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] keep\n",
+            "- [x] legacy drop\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        let pending_body = repaired
+            .split("<!-- agent:pending -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+            .expect("pending component");
+        assert!(
+            repaired.contains("- [ ] [#"),
+            "open legacy item should be backfilled: {repaired}"
+        );
+        assert!(repaired.contains("keep"));
+        assert!(!pending_body.contains("legacy drop"));
+        assert!(repaired.contains("legacy drop"));
+
+        let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        let snapshot_pending_body = repaired_snapshot
+            .split("<!-- agent:pending -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+            .expect("snapshot pending component");
+        assert!(repaired_snapshot.contains("- [ ] [#"));
+        assert!(!snapshot_pending_body.contains("legacy drop"));
+        assert!(repaired_snapshot.contains("legacy drop"));
+        assert!(repaired_snapshot.contains("pending-done"));
     }
 
     #[test]

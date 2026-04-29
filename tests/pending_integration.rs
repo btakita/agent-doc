@@ -193,6 +193,22 @@ fn pending_reap_removes_checked_items() {
 }
 
 #[test]
+fn pending_reap_backfills_legacy_done_ids_before_removing_items() {
+    let (_tmp, doc) = setup_doc("- [ ] keep\n- [x] legacy drop\n");
+    agent_doc()
+        .args(["backlog", doc.to_str().unwrap(), "reap"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- [ ] [#"),
+        "open legacy item should be backfilled: {content}"
+    );
+    assert!(content.contains("keep"));
+    assert!(!content.contains("legacy drop"));
+}
+
+#[test]
 fn pending_clear_empties_list() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] one\n- [ ] [#bbbb] two");
     agent_doc()

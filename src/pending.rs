@@ -735,17 +735,32 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
 
 /// Reap `[x]` items. `[/]` (gated) items are never reaped.
 /// Returns `(new_body, removed_ids)`.
-pub fn reap(body: &str) -> (String, Vec<String>) {
-    let (new_body, removed) = reap_with_items(body);
+pub fn reap(body: &str) -> Result<(String, Vec<String>)> {
+    let (new_body, removed) = reap_with_items(body)?;
     let ids = removed.iter().map(|i| i.id.clone()).collect();
-    (new_body, ids)
+    Ok((new_body, ids))
 }
 
 /// Reap `[x]` items and return the removed items (with text), not just ids.
 /// Used by preflight to archive reaped items to an `agent:pending-done`
 /// component when one exists (spec §3 step 3).
-pub fn reap_with_items(body: &str) -> (String, Vec<PendingItem>) {
+pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
     let (prelude, items, postlude) = parse_items(body);
+    let missing_done: Vec<&PendingItem> = items
+        .iter()
+        .filter(|item| item.is_done() && item.id.is_empty())
+        .collect();
+    if !missing_done.is_empty() {
+        let refs = missing_done
+            .iter()
+            .map(|item| format!("\"{}\"", item.text))
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!(
+            "pending reap requires ids for completed items; run backfill first (missing ids on done item(s): {})",
+            refs
+        );
+    }
     let mut removed = Vec::new();
     let mut kept = Vec::new();
     for item in items {
@@ -758,10 +773,10 @@ pub fn reap_with_items(body: &str) -> (String, Vec<PendingItem>) {
         }
     }
     if removed.is_empty() {
-        return (body.to_string(), removed);
+        return Ok((body.to_string(), removed));
     }
     let new_body = render_items(&prelude, &kept, &postlude);
-    (new_body, removed)
+    Ok((new_body, removed))
 }
 
 /// Detect reorder: returns `Some(current_order)` when id-sets match but order differs.
@@ -1153,7 +1168,7 @@ mod tests {
     #[test]
     fn reap_skips_gated() {
         let body = "- [/] [#eg0w] gated\n- [x] [#c9e0] done\n";
-        let (new_body, removed) = reap(body);
+        let (new_body, removed) = reap(body).unwrap();
         assert_eq!(removed, vec!["c9e0"]);
         assert!(new_body.contains("[#eg0w]"));
         assert!(!new_body.contains("[#c9e0]"));
@@ -1162,7 +1177,7 @@ mod tests {
     #[test]
     fn reap_removes_checked() {
         let body = "- [ ] [#a3f2] keep\n- [x] [#b1c4] drop\n- [ ] [#c5d6] keep2\n";
-        let (new_body, removed) = reap(body);
+        let (new_body, removed) = reap(body).unwrap();
         assert_eq!(removed, vec!["b1c4"]);
         assert!(new_body.contains("a3f2"));
         assert!(!new_body.contains("b1c4"));
@@ -1172,9 +1187,20 @@ mod tests {
     #[test]
     fn reap_noop_when_none_checked() {
         let body = "- [ ] [#a3f2] keep\n";
-        let (new_body, removed) = reap(body);
+        let (new_body, removed) = reap(body).unwrap();
         assert!(removed.is_empty());
         assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn reap_errors_when_completed_item_is_missing_id() {
+        let body = "- [x] legacy done without id\n- [ ] [#keep1] keep\n";
+        let err = reap(body).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("pending reap requires ids for completed items"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

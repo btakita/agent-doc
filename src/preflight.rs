@@ -1251,7 +1251,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
 
     // 2. Reap `[x]` items. Collect full items (not just ids) so we can
     //    archive them to `agent:pending-done` in step 2b below.
-    let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body);
+    let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body)?;
     if !removed_items.is_empty() {
         let removed_ids: Vec<String> = removed_items.iter().map(|i| i.id.clone()).collect();
         eprintln!(

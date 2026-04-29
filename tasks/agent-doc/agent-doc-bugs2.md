@@ -353,7 +353,18 @@ No new backlog item is needed from this turn; the existing `#tmuxcrash` item is 
 ### Re: `#tmuxcrash` next steps follow-up — gpt-5
 
 No further backlog change is needed from the normalized follow-up line. `#tmuxcrash` still remains the top backlog item.
-<!-- agent:boundary:f9970f6f -->
+❯ Please create subtasks of #tmuxcrash so I can track progress. The subtasks should be a sublist item. Why didn't agent-doc already create the subtask sublist? #agent-doc-bug
+### Re: `#tmuxcrash` subtasks + missing sublist — gpt-5
+
+I added the `#tmuxcrash` subtasks as indented child bullets under the existing backlog item.
+
+Why `agent-doc` did not already create that subtask sublist:
+- nested backlog subtasks are supported, so this was not a binary limitation
+- the earlier `#next-steps` reply stayed in exchange prose and did not record the backlog mutation in the same cycle
+- so the miss was in the responder/workflow path, not in backlog sublist support itself
+
+`#agent-doc-bug` is a fair label for that miss because the expected backlog capture did not happen when the prior turn converted the prose next steps into tracked work.
+<!-- agent:boundary:de1fd337 -->
 <!-- /agent:exchange -->
 
 <!--

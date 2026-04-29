@@ -746,7 +746,32 @@ Commit / push:
 - `agent-loop`: `afadb8b01` (`feat: wire local tmux-router development`) pushed to `origin/main`
 
 No new backlog item came out of this change.
-<!-- agent:boundary:7b232ac6 -->
+### Re: tmux-router development-target reconciliation — gpt-5
+
+Implemented.
+
+- Moved the generic tmux session/key helpers into `src/tmux-router`: `Tmux::send_key()` and `Tmux::ensure_pane_in_session()` now own that reusable behavior.
+- Switched `src/agent-doc/src/sessions.rs` to delegate pane capture, single-key dispatch, and session-guarded joins to `tmux-router` instead of carrying local shell wrappers.
+- Added the workspace cargo patch at `.cargo/config.toml` so local `src/agent-doc` builds use the sibling `src/tmux-router` checkout.
+- Updated the harness instruction surfaces so Codex/Claude treat `src/tmux-router` as a live development target in this workspace: root `AGENTS.md`, installed `.codex/AGENTS.md`, installed `.claude/skills/agent-doc/SKILL.md`, plus `src/agent-doc/SKILL.md` and `src/agent-doc/CLAUDE.md`.
+
+Verification:
+- `cargo test` in `src/tmux-router`
+- `cargo build` in `src/tmux-router`
+- `cargo install --path . --force` in `src/tmux-router`
+- `cargo test` in `src/agent-doc` against the local patched `tmux-router`
+- `cargo build` in `src/agent-doc`
+- `cargo install --path . --force` in `src/agent-doc`
+- `agent-doc skill install --harness codex --reload restart`
+- `agent-doc skill install --harness claude --reload compact`
+
+Commit / push:
+- `src/tmux-router`: `e52f78e` (`feat: extract tmux session helpers`) pushed to `origin/main`
+- `src/agent-doc`: `3afd3bd` (`feat: patch local tmux-router workspace`) pushed to `origin/20260422/codex-agent-backend`
+- `agent-loop`: `afadb8b01` (`feat: wire local tmux-router development`) pushed to `origin/main`
+
+No new backlog item came out of this change.
+<!-- agent:boundary:4ca5b048 -->
 <!-- /agent:exchange -->
 
 <!--

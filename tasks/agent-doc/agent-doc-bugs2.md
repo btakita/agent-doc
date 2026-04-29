@@ -492,7 +492,29 @@ Verification:
 Note on verification: the first full serial suite run hit one transient `run_integration` failure while spawning `agent-doc finalize` inside `orchestrate_streams_step_patchback_before_finalize`; rerunning that exact test immediately passed, and the new tracked-work / icebox coverage stayed green throughout.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:77c2264f -->
+
+❯ do #w4va. spec-test-build-install-commit-push
+### Re: #w4va nested backlog/icebox lists — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-28 as `63ad29d` (`fix: preserve nested backlog item blocks`) to `origin/20260422/codex-agent-backend`.
+
+Backlog and icebox items now treat indented nested list lines as part of the parent tracked item block instead of parsing them as standalone backlog entries. Concretely:
+- `pending.rs` now only treats flush-left `- ...` lines as tracked items and attaches following indented continuation lines to the parent item.
+- backfill, edit, done, reap, reorder, and selective `transfer --items` preserve or move those nested blocks with the parent item.
+- pending-done archival now preserves nested continuation lines under the archived entry.
+- spec and runbook text now document the flush-left parent plus indented continuation contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test pending::tests::parse_nested_lines_attach_to_parent_item -- --exact`
+- `cargo test pending::tests::extract_items_by_id_preserves_nested_subtasks -- --exact`
+- `cargo test pending::tests::op_reorder_moves_nested_subtasks_with_parent_item -- --exact`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+No new backlog item came out of this change. `#vzpc` remains the top accepted active item.
+<!-- agent:boundary:546987d8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -501,7 +523,6 @@ No new backlog item came out of this change.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#w4va] Support nested lists in the backlog and icebox for subtasks and dependencies
 - [ ] [#vzpc] Support optional numeric lists in the backlog to enforce order
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage (requested alias/tag: [#multi-user])

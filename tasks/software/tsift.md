@@ -62,7 +62,24 @@ Verification:
 - `cargo build`
 - `cargo install --path .`
 - installed binary reports `tsift 0.1.21`
-<!-- agent:boundary:a7982194 -->
+
+❯ do #618r. spec-test-build-install-commit-push
+### Re: #618r — gpt-5
+
+Implemented the lint scope-filtering fix in `src/tsift` and pushed it as `57ab2be` (`fix: scope lint entity auto-discovery`).
+
+What changed:
+- `tsift lint` now auto-discovers entities from the workspace root index plus only the scoped indexes whose scopes still participate in federation. Private, isolated, and explicitly non-federated scopes are skipped by default.
+- Explicit `--index` behavior is unchanged, so callers can still opt into a specific scoped index or the full `.tsift/indexes` tree directly.
+- Added regression coverage in both layers: a unit test for workspace entity collection and a CLI test proving default lint auto-discovery includes shared-scope symbols while excluding private and isolated scopes.
+- Updated `SPEC.md` to document the default scope filtering and the `--index` opt-in escape hatch.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- installed binary reports `tsift 0.1.21`
+<!-- agent:boundary:f4844473 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -71,7 +88,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#618r] [recommended] Make lint entity collection config-aware so workspace linting excludes private/isolated indexes unless the caller opts in.
 - [ ] [#ggft] [recommended] Resolve summarize roots through the same project/workspace helper used by search/status/lint, and add nested-path coverage.
 - [ ] [#35ms] [recommended] Make tsift edit transactional; add a regression test for partial write failure.
 <!-- /agent:backlog -->

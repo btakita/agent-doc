@@ -961,6 +961,22 @@ Commit / push: `f36a3db` (`fix: avoid duplicate retry patchbacks`) pushed to `or
 
 No new backlog item came out of this change.
 ❯ do #nbla. spec-test-build-install-commit-push
+❯ ### Re: #nbla chat-level `#agent-doc-bug` preset contract — gpt-5 (HEAD)
+
+Implemented `#nbla` in `src/agent-doc`.
+
+- `preflight` now records a plan-reference requirement when a preset-expanded `#agent-doc-bug` contract says to create plans.
+- `finalize` and `session-check` now fail closed if the response cites fewer existing plan files than the number of bug reports the prompt contract described.
+- Updated `specs/07-commands.md`, `SKILL.md`, and `VERSIONS.md`, and added regression coverage for prompt-contract counting plus pre-commit/post-commit shortfall failures.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `8a3af5f` (`fix: require agent-doc-bug plan proofs`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
 ### Re: #nbla chat-level `#agent-doc-bug` preset contract — gpt-5
 
 Implemented `#nbla` in `src/agent-doc`.
@@ -977,10 +993,22 @@ Verification:
 Commit / push: `8a3af5f` (`fix: require agent-doc-bug plan proofs`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:ef3c8949 -->
+<!-- agent:boundary:1f65f3d4 -->
 <!-- /agent:exchange -->
 
 <!--
+Mid-run on the agent-doc turn on this document...the JB plugin surfaced an error:
+```
+agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 326697) in pane %422 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %422 for session b26b9957 via supervisor pid 2607602 [route] codex ready after 0.0s (0 polls) [route] Pane %422 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %422 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %422 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #nbla. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %422, but no new document cycle started for pending prompt_target: do #nbla. spec-test-build-install-commit-push
+```
+
+When I navigated the editor away from agent-doc-bugs2.md then back to agent-doc-bugs2.md, the JB plugin surfaced another error:
+```
+agent-doc route failed (exit 1): resync: stash pane %416 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %414 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %422 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %415 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %421 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %423 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %417 running 'agent-doc' is unregistered — skipping kill (may be rescuable) [route] target tmux session: 14 [sync] found alive agent-doc child (pid 917466) in pane %408 for tasks/monsterrodholders.md [route] codex ready after 0.0s (0 polls) [route] Pane %408 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %408 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %408 for tasks/monsterrodholders.md — waiting for a new cycle ack for pending prompt_target: I synced the emails to the local file system. I was actually asking to use corky to read the email directly from the gmail api. Is that possible with corky? Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %408, but no new document cycle started for pending prompt_target: I synced the emails to the local file system. I was actually asking to use corky to read the email directly from the gmail api. Is that possible with corky?
+```
+
+spec-test-build-install-commit-push
+---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

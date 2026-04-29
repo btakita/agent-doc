@@ -36,7 +36,20 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:e3270939 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. `src/tsift/src/summarize.rs:430-449` opens the symbols DB directly during `tsift summarize --extract` instead of going through the lock-tolerant `IndexDb` read helpers. That loses the busy-timeout and snapshot-fallback behavior already used by `search`, `status`, and `lint`, so a concurrent index/update can fail extraction with `database is locked` instead of degrading cleanly. The root cause is the second SQLite read stack in `load_symbols_for_file`.
+
+2. `src/tsift/src/lint.rs:256-300` only looks one directory below `.tsift/indexes` when discovering index DBs. That breaks workspaces that intentionally use nested scope ids for duplicate leaf names: the indexing path writes `.tsift/indexes/pkg/app/foo/index.db` and `.tsift/indexes/vendor/foo/index.db` (`src/tsift/src/main.rs:4459-4488`), but lint discovery only probes `.tsift/indexes/<child>/index.db`. The result is silent under-reporting from `tsift lint --index .tsift/indexes` and any other aggregate caller.
+
+3. `src/tsift/src/lint.rs:215-219` treats both `root/index.db` and `root/.tsift/index.db` as workspace symbol sources, even though the rest of the codebase resolves the root index only at `.tsift/index.db` (`src/tsift/src/main.rs:2122-2124`, `src/tsift/src/status.rs:146-160`). On repos that already carry an application database named `index.db`, lint can ingest unrelated symbols or fail against a non-tsift schema. This looks like an accidental alternate namespace local to lint rather than an intentional compatibility surface.
+
+Residual risk: I did not find regression coverage for duplicate-leaf scope lint discovery, so finding 2 looks unguarded today.
+
+Verification: `cargo test -q` passed locally (403 unit tests, 40 integration tests).
+<!-- agent:boundary:271c553a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -45,6 +58,9 @@ Icebox:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dafv] [recommended] Reuse IndexDb's lock-tolerant read path for summarize symbol lookup so  survives concurrent index activity
+- [ ] [#rttp] [recommended] Make lint index discovery recurse through nested  paths for duplicate-leaf workspace scopes
+- [ ] [#98pz] [recommended] Remove the repo-root  fallback from lint workspace entity discovery unless it is an intentional compatibility surface
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -351,10 +351,19 @@ Verification:
 - `cargo install --path . --force`
 
 No new backlog items came out of this change.
-<!-- agent:boundary:d9acb6bd -->
+### Re: post-commit exchange drift — gpt-5
+
+The routed live-pane fix is already committed. This follow-up closeout only re-normalizes the exchange tail after the live working tree dropped the prompt prefix from the JB report while leaving the committed `HEAD` response intact.
+
+No additional code changes or backlog items came out of this normalization pass.
+<!-- agent:boundary:147bcb03 -->
 <!-- /agent:exchange -->
 
 <!--
+On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc turn. The JB plugin surfaced an error. spec-test-build-install-commit-push:
+```
+agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1114806) in pane %411 for tasks/software/tsift.md [route] registered pane %411 still proves live ownership for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md — clearing stale startup-miss marker [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% u [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: registered pane %411 for tasks/software/tsift.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%411 pane_pid=1113432 pane_session=14 current_command=agent-doc)
+```
 ---
 Add `agent-doc fix`. `agent-doc resync --fix` is an alias to `agent-doc fix`. Support an optional file-path to agent doc that I want to fix `agent-doc fix <path-to-file.md>`.
 ---

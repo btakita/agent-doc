@@ -87,6 +87,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::Path;
 use uuid::Uuid;
 
 use crate::model_tier::Tier;
@@ -485,6 +486,20 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     Ok((fm, body))
 }
 
+/// Wrap a frontmatter parse failure with the target document path and a repair hint.
+pub fn contextualize_parse_error(file: &Path, err: anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "invalid YAML frontmatter in {}: {}\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
+        file.display(),
+        err
+    )
+}
+
+/// Parse frontmatter for a concrete document path so callers can surface actionable errors.
+pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter, &'a str)> {
+    parse(content).map_err(|err| contextualize_parse_error(file, err))
+}
+
 /// Write frontmatter back into a document, preserving the body.
 pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
     let yaml = serde_yaml::to_string(fm)?;
@@ -623,6 +638,11 @@ pub fn ensure_session(content: &str) -> Result<(String, String)> {
     Ok((updated, session_id))
 }
 
+/// Ensure a document has a session id while preserving the target path in parse errors.
+pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, String)> {
+    ensure_session(content).map_err(|err| contextualize_parse_error(file, err))
+}
+
 /// Read the session UUID from a document file. Returns empty string if not found.
 pub fn read_session_id(file: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
@@ -664,6 +684,17 @@ mod tests {
         assert_eq!(fm.session.as_deref(), Some("xyz"));
         assert!(fm.agent.is_none());
         assert!(body.contains("# Doc"));
+    }
+
+    #[test]
+    fn parse_for_file_includes_path_and_fix_hint() {
+        let path = Path::new("tasks/bad.md");
+        let err = parse_for_file("---\nprompt_presets:\n  key: [oops\n---\n", path).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("invalid YAML frontmatter in tasks/bad.md"));
+        assert!(
+            message.contains("Fix the frontmatter between the opening and closing --- markers")
+        );
     }
 
     #[test]

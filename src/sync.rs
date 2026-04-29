@@ -158,6 +158,15 @@ use tmux_router::FileResolution;
 
 const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
 
+fn parse_frontmatter_for_sync<'a>(
+    content: &'a str,
+    file: &Path,
+    phase: &str,
+) -> Result<(frontmatter::Frontmatter, &'a str)> {
+    frontmatter::parse_for_file(content, file)
+        .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
+}
+
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
     run_with_options(col_args, window, focus, true, &Tmux::default_server())
@@ -819,7 +828,15 @@ fn run_with_options(
 
         // Step 3: Read content and resolve.
         let content = std::fs::read_to_string(path).ok()?;
-        let (fm, _) = frontmatter::parse(&content).ok()?;
+        let (fm, _) = match parse_frontmatter_for_sync(&content, path, "resolve_file") {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                let warning = format!("[sync] warning: {}", e);
+                eprintln!("{}", warning);
+                sync_log(&warning);
+                return None;
+            }
+        };
 
         match fm.session {
             Some(ref key) => {
@@ -935,9 +952,14 @@ fn run_with_options(
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let (fm, _) = match frontmatter::parse(&content) {
+            let (fm, _) = match parse_frontmatter_for_sync(&content, file_path, "auto-start") {
                 Ok(r) => r,
-                Err(_) => continue,
+                Err(e) => {
+                    let warning = format!("[sync] warning: {}", e);
+                    eprintln!("{}", warning);
+                    sync_log(&warning);
+                    continue;
+                }
             };
             let session_id = match fm.session {
                 Some(ref id) => id.clone(),
@@ -1852,6 +1874,24 @@ mod tests {
         assert!(
             !cmdline_has_file_match(cmdline, file_path),
             "different relative path should not match by basename alone"
+        );
+    }
+
+    #[test]
+    fn parse_frontmatter_for_sync_includes_phase_and_fix_hint() {
+        let path = Path::new("tasks/bad.md");
+        let err = parse_frontmatter_for_sync(
+            "---\nprompt_presets:\n  key: [oops\n---\n",
+            path,
+            "auto-start",
+        )
+        .unwrap_err();
+        let message = err.to_string();
+
+        assert!(message.contains("sync auto-start frontmatter"));
+        assert!(message.contains("invalid YAML frontmatter in tasks/bad.md"));
+        assert!(
+            message.contains("Fix the frontmatter between the opening and closing --- markers")
         );
     }
 

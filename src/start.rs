@@ -1240,14 +1240,14 @@ pub fn run(file: &Path) -> Result<()> {
     // Ensure session UUID exists in frontmatter
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
+    let (updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         std::fs::write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("Generated session UUID: {}", session_id);
     }
 
-    let (fm, _body) = frontmatter::parse(&updated_content)?;
+    let (fm, _body) = frontmatter::parse_for_file(&updated_content, file)?;
     let global_config = config::load().unwrap_or_default();
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
@@ -2486,6 +2486,22 @@ mod tests {
         assert_eq!(
             clean_exit_resolution(&crate::harness::HarnessConfig::codex()),
             CleanExitResolution::RestartContinue
+        );
+    }
+
+    #[test]
+    fn start_invalid_frontmatter_returns_contextual_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("bad.md");
+        std::fs::write(&file, "---\nprompt_presets:\n  key: [oops\n---\n").unwrap();
+
+        let err = run(&file).unwrap_err();
+        let message = err.to_string();
+
+        assert!(message.contains("invalid YAML frontmatter in"));
+        assert!(message.contains("bad.md"));
+        assert!(
+            message.contains("Fix the frontmatter between the opening and closing --- markers")
         );
     }
 

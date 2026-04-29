@@ -96,19 +96,20 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 
 `agent-doc start <FILE>` — start the configured harness in a new tmux pane and register the session.
 
-1. Ensure session UUID in frontmatter (generate if missing)
-2. Read `$TMUX_PANE` (must be inside tmux)
-3. If another tmux pane still proves live ownership of that same document session, probe its health before deciding what to do:
+1. Parse YAML frontmatter. If the frontmatter is malformed, fail closed with a file-targeted error that names the document and tells the user to fix the `--- ... ---` block before retrying.
+2. Ensure session UUID in frontmatter (generate if missing)
+3. Read `$TMUX_PANE` (must be inside tmux)
+4. If another tmux pane still proves live ownership of that same document session, probe its health before deciding what to do:
    - **Healthy** (supervisor IPC returns `running=true, state="healthy"`) → focus and reuse that pane; if it lives in another tmux session, switch the caller's current client to that session before selecting the target window/pane
    - **Needs restart** (supervisor reachable but child not running or state is degraded/halted) → send `restart` via supervisor IPC, focus pane on success; deregister and start fresh on failure
    - **Unreachable** (socket exists but supervisor does not respond) → deregister and start fresh in the current pane
    - **No socket** (no supervisor socket found) → deregister and start fresh in the current pane
-4. If `sessions.json` points at a different **alive** pane but no live owner can still be proven for the document, clear that stale registration before continuing in the current pane.
-5. Only when start is falling through to a fresh session in the current pane, auto-relocate that pane into the configured project tmux session if needed. Reuse/focus of an already-running owner must leave the launcher's pane in its original session.
-6. Register session → pane in `sessions.json`
-7. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
-8. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append `--add-dir` entries for any extra writable roots needed by submodule documents: the superproject working tree for parent-repo patchback targets plus any external git metadata directories (`.git/modules/...` and the superproject `.git` when applicable). Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not, so the Codex backend strips `--add-dir` entries from resume args (the resumed session inherits writable roots from the original `exec`)
-9. Exec the configured harness (replaces process)
+5. If `sessions.json` points at a different **alive** pane but no live owner can still be proven for the document, clear that stale registration before continuing in the current pane.
+6. Only when start is falling through to a fresh session in the current pane, auto-relocate that pane into the configured project tmux session if needed. Reuse/focus of an already-running owner must leave the launcher's pane in its original session.
+7. Register session → pane in `sessions.json`
+8. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
+9. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append `--add-dir` entries for any extra writable roots needed by submodule documents: the superproject working tree for parent-repo patchback targets plus any external git metadata directories (`.git/modules/...` and the superproject `.git` when applicable). Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not, so the Codex backend strips `--add-dir` entries from resume args (the resumed session inherits writable roots from the original `exec`)
+10. Exec the configured harness (replaces process)
 
 ## route
 
@@ -322,6 +323,8 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
 
 **Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. Files with session UUIDs are always treated as **registered**, even if the registry entry was pruned (dead pane). This enables the declarative layout flow: navigating to a file in a split creates a tmux pane regardless of registry state. For managed files whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window via guarded `join-pane`, choosing the left or right edge from the requested column so the recovered pane becomes visible without swapping another live pane back into stash. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
+
+Malformed YAML frontmatter is not silently dropped during resolution or auto-start. Sync logs a warning that includes the file path plus a repair hint for the `--- ... ---` block, then skips that file for the current pass.
 
 **Build stamp:** On each sync invocation, the binary compares its embedded build timestamp (`AGENT_DOC_BUILD_TIMESTAMP` from `build.rs`) against `.agent-doc/build.stamp`. On mismatch (new build detected), all startup locks (`.agent-doc/starting/*.lock`) are cleared and the stamp is updated. This prevents stale locks from old binary instances from blocking auto-start.
 

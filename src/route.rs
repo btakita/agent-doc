@@ -318,16 +318,14 @@ pub fn run_with_tmux(
     // Ensure session UUID exists in frontmatter (generate if missing)
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
+    let (updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         std::fs::write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    let fm = frontmatter::parse(&updated_content)
-        .map(|(f, _)| f)
-        .unwrap_or_default();
+    let fm = frontmatter::parse_for_file(&updated_content, file).map(|(f, _)| f)?;
     let global_config = crate::config::load().unwrap_or_default();
     let harness = HarnessConfig::from_context(&fm, &global_config);
 

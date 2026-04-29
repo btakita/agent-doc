@@ -773,7 +773,6 @@ fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
             let (_, items, _) = crate::pending::parse_items(component.content(&content));
             items
         })
-        .into_iter()
         .filter(|item| !item.is_done())
         .map(|item| item.id)
         .collect())

@@ -508,11 +508,22 @@ enum Commands {
     },
     /// Validate sessions.json against live tmux panes, remove stale entries
     Resync {
+        /// Limit checks/fixes to a single session document
+        file: Option<PathBuf>,
         /// Actually kill wrong-session panes and deregister stale entries (without this flag, dry-run only)
         #[arg(long)]
         fix: bool,
         /// Relocate WrongSession panes to this tmux session via join-pane instead of killing them.
         /// Requires --fix. Example: --session 10
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Fix stale routing/session issues globally or for one session document (`resync --fix` alias)
+    Fix {
+        /// Limit fixes to a single session document
+        file: Option<PathBuf>,
+        /// Relocate WrongSession panes to this tmux session via join-pane instead of killing them.
+        /// Example: --session 10
         #[arg(long)]
         session: Option<String>,
     },
@@ -1315,7 +1326,14 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Outline { file, json } => outline::run(&file, json),
-        Commands::Resync { fix, session } => resync::run(fix, session.as_deref()),
+        Commands::Resync { file, fix, session } => {
+            if fix {
+                resync::run_fix(file.as_deref(), session.as_deref())
+            } else {
+                resync::run(false, session.as_deref(), file.as_deref())
+            }
+        }
+        Commands::Fix { file, session } => resync::run_fix(file.as_deref(), session.as_deref()),
         Commands::Skill { command } => {
             match command {
                 SkillCommands::Install {

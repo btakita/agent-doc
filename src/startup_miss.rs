@@ -148,6 +148,7 @@ pub fn clear(file: &Path) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn is_startup_miss_pane(file: &Path, pane_id: &str) -> bool {
     load(file)
         .ok()

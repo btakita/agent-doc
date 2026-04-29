@@ -131,8 +131,13 @@ fn all_commands() -> Vec<CommandInfo> {
     ));
     cmds.push(cmd(
         "/agent-doc resync",
-        "",
-        "Validate sessions.json, remove stale entries",
+        "[FILE] [--fix]",
+        "Validate sessions.json globally or for one document; `--fix` aliases `fix`",
+    ));
+    cmds.push(cmd(
+        "/agent-doc fix",
+        "[FILE]",
+        "Fix stale routing/session issues globally or for one document",
     ));
     cmds.push(cmd(
         "/agent-doc compact",

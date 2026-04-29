@@ -396,7 +396,7 @@ fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
 ///
 /// The drift counter lives at `.agent-doc/state/drift.count`. Each call either
 /// increments it (drift present) or deletes it (drift absent). When the counter
-/// reaches >= 2 we invoke `resync::run(true, None)` and reset it to 0 so we do
+/// reaches >= 2 we invoke `resync::run(true, None, None)` and reset it to 0 so we do
 /// not loop on every cycle.
 fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) {
     let has_drift = layout_issues
@@ -440,7 +440,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
             next
         );
         crate::ops_log::log_op(file, &format!("auto_resync_on_drift consecutive={}", next));
-        if let Err(e) = resync::run(true, None) {
+        if let Err(e) = resync::run(true, None, None) {
             eprintln!("[preflight] auto-resync failed: {}", e);
         } else {
             // Reset after successful fix — next cycle re-evaluates.
@@ -1158,13 +1158,13 @@ pub fn run(file: &Path) -> Result<()> {
         .as_ref()
         .map(|d| diff::classify_prompt_bearing_changes(d))
         .unwrap_or_default();
-    if raw_diff.is_some() {
-        if let Some(harness_only_diff) = harness_diff.as_ref() {
-            push_unique_prompt_bearing_changes(
-                &mut prompt_bearing_changes,
-                diff::classify_prompt_bearing_changes(harness_only_diff),
-            );
-        }
+    if raw_diff.is_some()
+        && let Some(harness_only_diff) = harness_diff.as_ref()
+    {
+        push_unique_prompt_bearing_changes(
+            &mut prompt_bearing_changes,
+            diff::classify_prompt_bearing_changes(harness_only_diff),
+        );
     }
     let prompt_targets = prompt_bearing_changes
         .iter()
@@ -1175,13 +1175,13 @@ pub fn run(file: &Path) -> Result<()> {
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
         .unwrap_or_default();
-    if raw_diff.is_some() {
-        if let Some(harness_only_diff) = harness_diff.as_ref() {
-            push_unique_strings(
-                &mut added_diff_lines,
-                crate::prompt_contract::collect_added_diff_lines(harness_only_diff),
-            );
-        }
+    if raw_diff.is_some()
+        && let Some(harness_only_diff) = harness_diff.as_ref()
+    {
+        push_unique_strings(
+            &mut added_diff_lines,
+            crate::prompt_contract::collect_added_diff_lines(harness_only_diff),
+        );
     }
 
     // Legacy compatibility surface for older skill consumers.
@@ -1198,18 +1198,18 @@ pub fn run(file: &Path) -> Result<()> {
             skill_commands: vec![],
             builtin_commands: vec![],
         });
-    if raw_diff.is_some() {
-        if let Some(harness_only_diff) = harness_diff.as_ref() {
-            let harness_commands = diff::parse_slash_commands_classified(harness_only_diff);
-            push_unique_strings(
-                &mut parsed_commands.skill_commands,
-                harness_commands.skill_commands,
-            );
-            push_unique_strings(
-                &mut parsed_commands.builtin_commands,
-                harness_commands.builtin_commands,
-            );
-        }
+    if raw_diff.is_some()
+        && let Some(harness_only_diff) = harness_diff.as_ref()
+    {
+        let harness_commands = diff::parse_slash_commands_classified(harness_only_diff);
+        push_unique_strings(
+            &mut parsed_commands.skill_commands,
+            harness_commands.skill_commands,
+        );
+        push_unique_strings(
+            &mut parsed_commands.builtin_commands,
+            harness_commands.builtin_commands,
+        );
     }
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
@@ -1273,13 +1273,13 @@ pub fn run(file: &Path) -> Result<()> {
         .as_ref()
         .map(|d| diff::detect_prompt_preset_requests(d))
         .unwrap_or_default();
-    if raw_diff.is_some() {
-        if let Some(harness_only_diff) = harness_diff.as_ref() {
-            push_unique_strings(
-                &mut prompt_presets_requested,
-                diff::detect_prompt_preset_requests(harness_only_diff),
-            );
-        }
+    if raw_diff.is_some()
+        && let Some(harness_only_diff) = harness_diff.as_ref()
+    {
+        push_unique_strings(
+            &mut prompt_presets_requested,
+            diff::detect_prompt_preset_requests(harness_only_diff),
+        );
     }
     let missing_prompt_presets = prompt_presets_requested
         .iter()
@@ -1561,7 +1561,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
             let snap_comp = crate::component::parse(&snap)
                 .ok()
                 .and_then(|comps| comps.into_iter().find(|c| is_backlog_component(&c.name)));
-            if let (Some(sc), Some(current_body)) = (snap_comp, current_body.as_deref()) {
+            if let (Some(sc), Some(current_body)) = (snap_comp, current_body) {
                 let snap_body = &snap[sc.open_end..sc.close_start];
                 crate::pending::detect_reorder(snap_body, current_body).is_some()
             } else {
@@ -1576,7 +1576,6 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
 
     // 5. Count gated items in the post-maintenance body.
     let gated_count = current_body
-        .as_deref()
         .map(|body| {
             let (_, items, _) = crate::pending::parse_items(body);
             items

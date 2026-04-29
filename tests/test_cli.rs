@@ -70,7 +70,8 @@ fn test_cli_help() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Interactive document sessions"))
-        .stdout(predicate::str::contains("repair"));
+        .stdout(predicate::str::contains("repair"))
+        .stdout(predicate::str::contains("fix"));
 }
 
 #[test]
@@ -275,6 +276,30 @@ fn test_cli_repair_aliases_legacy_recover() {
     recover.arg("recover").arg(&missing);
     recover
         .assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
+fn test_cli_fix_missing_file_errors() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let missing = tmp.path().join("missing.md");
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("fix").arg(&missing);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+}
+
+#[test]
+fn test_cli_resync_fix_alias_accepts_optional_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let missing = tmp.path().join("missing.md");
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["resync", "--fix", missing.to_str().unwrap()]);
+    cmd.assert()
         .failure()
         .stderr(predicate::str::contains("file not found"));
 }

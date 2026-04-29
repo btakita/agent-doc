@@ -538,103 +538,102 @@ fn resolve_or_create_pane(
     // Strategy 0: If a previous startup-miss was recorded for the registered pane,
     // deregister it immediately so we fall through to auto-start instead of
     // reusing a pane that never successfully started a document cycle.
-    if let Some(ref registered_pane) = registered {
-        if let Ok(Some(miss)) = crate::startup_miss::load(file)
-            && miss.pane_id == *registered_pane
-            && tmux.pane_alive(registered_pane)
-        {
-            let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
-                .ok()
-                .flatten();
-            let provenance = startup_miss_route_provenance(
-                tmux,
-                registered_pane,
-                live_owner.as_deref(),
-                supervisor_health,
-                log_status.as_ref(),
+    if let Some(ref registered_pane) = registered
+        && let Ok(Some(miss)) = crate::startup_miss::load(file)
+        && miss.pane_id == *registered_pane
+        && tmux.pane_alive(registered_pane)
+    {
+        let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
+            .ok()
+            .flatten();
+        let provenance = startup_miss_route_provenance(
+            tmux,
+            registered_pane,
+            live_owner.as_deref(),
+            supervisor_health,
+            log_status.as_ref(),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_startup_miss_detected file={} origin={:?} {}",
+                file_path, miss.origin, provenance
+            ),
+        );
+        if startup_miss_should_fail_closed(
+            true,
+            registered_pane,
+            live_owner.as_deref(),
+            supervisor_health,
+            log_status.as_ref(),
+        ) {
+            eprintln!(
+                "[route] startup-miss for {} is stranded, not crashed: {}",
+                file_path, provenance
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_startup_miss_detected file={} origin={:?} {}",
+                    "route_startup_miss_stranded file={} origin={:?} {}",
                     file_path, miss.origin, provenance
                 ),
             );
-            if startup_miss_should_fail_closed(
-                true,
+            anyhow::bail!(
+                "startup-miss for {} remains unresolved on alive pane {}: {}. The last session never recorded a child exit or session_end, so route will not auto-start a replacement pane over a stranded session",
+                file.display(),
                 registered_pane,
-                live_owner.as_deref(),
-                supervisor_health,
-                log_status.as_ref(),
-            ) {
-                eprintln!(
-                    "[route] startup-miss for {} is stranded, not crashed: {}",
-                    file_path, provenance
-                );
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_startup_miss_stranded file={} origin={:?} {}",
-                        file_path, miss.origin, provenance
-                    ),
-                );
-                anyhow::bail!(
-                    "startup-miss for {} remains unresolved on alive pane {}: {}. The last session never recorded a child exit or session_end, so route will not auto-start a replacement pane over a stranded session",
-                    file.display(),
-                    registered_pane,
-                    provenance
-                );
-            }
-            if startup_miss_requires_fresh_start(
-                registered_pane,
-                live_owner.as_deref(),
-                supervisor_health,
-            ) {
-                eprintln!(
-                    "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
-                    registered_pane, file_path
-                );
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_startup_miss_deregistered file={} pane={}",
-                        file_path, registered_pane
-                    ),
-                );
-                let _ = sessions::deregister(session_id)?;
-                let _ = crate::startup_miss::clear(file);
-                // Fall through to Strategy 3 (auto-start)
-                eprintln!("[route] No active pane found, auto-starting...");
-                if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
-                    anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
-                }
-                let split_before = is_first_column(file, col_args);
-                ensure_auto_start_target_session(tmux, None, target_session, harness)?;
-                return auto_start_in_session(
-                    tmux,
-                    file,
-                    session_id,
-                    file_path,
-                    target_session,
-                    false,
-                    split_before,
-                    harness,
-                );
-            }
-
+                provenance
+            );
+        }
+        if startup_miss_requires_fresh_start(
+            registered_pane,
+            live_owner.as_deref(),
+            supervisor_health,
+        ) {
             eprintln!(
-                "[route] registered pane {} still proves live ownership for {} — clearing stale startup-miss marker",
+                "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
                 registered_pane, file_path
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_startup_miss_cleared_live_owner file={} pane={}",
+                    "route_startup_miss_deregistered file={} pane={}",
                     file_path, registered_pane
                 ),
             );
+            let _ = sessions::deregister(session_id)?;
             let _ = crate::startup_miss::clear(file);
+            // Fall through to Strategy 3 (auto-start)
+            eprintln!("[route] No active pane found, auto-starting...");
+            if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+                anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+            }
+            let split_before = is_first_column(file, col_args);
+            ensure_auto_start_target_session(tmux, None, target_session, harness)?;
+            return auto_start_in_session(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                target_session,
+                false,
+                split_before,
+                harness,
+            );
         }
+
+        eprintln!(
+            "[route] registered pane {} still proves live ownership for {} — clearing stale startup-miss marker",
+            registered_pane, file_path
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_startup_miss_cleared_live_owner file={} pane={}",
+                file_path, registered_pane
+            ),
+        );
+        let _ = crate::startup_miss::clear(file);
     }
 
     // Strategy 1: Alive registered pane — reuse only when a live process tree
@@ -933,9 +932,7 @@ fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
 
 fn canonical_registered_file(entry: &sessions::SessionEntry) -> std::path::PathBuf {
     let path = std::path::Path::new(&entry.file);
-    let resolved = if path.is_absolute() {
-        path.to_path_buf()
-    } else if entry.cwd.is_empty() {
+    let resolved = if path.is_absolute() || entry.cwd.is_empty() {
         path.to_path_buf()
     } else {
         std::path::Path::new(&entry.cwd).join(path)
@@ -1116,6 +1113,7 @@ fn pending_prompt_bearing_marker_for_route(
     crate::session_check::detect_unstarted_prompt_bearing_diff(file)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn require_routed_cycle_ack(
     tmux: &Tmux,
     file: &Path,
@@ -1973,9 +1971,8 @@ fn pane_has_prompt(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool 
         content
             .lines()
             .rev()
-            .filter(|l| !l.trim().is_empty())
-            .take(10)
-            .any(|l| harness.is_prompt_line(l))
+            .find(|l| !l.trim().is_empty())
+            .is_some_and(|line| harness.is_prompt_line(line))
     } else {
         false
     }

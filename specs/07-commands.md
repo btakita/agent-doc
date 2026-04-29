@@ -200,12 +200,19 @@ Exits with error if the pane is dead or no session is registered.
 
 ## resync
 
-`agent-doc resync [--fix]` — validate sessions.json against live tmux panes.
+`agent-doc resync [FILE] [--fix]` — validate sessions.json against live tmux panes.
+
+`agent-doc fix [FILE]` is the canonical fix surface. `agent-doc resync --fix [FILE]` is an alias to the same behavior.
 
 **Always (dry-run and --fix):**
 1. Load `sessions.json`, prune entries with dead panes (delegates to `tmux_router::prune()`)
 2. Purge idle stash windows: kill `stash`-named windows where all panes run idle shells (`zsh`, `bash`, `sh`, `fish`) and last activity was >30s ago
 3. Log orphaned `claude`/`stash` windows (all panes unregistered) for diagnostics
+
+**Scoped mode (`FILE` provided):**
+- Resolve `FILE` through the normal cwd/git-root path resolver and require the document to exist.
+- Limit dead-pane pruning, issue detection, and fix application to registry entries whose stored document path resolves to that same file.
+- Do not mutate unrelated documents' registry entries, stash windows, or orphan cleanup state during a scoped run.
 
 **Issue detection (alive panes only):**
 4. **Wrong-process:** Pane is running a process not in the allowlist (`agent-doc`, `claude`, `node`) and not an idle shell (`zsh`, `bash`, `sh`, `fish`)
@@ -226,6 +233,14 @@ Exits with error if the pane is dead or no session is registered.
 **Auto-start stash overflow (route):** When `auto_start_in_session` tries `split-window` alongside a registered pane and the split fails (e.g. minimum pane size constraint), it falls back to `tmux new-window` then immediately calls `stash_pane` to move the new pane into the stash window — avoiding a visible throwaway window in the session.
 
 **Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations. Uses bulk metadata fetching (2 subprocess calls: `list-windows -a` + `list-panes -a`) instead of per-pane queries. Stranded panes (no valid return target) are deregistered on first failure to prevent repeated expensive lookups. **Stash pane safety:** unregistered agent processes (`agent-doc`, `claude`, `node`) in stash windows are never auto-killed — only idle shells are purged. This prevents loss of active Claude sessions when the registry goes stale.
+
+## fix
+
+`agent-doc fix [FILE] [--session <name>]` — apply the same fix path as `agent-doc resync --fix`, either globally or for one document.
+
+- Without `FILE`, behavior matches the existing global `resync --fix` workflow, including stash/orphan cleanup and post-fix session listing.
+- With `FILE`, behavior is scoped to that document only; unrelated registry entries and stash cleanup are left untouched.
+- `--session <name>` preserves the existing `WrongSession` relocate-via-`join-pane` behavior instead of killing the pane.
 
 ## prompt
 

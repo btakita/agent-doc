@@ -124,10 +124,10 @@ fn effective_prompt_texts(
     while let Some(text) = queue.pop_front() {
         texts.push(text.clone());
         for preset in referenced_presets_in_text(&text, prompt_presets) {
-            if seen_presets.insert(preset.clone()) {
-                if let Some(body) = prompt_presets.get(&preset) {
-                    queue.push_back(body.clone());
-                }
+            if seen_presets.insert(preset.clone())
+                && let Some(body) = prompt_presets.get(&preset)
+            {
+                queue.push_back(body.clone());
             }
         }
     }

@@ -1512,7 +1512,7 @@ fn run_with_options(
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
     // cross-session panes — resync --fix would kill them (lesson: context_session override).
-    if let Err(e) = resync::run(false, None) {
+    if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
 

@@ -49,16 +49,16 @@ pub(crate) fn synthetic_diff_for_file(file: &Path) -> Result<Option<String>> {
 pub(crate) fn prompt_body_for_file(file: &Path) -> Result<Option<String>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
-    if let Ok(env_prompt) = std::env::var("AGENT_DOC_HARNESS_PROMPT") {
-        if let Some(body) = prompt_body_from_text(&env_prompt, &canonical) {
-            return Ok(Some(body));
-        }
+    if let Ok(env_prompt) = std::env::var("AGENT_DOC_HARNESS_PROMPT")
+        && let Some(body) = prompt_body_from_text(&env_prompt, &canonical)
+    {
+        return Ok(Some(body));
     }
 
-    if let Some(prompt) = crate::codex_hook::load_prompt_for_current_session(&canonical)? {
-        if let Some(body) = prompt_body_from_text(&prompt, &canonical) {
-            return Ok(Some(body));
-        }
+    if let Some(prompt) = crate::codex_hook::load_prompt_for_current_session(&canonical)?
+        && let Some(body) = prompt_body_from_text(&prompt, &canonical)
+    {
+        return Ok(Some(body));
     }
 
     Ok(None)

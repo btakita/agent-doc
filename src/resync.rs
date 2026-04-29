@@ -5,9 +5,10 @@
 //!   `tmux_router::prune()`, then returns active panes from stash windows, purges
 //!   idle stash windows, and clears orphaned stash panes. Called automatically
 //!   before route, sync, and claim operations. Returns the count of entries removed.
-//! - `run(fix)`: verbose counterpart to `prune()` for the `agent-doc resync` CLI
-//!   subcommand. Prints which entries were removed, which issues were detected, and
-//!   the post-resync active session list.
+//! - `run(fix, target_file)`: verbose counterpart to `prune()` for the `agent-doc resync`
+//!   and `agent-doc fix` CLI subcommands. Prints which entries were removed, which
+//!   issues were detected, and the post-resync active session list. When
+//!   `target_file` is provided, scope mutations to that single document.
 //! - Issue detection (`detect_issues`): inspects every alive registry pane for five
 //!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
 //!   (pane running a non-agent process such as `corky watch`), `WrongSession`
@@ -81,6 +82,7 @@
 //!   issue; the W1 panes do not.
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 use crate::sessions::{self, PaneMoveOp, Tmux};
 use crate::{config, frontmatter};
@@ -229,6 +231,68 @@ impl std::fmt::Display for Issue {
             ),
         }
     }
+}
+
+fn resolve_target_file(file: &Path) -> Result<PathBuf> {
+    let resolved = crate::git::resolve_absolute_file_path(file);
+    if !resolved.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+    Ok(resolved.canonicalize().unwrap_or(resolved))
+}
+
+fn same_document_path(target: &Path, candidate: &str) -> bool {
+    if candidate.is_empty() {
+        return false;
+    }
+    let resolved = crate::git::resolve_absolute_file_path(Path::new(candidate));
+    let canonical = resolved.canonicalize().unwrap_or(resolved);
+    canonical == target
+}
+
+fn filter_registry_for_target(
+    registry: &sessions::SessionRegistry,
+    target: &Path,
+) -> sessions::SessionRegistry {
+    registry
+        .iter()
+        .filter(|(_, entry)| same_document_path(target, &entry.file))
+        .map(|(key, entry)| (key.clone(), entry.clone()))
+        .collect()
+}
+
+fn prune_dead_entries_for_target_in_registry<F>(
+    registry: &mut sessions::SessionRegistry,
+    target: &Path,
+    mut pane_alive: F,
+) -> Vec<(String, sessions::SessionEntry)>
+where
+    F: FnMut(&str) -> bool,
+{
+    let removed: Vec<(String, sessions::SessionEntry)> = registry
+        .iter()
+        .filter(|(_, entry)| same_document_path(target, &entry.file) && !pane_alive(&entry.pane))
+        .map(|(key, entry)| (key.clone(), entry.clone()))
+        .collect();
+
+    for (key, _) in &removed {
+        registry.remove(key);
+    }
+
+    removed
+}
+
+fn prune_targeted(tmux: &Tmux, target: &Path) -> Result<Vec<(String, sessions::SessionEntry)>> {
+    let registry_path = sessions::registry_path();
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let mut registry = sessions::load()?;
+    let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
+        tmux.pane_alive(pane)
+    });
+    if !removed.is_empty() {
+        sessions::save(&registry)?;
+    }
+    Ok(removed)
 }
 
 /// Quietly prune dead panes and deduplicate entries.
@@ -1527,8 +1591,86 @@ fn apply_fixes_to_registry(
 ///
 /// `relocate_session`: when `Some(target)`, `WrongSession` panes are relocated via
 /// `join-pane` instead of being killed. Pass the target tmux session name (e.g. `"10"`).
-pub fn run(fix: bool, relocate_session: Option<&str>) -> Result<()> {
+pub fn run_fix(target_file: Option<&Path>, relocate_session: Option<&str>) -> Result<()> {
+    run(true, relocate_session, target_file)
+}
+
+/// `target_file`: when `Some(file)`, scope detection and mutations to that single
+/// document instead of mutating the whole registry.
+pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>) -> Result<()> {
     let tmux = Tmux::default_server();
+
+    if let Some(file) = target_file {
+        let target = resolve_target_file(file)?;
+        let removed = prune_targeted(&tmux, &target)?;
+
+        if removed.is_empty() {
+            let scoped = filter_registry_for_target(&sessions::load()?, &target);
+            if scoped.is_empty() {
+                eprintln!("No registered sessions found for {}.", target.display());
+            } else {
+                eprintln!(
+                    "All {} matching session(s) for {} have live panes.",
+                    scoped.len(),
+                    target.display()
+                );
+            }
+        } else {
+            eprintln!("Removed {} stale matching session(s):", removed.len());
+            for (key, entry) in &removed {
+                let label = if entry.file.is_empty() {
+                    key.as_str()
+                } else {
+                    entry.file.as_str()
+                };
+                eprintln!("  {} (pane {} removed)", label, entry.pane);
+            }
+        }
+
+        let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+        let issues = detect_issues_in_registry(&tmux, &scoped_registry);
+        if !issues.is_empty() {
+            if fix {
+                eprintln!(
+                    "\nFixing {} issue(s) for {}:",
+                    issues.len(),
+                    target.display()
+                );
+                let fixed = apply_fixes(&tmux, &issues, relocate_session)?;
+                eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
+            } else {
+                eprintln!(
+                    "\nFound {} issue(s) for {} (run with --fix to resolve):",
+                    issues.len(),
+                    target.display()
+                );
+                for issue in &issues {
+                    eprintln!("  {}", issue);
+                }
+            }
+        } else {
+            eprintln!(
+                "\nNo session/process issues detected for {}.",
+                target.display()
+            );
+        }
+
+        let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+        if !scoped_registry.is_empty() {
+            eprintln!("\nActive matching sessions:");
+            for (key, entry) in &scoped_registry {
+                let label = if entry.file.is_empty() {
+                    key.as_str()
+                } else {
+                    entry.file.as_str()
+                };
+                eprintln!("  {} -> pane {}", label, entry.pane);
+            }
+        }
+
+        return Ok(());
+    }
+
     let registry_path = sessions::registry_path();
 
     // Show what's being removed (verbose)
@@ -1788,6 +1930,58 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         panic!("timed out waiting for process matching {pattern}");
+    }
+
+    #[test]
+    fn filter_registry_for_target_matches_only_selected_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_a = dir.path().join("a.md");
+        let doc_b = dir.path().join("b.md");
+        std::fs::write(&doc_a, "# A\n").unwrap();
+        std::fs::write(&doc_b, "# B\n").unwrap();
+        let target = doc_a.canonicalize().unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "sess-a".to_string(),
+            test_entry("%1", &doc_a.to_string_lossy()),
+        );
+        registry.insert(
+            "sess-b".to_string(),
+            test_entry("%2", &doc_b.to_string_lossy()),
+        );
+
+        let filtered = filter_registry_for_target(&registry, &target);
+        assert_eq!(filtered.len(), 1, "only the target doc should remain");
+        assert!(filtered.contains_key("sess-a"));
+        assert!(!filtered.contains_key("sess-b"));
+    }
+
+    #[test]
+    fn prune_dead_entries_for_target_only_removes_matching_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_a = dir.path().join("a.md");
+        let doc_b = dir.path().join("b.md");
+        std::fs::write(&doc_a, "# A\n").unwrap();
+        std::fs::write(&doc_b, "# B\n").unwrap();
+        let target = doc_a.canonicalize().unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "sess-a".to_string(),
+            test_entry("%dead-a", &doc_a.to_string_lossy()),
+        );
+        registry.insert(
+            "sess-b".to_string(),
+            test_entry("%dead-b", &doc_b.to_string_lossy()),
+        );
+
+        let removed =
+            prune_dead_entries_for_target_in_registry(&mut registry, &target, |_pane| false);
+        assert_eq!(removed.len(), 1, "only the target doc should be pruned");
+        assert_eq!(removed[0].0, "sess-a");
+        assert!(!registry.contains_key("sess-a"));
+        assert!(registry.contains_key("sess-b"));
     }
 
     #[test]

@@ -642,9 +642,7 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
             item.render()
         };
         out.push_str(&render);
-        if item.continuation.is_empty() {
-            out.push('\n');
-        } else if !item.continuation.ends_with('\n') {
+        if item.continuation.is_empty() || !item.continuation.ends_with('\n') {
             out.push('\n');
         }
     }
@@ -661,8 +659,19 @@ pub(crate) fn canonicalize_preserving_non_item_lines(body: &str) -> String {
     PendingLayout::parse(body).render()
 }
 
+fn trim_boundary_blank_segments(mut segments: Vec<String>) -> Vec<String> {
+    while matches!(segments.first(), Some(segment) if segment.trim().is_empty()) {
+        segments.remove(0);
+    }
+    while matches!(segments.last(), Some(segment) if segment.trim().is_empty()) {
+        segments.pop();
+    }
+    segments
+}
+
 pub(crate) fn preserves_non_item_structure(lhs: &str, rhs: &str) -> bool {
-    PendingLayout::parse(lhs).non_item_segments() == PendingLayout::parse(rhs).non_item_segments()
+    trim_boundary_blank_segments(PendingLayout::parse(lhs).non_item_segments())
+        == trim_boundary_blank_segments(PendingLayout::parse(rhs).non_item_segments())
 }
 
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
@@ -837,10 +846,10 @@ pub fn detect_dropped_from_history(
             continue;
         }
 
-        if let Some(item) = parse_item_line(line) {
-            if !item.id.is_empty() {
-                current_ids.insert(item.id);
-            }
+        if let Some(item) = parse_item_line(line)
+            && !item.id.is_empty()
+        {
+            current_ids.insert(item.id);
         }
     }
 
@@ -1034,7 +1043,7 @@ pub fn extract_items_by_id(body: &str, ids: &[String]) -> Result<(String, String
     let mut matched_ids = Vec::new();
     let mut moved_items = Vec::new();
     let remaining = PendingLayout::parse(body).replace_items(|item| {
-        if requested.iter().any(|id| *id == item.id) {
+        if requested.contains(&item.id) {
             matched_ids.push(item.id.clone());
             moved_items.push(item.clone());
             None

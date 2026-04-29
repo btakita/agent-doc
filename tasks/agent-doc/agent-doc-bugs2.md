@@ -160,16 +160,36 @@ Commit / push:
 - `7280e5c` `fix: reject live cross-session claims`
 
 `#qmut` remains the top backlog item.
-<!-- agent:boundary:6af0719f -->
+
+❯ do #lzcl. spec-test-build-install-commit-push
+### Re: #lzcl lazy-claim provenance — gpt-5
+
+Implemented in `src/agent-doc` and pushed `4794e41` on `20260422/codex-agent-backend`.
+
+The fix removes the unsafe implicit lazy-claim path in `route.rs`. When a registered pane is dead, Strategy 2 now accepts only an explicit pane override as lazy-claim provenance; it no longer adopts whatever pane happens to be `tmux.active_pane(session)` just because that pane looks like Codex/Claude. That closes the cross-registry / cross-repo pane-theft shape behind `#lzcl`. The existing guards still apply: already-claimed panes are rejected, non-agent processes are rejected, and route falls through to auto-start when no explicit safe candidate exists.
+
+I updated the route contract comments, `specs/07-commands.md`, and `VERSIONS.md`, and added regression coverage proving the active-pane fallback is gone while explicit `--pane` lazy-claim still works.
+
+Verification:
+- `cargo test lazy_claim_requires_explicit_pane_provenance`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `4794e41` `fix: require explicit lazy-claim provenance`
+
+`#qmut` remains the top backlog item.
+<!-- agent:boundary:9ee9bb32 -->
 <!-- /agent:exchange -->
 
 <!--
+compact exchange should peek into the backlog to provide more context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lzcl] [recommended] Strengthen lazy-claim ownership proof so route cannot adopt unrelated active agent panes across registries/repos
 - [ ] [#qmut] [recommended] Make strict queue consumption prove document + snapshot state before mutating either side or advancing the live queue
 - [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
 <!-- /agent:backlog -->

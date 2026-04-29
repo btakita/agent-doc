@@ -151,7 +151,17 @@ This closes `#idxr`, and the same change also closes `#lokr`.
 - Reproduced the nested-path `locks --json` mis-targeting and the `lint --index <workspace>` privacy leak against temporary workspaces
 - I did not run the full `tsift` test suite for this review
 
-<!-- agent:boundary:738e1491 -->
+❯ add code-review recommendations to the backlog. Why were not added automatically? #agent-doc-bug
+
+### Re: backlog capture + code review follow-up — gpt-5
+
+Added the three review findings to the live backlog in priority order. The top item is `#spath`.
+
+Why they were not added automatically last cycle:
+- `agent-doc finalize` actually caught the missing backlog capture and failed before commit because `#code-review` expands to a backlog-required closeout.
+- I then used the explicit `` escape hatch to commit the findings-only review instead of re-running closeout with `--pending-add` flags. That suppression was my choice in the prior cycle, not the intended automatic path.
+- The separate `#agent-doc-bug` reproduced here is real: your direct harness follow-up did not enter the document, so preflight initially returned `no_changes`. That matches the existing `#prst` item in [tasks/agent-doc/agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md), so I did not create a duplicate bug entry.
+<!-- agent:boundary:a145803e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -160,6 +170,9 @@ This closes `#idxr`, and the same change also closes `#lokr`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#spath] infer submodule scope from nested workspace paths for read-only queries so search/graph/path/communities/explain do not require redundant --scope
+- [ ] [#lintw] make tsift lint --index <workspace-root> honor federation/isolation rules instead of loading private-scope entities
+- [ ] [#lkws] make tsift locks <nested-workspace-path> target the matching scoped index/lock state instead of the absent shared-root index
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

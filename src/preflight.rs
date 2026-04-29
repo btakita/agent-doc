@@ -3087,7 +3087,7 @@ mod tests {
             "## Status\n\n",
             "<!-- agent:status patch=replace -->\n",
             "Compacted.\n",
-            "#next-steps\n",
+            "#next-steps for calibrating session benchmarks with expected scores\n",
             "<!-- /agent:status -->\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",

@@ -731,19 +731,26 @@ fn strip_promptish_list_prefix(line: &str) -> &str {
     trimmed
 }
 
-fn starts_with_bare_prompt_preset_reference(line: &str) -> bool {
+fn starts_with_prompt_preset_reference(line: &str) -> bool {
     let trimmed = strip_promptish_list_prefix(line);
     let Some(rest) = trimmed.strip_prefix('#') else {
         return false;
     };
-    let mut chars = rest.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphanumeric() {
+    let token_len = rest
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()
+        .unwrap_or(0);
+    if token_len == 0 {
         return false;
     }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    let remainder = &rest[token_len..];
+    remainder.is_empty()
+        || remainder
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_whitespace())
 }
 
 fn status_mutation_introduces_prompt_work(snapshot_content: &str, file_content: &str) -> bool {
@@ -768,7 +775,7 @@ fn status_mutation_introduces_prompt_work(snapshot_content: &str, file_content: 
         let trimmed = line.trim();
         !trimmed.is_empty()
             && (crate::diff::text_line_looks_like_prompt_target(trimmed)
-                || starts_with_bare_prompt_preset_reference(trimmed))
+                || starts_with_prompt_preset_reference(trimmed))
     })
 }
 
@@ -2653,6 +2660,24 @@ mod tests {
         let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             #next-steps\n\
+            <!-- /agent:status -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference_with_guidance(
+    ) {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Compacted.\n\
+            <!-- /agent:status -->\n";
+        let file = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            #next-steps for calibrating session benchmarks with expected scores\n\
             <!-- /agent:status -->\n";
 
         assert_eq!(

@@ -466,23 +466,10 @@ impl Frontmatter {
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
 /// If no frontmatter block is present, returns defaults and the full content as body.
 pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
-    if !content.starts_with("---\n") {
+    let Some((yaml, body)) = split_frontmatter(content)? else {
         return Ok((Frontmatter::default(), content));
-    }
-    let rest = &content[4..]; // skip opening ---\n
-    let (end, closing_len) = rest
-        .find("\n---\n")
-        .map(|end| (end, 5))
-        .or_else(|| rest.find("\n---").map(|end| (end, 4)))
-        .ok_or_else(|| anyhow::anyhow!("Unterminated frontmatter block"))?;
-    let yaml = &rest[..end];
-    let fm: Frontmatter = serde_yaml::from_str(yaml)?;
-    let body_start = 4 + end + closing_len; // opening ---\n + yaml + closing marker
-    let body = if body_start <= content.len() {
-        &content[body_start..]
-    } else {
-        ""
     };
+    let fm: Frontmatter = serde_yaml::from_str(yaml)?;
     Ok((fm, body))
 }
 
@@ -497,7 +484,13 @@ pub fn contextualize_parse_error(file: &Path, err: anyhow::Error) -> anyhow::Err
 
 /// Parse frontmatter for a concrete document path so callers can surface actionable errors.
 pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter, &'a str)> {
-    parse(content).map_err(|err| contextualize_parse_error(file, err))
+    let Some((yaml, body)) = split_frontmatter(content)? else {
+        return Ok((Frontmatter::default(), content));
+    };
+    match serde_yaml::from_str(yaml) {
+        Ok(fm) => Ok((fm, body)),
+        Err(err) => Err(contextualize_yaml_parse_error(file, yaml, err)),
+    }
 }
 
 /// Write frontmatter back into a document, preserving the body.
@@ -640,7 +633,87 @@ pub fn ensure_session(content: &str) -> Result<(String, String)> {
 
 /// Ensure a document has a session id while preserving the target path in parse errors.
 pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, String)> {
-    ensure_session(content).map_err(|err| contextualize_parse_error(file, err))
+    let (mut fm, body) = parse_for_file(content, file)?;
+    if let Some(existing) = fm.session.clone() {
+        return Ok((content.to_string(), existing));
+    }
+
+    let session_id = Uuid::new_v4().to_string();
+    fm.session = Some(session_id.clone());
+    let updated = write(&fm, body)?;
+    Ok((updated, session_id))
+}
+
+fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
+    if !content.starts_with("---\n") {
+        return Ok(None);
+    }
+    let rest = &content[4..]; // skip opening ---\n
+    let (end, closing_len) = rest
+        .find("\n---\n")
+        .map(|end| (end, 5))
+        .or_else(|| rest.find("\n---").map(|end| (end, 4)))
+        .ok_or_else(|| anyhow::anyhow!("Unterminated frontmatter block"))?;
+    let yaml = &rest[..end];
+    let body_start = 4 + end + closing_len; // opening ---\n + yaml + closing marker
+    let body = if body_start <= content.len() {
+        &content[body_start..]
+    } else {
+        ""
+    };
+    Ok(Some((yaml, body)))
+}
+
+fn contextualize_yaml_parse_error(
+    file: &Path,
+    yaml: &str,
+    err: serde_yaml::Error,
+) -> anyhow::Error {
+    let excerpt = err
+        .location()
+        .and_then(|location| render_frontmatter_excerpt(yaml, location.line(), location.column()));
+    let mut message = format!("invalid YAML frontmatter in {}: {}", file.display(), err);
+    if let Some(excerpt) = excerpt {
+        message.push_str("\n\nFrontmatter excerpt:\n");
+        message.push_str(&excerpt);
+    }
+    message.push_str(
+        "\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
+    );
+    anyhow::anyhow!(message)
+}
+
+fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<String> {
+    let lines: Vec<&str> = yaml.lines().collect();
+    if line == 0 || line > lines.len() {
+        return None;
+    }
+
+    let start = line.saturating_sub(1).max(1);
+    let end = (line + 1).min(lines.len());
+    let width = end.to_string().len();
+    let mut rendered = Vec::new();
+
+    for current in start..=end {
+        let marker = if current == line { '>' } else { ' ' };
+        rendered.push(format!(
+            "{} {:>width$} | {}",
+            marker,
+            current,
+            lines[current - 1],
+            width = width
+        ));
+        if current == line {
+            rendered.push(format!(
+                "  {:>width$} | {}^",
+                "",
+                " ".repeat(column.saturating_sub(1)),
+                width = width
+            ));
+        }
+    }
+
+    Some(rendered.join("\n"))
 }
 
 /// Read the session UUID from a document file. Returns empty string if not found.
@@ -692,6 +765,9 @@ mod tests {
         let err = parse_for_file("---\nprompt_presets:\n  key: [oops\n---\n", path).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("invalid YAML frontmatter in tasks/bad.md"));
+        assert!(message.contains("Frontmatter excerpt:"));
+        assert!(message.contains("> 2 |   key: [oops"));
+        assert!(message.contains("^"));
         assert!(
             message.contains("Fix the frontmatter between the opening and closing --- markers")
         );

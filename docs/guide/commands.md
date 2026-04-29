@@ -87,7 +87,7 @@ agent-doc start <FILE>
 
 Start Claude in the current tmux pane and register the session. Ensures a session UUID exists in frontmatter, registers the pane in `sessions.json`, then execs `claude`.
 
-If the YAML frontmatter is malformed, `start` now fails with a file-targeted error that tells you to fix the `--- ... ---` block before retrying. The sync/auto-start path also mirrors the same warning into the document's `agent:status` component when present, so editor-driven auto-start failures are visible even when no tmux pane appears.
+If the YAML frontmatter is malformed, `start` now fails with a file-targeted error that includes a compiler-style frontmatter excerpt with a caret at the reported line/column, then tells you to fix the `--- ... ---` block before retrying. The sync/auto-start path also mirrors the same warning into the document's `agent:status` component when present, so editor-driven auto-start failures are visible even when no tmux pane appears.
 
 ## claim
 

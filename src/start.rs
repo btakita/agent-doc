@@ -2500,6 +2500,8 @@ mod tests {
 
         assert!(message.contains("invalid YAML frontmatter in"));
         assert!(message.contains("bad.md"));
+        assert!(message.contains("Frontmatter excerpt:"));
+        assert!(message.contains("> 2 |   key: [oops"));
         assert!(
             message.contains("Fix the frontmatter between the opening and closing --- markers")
         );

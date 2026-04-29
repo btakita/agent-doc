@@ -241,13 +241,30 @@ fn startup_miss_requires_fresh_start(
     )
 }
 
-fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
-    let msg = format!(
+const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
+
+fn startup_miss_diagnostic_message(file: &Path, reason: &str) -> String {
+    format!(
         "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
         reason,
         file.display()
-    );
-    if let Err(e) = tmux.send_keys_raw(pane_id, &format!("echo '{}'", msg.replace('\'', "'\\''"))) {
+    )
+}
+
+fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
+    let msg = startup_miss_diagnostic_message(file, reason);
+    if let Err(e) = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-d",
+            STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS,
+            &msg,
+        ])
+        .status()
+    {
         eprintln!(
             "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
             pane_id, e
@@ -4670,6 +4687,42 @@ history line
             None,
             SupervisorHealth::Healthy
         ));
+    }
+
+    #[test]
+    fn startup_miss_diagnostic_message_includes_retry_command() {
+        let doc = std::path::Path::new("tasks/agent-doc/agent-doc-bugs2.md");
+        let message = startup_miss_diagnostic_message(
+            doc,
+            "routed trigger accepted but no document cycle started for pending #smdq",
+        );
+        assert!(message.contains("[agent-doc] startup-miss:"));
+        assert!(message.contains("agent-doc start tasks/agent-doc/agent-doc-bugs2.md"));
+    }
+
+    #[test]
+    fn startup_miss_diagnostic_does_not_queue_shell_echo_in_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let iso = IsolatedTmux::new("route-test-startup-miss-diagnostic");
+        let pane = iso.new_session("test", dir.path()).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        send_keys_with_retry(&iso, &pane, "printf '> '");
+        let before = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(5));
+        assert!(before.contains("> "), "shell prompt should be visible: {before}");
+
+        emit_startup_miss_diagnostic(&iso, &pane, &doc, "startup timed out");
+
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let after = sessions::capture_pane(&iso, &pane).unwrap();
+        assert!(
+            !after.contains("echo '[agent-doc] startup-miss:"),
+            "diagnostic should not be left as drafted shell input: {after}"
+        );
     }
 
     #[test]

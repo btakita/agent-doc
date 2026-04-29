@@ -756,7 +756,7 @@ If that fresh-start acknowledgment fails after route already created and registe
 
 ### Startup-miss tracking
 
-When a fresh-start or routed-trigger acknowledgment times out, route now records a startup-miss marker at `.agent-doc/state/startup-miss/<doc-hash>.json` with pane provenance (pane id, session id, harness, origin, cycle baseline). Route also echoes a diagnostic into the pane via `tmux send-keys` so the user sees a visible "startup-miss" message instead of an unexplained idle shell.
+When a fresh-start or routed-trigger acknowledgment times out, route now records a startup-miss marker at `.agent-doc/state/startup-miss/<doc-hash>.json` with pane provenance (pane id, session id, harness, origin, cycle baseline). Route also shows a tmux-owned startup-miss diagnostic overlay on the target pane for 10 seconds, including the reason and retry command. The diagnostic must not be injected into the harness input buffer or left as drafted shell text.
 
 On the next route invocation, if the registered pane matches a persisted startup-miss marker, route first re-runs the live-owner proof. If that same pane still proves live ownership of the document, the marker is treated as stale and cleared in place. Only when the marked pane no longer proves live ownership does route deregister it, clear the marker, and auto-start a fresh pane. This prevents stale startup-miss state from spawning a duplicate fallback session on top of a pane that later recovered or was manually restarted.
 

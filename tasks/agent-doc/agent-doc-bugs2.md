@@ -109,7 +109,21 @@ Commit / push:
 - `22cfda1` `fix: backfill legacy done ids before reap`
 
 `#g3qn` remains in the backlog as the next recommended follow-up.
-<!-- agent:boundary:664b3979 -->
+
+❯ do #g3qn. spec-test-build-install-commit-push
+### Re: #g3qn queue consumption closeout — gpt-5
+Implemented in `src/agent-doc` and pushed `a753288` on `20260422/codex-agent-backend`.
+
+The closeout path now treats active queue consumption as a required proof step for strict session writes. `finalize` and session-document `write --commit` now fail before commit if `queue_active: true` but the live queue is missing, malformed, empty at the head, or cannot be matched against the snapshot head / remaining queue state. Best-effort non-session `write --commit` keeps the warning-only behavior. I also updated the queue spec docs and added regression coverage for the new fail-closed cases.
+
+Verification:
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `a753288` `fix: fail closed on queue consumption drift`
+<!-- agent:boundary:6fbfa7d7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -118,5 +132,4 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#g3qn] [recommended] Fail closed when queue consumption cannot prove the first queued prompt was removed from file + snapshot
 <!-- /agent:backlog -->

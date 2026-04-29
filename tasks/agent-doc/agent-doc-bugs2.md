@@ -134,10 +134,36 @@ I committed and pushed the remaining uncommitted files in `src/agent-doc`.
 
 Note:
 - The `src/agent-doc` diff was formatting-only in `src/sync.rs` and `src/terminal.rs`.
-<!-- agent:boundary:e6cc7f0d -->
+❯ Please treat the parallel tmux tests are **required to pass** for the suite to pass. Falling back to the synchronous test plan with a parallel tmux test failure means the test suite has failed. Please add to the development agent harness for agent-doc so we always follow this rule.
+### Re: parallel tmux verification policy — gpt-5
+
+I added the rule to the shared agent-doc harness surfaces instead of only patching this live Codex copy.
+
+Updated instruction surfaces:
+- `.codex/AGENTS.md`
+- `src/agent-doc/SKILL.md`
+- `.claude/skills/agent-doc/SKILL.md`
+- `src/agent-doc/CLAUDE.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/SPEC.md`
+
+The new rule is explicit:
+- tmux-heavy changes must include the parallel tmux suites in their parallel form
+- a failing parallel tmux suite still means verification failed, even if the same test passes in isolation or under a synchronous rerun
+
+Verification I ran for this policy change:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+
+All of those passed.
+<!-- agent:boundary:82a1b7fb -->
 <!-- /agent:exchange -->
 
 <!--
+do #stshcr. spec-test-build-install-commit-push
+---
 Mid-run on the agent-doc turn on this document...the JB plugin surfaced an error:
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 326697) in pane %422 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %422 for session b26b9957 via supervisor pid 2607602 [route] codex ready after 0.0s (0 polls) [route] Pane %422 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %422 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %422 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #nbla. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %422, but no new document cycle started for pending prompt_target: do #nbla. spec-test-build-install-commit-push

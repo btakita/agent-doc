@@ -837,18 +837,26 @@ No new backlog item came out of this change.
 ### Re: tmux duplicate-pane autorecovery closeout — gpt-5
 
 This follow-up only closes the prompt-bearing diff that remained after the prior patchback. No additional code changes, tests, or backlog items came out of this normalization pass.
-<!-- agent:boundary:f462d6b3 -->
+❯ commit + push
+### Re: tmux duplicate-pane autorecovery commit + push — gpt-5
+
+Committed and pushed the uncommitted `src/agent-doc` implementation for the duplicate-pane autorecovery work.
+
+Verification:
+- `cargo test` (full suite passed on rerun after one flaky `wait_for_agent_ready_detects_prompt` timeout)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `9355752` (`fix: recover duplicate tmux pane ownership`) pushed to `origin/20260422/codex-agent-backend`.
+
+I left the workspace root repo untouched because it has unrelated modified docs/submodules; this publish step only covered the `src/agent-doc` changes tied to the tmux recovery work.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:5b9a1775 -->
 <!-- /agent:exchange -->
 
 <!--
-Given the reoccurring issues we have had with tmux, should we merge the tmux-router into agent-doc? Or is there a clean separation of concerns that will be followed with agentic development?
----
-On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc turn. The JB plugin surfaced an error. spec-test-build-install-commit-push:
-```
-agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1114806) in pane %411 for tasks/software/tsift.md [route] registered pane %411 still proves live ownership for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md — clearing stale startup-miss marker [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% u [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: registered pane %411 for tasks/software/tsift.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%411 pane_pid=1113432 pane_session=14 current_command=agent-doc)
-```
----
-When I quit the supervisor using Codex, the process does not complete the shutdown. I have to press Ctrl+C again. spec-test-build-install-commit-push
+When I quit the supervisor using Codex, the process does not complete the shutdown. I had to press Ctrl+C again. spec-test-build-install-commit-push
 ```
 ~/work/btakita/agent-loop main ⇡35 !12 ?7                                              9h 19m 27s  agent-loop 13:18:01
 ❯ agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md

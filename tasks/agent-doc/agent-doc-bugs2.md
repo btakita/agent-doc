@@ -162,7 +162,24 @@ Key fixes:
 2. Add a file-match guard before any `send-keys` dispatch
 3. Make `resync --fix` kill stashed unregistered panes instead of logging indefinitely
 4. Regression tests for cross-file dispatch rejection
-<!-- agent:boundary:ffcdf330 -->
+❯ do #rtxf. spec-test-build-install-commit-push
+### Re: #rtxf route cross-file pane mismatch — gpt-5
+
+Implemented `#rtxf` in `src/agent-doc`.
+
+- `route` now fails closed before any tmux `send-keys` dispatch if the chosen pane is not currently registered for the requested document. The guard resolves pane-relative registry paths against the pane cwd, so submodule-launched `agent-doc start tasks/...` registrations still match absolute route targets.
+- Added route regressions covering both the pane-cwd relative-path match case and the cross-file rejection case.
+- Updated `specs/07-commands.md` to make the contract explicit: `find_registered_pane_in_session` may be used as a split anchor, but dispatch must go to a pane registered for the target file.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `53a3c5c` (`fix: guard route dispatch ownership`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#rtxf` is done.
+<!-- agent:boundary:a7cf5348 -->
 <!-- /agent:exchange -->
 
 <!--

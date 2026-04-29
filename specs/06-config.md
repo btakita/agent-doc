@@ -4,7 +4,7 @@
 
 Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-doc/config.toml`).
 
-Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `codex_network_access`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
 
 ## agent_args
 
@@ -23,15 +23,28 @@ Space-separated string. Claude-only compatibility alias for older documents/conf
 Additional CLI arguments passed to the `codex` process when spawned by `agent-doc start`.
 Space-separated string. Codex-only alias for explicit Codex session configuration.
 
+## codex_network_access
+
+Explicit Codex network policy for agent-doc-launched sessions.
+
+Values:
+- `inherit` (default) — keep the launcher's ambient `CODEX_SANDBOX_NETWORK_DISABLED` setting
+- `enabled` — remove `CODEX_SANDBOX_NETWORK_DISABLED` from the child env
+- `disabled` — force `CODEX_SANDBOX_NETWORK_DISABLED=1` in the child env
+
+Frontmatter and global config share the same field name: `codex_network_access`.
+
 Claude sources, in precedence order (highest first):
 
-1. **Frontmatter**: `agent_args: "--model sonnet"`, `claude_args: "--dangerously-skip-permissions"`, or `codex_args: "-s danger-full-access"` in the document's YAML frontmatter
-2. **Global config**: `agent_args = "--model sonnet"`, `claude_args = "--dangerously-skip-permissions"`, or `codex_args = "-s danger-full-access"` in `~/.config/agent-doc/config.toml`
+1. **Frontmatter**: `agent_args: "--model sonnet"`, `claude_args: "--dangerously-skip-permissions"`, `codex_args: "-s danger-full-access"`, or `codex_network_access: enabled` in the document's YAML frontmatter
+2. **Global config**: `agent_args = "--model sonnet"`, `claude_args = "--dangerously-skip-permissions"`, `codex_args = "-s danger-full-access"`, or `codex_network_access = "enabled"` in `~/.config/agent-doc/config.toml`
 3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"`
 
 Claude resolution chain: `frontmatter agent_args > frontmatter claude_args > config agent_args > config claude_args > AGENT_DOC_CLAUDE_ARGS`.
 
 Codex resolution chain: `frontmatter agent_args > frontmatter codex_args > config agent_args > config codex_args`.
+
+Codex network resolution chain: `frontmatter codex_network_access > config codex_network_access > inherit`.
 
 `claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex.
 

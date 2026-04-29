@@ -27,6 +27,7 @@ use std::path::PathBuf;
 
 // Import ModelConfig from the library version (works in both binary and library contexts)
 use agent_doc::model_tier::ModelConfig;
+use crate::frontmatter::CodexNetworkAccess;
 
 // Re-export project-level configuration from the shared module (for convenience)
 pub use crate::project_config::{
@@ -74,6 +75,11 @@ pub struct Config {
     /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default)]
     pub codex_args: Option<String>,
+    /// Explicit Codex network policy for agent-doc-launched sessions.
+    /// `inherit` keeps the ambient launcher setting, `enabled` removes
+    /// `CODEX_SANDBOX_NETWORK_DISABLED`, and `disabled` forces it on.
+    #[serde(default)]
+    pub codex_network_access: Option<CodexNetworkAccess>,
     /// Execution mode: hybrid (default), parallel, sequential.
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]
@@ -156,6 +162,7 @@ mod tests {
 agent_args = "--json -s workspace-write"
 claude_args = "--dangerously-skip-permissions"
 codex_args = "-s danger-full-access"
+codex_network_access = "enabled"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.agent_args.as_deref(), Some("--json -s workspace-write"));
@@ -164,6 +171,7 @@ codex_args = "-s danger-full-access"
             Some("--dangerously-skip-permissions")
         );
         assert_eq!(cfg.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(cfg.codex_network_access, Some(CodexNetworkAccess::Enabled));
     }
 
     #[test]

@@ -31,6 +31,9 @@
 //!   target component, and chain-of-thought routing.
 //! - `prompt_presets` stores reusable named prompt snippets for orchestrated tasks and round-trips
 //!   exact preset names/values, including symbolic keys such as `#1`.
+//! - `codex_network_access` stores an explicit Codex network policy (`inherit`, `enabled`,
+//!   `disabled`) so agent-doc can own the `CODEX_SANDBOX_NETWORK_DISABLED` contract instead of
+//!   silently inheriting an ambient launcher override.
 //! - Field renames and aliases ensure backward compatibility:
 //!   `session` / `agent_doc_session` → `session`;
 //!   `mode` / `response_mode` / `agent_doc_mode` → `mode`.
@@ -51,6 +54,8 @@
 //!   which combination of deprecated and current fields are populated.
 //! - `prompt_presets` is deterministic: parse/write preserves preset names and bodies exactly,
 //!   including multiline values and symbolic names like `#1`.
+//! - `codex_network_access` round-trips as a stable enum and is preserved across
+//!   parse/write/merge cycles.
 //! - Serialised YAML always uses the canonical field names (`agent_doc_session`,
 //!   `agent_doc_mode`, `agent_doc_format`, `agent_doc_write`); legacy aliases are read-only.
 //!
@@ -79,6 +84,7 @@
 //! - merge_fields_ignores_unknown: unknown key logged to stderr, not stored
 //! - parse_prompt_presets_roundtrip: preset map with multiline values → parse/write preserves keys
 //!   and bodies exactly
+//! - parse_codex_network_access_field: `codex_network_access: enabled` → enum value
 //! - resolve_harness_model: `claude_model` overrides `model` under `claude-code`, `codex_model`
 //!   overrides `model` under `codex`, fallback to `model` for unknown harnesses
 //! - parse_harness_model_fields: `claude_model` and `codex_model` round-trip through parse/write
@@ -98,6 +104,15 @@ pub enum CollaborationMode {
     #[default]
     SingleUser,
     Shared,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodexNetworkAccess {
+    #[default]
+    Inherit,
+    Enabled,
+    Disabled,
 }
 
 /// Document format: controls document structure.
@@ -302,6 +317,11 @@ pub struct Frontmatter {
     /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_args: Option<String>,
+    /// Explicit Codex network policy. `inherit` keeps the launcher's ambient
+    /// `CODEX_SANDBOX_NETWORK_DISABLED` setting, `enabled` removes it, and
+    /// `disabled` forces it on for the child session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_network_access: Option<CodexNetworkAccess>,
     /// When true, passes `--no-mcp` to the `claude` process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_mcp: Option<bool>,
@@ -627,6 +647,14 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "agent_args" => fm.agent_args = val_str(),
             "claude_args" => fm.claude_args = val_str(),
             "codex_args" => fm.codex_args = val_str(),
+            "codex_network_access" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(mode) =
+                        serde_yaml::from_str::<CodexNetworkAccess>(&format!("\"{}\"", s))
+                {
+                    fm.codex_network_access = Some(mode);
+                }
+            }
             "queue_active" => {
                 fm.queue_active = value.as_bool();
             }
@@ -970,6 +998,7 @@ mod tests {
             agent_args: None,
             claude_args: None,
             codex_args: None,
+            codex_network_access: None,
             no_mcp: None,
             enable_tool_search: None,
             debounce_ms: None,
@@ -1508,7 +1537,7 @@ mod tests {
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -1516,6 +1545,7 @@ mod tests {
             Some("--dangerously-skip-permissions")
         );
         assert_eq!(fm.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Enabled));
     }
 
     #[test]
@@ -1523,12 +1553,14 @@ mod tests {
         let fm = Frontmatter {
             agent_args: Some("--json -s workspace-write".to_string()),
             codex_args: Some("-s danger-full-access".to_string()),
+            codex_network_access: Some(CodexNetworkAccess::Enabled),
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
         let (fm2, _) = parse(&written).unwrap();
         assert_eq!(fm2.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert_eq!(fm2.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(fm2.codex_network_access, Some(CodexNetworkAccess::Enabled));
     }
 
     #[test]
@@ -1548,6 +1580,14 @@ mod tests {
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("old"));
         assert_eq!(fm.codex_args.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn merge_fields_codex_network_access() {
+        let content = "Body\n";
+        let result = merge_fields(content, "codex_network_access: disabled").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Disabled));
     }
 
     // --- resolve_harness_model tests ---

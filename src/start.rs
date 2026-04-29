@@ -1465,6 +1465,20 @@ pub fn run(file: &Path) -> Result<()> {
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
     }
+    if harness.binary == "codex" {
+        let codex_network_access =
+            crate::agent::resolve_codex_network_access(&fm, &global_config);
+        crate::agent::apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
+        let status = crate::agent::codex_network_status_from_env_map(
+            &base_args,
+            codex_network_access,
+            &resolved_env,
+        );
+        eprintln!("[start] codex network access: {}", status.summary());
+        if let Some(err) = status.mismatch_error() {
+            anyhow::bail!(err);
+        }
+    }
 
     // Query initial terminal size
     let initial_size = {

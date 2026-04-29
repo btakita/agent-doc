@@ -39,6 +39,13 @@ codex fork <SESSION_ID>       # fork (≈ Claude's --continue --fork-session)
 codex fork --last
 ```
 
+`agent-doc` also treats `CODEX_SANDBOX_NETWORK_DISABLED` as a first-class Codex launch input:
+- `codex_network_access: enabled` removes the variable from the child env
+- `codex_network_access: disabled` forces `CODEX_SANDBOX_NETWORK_DISABLED=1`
+- `inherit` preserves the ambient launcher setting
+
+When the effective child env still has `CODEX_SANDBOX_NETWORK_DISABLED=1` while the sandbox request is `danger-full-access`, `start` and orchestrated fresh Codex runs fail closed with a launch-policy mismatch instead of silently starting a network-disabled session.
+
 Key differences from Claude Code:
 - No `-p` (pipe mode) — `exec` is the non-interactive equivalent
 - No `--permission-mode` — uses `-s` sandbox mode instead
@@ -48,6 +55,7 @@ Key differences from Claude Code:
 - Session fork: `codex fork <id>` (separate subcommand, not `--continue --fork-session`)
 - No `CLAUDECODE` env var — uses `CODEX_CLI`/`CODEX`
 - Interactive mode: `codex [PROMPT]` (TUI, not `claude` with no flags)
+- Network policy is partially env-driven — sandbox args alone do not guarantee socket access
 
 ## Implementation Plan
 

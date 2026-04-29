@@ -658,6 +658,27 @@ fn run_ordered_task_step(
     let agent_config = effective_config
         .as_ref()
         .or_else(|| global_config.agents.get(agent_name));
+    let mut launch_env = expanded_env;
+    if agent_name == "codex" {
+        let codex_network_access =
+            crate::agent::resolve_codex_network_access(&fm, global_config);
+        crate::agent::apply_codex_network_access_env_overrides(
+            &mut launch_env,
+            codex_network_access,
+        );
+        let sandbox_args = agent_config
+            .map(|cfg| cfg.args.clone())
+            .unwrap_or_else(agent::codex::default_base_args);
+        let status = crate::agent::codex_network_status_from_overrides(
+            &sandbox_args,
+            codex_network_access,
+            &launch_env,
+        );
+        eprintln!("[orchestrate] codex network access: {}", status.summary());
+        if let Some(err) = status.mismatch_error() {
+            anyhow::bail!(err);
+        }
+    }
 
     let (response, finalize_response) = if mode.is_crdt() {
         if let Some(seed) = exchange_stream_seed(&doc)? {
@@ -666,7 +687,7 @@ fn run_ordered_task_step(
                 &prompt,
                 agent_name,
                 agent_config,
-                expanded_env.clone(),
+                launch_env.clone(),
                 model,
             )? {
                 let streamed = stream_step_response(file, &seed, chunks)?;
@@ -677,7 +698,7 @@ fn run_ordered_task_step(
                     &prompt,
                     agent_name,
                     agent_config,
-                    expanded_env,
+                    launch_env,
                     model,
                 )?;
                 let finalize = response.clone();
@@ -689,7 +710,7 @@ fn run_ordered_task_step(
                 &prompt,
                 agent_name,
                 agent_config,
-                expanded_env,
+                launch_env,
                 model,
             )?;
             let finalize = response.clone();
@@ -701,7 +722,7 @@ fn run_ordered_task_step(
             &prompt,
             agent_name,
             agent_config,
-            expanded_env,
+            launch_env,
             model,
         )?;
         let finalize = response.clone();
@@ -1503,6 +1524,7 @@ mod tests {
 
     struct FakeAgentRunner {
         prompts: RefCell<Vec<String>>,
+        envs: RefCell<Vec<Vec<(String, Option<String>)>>>,
         fresh_calls: RefCell<usize>,
         streaming_calls: RefCell<usize>,
         response: String,
@@ -1521,6 +1543,7 @@ mod tests {
         ) -> Result<String> {
             *self.fresh_calls.borrow_mut() += 1;
             self.prompts.borrow_mut().push(prompt.to_string());
+            self.envs.borrow_mut().push(_env);
             Ok(self.response.clone())
         }
 
@@ -1538,6 +1561,7 @@ mod tests {
             };
             *self.streaming_calls.borrow_mut() += 1;
             self.prompts.borrow_mut().push(prompt.to_string());
+            self.envs.borrow_mut().push(_env);
             Ok(Some(Box::new(chunks.clone().into_iter().map(Ok))))
         }
     }
@@ -1708,6 +1732,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
@@ -1766,6 +1791,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
@@ -1821,6 +1847,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
@@ -1909,6 +1936,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: String::new(),
@@ -2031,6 +2059,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
@@ -2098,6 +2127,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2164,6 +2194,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2216,6 +2247,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2265,6 +2297,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2313,6 +2346,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2360,6 +2394,7 @@ mod tests {
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response: "unused".to_string(),
@@ -2474,6 +2509,62 @@ mod tests {
         let config = Config::default();
         let effective = build_effective_agent_config("claude", None, &config);
         assert!(effective.is_none());
+    }
+
+    #[test]
+    fn sequential_orchestration_adds_codex_network_override_to_child_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: network — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+            streaming_chunks: None,
+        };
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #net".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
+
+        let envs = agent.envs.borrow();
+        assert_eq!(envs.len(), 1);
+        assert!(envs[0].iter().any(|(key, value)| {
+            key == crate::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV && value.is_none()
+        }));
     }
 
     // --- parse_list_item prompt-prefix stripping (bug #orch3) ---

@@ -491,7 +491,12 @@ pub fn run_with_tmux(
     }
 }
 
-fn cleanup_failed_route_panes(tmux: &Tmux, file: &Path, session_id: &str, created_panes: &[String]) {
+fn cleanup_failed_route_panes(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    created_panes: &[String],
+) {
     for p in created_panes {
         if !tmux.pane_alive(p) {
             continue;
@@ -532,7 +537,11 @@ fn should_preserve_failed_route_pane(
     };
     sessions::load_in(&root)
         .ok()
-        .and_then(|registry| registry.get(session_id).map(|entry| entry.pane.as_str() == pane_id))
+        .and_then(|registry| {
+            registry
+                .get(session_id)
+                .map(|entry| entry.pane.as_str() == pane_id)
+        })
         .unwrap_or(false)
         && tmux.pane_alive(pane_id)
 }
@@ -2748,6 +2757,39 @@ mod tests {
         let harness = HarnessConfig::claude();
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         assert!(ready, "should detect ❯ prompt from mock agent");
+    }
+
+    #[test]
+    fn wait_for_agent_ready_detects_claude_composer_hint_prompt() {
+        let _tmux_guard = tmux_start_lock();
+        let iso = IsolatedTmux::new("route-test-claude-composer-hint");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
+
+        let script = r#"exec /bin/sh -c 'printf "Starting claude...\n"; sleep 0.5; printf "⏵⏵ bypass permissions on (shift+tab to cycle)\n"; cat'"#;
+        send_keys_with_retry(&iso, &pane, script);
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting claude...",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting claude..."),
+            "mock claude never started in pane: {content}"
+        );
+
+        let harness = HarnessConfig::claude();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
+        assert!(
+            ready,
+            "should detect Claude composer hint line as an idle prompt"
+        );
     }
 
     #[test]

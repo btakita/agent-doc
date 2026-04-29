@@ -147,6 +147,9 @@ impl HarnessConfig {
         self.prompt_patterns
             .iter()
             .any(|p| trimmed == p || trimmed.starts_with(&format!("{} ", p)))
+            || (self.binary == "claude"
+                && trimmed.starts_with("⏵⏵ ")
+                && trimmed.contains("(shift+tab to cycle)"))
     }
 
     /// Return true when the line is harness UI chrome that should not be treated as
@@ -321,6 +324,7 @@ mod tests {
         assert!(h.is_prompt_line("❯"));
         assert!(h.is_prompt_line("❯ "));
         assert!(h.is_prompt_line("  ❯  "));
+        assert!(h.is_prompt_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
     }
 
     #[test]

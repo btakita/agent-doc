@@ -238,22 +238,52 @@ Published:
 
 Note:
 - I left the pre-existing unrelated local edits in `src/agent/codex.rs`, `src/autoclaim.rs`, and `src/route.rs` untouched.
-<!-- agent:boundary:946f04e1 -->
-<!-- /agent:exchange -->
+❯ Mid-run on the agent-doc turn on this document...the JB plugin surfaced an error. Please log the timestamp in the error so we can more accurately debug. Please diagnose the following issues:
 
-<!--
-Mid-run on the agent-doc turn on this document...the JB plugin surfaced an error. Please log the timestamp in the error so we can more accurately debug. Please diagnose the following issues:
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 326697) in pane %422 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %422 for session b26b9957 via supervisor pid 2607602 [route] codex ready after 0.0s (0 polls) [route] Pane %422 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %422 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %422 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #nbla. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %422, but no new document cycle started for pending prompt_target: do #nbla. spec-test-build-install-commit-push
 ```
 
-When I navigated the editor away from agent-doc-bugs2.md then back to agent-doc-bugs2.md, the JB plugin surfaced another error:
+❯ When I navigated the editor away from agent-doc-bugs2.md then back to agent-doc-bugs2.md, the JB plugin surfaced another error:
+
 ```
 agent-doc route failed (exit 1): resync: stash pane %416 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %414 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %422 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %415 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %421 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %423 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %417 running 'agent-doc' is unregistered — skipping kill (may be rescuable) [route] target tmux session: 14 [sync] found alive agent-doc child (pid 917466) in pane %408 for tasks/monsterrodholders.md [route] codex ready after 0.0s (0 polls) [route] Pane %408 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %408 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %408 for tasks/monsterrodholders.md — waiting for a new cycle ack for pending prompt_target: I synced the emails to the local file system. I was actually asking to use corky to read the email directly from the gmail api. Is that possible with corky? Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %408, but no new document cycle started for pending prompt_target: I synced the emails to the local file system. I was actually asking to use corky to read the email directly from the gmail api. Is that possible with corky?
 ```
 
-spec-test-build-install-commit-push
----
+❯ spec-test-build-install-commit-push
+### Re: routed startup-miss timestamp + live-owner reuse — gpt-5
+
+I fixed the new routed startup-miss failure shape and added the missing timestamp to the surfaced error.
+
+Diagnosis:
+- The first JB-plugin error on `%422` was not a real pane crash. Route recovered a still-alive pane, but the old startup-miss marker could be cleared too eagerly just because that pane still owned the document. When no newer open `session_start` had actually superseded the miss, route could reuse the same broken live-owner state, inject the trigger, and then fail with `accepted ... but no new document cycle started`.
+- The second JB-plugin error is the same family on `tasks/monsterrodholders.md`: route found a live pane `%408`, but the persisted state still represented an unresolved startup miss rather than a clean later start. The repeated unregistered stash-pane lines were noise around that reroute, not proof that `%408` had become healthy.
+
+What changed:
+- `startup_miss::record()` now returns the persisted marker, and routed-trigger failures append `startup_miss_timestamp=...` to the fail-closed error text that the JetBrains plugin shows.
+- The tmux startup-miss overlay now includes that same recorded timestamp.
+- Route no longer clears a startup-miss marker merely because the same pane still proves live ownership. It clears only when the session log proves a newer open `session_start` for that pane after the recorded miss.
+- If the same pane still owns the doc but the session log only shows a closed/timeout restart loop with no later open start, route now deregisters that pane and starts fresh instead of repeatedly reusing and re-clearing the broken state.
+- Added regression coverage for the timestamped routed failure and for the closed-live-owner restart rule.
+
+No new backlog item was added for this turn; the response is a diagnosis/fix closeout, not a new unresolved follow-up.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `717cf98` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- The first `cargo test` attempt hit a leaked tmux test-session artifact (`duplicate session: test`) during a parallel verification run; I reran the failing test in isolation and then reran the full suite serially, which passed cleanly.
+- I left the pre-existing unrelated local edits in `src/agent/codex.rs` and `src/autoclaim.rs` untouched.
+<!-- agent:boundary:9fd85117 -->
+<!-- /agent:exchange -->
+
+<!--
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
@@ -264,6 +294,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

@@ -28,6 +28,9 @@
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
 //!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
 //!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
+//!   Prompt decisions are logged explicitly, stdin EOF at that prompt counts
+//!   as quit, and non-empty non-`q` input is rejected and re-prompted instead
+//!   of silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
@@ -257,6 +260,115 @@ enum RestartContinueExitStrategy {
     Resume,
     RestartFresh,
     PromptUser,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptDecision {
+    RestartFresh,
+    Quit,
+    QuitEof,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptOutcome {
+    RestartFresh,
+    Quit,
+}
+
+fn classify_prompt_decision(bytes_read: usize, input: &str) -> PromptDecision {
+    if bytes_read == 0 {
+        return PromptDecision::QuitEof;
+    }
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("q") {
+        return PromptDecision::Quit;
+    }
+    if trimmed.is_empty() {
+        return PromptDecision::RestartFresh;
+    }
+    PromptDecision::Invalid
+}
+
+fn prompt_input_summary(input: &str) -> String {
+    let trimmed = input.trim_end_matches(&['\r', '\n'][..]);
+    let mut summary = String::new();
+    let mut count = 0usize;
+    for ch in trimmed.chars() {
+        count += 1;
+        if count > 32 {
+            summary.push_str("...");
+            break;
+        }
+        match ch {
+            '\r' => summary.push_str("\\r"),
+            '\n' => summary.push_str("\\n"),
+            '\t' => summary.push_str("\\t"),
+            c if c.is_control() => summary.push('?'),
+            c => summary.push(c),
+        }
+    }
+    if summary.is_empty() {
+        "<empty>".to_string()
+    } else {
+        summary
+    }
+}
+
+fn prompt_for_restart_or_quit(
+    session_log: &mut Option<std::fs::File>,
+    prompt_kind: &str,
+    prompt_text: &str,
+    quit_event: &str,
+) -> PromptOutcome {
+    loop {
+        eprintln!("{prompt_text}");
+        let mut input = String::new();
+        let bytes_read = match std::io::stdin().read_line(&mut input) {
+            Ok(n) => n,
+            Err(_) => {
+                log_event(session_log, "stdin_read_failed — exiting loop");
+                return PromptOutcome::Quit;
+            }
+        };
+        match classify_prompt_decision(bytes_read, &input) {
+            PromptDecision::Quit => {
+                log_event(session_log, quit_event);
+                return PromptOutcome::Quit;
+            }
+            PromptDecision::QuitEof => {
+                log_event(
+                    session_log,
+                    &format!("user_quit_after_eof prompt={prompt_kind}"),
+                );
+                return PromptOutcome::Quit;
+            }
+            PromptDecision::RestartFresh => {
+                log_event(
+                    session_log,
+                    &format!(
+                        "user_restart_fresh prompt={} bytes_read={} input={}",
+                        prompt_kind,
+                        bytes_read,
+                        prompt_input_summary(&input)
+                    ),
+                );
+                return PromptOutcome::RestartFresh;
+            }
+            PromptDecision::Invalid => {
+                eprintln!("Unrecognized input. Press Enter to restart fresh, or 'q' to exit.");
+                log_event(
+                    session_log,
+                    &format!(
+                        "prompt_input_invalid prompt={} bytes_read={} input={}",
+                        prompt_kind,
+                        bytes_read,
+                        prompt_input_summary(&input)
+                    ),
+                );
+            }
+        }
+    }
 }
 
 fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitResolution {
@@ -1774,20 +1886,19 @@ pub fn run(file: &Path) -> Result<()> {
                         // normal line editing (echo, backspace, etc.)
                         raw_mode.suspend();
                         eprintln!("\n{} exited cleanly.", harness.binary);
-                        eprintln!("Press Enter to restart, or 'q' to exit.");
-                        let mut input = String::new();
-                        if std::io::stdin().read_line(&mut input).is_err() {
-                            log_event(&mut session_log, "stdin_read_failed — exiting loop");
-                            break;
+                        match prompt_for_restart_or_quit(
+                            &mut session_log,
+                            "clean_exit",
+                            "Press Enter to restart, or 'q' to exit.",
+                            "user_quit",
+                        ) {
+                            PromptOutcome::Quit => break,
+                            PromptOutcome::RestartFresh => {
+                                raw_mode.resume();
+                                first_run = true;
+                                restart_count += 1;
+                            }
                         }
-                        if input.trim().eq_ignore_ascii_case("q") {
-                            log_event(&mut session_log, "user_quit");
-                            break;
-                        }
-                        // User pressed Enter — restart fresh
-                        raw_mode.resume();
-                        first_run = true;
-                        restart_count += 1;
                     }
                     CleanExitResolution::RestartContinue => {
                         let recent_failures = if failed_resume {
@@ -1837,24 +1948,29 @@ pub fn run(file: &Path) -> Result<()> {
                                         FAILED_RESUME_WINDOW.as_secs()
                                     );
                                 }
-                                eprintln!("Press Enter to restart fresh, or 'q' to exit.");
-                                let mut input = String::new();
-                                if std::io::stdin().read_line(&mut input).is_err() {
-                                    log_event(&mut session_log, "stdin_read_failed — exiting loop");
-                                    break;
+                                let prompt_kind = if ctrl_d_forwarded {
+                                    "ctrl_d"
+                                } else {
+                                    "resume_failure"
+                                };
+                                let quit_event = if ctrl_d_forwarded {
+                                    "user_quit_after_ctrl_d"
+                                } else {
+                                    "user_quit_after_resume_failure"
+                                };
+                                match prompt_for_restart_or_quit(
+                                    &mut session_log,
+                                    prompt_kind,
+                                    "Press Enter to restart fresh, or 'q' to exit.",
+                                    quit_event,
+                                ) {
+                                    PromptOutcome::Quit => break,
+                                    PromptOutcome::RestartFresh => {
+                                        raw_mode.resume();
+                                        first_run = true;
+                                        restart_count += 1;
+                                    }
                                 }
-                                if input.trim().eq_ignore_ascii_case("q") {
-                                    let event = if ctrl_d_forwarded {
-                                        "user_quit_after_ctrl_d"
-                                    } else {
-                                        "user_quit_after_resume_failure"
-                                    };
-                                    log_event(&mut session_log, event);
-                                    break;
-                                }
-                                raw_mode.resume();
-                                first_run = true;
-                                restart_count += 1;
                             }
                             RestartContinueExitStrategy::RestartFresh => {
                                 eprintln!(
@@ -2644,6 +2760,43 @@ mod tests {
             false,
             AutoTriggerOutcome::Cancelled
         ));
+    }
+
+    #[test]
+    fn classify_prompt_decision_quits_on_q() {
+        assert_eq!(classify_prompt_decision(2, "q\n"), PromptDecision::Quit);
+        assert_eq!(classify_prompt_decision(2, "Q\n"), PromptDecision::Quit);
+    }
+
+    #[test]
+    fn classify_prompt_decision_restarts_on_blank_line() {
+        assert_eq!(
+            classify_prompt_decision(1, "\n"),
+            PromptDecision::RestartFresh
+        );
+    }
+
+    #[test]
+    fn classify_prompt_decision_quits_on_eof() {
+        assert_eq!(classify_prompt_decision(0, ""), PromptDecision::QuitEof);
+    }
+
+    #[test]
+    fn classify_prompt_decision_rejects_unrecognized_input() {
+        assert_eq!(
+            classify_prompt_decision(4, "yes\n"),
+            PromptDecision::Invalid
+        );
+    }
+
+    #[test]
+    fn prompt_input_summary_escapes_and_truncates() {
+        assert_eq!(prompt_input_summary("\n"), "<empty>");
+        assert_eq!(prompt_input_summary("abc\tdef\n"), "abc\\tdef");
+        assert_eq!(
+            prompt_input_summary("abcdefghijklmnopqrstuvwxyz1234567890\n"),
+            "abcdefghijklmnopqrstuvwxyz123456..."
+        );
     }
 
     #[test]

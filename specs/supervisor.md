@@ -146,6 +146,14 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the user can
                          choose to quit the supervisor cleanly
+                         AND the supervisor must log the prompt outcome
+                         (`user_quit*`, `user_restart_fresh`, invalid input) so
+                         later `session_start` / `session_end` transitions keep
+                         user-input provenance in the session log
+                         AND stdin EOF at that prompt counts as quit, not as an
+                         implicit restart
+                         AND non-empty non-`q` input is rejected with a
+                         re-prompt instead of silently restarting fresh
                          AND resume auto-trigger only accepts a prompt line that
                          appears as the latest non-empty line in the current
                          resumed child's filtered pty output; stale tmux history

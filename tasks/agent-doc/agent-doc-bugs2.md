@@ -85,7 +85,31 @@ Commit / push:
 Queue consumption is documented as part of the same atomic closeout as the response commit, but the required closeout path only logs a warning when `consume_queue_prompt()` errors, and `consume_queue_prompt()` also returns `Ok(false)` for malformed/missing queue state. That allows `finalize` to commit the response while leaving the active queue prompt in place, which can replay the same queued prompt on the next cycle or strand `queue_active: true` indefinitely. Required closeouts should fail closed unless queue consumption can prove the first prompt was removed from both the document and the snapshot.
 
 I added both fixes to the backlog as recommended follow-up work. I did not find a third issue in this pass that was as concrete as these two.
-<!-- agent:boundary:880c7aa2 -->
+
+❯ do #ynad. spec-test-build-install-commit-push
+### Re: #ynad legacy done backlog reap — gpt-5
+
+Implemented in `src/agent-doc` and pushed `22cfda1` on `20260422/codex-agent-backend`.
+
+The fix now fails closed if shared reap logic sees a completed backlog item with no id, and the file-backed reap paths that are supposed to handle legacy/manual backlog lines now backfill ids before removal. Concretely:
+- `pending::reap_with_items()` no longer allows silent loss of `[x]` items with empty ids.
+- `agent-doc backlog reap` backfills missing ids / checkboxes before reaping.
+- stale-completed-item `repair` now does the same before syncing the reap into the snapshot/archive.
+- spec text and regressions were updated so the canonical contract is explicit.
+
+Verification:
+- `cargo test reap_errors_when_completed_item_is_missing_id`
+- `cargo test pending_reap_backfills_legacy_done_ids_before_removing_items`
+- `cargo test repair_backfills_legacy_done_ids_before_reaping_completed_backlog`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `22cfda1` `fix: backfill legacy done ids before reap`
+
+`#g3qn` remains in the backlog as the next recommended follow-up.
+<!-- agent:boundary:664b3979 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -94,6 +118,5 @@ I added both fixes to the backlog as recommended follow-up work. I did not find 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ynad] [recommended] Make pending reap backfill or reject empty-id done items instead of silently dropping them during repair/manual reap
 - [ ] [#g3qn] [recommended] Fail closed when queue consumption cannot prove the first queued prompt was removed from file + snapshot
 <!-- /agent:backlog -->

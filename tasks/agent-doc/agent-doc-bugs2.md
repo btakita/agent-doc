@@ -317,7 +317,12 @@ Commit / push:
 - `55c16a0` `fix: enforce backlog-required review capture`
 
 No new backlog item came out of this change.
-<!-- agent:boundary:d9833ec6 -->
+Implemented in `src/agent-doc` and pushed `55c16a0` on `20260422/codex-agent-backend`.
+
+The fix makes backlog-required review flows binary-owned instead of heuristic-only: preflight now persists a prompt contract derived from changed diff lines plus recursive `prompt_presets`, `plan` surfaces that as `expect_add`, and `finalize` / `session-check` now fail closed unless the cycle records backlog mutations or explicitly says there were no actionable follow-up items. I also added regression coverage and updated `SPEC.md`, [specs/07-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-commands.md), and `VERSIONS.md`.
+
+Verification passed with `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`. I had to widen one existing route test’s mock prompt wait from 3s to 10s because the full serial suite exposed a timing flake there; after that the full suite was clean. The session document is closed cleanly now and `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` returns OK.
+<!-- agent:boundary:99a9269a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -332,5 +337,5 @@ Support headers in the backlog and icebox to organize + categorize long lists.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [ ] [#x6e9] [#multi-user] Research how we can make agent-doc safe for multi user usage
+- [ ] [#x6e9] [#multi-user] Research how we can make agent-doc safe for multi-user usage
 <!-- /agent:icebox -->

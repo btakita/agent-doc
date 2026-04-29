@@ -579,7 +579,28 @@ Commit/push:
 - `btakita/tsift@c58a465` (`fix: require scope for workspace graph queries`) pushed to `origin/main`.
 
 Top of backlog: `#sumdiff`.
-<!-- agent:boundary:516d96cf -->
+
+❯ do #sumdiff. spec-test-build-install-commit-push
+### Re: do #sumdiff — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift summarize --extract <path> --diff` now includes untracked files within the requested extract scope, and it filters deleted tracked paths before the extraction walk.
+- added regressions in both the helper-level summarize diff path (`src/main.rs`, `src/summarize.rs`) and the compiled CLI surface (`tests/exit_code.rs`).
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the crate version to `0.1.18`.
+
+Verification:
+- `cargo test summarize_diff_extract_includes_untracked_files -- --nocapture` passed.
+- `make check` passed: 379 unit tests + 34 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.18`.
+
+Commit/push:
+- `btakita/tsift@595b195` (`fix: include untracked summarize diff files`) pushed to `origin/main`.
+
+Top of backlog: `#tmv7`.
+<!-- agent:boundary:5b6de1da -->
 <!-- /agent:exchange -->
 
 <!--
@@ -588,7 +609,6 @@ Top of backlog: `#sumdiff`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sumdiff] [recommended] summarize diff mode: include untracked files, not just git diff --name-only HEAD
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

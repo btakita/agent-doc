@@ -50,9 +50,12 @@
 //!   the agent-doc window for left-column files (`split_before`), last pane for right-column
 //!   files. This places the new pane adjacent to its column neighbors instead of always splitting
 //!   beside an arbitrary registered pane.
-//! - **`send_command(tmux, pane, file_path, harness)`**: Flashes a tmux display-message on the
-//!   target pane, sends the harness trigger command via send-keys, focuses the pane, then polls
-//!   up to 5 seconds verifying the command was accepted (retrying Enter if still visible in input).
+//! - **`send_command(tmux, pane, file_path, harness, routed_prompt_body)`**: Flashes a tmux
+//!   display-message on the target pane, sends the harness trigger command via send-keys, focuses
+//!   the pane, then polls up to 5 seconds verifying the command was accepted (retrying Enter if
+//!   still visible in input). For Codex reroutes with unresolved prompt-bearing drift, appends the
+//!   first unresolved prompt body after `agent-doc <FILE>` so cancel/retry flows re-submit a real
+//!   actionable message instead of a bare reopen.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -147,6 +150,12 @@ enum SupervisorHealth {
     NeedsRestart,
     Unreachable,
     NoSocket,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingPromptBearingRouteContext {
+    marker: String,
+    trigger_body: String,
 }
 
 fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
@@ -573,8 +582,8 @@ fn resolve_or_create_pane(
     );
     let registered = sessions::lookup(session_id)?;
     let cycle_baseline = crate::cycle_state::load(file)?;
-    let pending_prompt_marker =
-        pending_prompt_bearing_marker_for_route(file, cycle_baseline.as_ref())?;
+    let pending_prompt_context =
+        pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let live_owner = if registered.is_some() {
         crate::sync::find_live_owner_pane(tmux, file, session_id)
     } else {
@@ -755,7 +764,15 @@ fn resolve_or_create_pane(
                         is_first_column(file, col_args),
                     );
                     ensure_existing_pane_ready_for_dispatch(tmux, file, owner, harness)?;
-                    send_command(tmux, owner, file_path, harness)?;
+                    send_command(
+                        tmux,
+                        owner,
+                        file_path,
+                        harness,
+                        pending_prompt_context
+                            .as_ref()
+                            .map(|context| context.trigger_body.as_str()),
+                    )?;
                     require_routed_cycle_ack(
                         tmux,
                         file,
@@ -763,7 +780,9 @@ fn resolve_or_create_pane(
                         session_id,
                         harness,
                         cycle_baseline.as_ref(),
-                        pending_prompt_marker.as_deref(),
+                        pending_prompt_context
+                            .as_ref()
+                            .map(|context| context.marker.as_str()),
                         true,
                     )?;
                     return Ok(owner.to_string());
@@ -809,7 +828,9 @@ fn resolve_or_create_pane(
                                 session_id,
                                 harness,
                                 cycle_baseline.as_ref(),
-                                pending_prompt_marker.as_deref(),
+                                pending_prompt_context
+                                    .as_ref()
+                                    .map(|context| context.marker.as_str()),
                                 false,
                             )?;
                             return Ok(registered_pane.clone());
@@ -858,7 +879,15 @@ fn resolve_or_create_pane(
                 );
                 ensure_existing_pane_ready_for_dispatch(tmux, file, registered_pane, harness)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-                send_command(tmux, registered_pane, file_path, harness)?;
+                send_command(
+                    tmux,
+                    registered_pane,
+                    file_path,
+                    harness,
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.trigger_body.as_str()),
+                )?;
                 require_routed_cycle_ack(
                     tmux,
                     file,
@@ -866,7 +895,9 @@ fn resolve_or_create_pane(
                     session_id,
                     harness,
                     cycle_baseline.as_ref(),
-                    pending_prompt_marker.as_deref(),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
                     true,
                 )?;
                 return Ok(registered_pane.clone());
@@ -921,7 +952,15 @@ fn resolve_or_create_pane(
         );
         sessions::register(session_id, &existing, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &existing, harness)?;
-        send_command(tmux, &existing, file_path, harness)?;
+        send_command(
+            tmux,
+            &existing,
+            file_path,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.trigger_body.as_str()),
+        )?;
         require_routed_cycle_ack(
             tmux,
             file,
@@ -929,7 +968,9 @@ fn resolve_or_create_pane(
             session_id,
             harness,
             cycle_baseline.as_ref(),
-            pending_prompt_marker.as_deref(),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
             true,
         )?;
         return Ok(existing.to_string());
@@ -941,7 +982,15 @@ fn resolve_or_create_pane(
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         sessions::register(session_id, &new_pane, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &new_pane, harness)?;
-        send_command(tmux, &new_pane, file_path, harness)?;
+        send_command(
+            tmux,
+            &new_pane,
+            file_path,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.trigger_body.as_str()),
+        )?;
         require_routed_cycle_ack(
             tmux,
             file,
@@ -949,7 +998,9 @@ fn resolve_or_create_pane(
             session_id,
             harness,
             cycle_baseline.as_ref(),
-            pending_prompt_marker.as_deref(),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
             false,
         )?;
         return Ok(new_pane);
@@ -1031,8 +1082,14 @@ fn rescue_from_stash(
 
 /// Send the trigger command to a pane and focus it.
 /// Shows a brief tmux display-message on the target pane for immediate feedback.
-fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfig) -> Result<()> {
-    let _ = send_command_checked(tmux, pane, file_path, harness)?;
+fn send_command(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    routed_prompt_body: Option<&str>,
+) -> Result<()> {
+    let _ = send_command_checked(tmux, pane, file_path, harness, routed_prompt_body)?;
     Ok(())
 }
 
@@ -1093,6 +1150,7 @@ fn send_command_checked(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    routed_prompt_body: Option<&str>,
 ) -> Result<CommandDispatchStatus> {
     ensure_dispatch_target_matches_file(pane, file_path)?;
     let short_name = std::path::Path::new(file_path)
@@ -1100,6 +1158,7 @@ fn send_command_checked(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
     let trigger = harness.trigger_command(file_path);
+    let payload = routed_trigger_payload(harness, &trigger, routed_prompt_body);
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
     if let Err(e) = tmux
         .cmd()
@@ -1109,7 +1168,7 @@ fn send_command_checked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    tmux.send_keys(pane, &trigger)?;
+    tmux.send_keys(pane, &payload)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }
@@ -1153,6 +1212,23 @@ fn send_command_checked(
         enter_retries
     );
     Ok(CommandDispatchStatus::TimedOut)
+}
+
+fn routed_trigger_payload(
+    harness: &HarnessConfig,
+    trigger: &str,
+    routed_prompt_body: Option<&str>,
+) -> String {
+    if harness.binary != "codex" {
+        return trigger.to_string();
+    }
+    let Some(body) = routed_prompt_body
+        .map(str::trim)
+        .filter(|body| !body.is_empty())
+    else {
+        return trigger.to_string();
+    };
+    format!("{trigger}\n{body}")
 }
 
 fn existing_pane_ready_timeout() -> Duration {
@@ -1252,14 +1328,49 @@ fn should_require_routed_cycle_ack(
     prompt_bearing_marker.is_some() && !baseline.is_some_and(|state| state.is_open())
 }
 
-fn pending_prompt_bearing_marker_for_route(
+fn strip_routed_prompt_prefix(line: &str) -> &str {
+    line.trim_start()
+        .strip_prefix("❯ ")
+        .or_else(|| line.trim_start().strip_prefix('❯'))
+        .map(str::trim_start)
+        .unwrap_or_else(|| line.trim_start())
+}
+
+fn normalize_routed_prompt_body(text: &str) -> String {
+    text.lines()
+        .map(strip_routed_prompt_prefix)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn pending_prompt_bearing_context_for_route(
     file: &Path,
     baseline: Option<&crate::cycle_state::CycleState>,
-) -> Result<Option<String>> {
+) -> Result<Option<PendingPromptBearingRouteContext>> {
     if baseline.is_some_and(|state| state.is_open()) {
         return Ok(None);
     }
-    crate::session_check::detect_unstarted_prompt_bearing_diff(file)
+    let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)? else {
+        return Ok(None);
+    };
+    let marker = match change.kind {
+        crate::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
+        crate::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
+        crate::diff::PromptBearingChangeKind::RecoveryArtifact
+        | crate::diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
+    };
+    let preview = change
+        .text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(change.text.as_str())
+        .trim();
+    Ok(Some(PendingPromptBearingRouteContext {
+        marker: format!("{marker}: {preview}"),
+        trigger_body: normalize_routed_prompt_body(&change.text),
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1955,13 +2066,13 @@ fn auto_start_in_session(
             harness,
         ) {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_checked(tmux, &new_pane, &start_path, harness)?
+            send_command_checked(tmux, &new_pane, &start_path, harness, None)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_checked(tmux, &new_pane, &start_path, harness)? {
+            match send_command_checked(tmux, &new_pane, &start_path, harness, None)? {
                 CommandDispatchStatus::Accepted => {
                     crate::ops_log::log_op(
                         file,
@@ -2936,6 +3047,35 @@ history line
     }
 
     #[test]
+    fn routed_trigger_payload_appends_prompt_body_for_codex_only() {
+        let trigger = HarnessConfig::codex().trigger_command("test.md");
+        assert_eq!(
+            routed_trigger_payload(
+                &HarnessConfig::codex(),
+                &trigger,
+                Some("do #stshcr. spec-test-build-install-commit-push"),
+            ),
+            "agent-doc test.md\ndo #stshcr. spec-test-build-install-commit-push"
+        );
+        assert_eq!(
+            routed_trigger_payload(
+                &HarnessConfig::claude(),
+                "/agent-doc test.md",
+                Some("do #stshcr. spec-test-build-install-commit-push"),
+            ),
+            "/agent-doc test.md"
+        );
+    }
+
+    #[test]
+    fn normalize_routed_prompt_body_strips_binary_prompt_prefixes() {
+        assert_eq!(
+            normalize_routed_prompt_body("❯ do #stshcr.\n  ❯ follow-up detail"),
+            "do #stshcr.\nfollow-up detail"
+        );
+    }
+
+    #[test]
     fn send_keys_delivers_claude_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send");
         let session = "test";
@@ -3026,7 +3166,8 @@ history line
         );
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
-        let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
+        let status =
+            send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex(), None).unwrap();
         assert_eq!(status, CommandDispatchStatus::Accepted);
     }
 

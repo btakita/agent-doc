@@ -988,6 +988,27 @@ fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> boo
 }
 
 pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
+    let Some(change) = first_unstarted_prompt_bearing_change(file)? else {
+        return Ok(None);
+    };
+    let label = match change.kind {
+        crate::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
+        crate::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
+        crate::diff::PromptBearingChangeKind::RecoveryArtifact
+        | crate::diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
+    };
+    let preview = change
+        .text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(change.text.as_str())
+        .trim();
+    Ok(Some(format!("{label}: {preview}")))
+}
+
+pub(crate) fn first_unstarted_prompt_bearing_change(
+    file: &Path,
+) -> Result<Option<crate::diff::PromptBearingChange>> {
     let Some(snapshot) = crate::snapshot::load(file)? else {
         return Ok(None);
     };
@@ -1003,23 +1024,15 @@ pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option
         return Ok(None);
     };
 
-    for change in crate::diff::classify_prompt_bearing_changes(&diff_text) {
-        let label = match change.kind {
-            crate::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
-            crate::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
-            crate::diff::PromptBearingChangeKind::RecoveryArtifact
-            | crate::diff::PromptBearingChangeKind::BoundaryArtifact => continue,
-        };
-        let preview = change
-            .text
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or(change.text.as_str())
-            .trim();
-        return Ok(Some(format!("{label}: {preview}")));
-    }
-
-    Ok(None)
+    Ok(crate::diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .find(|change| {
+            matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::PromptTarget
+                    | crate::diff::PromptBearingChangeKind::ContentEdit
+            )
+        }))
 }
 
 #[cfg(test)]

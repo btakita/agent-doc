@@ -353,12 +353,14 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
+        .stderr(predicates::str::contains("[finalize] pre-write gate"))
         .stderr(predicates::str::contains("recommendation-like items"));
 
-    // Response is written to disk but NOT committed (pre-commit gate blocked)
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: recommendations — gpt-5"));
+    assert!(
+        !content.contains("### Re: recommendations — gpt-5"),
+        "strict closeout should fail before patching the response into the working tree"
+    );
 
     let head_blob = ProcessCommand::new("git")
         .current_dir(tmp.path())
@@ -385,11 +387,16 @@ fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() 
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
-        .stderr(predicates::str::contains("--pending-done 4qja"));
+        .stderr(predicates::str::contains("[finalize] pre-write gate"))
+        .stderr(predicates::str::contains("--pending-done 4qja"))
+        .stderr(predicates::str::contains("agent-doc finalize"))
+        .stderr(predicates::str::contains("re-run the same response"));
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: #4qja streaming orchestrate patchback — gpt-5"));
+    assert!(
+        !content.contains("### Re: #4qja streaming orchestrate patchback — gpt-5"),
+        "strict pending-done rejection should leave the response out of the working tree"
+    );
     assert!(content.contains("- [ ] [#4qja] Stream orchestrate patchback"));
 
     let head_blob = ProcessCommand::new("git")
@@ -816,7 +823,7 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
+        .stderr(predicates::str::contains("[finalize] pre-write gate"))
         .stderr(predicates::str::contains("recommendation-like items"));
 
     let content = fs::read_to_string(&doc).unwrap();
@@ -825,8 +832,8 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
         "queue head should remain when a later strict closeout gate rejects the cycle"
     );
     assert!(
-        content.contains("### Re: recommendations — gpt-5"),
-        "the response write itself should still be present in the working tree"
+        !content.contains("### Re: recommendations — gpt-5"),
+        "strict pre-write gates should leave the working tree untouched"
     );
 
     let snap_dir = tmp.path().join(".agent-doc/snapshots");
@@ -835,11 +842,11 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
         let entry = entry.unwrap();
         if entry.path().extension().is_some_and(|e| e == "md") {
             let snap = fs::read_to_string(entry.path()).unwrap();
-            if snap.contains("### Re: recommendations — gpt-5") {
-                assert!(
-                    snap.contains("- do #fix1"),
-                    "snapshot queue head should remain when queue consumption never ran"
-                );
+            assert!(
+                !snap.contains("### Re: recommendations — gpt-5"),
+                "strict pre-write gates should leave snapshots untouched"
+            );
+            if snap.contains("- do #fix1") {
                 snapshot_checked = true;
             }
         }

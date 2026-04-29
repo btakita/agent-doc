@@ -117,8 +117,9 @@
 //!   disk state, the snapshot stays at `content_ours` so those late user edits
 //!   remain visible to the next diff cycle instead of being folded into the
 //!   just-finished turn.
-//! - Pending response is saved before any write attempt and cleared only after
-//!   a successful write, so an interrupted write is recoverable.
+//! - Once a response survives strict pre-write closeout gates, it is saved to
+//!   the pending store before any document mutation and cleared only after a
+//!   successful write, so an interrupted write is recoverable.
 //! - Pre-response snapshot is captured from the live document state while the
 //!   advisory doc lock is held, so `undo` restores the exact on-disk content
 //!   that existed immediately before the local write path applied the response.
@@ -245,10 +246,13 @@ pub struct CommandOptions {
     pub status: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct WriteFlags {
     pub allow_replace_pending: bool,
     pub has_pending_add: bool,
+    pub pending_done_ids: Vec<String>,
+    pub strict_closeout: bool,
+    pub rerun_command_base: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,6 +318,103 @@ fn snapshot_content_to_persist<'a>(
         SnapshotPersistMode::FinalContent => final_content,
         SnapshotPersistMode::ContentOurs => content_ours,
     }
+}
+
+fn shell_quote_cli_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "''".to_string();
+    }
+    if arg
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
+    {
+        return arg.to_string();
+    }
+    format!("'{}'", arg.replace('\'', "'\"'\"'"))
+}
+
+fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -> Option<String> {
+    if commit_mode != CommitMode::Required {
+        return None;
+    }
+
+    let mut args = vec!["agent-doc".to_string(), "finalize".to_string()];
+    args.push(options.file.display().to_string());
+    if let Some(path) = &options.baseline_file {
+        args.push("--baseline-file".to_string());
+        args.push(path.display().to_string());
+    }
+    if options.is_template {
+        args.push("--template".to_string());
+    }
+    if options.is_stream {
+        args.push("--stream".to_string());
+    }
+    if options.is_ipc {
+        args.push("--ipc".to_string());
+    }
+    if options.force_disk {
+        args.push("--force-disk".to_string());
+    }
+    if let Some(origin) = &options.origin {
+        args.push("--origin".to_string());
+        args.push(origin.clone());
+    }
+    for value in &options.pending_add {
+        args.push("--pending-add".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_add_gated {
+        args.push("--pending-add-gated".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_done {
+        args.push("--pending-done".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_edit {
+        args.push("--pending-edit".to_string());
+        args.push(value.clone());
+    }
+    if options.pending_clear {
+        args.push("--pending-clear".to_string());
+    }
+    if let Some(value) = &options.pending_reorder {
+        args.push("--pending-reorder".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_gate {
+        args.push("--pending-gate".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_ungate {
+        args.push("--pending-ungate".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_resolve_gate {
+        args.push("--pending-resolve-gate".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.pending_set_gate_type {
+        args.push("--pending-set-gate-type".to_string());
+        args.push(value.clone());
+    }
+    if options.allow_replace_pending {
+        args.push("--allow-replace-pending".to_string());
+    }
+    if options.pending_only {
+        args.push("--pending-only".to_string());
+    }
+    if let Some(status) = &options.status {
+        args.push("--status".to_string());
+        args.push(status.clone());
+    }
+    Some(
+        args.into_iter()
+            .map(|arg| shell_quote_cli_arg(&arg))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 fn is_session_document(file: &Path) -> Result<bool> {
@@ -473,6 +574,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let write_flags = WriteFlags {
         allow_replace_pending: options.allow_replace_pending,
         has_pending_add: !options.pending_add.is_empty() || !options.pending_add_gated.is_empty(),
+        pending_done_ids: options.pending_done.clone(),
+        strict_closeout: commit_mode == CommitMode::Required,
+        rerun_command_base: build_rerun_command_base(&options, commit_mode),
     };
 
     let baseline = options
@@ -516,7 +620,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 write_flags,
             )
         } else {
-            run(file, baseline.as_deref())
+            run(file, baseline.as_deref(), write_flags)
         }
     };
 
@@ -666,6 +770,71 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     );
 }
 
+fn prewrite_pending_capture_check(
+    file: &Path,
+    response_body: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    if !flags.strict_closeout {
+        return Ok(());
+    }
+
+    let state = crate::cycle_state::load(file)?;
+    if state
+        .as_ref()
+        .is_some_and(|state| state.had_pending_mutations)
+        || flags.has_pending_add
+    {
+        return Ok(());
+    }
+    if response_body.contains("<!-- no-pending-capture -->") {
+        return Ok(());
+    }
+
+    let response_text = crate::session_check::response_text_for_guards(response_body);
+    if response_text.trim().is_empty() {
+        return Ok(());
+    }
+    if state
+        .as_ref()
+        .is_some_and(|state| state.requires_backlog_capture)
+        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    {
+        anyhow::bail!(
+            "[finalize] pre-write gate: active prompt requested backlog capture \
+             but no backlog mutations were recorded this cycle\n\
+             [finalize] hint: re-run finalize with --pending-add flags, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures"
+        );
+    }
+
+    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
+    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+        return Ok(());
+    }
+
+    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    let skip = match signal.estimated_count {
+        0 => true,
+        1 => signal.confidence < 0.7,
+        _ => signal.confidence < 0.5,
+    };
+    if skip {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "[finalize] pre-write gate: response contains ~{} recommendation-like items \
+         but no --pending-add flags were used this cycle\n\
+         [finalize] hint: re-run finalize with --pending-add flags, \
+         add <!-- no-pending-capture --> to suppress, \
+         or set pending_capture_guard = \"warn\" to downgrade",
+        signal.estimated_count
+    );
+}
+
 fn precommit_pending_done_check(file: &Path) -> Result<()> {
     let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
     if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
@@ -715,6 +884,66 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
          or set pending_done_guard = \"warn\" to downgrade",
         ids,
         hint
+    );
+}
+
+fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFlags) -> Result<()> {
+    if !flags.strict_closeout {
+        return Ok(());
+    }
+
+    let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
+    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+        return Ok(());
+    }
+
+    let recorded_done_ids = crate::cycle_state::load(file)?
+        .map(|state| state.pending_done_ids)
+        .unwrap_or_else(|| flags.pending_done_ids.clone());
+    if response_body.contains("<!-- no-pending-done-guard -->") {
+        return Ok(());
+    }
+
+    let response_text = crate::session_check::response_text_for_guards(response_body);
+    let missing = crate::session_check::detect_missing_pending_done_ids(
+        file,
+        &response_text,
+        &recorded_done_ids,
+    )?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let ids = missing
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let hint = missing
+        .iter()
+        .map(|id| format!("--pending-done {}", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let recovery = flags
+        .rerun_command_base
+        .as_ref()
+        .map(|base| {
+            format!(
+                "\n[finalize] recovery: re-run the same response with {} {}",
+                base, hint
+            )
+        })
+        .unwrap_or_default();
+
+    anyhow::bail!(
+        "[finalize] pre-write gate: response appears to complete existing pending {} \
+         but no matching `--pending-done` was recorded this cycle\n\
+         [finalize] hint: re-run finalize with {}, \
+         add <!-- no-pending-done-guard --> to suppress, \
+         or set pending_done_guard = \"warn\" to downgrade{}",
+        ids,
+        hint,
+        recovery
     );
 }
 
@@ -2172,7 +2401,7 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
 ///
 /// `baseline` is the document content at the time the response was generated.
 /// If omitted, the current document content is used (no merge needed).
-pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
+pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2194,6 +2423,8 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let response = strip_assistant_heading(&response);
+    prewrite_pending_capture_check(file, &response, &flags)?;
+    prewrite_pending_done_check(file, &response, &flags)?;
 
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
@@ -2347,6 +2578,8 @@ pub fn run_template(
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
+    prewrite_pending_capture_check(file, &response, &flags)?;
+    prewrite_pending_done_check(file, &response, &flags)?;
 
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
@@ -2510,6 +2743,8 @@ pub fn run_stream(
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
+    prewrite_pending_capture_check(file, &response, &flags)?;
+    prewrite_pending_done_check(file, &response, &flags)?;
 
     if patches.is_empty() {
         eprintln!(
@@ -3064,6 +3299,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
+    prewrite_pending_capture_check(file, &response, &flags)?;
+    prewrite_pending_done_check(file, &response, &flags)?;
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 

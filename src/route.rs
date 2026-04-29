@@ -816,12 +816,67 @@ fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfi
     Ok(())
 }
 
+fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
+    let resolved = crate::git::resolve_absolute_file_path(path);
+    std::fs::canonicalize(&resolved).unwrap_or(resolved)
+}
+
+fn canonical_registered_file(entry: &sessions::SessionEntry) -> std::path::PathBuf {
+    let path = std::path::Path::new(&entry.file);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else if entry.cwd.is_empty() {
+        path.to_path_buf()
+    } else {
+        std::path::Path::new(&entry.cwd).join(path)
+    };
+    std::fs::canonicalize(&resolved).unwrap_or(resolved)
+}
+
+fn pane_registration_matches_file(
+    registry: &sessions::SessionRegistry,
+    pane: &str,
+    file_path: &str,
+) -> bool {
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    registry
+        .values()
+        .find(|entry| entry.pane == pane)
+        .map(|entry| canonical_registered_file(entry) == requested)
+        .unwrap_or(false)
+}
+
+fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()> {
+    let registry =
+        sessions::load().context("failed to load route registry before dispatch validation")?;
+    if pane_registration_matches_file(&registry, pane, file_path) {
+        return Ok(());
+    }
+
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
+        anyhow::bail!(
+            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+            pane,
+            canonical_registered_file(entry).display(),
+            requested.display()
+        );
+    }
+
+    anyhow::bail!(
+        "route dispatch target {} is not registered for {}; refusing unbound dispatch",
+        pane,
+        requested.display()
+    );
+}
+
 fn send_command_checked(
     tmux: &Tmux,
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<CommandDispatchStatus> {
+    ensure_dispatch_target_matches_file(pane, file_path)?;
     let short_name = std::path::Path::new(file_path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1927,6 +1982,21 @@ mod tests {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     }
 
+    fn test_registry_entry(
+        pane: &str,
+        file: &str,
+        cwd: &std::path::Path,
+    ) -> sessions::SessionEntry {
+        sessions::SessionEntry {
+            pane: pane.to_string(),
+            pid: 1234,
+            cwd: cwd.to_string_lossy().to_string(),
+            started: "2026-01-01T00:00:00Z".to_string(),
+            file: file.to_string(),
+            window: "@1".to_string(),
+        }
+    }
+
     struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: std::sync::MutexGuard<'static, ()>,
@@ -1948,6 +2018,61 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prev_cwd);
         }
+    }
+
+    #[test]
+    fn pane_registration_matches_file_resolves_entry_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let submodule = dir.path().join("src/session-share");
+        let tasks = submodule.join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let doc = tasks.join("claudescore-3.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+
+        let mut registry = sessions::SessionRegistry::new();
+        registry.insert(
+            "session-a".to_string(),
+            test_registry_entry("%401", "tasks/claudescore-3.md", &submodule),
+        );
+
+        assert!(
+            pane_registration_matches_file(&registry, "%401", &doc.to_string_lossy()),
+            "relative registry paths should resolve against the pane cwd"
+        );
+    }
+
+    #[test]
+    fn ensure_dispatch_target_matches_file_rejects_cross_file_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let submodule = dir.path().join("src/session-share");
+        let tasks = submodule.join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let registered = tasks.join("monsterrodholders.md");
+        let requested = tasks.join("claudescore-3.md");
+        std::fs::write(&registered, "# registered\n").unwrap();
+        std::fs::write(&requested, "# requested\n").unwrap();
+
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            "session-a",
+            "%401",
+            "tasks/monsterrodholders.md",
+            1234,
+            "@1",
+            &submodule.to_string_lossy(),
+        )
+        .unwrap();
+
+        let err = ensure_dispatch_target_matches_file("%401", &requested.to_string_lossy())
+            .expect_err("cross-file pane reuse must fail closed");
+        assert!(
+            err.to_string().contains("refusing cross-file dispatch"),
+            "error should explain the rejected cross-file dispatch: {err}"
+        );
     }
 
     fn wait_for_pane_contains(
@@ -2516,10 +2641,25 @@ history line
 
     #[test]
     fn send_command_checked_reports_accepted_when_command_is_consumed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-send-checked");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            "route-test-send-checked",
+            &pane,
+            "test.md",
+            1234,
+            &window,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
 
         send_keys_with_retry(
             &iso,

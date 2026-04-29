@@ -28,112 +28,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260429-013925.md`*
+### Session Summary
+
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260429-031355.md`*
+
+Icebox:
+- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
+- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
+- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
+The `tsift` agent-doc cycle is blocked inside `agent-doc`, not on tsift work.
+
+What happened:
+- `preflight` saw the two intended edits in [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md): `#tmv7` marked done in `agent:icebox`, and `compact exchange`.
+- `agent-doc compact ... --component exchange --commit` did compact the working document and archive the old exchange, but the commit boundary failed closed.
+- A follow-up `agent-doc repair`, `agent-doc preflight`, `agent-doc commit`, and `agent-doc session-check` all confirmed the same blocker.
+
+Concrete blocker:
+- `agent-doc` refuses to commit because `HEAD` already contains an older out-of-band historical typed-component drift for this document:
+  `### Re: code review — gpt-5` with a bare prompt target missing the expected `❯ ` prefix.
+- Current error:
+  `refusing to auto-adopt committed historical response patchback ... HEAD contains an out-of-band typed_component_drift mutation ...`
+
+Current state:
+- The working copy of [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md) is compacted locally and still shows `#tmv7` as completed.
+- The cycle is still open:
+  `cycle-1777432391714` remains `preflight_started`.
+- `session-check` is failing, so I’m not reporting this cycle as complete.
+
+If you want, I can switch to fixing this `agent-doc` commit-boundary bug directly in `src/agent-doc` and then retry the tsift compact cycle.
 
 ❯ #code-review
-### Re: code review — gpt-5
-
-1. High: `--federated` search still leaks lexical hits from non-federated scopes. In `cmd_search`, the federated branch filters symbol hits through `federated_symbol_search`, but it hands `root.clone()` to the sift engine instead of a filtered scope set ([src/tsift/src/main.rs:3074](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3074), [src/tsift/src/main.rs:3085](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3085)). That means the AST side respects `federation_for_scope`, while the lexical side still searches the whole workspace tree, including `Private` and `Isolated` submodules. The root cause is that federation rules are only applied to index reads, not to the underlying lexical search path.
-
-2. Medium: `tsift lint` ignores isolation tiers and aggregates entities from every discovered index in the workspace. `cmd_lint` auto-loads entities from the resolved project root ([src/tsift/src/main.rs:3375](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3375)), and `collect_entities_from_index_path` blindly walks every reachable `index.db` under `.tsift/indexes` ([src/tsift/src/lint.rs:201](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:201), [src/tsift/src/lint.rs:226](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:226)). In a shared workspace, that can surface private symbol names in lint suggestions for unrelated markdown docs. The root cause is filesystem discovery without any config-aware scope filtering.
-
-3. Medium: `tsift summarize` does not resolve the workspace/project root the way the other commands do. It starts from raw `canonicalize()` and builds `.tsift/summaries.db` relative to that path ([src/tsift/src/main.rs:2419](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2419), [src/tsift/src/main.rs:2420](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2420)). From a nested directory, that points summary reads/writes, `git diff`, and `find_symbols_db_for_file` at the wrong root ([src/tsift/src/main.rs:2428](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2428), [src/tsift/src/main.rs:2472](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2472)). The result is inconsistent behavior versus `search`/`status`/`lint`, and it can create a second nested summary cache or drop workspace-scoped symbol context.
-
-4. Medium: `tsift edit` is not actually atomic even though phase 1 is labeled `atomic batch`. Validation happens up front, but phase 2 writes files sequentially with no temp-file swap and no rollback ([src/tsift/src/main.rs:1257](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1257), [src/tsift/src/main.rs:1268](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1268), [src/tsift/src/main.rs:1280](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1280)). If a later write fails after earlier ones succeeded, the command returns an error after already mutating part of the repo. The root cause is treating replacement validation as if it were a transactional commit boundary.
-
-#### Coverage Gaps
-
-- I do not see a regression test that proves federated lexical search excludes isolated/private scopes.
-- I do not see nested-path coverage for `summarize` root resolution.
-- I did not run the full test suite for this review; the findings above are from code inspection.
-
-❯ do #dpeh. spec-test-build-install-commit-push
-### Re: #dpeh — gpt-5
-
-Implemented the federated search fix in `src/tsift` and pushed it as `b4f6b33` (`fix: scope federated lexical search`).
-
-What changed:
-- `tsift search --federated` now runs the sift pass only across eligible federated scope roots instead of the workspace root, then merges and reranks those hits at the workspace layer. That keeps lexical results aligned with the same scope filter already used for federated symbol search.
-- Added regression tests covering both `isolated` and `private` scope tiers for federated lexical search.
-- Updated `SPEC.md` to document the scoped federated sift behavior.
-
-Verification:
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- installed binary reports `tsift 0.1.21`
-
-❯ do #618r. spec-test-build-install-commit-push
-### Re: #618r — gpt-5
-
-Implemented the lint scope-filtering fix in `src/tsift` and pushed it as `57ab2be` (`fix: scope lint entity auto-discovery`).
-
-What changed:
-- `tsift lint` now auto-discovers entities from the workspace root index plus only the scoped indexes whose scopes still participate in federation. Private, isolated, and explicitly non-federated scopes are skipped by default.
-- Explicit `--index` behavior is unchanged, so callers can still opt into a specific scoped index or the full `.tsift/indexes` tree directly.
-- Added regression coverage in both layers: a unit test for workspace entity collection and a CLI test proving default lint auto-discovery includes shared-scope symbols while excluding private and isolated scopes.
-- Updated `SPEC.md` to document the default scope filtering and the `--index` opt-in escape hatch.
-
-Verification:
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- installed binary reports `tsift 0.1.21`
-
-❯ do #ggft. spec-test-build-install-commit-push
-### Re: #ggft — gpt-5
-
-Implemented the summarize root-resolution fix in `src/tsift` and pushed it as `b9cbd25` (`fix: resolve summarize workspace roots`).
-
-What changed:
-- `tsift summarize` now resolves `--path` through the nearest ancestor `.tsift` project/workspace root before opening `summaries.db`, computing `--diff`, or resolving scoped symbol context.
-- Added nested-path regression coverage in both the unit test layer and `tests/exit_code.rs` so query and extract flows reuse the shared root cache instead of creating shadow caches under nested directories.
-- Updated `SPEC.md` to document the ancestor-root behavior for `summarize`.
-
-Verification:
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- installed binary reports `tsift 0.1.21`
-
-❯ do #35ms. spec-test-build-install-commit-push
-### Re: #35ms — gpt-5
-
-Implemented the transactional `tsift edit` fix in `src/tsift` and pushed it as `00af3d4` (`fix: make edit batches transactional`).
-
-What changed:
-- `tsift edit` now stages every rewritten file beside its target, then swaps originals through per-file backup slots so the batch only lands after validation and staging complete.
-- If any later swap fails, tsift rolls earlier files back to their original contents before returning an error instead of leaving a partially-written batch behind.
-- Added a regression test that simulates a later swap failure and proves earlier files are restored.
-- Updated `SPEC.md` to document the staged/rollback behavior.
-
-Verification:
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- installed binary reports `tsift 0.1.21`
-
-❯ do #tmv7. spec-test-build-install-commit-push
-### Re: #tmv7 — gpt-5
-
-Implemented the tagged GitHub release pipeline in `src/tsift` and pushed it as `0ffc428` (`build: add tagged release workflow`).
-
-What changed:
-- Added `.github/workflows/release.yml` to build checked release binaries for Linux x86_64, macOS x86_64/aarch64, and Windows x86_64 on `v*` tags, then attach archives plus `.sha256` files to the GitHub Release.
-- Added a tag/version guard so `vX.Y.Z` must match `Cargo.toml` before the release jobs continue.
-- Added the missing `tagpath` crates.io version requirement and documented the release contract plus packaging blocker in `SPEC.md` and `CLAUDE.md`.
-- Fixed a pre-existing Clippy failure in the CLI autoindex flag test so the release verification gate can actually pass.
-
-Current blocker:
-- I did not enable live crates.io publishing. `tsift` still depends on `github.com/rupurt/sift`, and that library is not published on crates.io under a compatible package name. The existing crates.io `sift` crate is a different project, so enabling `cargo publish` today would be incorrect. The workflow keeps that job explicitly gated behind `TSIFT_ENABLE_CRATES_PUBLISH=true` until the upstream package exists and `Cargo.toml` can be retargeted safely.
-
-Verification:
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- installed binary reports `tsift 0.1.21`
-<!-- agent:boundary:c745290d -->
+<!-- agent:boundary:8f41272b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -145,7 +70,7 @@ Verification:
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
+- [x] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)

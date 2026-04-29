@@ -322,7 +322,27 @@ Implemented in `src/agent-doc` and pushed `55c16a0` on `20260422/codex-agent-bac
 The fix makes backlog-required review flows binary-owned instead of heuristic-only: preflight now persists a prompt contract derived from changed diff lines plus recursive `prompt_presets`, `plan` surfaces that as `expect_add`, and `finalize` / `session-check` now fail closed unless the cycle records backlog mutations or explicitly says there were no actionable follow-up items. I also added regression coverage and updated `SPEC.md`, [specs/07-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-commands.md), and `VERSIONS.md`.
 
 Verification passed with `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`. I had to widen one existing route test’s mock prompt wait from 3s to 10s because the full serial suite exposed a timing flake there; after that the full suite was clean. The session document is closed cleanly now and `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` returns OK.
-<!-- agent:boundary:99a9269a -->
+
+❯ While I was writing `- [ ] [#x6e9] [#multi-user] Research how we can make agent-doc safe for multi-user usage`, the document had an external edit. I may have some backlog & icebox items but I'm not sure. Please verify from the git history.
+❯ spec-test-build-install-commit-push
+### Re: interrupted backlog/icebox verification — gpt-5
+
+I checked the document history around the external edit. The result is narrower than the current note suggests: I only found one real tracked item from that interrupted write, and it is already preserved.
+
+What the git history shows:
+- `941e47a4f` is where `#x6e9` first appeared, but it landed as a truncated backlog line: `- [ ] [#x6e9] [#multi-user] Research how we can make agennn`.
+- `3214f30f3` immediately corrected that by removing the broken backlog line, creating `agent:icebox`, and moving `#x6e9` there as `Research how we can make agent-doc safe for multi user usage`.
+- `909fa5290` only cleaned up wording to `multi-user`; it did not introduce any additional backlog or icebox items.
+
+I also checked the other nearby additions. `Create an agent:icebox element...` and `Support headers in the backlog and icebox...` were added earlier in `7a83b5955`, but only inside the HTML comment block, not as live backlog or icebox entries.
+
+So the verified state from history is:
+- live backlog: empty
+- live icebox: `#x6e9`
+- no other lost backlog or icebox items found in the interrupted edit sequence
+
+I did not change code or run build/test/install here because this turn was a git-history verification request rather than an implementation cycle.
+<!-- agent:boundary:80b5378f -->
 <!-- /agent:exchange -->
 
 <!--

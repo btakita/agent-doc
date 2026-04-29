@@ -412,27 +412,7 @@ pub fn run_with_tmux(
     // This prevents propagation bugs where cross-cutting behavior (sync)
     // is added to one path but missed on others.
 
-    // Snapshot panes before route so we can clean up orphans on failure.
-    let window_arg = col_args
-        .first()
-        .and_then(|_| {
-            tmux.cmd()
-                .args([
-                    "display-message",
-                    "-t",
-                    &format!("{}:agent-doc", target_session),
-                    "-p",
-                    "#{window_id}",
-                ])
-                .output()
-                .ok()
-        })
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let panes_before: Vec<String> = window_arg
-        .as_deref()
-        .and_then(|w| tmux.list_window_panes(w).ok())
-        .unwrap_or_default();
+    let mut created_panes = Vec::new();
 
     let pane_id = resolve_or_create_pane(
         tmux,
@@ -443,6 +423,7 @@ pub fn run_with_tmux(
         &file_path,
         &target_session,
         &harness,
+        &mut created_panes,
     );
 
     match pane_id {
@@ -460,40 +441,56 @@ pub fn run_with_tmux(
             // closed for the current session owner: if a newly-created pane is
             // still the registered live pane for this document, preserve it so
             // a missed start-ack cannot crash the user's active tmux pane.
-            if let Some(w) = window_arg.as_deref()
-                && let Ok(panes_after) = tmux.list_window_panes(w)
-            {
-                for p in &panes_after {
-                    if panes_before.contains(p) {
-                        continue;
-                    }
-                    if should_preserve_failed_route_pane(tmux, p, &session_id) {
-                        eprintln!(
-                            "[route] preserving newly-created pane {} after failed route because it is still the live registered owner for {}",
-                            p,
-                            file.display()
-                        );
-                        continue;
-                    }
-                    eprintln!(
-                        "[route] cleaning up orphaned pane {} (created during failed route)",
-                        p
-                    );
-                    tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
-                    let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
-                }
-            }
+            cleanup_failed_route_panes(tmux, file, &session_id, &created_panes);
             Err(e)
         }
     }
 }
 
-fn should_preserve_failed_route_pane(tmux: &Tmux, pane_id: &str, session_id: &str) -> bool {
-    sessions::lookup(session_id)
+fn cleanup_failed_route_panes(tmux: &Tmux, file: &Path, session_id: &str, created_panes: &[String]) {
+    for p in created_panes {
+        if !tmux.pane_alive(p) {
+            continue;
+        }
+        if should_preserve_failed_route_pane(tmux, file, p, session_id) {
+            eprintln!(
+                "[route] preserving newly-created pane {} after failed route because it is still the live registered owner for {}",
+                p,
+                file.display()
+            );
+            continue;
+        }
+        eprintln!(
+            "[route] cleaning up orphaned pane {} (created during failed route)",
+            p
+        );
+        tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
+        let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+    }
+}
+
+fn failed_route_registry_root(file: &Path) -> Option<std::path::PathBuf> {
+    let canonical = std::fs::canonicalize(file)
         .ok()
-        .flatten()
-        .as_deref()
-        .is_some_and(|registered| registered == pane_id && tmux.pane_alive(pane_id))
+        .unwrap_or_else(|| file.to_path_buf());
+    snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(|parent| parent.to_path_buf()))
+}
+
+fn should_preserve_failed_route_pane(
+    tmux: &Tmux,
+    file: &Path,
+    pane_id: &str,
+    session_id: &str,
+) -> bool {
+    let Some(root) = failed_route_registry_root(file) else {
+        return false;
+    };
+    sessions::load_in(&root)
+        .ok()
+        .and_then(|registry| registry.get(session_id).map(|entry| entry.pane.as_str() == pane_id))
+        .unwrap_or(false)
+        && tmux.pane_alive(pane_id)
 }
 
 /// Resolve an existing pane or create a new one. Returns the pane ID.
@@ -513,6 +510,7 @@ fn resolve_or_create_pane(
     file_path: &str,
     target_session: &str,
     harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
 ) -> Result<String> {
     tracing::debug!(
         session_id = &session_id[..8.min(session_id.len())],
@@ -619,6 +617,7 @@ fn resolve_or_create_pane(
                 false,
                 split_before,
                 harness,
+                Some(created_panes),
             );
         }
 
@@ -671,6 +670,7 @@ fn resolve_or_create_pane(
                         target_session,
                         is_first_column(file, col_args),
                     );
+                    ensure_existing_pane_ready_for_dispatch(tmux, file, owner, harness)?;
                     send_command(tmux, owner, file_path, harness)?;
                     require_routed_cycle_ack(
                         tmux,
@@ -772,6 +772,7 @@ fn resolve_or_create_pane(
                     target_session,
                     is_first_column(file, col_args),
                 );
+                ensure_existing_pane_ready_for_dispatch(tmux, file, registered_pane, harness)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 send_command(tmux, registered_pane, file_path, harness)?;
                 require_routed_cycle_ack(
@@ -812,6 +813,7 @@ fn resolve_or_create_pane(
             existing, file_path
         );
         sessions::register(session_id, &existing, file_path)?;
+        ensure_existing_pane_ready_for_dispatch(tmux, file, &existing, harness)?;
         send_command(tmux, &existing, file_path, harness)?;
         require_routed_cycle_ack(
             tmux,
@@ -831,6 +833,7 @@ fn resolve_or_create_pane(
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         sessions::register(session_id, &new_pane, file_path)?;
+        ensure_existing_pane_ready_for_dispatch(tmux, file, &new_pane, harness)?;
         send_command(tmux, &new_pane, file_path, harness)?;
         require_routed_cycle_ack(
             tmux,
@@ -861,6 +864,7 @@ fn resolve_or_create_pane(
         false,
         split_before,
         harness,
+        Some(created_panes),
     )?;
 
     // Look up the pane that was just created
@@ -1042,6 +1046,44 @@ fn send_command_checked(
         enter_retries
     );
     Ok(CommandDispatchStatus::TimedOut)
+}
+
+fn existing_pane_ready_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
+fn ensure_existing_pane_ready_for_dispatch(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Result<()> {
+    if wait_for_agent_ready(tmux, pane, existing_pane_ready_timeout(), harness) {
+        return Ok(());
+    }
+
+    let provenance = pane_route_provenance(tmux, pane);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_existing_pane_not_idle file={} pane={} harness={} {}",
+            file.display(),
+            pane,
+            harness.binary,
+            provenance
+        ),
+    );
+    anyhow::bail!(
+        "registered pane {} for {} is not showing an idle {} prompt; refusing to inject a routed trigger into a busy session ({})",
+        pane,
+        file.display(),
+        harness.binary,
+        provenance
+    );
 }
 
 fn cycle_state_advances_start_ack(
@@ -1556,6 +1598,7 @@ fn auto_start_ext(
         skip_wait,
         split_before,
         &harness,
+        None,
     )
 }
 
@@ -1650,6 +1693,7 @@ fn auto_start_in_session(
     skip_wait: bool,
     split_before: bool,
     harness: &HarnessConfig,
+    mut created_panes: Option<&mut Vec<String>>,
 ) -> Result<String> {
     // Serialize auto-starts for both the document and the target tmux session.
     // This prevents duplicate starts for the same file and split-target races
@@ -1753,6 +1797,9 @@ fn auto_start_in_session(
             tmux.auto_start(session_name, &cwd)?
         }
     };
+    if let Some(created) = created_panes.as_mut() {
+        created.push(new_pane.clone());
+    }
 
     evict_previous_stash_pane(tmux, session_id, &new_pane, session_name, harness);
 
@@ -1968,11 +2015,9 @@ fn wait_for_agent_ready(
 /// Check if pane content shows the agent's idle prompt.
 fn pane_has_prompt(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
     if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
-        content
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .is_some_and(|line| harness.is_prompt_line(line))
+        harness
+            .last_prompt_candidate(&content)
+            .is_some_and(|line| harness.is_prompt_line(&line))
     } else {
         false
     }
@@ -2511,6 +2556,23 @@ mod tests {
         script
     }
 
+    fn write_mock_busy_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-busy");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn launch_mock_registered_agent_doc(
         iso: &IsolatedTmux,
         pane: &str,
@@ -2632,9 +2694,8 @@ mod tests {
             "shell did not become ready before mock codex launch"
         );
 
-        // Codex uses > as prompt
-        let script =
-            r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "> \n"; cat'"#;
+        // Recent Codex builds expose a `›` prompt above a footer/status line.
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "› \n"; printf "gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n"; cat'"#;
         send_keys_with_retry(&iso, &pane, script);
         let content = wait_for_pane_contains(
             &iso,
@@ -2649,7 +2710,10 @@ mod tests {
 
         let harness = HarnessConfig::codex();
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
-        assert!(ready, "should detect > prompt for codex harness");
+        assert!(
+            ready,
+            "should detect › prompt for codex harness even when a footer/status line follows it"
+        );
     }
 
     #[test]
@@ -2962,6 +3026,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect_err("route should fail closed when the live child never starts a new cycle");
         assert!(
@@ -2979,6 +3044,65 @@ history line
         assert!(
             content.contains("GOT:agent-doc "),
             "route should still dispatch the trigger to the registered pane: {content}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", mock_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy", &pane, &file_path).unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed instead of injecting into a busy live pane");
+        assert!(
+            err.to_string()
+                .contains("is not showing an idle codex prompt"),
+            "unexpected error: {err:#}"
+        );
+
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "route should not inject a trigger before the pane becomes idle: {after}"
         );
     }
 
@@ -3027,6 +3151,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect_err("same-cycle committed churn must not satisfy routed live-pane ack");
         assert!(
@@ -3100,6 +3225,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect("route should accept the new cycle ack");
         assert_eq!(resolved, pane);
@@ -3165,6 +3291,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect("route should continue recovery after clearing the stale registration");
         assert_ne!(resolved, stale_pane);
@@ -3241,6 +3368,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect("route should recover by re-registering to the live owner");
         assert_eq!(resolved, live_pane);
@@ -3302,6 +3430,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect("route should recover the live owner via supervisor pid");
         assert_eq!(resolved, pane);
@@ -4584,11 +4713,15 @@ history line
     #[test]
     fn failed_route_cleanup_preserves_live_registered_owner() {
         let dir = tempfile::tempdir().unwrap();
-        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
         let pane = iso.new_session("test", dir.path()).unwrap();
+        let file = dir.path().join("tasks/software/corky.md");
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file, "# Corky\n").unwrap();
         sessions::register_full_in(
             dir.path(),
             "session-1",
@@ -4600,7 +4733,7 @@ history line
         .unwrap();
 
         assert!(
-            should_preserve_failed_route_pane(&iso, &pane, "session-1"),
+            should_preserve_failed_route_pane(&iso, &file, &pane, "session-1"),
             "failed-route cleanup must preserve the live registered owner pane"
         );
     }
@@ -4608,15 +4741,65 @@ history line
     #[test]
     fn failed_route_cleanup_does_not_preserve_unregistered_pane() {
         let dir = tempfile::tempdir().unwrap();
-        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let iso = IsolatedTmux::new("route-test-cleanup-unregistered");
         let pane = iso.new_session("test", dir.path()).unwrap();
+        let file = dir.path().join("tasks/software/corky.md");
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file, "# Corky\n").unwrap();
 
         assert!(
-            !should_preserve_failed_route_pane(&iso, &pane, "session-1"),
+            !should_preserve_failed_route_pane(&iso, &file, &pane, "session-1"),
             "failed-route cleanup should still remove panes that never became the live owner"
+        );
+    }
+
+    #[test]
+    fn failed_route_cleanup_only_reaps_attempt_local_created_panes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let iso = IsolatedTmux::new("route-test-cleanup-concurrent-sibling");
+        let pane_owned = iso.new_session("test", dir.path()).unwrap();
+        let pane_sibling = iso.split_window(&pane_owned, dir.path(), "-dh").unwrap();
+
+        sessions::register_full_in(
+            dir.path(),
+            "session-1",
+            &pane_owned,
+            "tasks/software/corky.md",
+            123,
+            "@1",
+        )
+        .unwrap();
+        sessions::register_full_in(
+            dir.path(),
+            "session-2",
+            &pane_sibling,
+            "tasks/software/tsift.md",
+            456,
+            "@1",
+        )
+        .unwrap();
+
+        let file = dir.path().join("tasks/software/corky.md");
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file, "# Corky\n").unwrap();
+
+        cleanup_failed_route_panes(&iso, &file, "session-1", std::slice::from_ref(&pane_owned));
+
+        assert!(
+            iso.pane_alive(&pane_owned),
+            "cleanup should preserve the live owner pane for the failed route"
+        );
+        assert!(
+            iso.pane_alive(&pane_sibling),
+            "cleanup must not reap sibling panes that were not created by this route attempt"
         );
     }
 
@@ -4927,6 +5110,7 @@ history line
             &file_path,
             session,
             &HarnessConfig::codex(),
+            &mut Vec::new(),
         )
         .expect("route should restart the registered pane instead of autostarting a duplicate");
         let panes_after = iso

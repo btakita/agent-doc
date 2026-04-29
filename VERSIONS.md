@@ -617,7 +617,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Tracing instrumentation**: `tracing::debug!` at key decision points in sync, route, layout, and resync modules.
 - **Source annotations for extract/transfer**: `agent-doc extract` and `agent-doc transfer` now wrap content with `[EXTRACT from ...]` or `[TRANSFER from ...]` blockquote annotations including timestamp.
 - **Post-sync session health check**: After every sync, verifies the tmux session still exists. Logs `CRITICAL` if session was destroyed.
-- **Route cleanup on failure**: When route fails, orphaned panes created during the attempt are killed before the error propagates.
+- **Route cleanup on failure**: When route fails, only panes that the current route attempt itself created are eligible for cleanup before the error propagates. Concurrent panes from sibling documents in the same tmux window are no longer treated as orphaned cleanup candidates.
 
 ## 0.31.5
 

@@ -118,13 +118,14 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Prune stale entries from `sessions.json`
 2. Ensure session UUID in frontmatter (generate if missing)
 3. Look up pane in `sessions.json`
-4. If the registered pane is alive, first try to prove that it still owns the document via tmux process-tree match on the file path, then supervisor child-PID fallback. When that proof succeeds, route sends `/agent-doc <FILE>` via `send_keys`, runs the Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), then focuses the pane.
+4. If the registered pane is alive, first try to prove that it still owns the document via tmux process-tree match on the file path, then supervisor child-PID fallback. When that proof succeeds, route must first see the harness's idle prompt in that pane; only then does it send `/agent-doc <FILE>` via `send_keys`, run the Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), and focus the pane. If the pane never becomes idle, route fails closed instead of drafting input into a busy session.
 5. If the registered pane is alive but no live-owner proof succeeds, route still probes the pane's supervisor health before declaring it stale:
-   - **Healthy** supervisor → reuse the registered pane and send the routed command there
+   - **Healthy** supervisor → reuse the registered pane and send the routed command there, but only after the same idle-prompt gate passes
    - **Needs restart** (reachable supervisor, child halted/degraded/not running) → send supervisor `restart`, refocus the same pane, and require a fresh routed-cycle ack instead of spawning a second pane
    - **Unreachable** or **No socket** → clear the stale registration and continue to lazy-claim / auto-start
 6. If pane dead (previously registered) → lazy-claim only to an explicit `--pane P` override, and only if that pane is not already claimed and is running an agent process (`agent-doc`, `claude`, `node`). Route does **not** adopt the tmux session's current active pane implicitly. Non-agent panes (corky, shells, etc.) are skipped — falls through to auto-start. Unregistered files skip lazy-claim entirely.
 7. If no active pane available → auto-start cascade (see below), register, wait up to 30s for Claude `❯` prompt via `pane_has_prompt()` with ANSI stripping, then send command
+8. If route fails after creating replacement panes, cleanup must be scoped to panes created by that specific route attempt. Panes that appeared concurrently for other documents in the same tmux window are out of scope and must not be killed as inferred orphans.
 
 **Session validation:** If `tmux_session` references a non-existent tmux session, route logs a warning, ignores the stale pin, and resolves a live target from the current tmux session or an already-alive harness fallback session. If the only remaining target is a dead implicit fallback name (for example `"claude"` / `"codex"`), route fails closed instead of creating that session implicitly.
 

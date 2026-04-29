@@ -520,8 +520,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     };
 
-    // Phase 3: consume queue prompt after successful write, before commit.
-    // Included in the same commit as the response for atomicity.
+    if write_result.is_ok() {
+        run_closeout_pending_maintenance(file, commit_mode)?;
+    }
+
+    // Phase 3b: pre-commit pending closeout gates (strict mode only).
+    if write_result.is_ok() && commit_mode == CommitMode::Required {
+        precommit_pending_capture_check(file)?;
+        precommit_pending_done_check(file)?;
+    }
+
+    // Phase 3c: consume queue prompt after all other strict closeout gates
+    // have passed so a rejected closeout cannot advance the queue early.
     if write_result.is_ok() {
         match commit_mode {
             CommitMode::None => {}
@@ -534,16 +544,6 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 consume_queue_prompt(file)?;
             }
         }
-    }
-
-    if write_result.is_ok() {
-        run_closeout_pending_maintenance(file, commit_mode)?;
-    }
-
-    // Phase 3b: pre-commit pending closeout gates (strict mode only).
-    if write_result.is_ok() && commit_mode == CommitMode::Required {
-        precommit_pending_capture_check(file)?;
-        precommit_pending_done_check(file)?;
     }
 
     let commit_result = finalize_commit(file, commit_mode);
@@ -731,19 +731,51 @@ fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Res
 /// this is a no-op. On consumption, the first prompt is removed from both
 /// the file and the snapshot. When the queue drains to empty, `auto` is
 /// stripped and `queue_active` is cleared.
+struct QueueConsumptionPlan {
+    consumed_text: String,
+    remaining: usize,
+    drained: bool,
+    new_document: String,
+    new_snapshot: String,
+    save_snapshot: bool,
+}
+
 fn consume_queue_prompt(file: &Path) -> Result<bool> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
     let content =
         std::fs::read_to_string(file).context("queue consume: failed to read document")?;
-    let (fm, _) = frontmatter::parse(&content)?;
-
-    if fm.queue_active != Some(true) {
+    let Some(plan) = plan_queue_prompt_consumption(file, &content)? else {
         return Ok(false);
+    };
+
+    atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
+    if plan.save_snapshot {
+        snapshot::save(file, &plan.new_snapshot)?;
     }
 
-    let components = component::parse(&content)?;
+    eprintln!(
+        "[queue] consumed: {:?} (remaining: {})",
+        plan.consumed_text, plan.remaining
+    );
+    if plan.drained {
+        eprintln!("[queue] drained — cleared queue_active");
+    }
+
+    Ok(true)
+}
+
+fn plan_queue_prompt_consumption(
+    file: &Path,
+    content: &str,
+) -> Result<Option<QueueConsumptionPlan>> {
+    let (fm, _) = frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+
+    let components = component::parse(content)?;
     let comp = components
         .iter()
         .find(|c| c.name == "queue")
@@ -767,7 +799,7 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
 
     let new_entries = crate::queue::remove_first_prompt(&entries);
     let new_body = crate::queue::render(&new_entries);
-    let mut current = comp.replace_content(&content, &new_body);
+    let mut current = comp.replace_content(content, &new_body);
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
     let remaining = crate::queue::prompts(&new_entries).len();
@@ -790,8 +822,6 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
         }
         current = frontmatter::merge_fields(&current, "queue_active: false")?;
     }
-
-    std::fs::write(file, &current).context("queue consume: failed to write document")?;
 
     // Update snapshot in sync. Required closeouts must be able to prove the
     // same head prompt was removed from both the file and the snapshot.
@@ -852,18 +882,24 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
     }
 
     if new_snap != snap {
-        snapshot::save(file, &new_snap)?;
+        return Ok(Some(QueueConsumptionPlan {
+            consumed_text,
+            remaining,
+            drained,
+            new_document: current,
+            new_snapshot: new_snap,
+            save_snapshot: true,
+        }));
     }
 
-    eprintln!(
-        "[queue] consumed: {:?} (remaining: {})",
-        consumed_text, remaining
-    );
-    if drained {
-        eprintln!("[queue] drained — cleared queue_active");
-    }
-
-    Ok(true)
+    Ok(Some(QueueConsumptionPlan {
+        consumed_text,
+        remaining,
+        drained,
+        new_document: current,
+        new_snapshot: new_snap,
+        save_snapshot: false,
+    }))
 }
 
 /// Enforcement: reject full-replacement blocks targeting the `pending` component

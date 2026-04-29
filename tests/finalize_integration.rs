@@ -746,3 +746,70 @@ fn finalize_fails_closed_when_active_queue_is_malformed() {
         "HEAD blob should remain unchanged when required queue closeout cannot prove queue consumption"
     );
 }
+
+#[test]
+fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = queue_doc_content().replace(
+        "agent: codex\nmodel: gpt-5\n",
+        "agent: codex\nmodel: gpt-5\npending_capture_guard: strict\n",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[finalize] pre-commit gate"))
+        .stderr(predicates::str::contains("recommendation-like items"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- do #fix1"),
+        "queue head should remain when a later strict closeout gate rejects the cycle"
+    );
+    assert!(
+        content.contains("### Re: recommendations — gpt-5"),
+        "the response write itself should still be present in the working tree"
+    );
+
+    let snap_dir = tmp.path().join(".agent-doc/snapshots");
+    let mut snapshot_checked = false;
+    for entry in fs::read_dir(&snap_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().is_some_and(|e| e == "md") {
+            let snap = fs::read_to_string(entry.path()).unwrap();
+            if snap.contains("### Re: recommendations — gpt-5") {
+                assert!(
+                    snap.contains("- do #fix1"),
+                    "snapshot queue head should remain when queue consumption never ran"
+                );
+                snapshot_checked = true;
+            }
+        }
+    }
+    assert!(
+        snapshot_checked,
+        "expected a snapshot containing the captured response"
+    );
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re: recommendations — gpt-5"),
+        "HEAD should remain unchanged when strict pre-commit gates reject finalize"
+    );
+}

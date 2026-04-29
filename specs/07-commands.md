@@ -1079,14 +1079,14 @@ Preflight performs these mutations before emitting queue state:
 
 ### Post-commit consumption (Phase 3)
 
-After a successful response write (`finalize` or `write --commit`), the consumed prompt is removed from the `agent:queue` block before the commit step so the consumption is included atomically in the same git commit as the response.
+After a successful response write (`finalize` or `write --commit`), required closeouts first run the remaining strict post-write gates (pending maintenance and strict pending guards). Only after those gates pass is the consumed prompt removed from the `agent:queue` block so the same git commit can capture both the response and the queue advance.
 
 - Acquire the document advisory lock (`acquire_doc_lock`) before reading the file. The lock is held for the entire read-parse-write cycle to prevent concurrent edits from invalidating parsed offsets.
 - Read frontmatter: if `queue_active != true`, skip.
 - Parse the queue component body. If `queue_active: true` but the document queue is missing, malformed, or has no prompt at the head, required closeouts fail before commit.
 - Remove the first `Prompt` entry via `remove_first_prompt()`.
 - If queue drained (no prompts remain): strip `auto` from opening tag, set `queue_active: false` in frontmatter.
-- Load and parse the snapshot queue too. The same head prompt must exist in both file and snapshot, and removing it must yield the same remaining queue state; otherwise required closeouts fail before commit.
-- Write updated content to file AND snapshot.
+- Load and parse the snapshot queue too before mutating either side. The same head prompt must exist in both file and snapshot, and removing it must yield the same remaining queue state; otherwise required closeouts fail before commit.
+- Only after both transforms are proven do we write the updated file and snapshot content.
 - Required closeouts (`finalize`, session-document `write --commit`) must fail closed unless queue consumption can prove the first prompt was removed from both the file and the snapshot. Best-effort non-session `write --commit` still downgrades queue-consume errors to warnings.
 - The commit that follows stages the snapshot (which now includes the consumed queue).

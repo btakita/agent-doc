@@ -92,6 +92,14 @@ use uuid::Uuid;
 
 use crate::model_tier::Tier;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollaborationMode {
+    #[default]
+    SingleUser,
+    Shared,
+}
+
 /// Document format: controls document structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum AgentDocFormat {
@@ -405,6 +413,21 @@ pub struct Frontmatter {
     /// `do queue`/`run queue`. Cleared when the queue drains to empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,
+    /// Collaboration scope for the document.
+    /// `shared` opts the document into stricter cross-document security checks.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_collaboration"
+    )]
+    pub collaboration: Option<CollaborationMode>,
+    /// Audit note / approval token for cross-document reads or transfers in shared mode.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_security_review"
+    )]
+    pub security_review: Option<String>,
 }
 
 impl Frontmatter {
@@ -460,6 +483,17 @@ impl Frontmatter {
             _ => None,
         };
         harness_specific.or(self.model.as_deref())
+    }
+
+    pub fn collaboration_mode(&self) -> CollaborationMode {
+        self.collaboration.unwrap_or_default()
+    }
+
+    pub fn has_security_review(&self) -> bool {
+        self.security_review
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
     }
 }
 
@@ -596,6 +630,15 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "queue_active" => {
                 fm.queue_active = value.as_bool();
             }
+            "agent_doc_collaboration" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(mode) =
+                        serde_yaml::from_str::<CollaborationMode>(&format!("\"{}\"", s))
+                {
+                    fm.collaboration = Some(mode);
+                }
+            }
+            "agent_doc_security_review" => fm.security_review = val_str(),
             _ => {
                 eprintln!("[frontmatter] ignoring unknown patch field: {}", key_str);
             }
@@ -781,6 +824,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_collaboration_mode_shared() {
+        let content = "---\nagent_doc_collaboration: shared\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.collaboration_mode(), CollaborationMode::Shared);
+    }
+
+    #[test]
+    fn parse_security_review_roundtrip() {
+        let content = "---\nagent_doc_collaboration: shared\nagent_doc_security_review: sec-2026-04-29\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.collaboration_mode(), CollaborationMode::Shared);
+        assert_eq!(fm.security_review.as_deref(), Some("sec-2026-04-29"));
+        assert!(fm.has_security_review());
+        let written = write(&fm, "Body\n").unwrap();
+        assert!(written.contains("agent_doc_collaboration: shared"));
+        assert!(written.contains("agent_doc_security_review: sec-2026-04-29"));
+    }
+
+    #[test]
     fn parse_model_tier_low() {
         let content = "---\nagent_doc_model_tier: low\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
@@ -922,6 +984,8 @@ mod tests {
             agent_doc_env_inherit: None,
             cwd: None,
             queue_active: None,
+            collaboration: None,
+            security_review: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();
@@ -932,6 +996,8 @@ mod tests {
         assert_eq!(fm2.claude_model, fm.claude_model);
         assert_eq!(fm2.codex_model, fm.codex_model);
         assert_eq!(fm2.branch, fm.branch);
+        assert_eq!(fm2.collaboration, fm.collaboration);
+        assert_eq!(fm2.security_review, fm.security_review);
         assert_eq!(body2, body);
     }
 

@@ -116,6 +116,12 @@ agent-doc write plan.md \
 That keeps the backlog self-describing: the pending line already tells the next
 cycle which concrete plan file exists and should be opened.
 
+If the document is being used collaboratively, treat that cross-document read as
+a security boundary. Shared docs should carry both
+`agent_doc_collaboration: shared` and an auditable
+`agent_doc_security_review: <review-id>` before a `do #id` cycle follows a
+plan path into another `.md` file.
+
 ## What to decide each cycle
 
 - Items completed during this response → `--pending-done <id>`

@@ -38,7 +38,7 @@ use std::path::Path;
 use crate::{
     component,
     component::{is_backlog_component, is_tracked_work_component},
-    diff, frontmatter, pending,
+    diff, frontmatter, pending, security,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +127,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
     let pending_mutations =
         pending_mutations_for_doc(&content, &repo_actions, &prompt_targets, &added_diff_lines)?;
+    let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
@@ -189,7 +190,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         required_commands,
         pending_mutations,
         handoff,
-        blockers: Vec::new(),
+        blockers: std::mem::take(&mut blockers),
     })
 }
 
@@ -288,6 +289,30 @@ fn extract_do_pending_id(action: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_alphanumeric())
         .collect();
     (!id.is_empty()).then_some(id)
+}
+
+fn shared_doc_security_blockers(
+    file: &Path,
+    fm: &frontmatter::Frontmatter,
+    pending_mutations: &[PendingMutationPlan],
+) -> Vec<String> {
+    if fm.collaboration_mode() != frontmatter::CollaborationMode::Shared || fm.has_security_review()
+    {
+        return Vec::new();
+    }
+
+    pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
+        .filter_map(|mutation| {
+            let referenced = security::referenced_markdown_path(file, &mutation.text)?;
+            Some(format!(
+                "Shared document item `#{}` references {} but this file has no `agent_doc_security_review`. Add an approved review marker before reading another plan/backlog document in shared mode.",
+                mutation.id,
+                referenced.display()
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -884,6 +909,129 @@ Done.
             "expected ExpectAdd from harness prompt preset expansion, got {:?}",
             plan.pending_mutations
         );
+    }
+
+    #[test]
+    fn build_plan_blocks_shared_doc_plan_reference_without_security_review() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_collaboration: shared
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#spec2] Follow tasks/plan-follow-up.md before rollout
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_collaboration: shared
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+do #spec2. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#spec2] Follow tasks/plan-follow-up.md before rollout
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert_eq!(plan.pending_mutations.len(), 1);
+        assert_eq!(plan.pending_mutations[0].id, "spec2");
+        assert_eq!(plan.blockers.len(), 1);
+        assert!(plan.blockers[0].contains("agent_doc_security_review"));
+    }
+
+    #[test]
+    fn build_plan_allows_shared_doc_plan_reference_with_security_review() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_collaboration: shared
+agent_doc_security_review: sec-1
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#spec2] Follow tasks/plan-follow-up.md before rollout
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_collaboration: shared
+agent_doc_security_review: sec-1
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+do #spec2. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#spec2] Follow tasks/plan-follow-up.md before rollout
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        assert_eq!(plan.pending_mutations.len(), 1);
+        assert_eq!(plan.pending_mutations[0].id, "spec2");
     }
 
     #[test]

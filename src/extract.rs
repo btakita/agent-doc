@@ -38,7 +38,7 @@ use std::process::Command;
 use crate::{
     component,
     component::{is_backlog_component, is_icebox_component},
-    frontmatter, snapshot, write,
+    frontmatter, security, snapshot, write,
 };
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
@@ -124,11 +124,35 @@ fn allow_selective_item_transfer(component_name: &str) -> bool {
     is_backlog_component(component_name) || is_icebox_component(component_name)
 }
 
-fn render_target_scaffold(title: &str, agent: &str, session_id: uuid::Uuid) -> String {
-    format!(
-        "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-        session_id, agent, title
+fn render_target_scaffold(
+    title: &str,
+    agent: &str,
+    session_id: uuid::Uuid,
+    source_fm: &frontmatter::Frontmatter,
+) -> String {
+    let fm = frontmatter::Frontmatter {
+        session: Some(session_id.to_string()),
+        agent: Some(agent.to_string()),
+        format: Some(frontmatter::AgentDocFormat::Template),
+        write_mode: Some(frontmatter::AgentDocWrite::Crdt),
+        collaboration: (source_fm.collaboration_mode() == frontmatter::CollaborationMode::Shared)
+            .then_some(frontmatter::CollaborationMode::Shared),
+        security_review: source_fm
+            .security_review
+            .as_deref()
+            .map(str::trim)
+            .filter(|review| !review.is_empty())
+            .map(str::to_string),
+        ..Default::default()
+    };
+    frontmatter::write(
+        &fm,
+        &format!(
+            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
+            title
+        ),
     )
+    .expect("target scaffold frontmatter should serialize")
 }
 
 fn merge_list_component(
@@ -182,6 +206,15 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
         .with_context(|| format!("failed to read {}", source.display()))?;
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
+    let (source_fm, _) = frontmatter::parse_for_file(&source_content, source)?;
+    let (target_fm, _) = frontmatter::parse_for_file(&target_content, target)?;
+    security::enforce_cross_document_review(
+        "extract",
+        source,
+        &source_fm,
+        target,
+        Some(&target_fm),
+    )?;
 
     let comp_name = component_name.unwrap_or("exchange");
 
@@ -310,6 +343,31 @@ pub fn transfer(
         anyhow::bail!("source file not found: {}", source.display());
     }
 
+    let source_content = std::fs::read_to_string(source)
+        .with_context(|| format!("failed to read {}", source.display()))?;
+    let (source_fm, _) = frontmatter::parse_for_file(&source_content, source)?;
+
+    let target_existing = if target.exists() {
+        Some(
+            std::fs::read_to_string(target)
+                .with_context(|| format!("failed to read {}", target.display()))?,
+        )
+    } else {
+        None
+    };
+    let target_fm = if let Some(content) = target_existing.as_ref() {
+        Some(frontmatter::parse_for_file(content, target)?.0)
+    } else {
+        None
+    };
+    security::enforce_cross_document_review(
+        "transfer",
+        source,
+        &source_fm,
+        target,
+        target_fm.as_ref(),
+    )?;
+
     if !bypass_claim {
         check_target_ownership(target)?;
     } else {
@@ -328,19 +386,16 @@ pub fn transfer(
 
     // Auto-init target if it doesn't exist (always template mode)
     if !target.exists() {
-        let source_content = std::fs::read_to_string(source)
-            .with_context(|| format!("failed to read {}", source.display()))?;
-
         let title = target
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("Untitled Session");
         let session_id = uuid::Uuid::new_v4();
-        let agent = frontmatter::parse(&source_content)
-            .ok()
-            .and_then(|(fm, _)| fm.agent.clone())
+        let agent = source_fm
+            .agent
+            .clone()
             .unwrap_or_else(|| "claude".to_string());
-        let target_content = render_target_scaffold(title, &agent, session_id);
+        let target_content = render_target_scaffold(title, &agent, session_id, &source_fm);
 
         if let Some(parent) = target.parent()
             && !parent.exists()
@@ -352,8 +407,6 @@ pub fn transfer(
         eprintln!("[transfer] Auto-created {} (template)", target.display());
     }
 
-    let source_content = std::fs::read_to_string(source)
-        .with_context(|| format!("failed to read {}", source.display()))?;
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
 
@@ -798,11 +851,59 @@ mod tests {
 
     #[test]
     fn render_target_scaffold_includes_backlog_and_icebox_components() {
-        let scaffold = render_target_scaffold("Title", "codex", uuid::Uuid::nil());
+        let scaffold = render_target_scaffold(
+            "Title",
+            "codex",
+            uuid::Uuid::nil(),
+            &frontmatter::Frontmatter::default(),
+        );
         assert!(scaffold.contains("<!-- agent:backlog -->"));
         assert!(scaffold.contains("<!-- /agent:backlog -->"));
         assert!(scaffold.contains("<!-- agent:icebox -->"));
         assert!(scaffold.contains("<!-- /agent:icebox -->"));
+    }
+
+    #[test]
+    fn render_target_scaffold_inherits_shared_review_metadata() {
+        let scaffold = render_target_scaffold(
+            "Title",
+            "codex",
+            uuid::Uuid::nil(),
+            &frontmatter::Frontmatter {
+                collaboration: Some(frontmatter::CollaborationMode::Shared),
+                security_review: Some("sec-1".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(scaffold.contains("agent_doc_collaboration: shared"));
+        assert!(scaffold.contains("agent_doc_security_review: sec-1"));
+    }
+
+    #[test]
+    fn transfer_blocks_shared_source_without_security_review() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("source.md");
+        let target = dir.path().join("target.md");
+        std::fs::write(
+            &source,
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "agent_doc_collaboration: shared\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\n",
+                "Done.\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+        )
+        .unwrap();
+
+        let err = transfer(&source, &target, "exchange", false, None, false).unwrap_err();
+        assert!(err.to_string().contains("agent_doc_security_review"));
     }
 
     /// --referral and --items are mutually exclusive.

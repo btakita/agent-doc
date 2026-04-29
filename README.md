@@ -194,6 +194,7 @@ agent-doc is designed for **single-user, local operation**. All session data (do
 - **Private repo recommended.** Session documents may contain sensitive content (correspondence, research, credentials in context). Use a private git repository.
 - **Prompt injection risk.** Content pasted into documents from external sources (emails, web pages, chat logs) could contain prompt injection attempts. The agent processes all document content as user input with no injection scanning.
 - **`--dangerously-skip-permissions` exposure.** When running with this flag (common in agent-doc sessions), the agent has full filesystem access. Injected prompts could read files or execute commands if not sandboxed.
+- **Shared-doc guard is explicit, not full auth.** Documents may opt into `agent_doc_collaboration: shared`; in that mode, cross-document `extract` / `transfer` and plan-backed `do #id` work that references another `.md` file fail closed unless the document also carries `agent_doc_security_review: <review-id>`. This is an audit marker for cross-document access, not a replacement for real authentication or session isolation.
 
 **Planned:** Collaborative security for web/networked deployments (multi-user access control, session isolation, content scanning, compartmented access patterns).
 

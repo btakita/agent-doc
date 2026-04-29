@@ -301,7 +301,27 @@ Published:
 - `src/agent-doc` commit `cf07404` pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog item was added for this turn.
-<!-- agent:boundary:05bd3516 -->
+❯ do #tmuxcrash. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` restarted-child provenance — gpt-5
+
+I fixed the restarted-child provenance gap behind the repeated tmux-crash reports.
+
+- `startup_miss.rs` now tracks the latest harness run inside a supervisor session (`*_start` / `*_restart`), not just `session_start`, so a pane that cleanly restarts the child is classified as open again instead of looking permanently closed.
+- `route.rs` now treats a newer open harness run as enough to supersede an older startup-miss marker, and its ops provenance now logs that latest run event directly. That closes the false “same pane is still crashed/stale” interpretation after `codex_restart` / `fresh_restart`.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the stronger startup-miss contract.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `536155b` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I did not run a live tmux-backed manual repro on this repo in this turn, so I left the broader `#tmuxcrash` backlog item in place for that end-to-end proof instead of marking it fully closed.
+<!-- agent:boundary:f77181df -->
 <!-- /agent:exchange -->
 
 <!--

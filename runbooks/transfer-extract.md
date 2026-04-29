@@ -27,7 +27,7 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --by
 
 **`--bypass-claim`:** Required when the target document is owned by a different tmux pane. Without it, transfer checks pane ownership and refuses to write to another pane's document. Always use `--bypass-claim` for cross-session transfers — it signals deliberate intent.
 
-**`--items`:** Selective backlog or icebox transfer. Moves the tracked parent item whose flush-left line contains `[#id]`, along with any indented nested continuation lines under that item. Remaining items stay in the source. Valid with `component=pending`, `component=backlog`, or `component=icebox`. IDs can include or omit the `#` prefix.
+**`--items`:** Selective backlog or icebox transfer. Moves the tracked parent item whose flush-left `- ...` or `1. ...` line contains `[#id]`, along with any indented nested continuation lines under that item. Remaining items stay in the source. Valid with `component=pending`, `component=backlog`, or `component=icebox`. IDs can include or omit the `#` prefix.
 
 **What happens (full transfer):**
 1. Checks pane ownership of target (unless `--bypass-claim`)

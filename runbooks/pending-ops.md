@@ -16,18 +16,24 @@ Pending items carry stable IDs and GFM checkboxes:
 - [ ] [#a3f2] active item
 - [x] [#b1c4] user-marked done (commit-required closeouts reap it in the same cycle; preflight / repair also clean up stale completed items)
 - [/] [#c9e0] gated — skipped by reaper, waiting on external signal
+1. [ ] [#d4e5] explicit top priority
 ```
 
 Preflight lazy-backfills IDs and checkboxes on any item that lacks them. You do not assign
 hashes yourself unless you intentionally use the `id=<custom> ` prefix on add.
+
+If any tracked parent item in a backlog or icebox uses ordered-list style (`1.`, `2.`, `3.`),
+the binary treats that component as an ordered tracked surface and renumbers all tracked parent
+items sequentially in current item order on render. That keeps explicit priority lists stable
+across add/reorder/done/reap operations.
 
 Backlog and icebox sections may also contain markdown headings or blank separator
 lines for organization. The granular pending ops preserve those non-item lines in
 place; they mutate only the actual task bullets.
 
 Nested lists are supported under a backlog/icebox item as indented continuation
-lines. Keep the tracked parent bullet flush-left; the binary treats the indented
-children as part of that parent item and preserves them through reorder, done,
+lines. Keep the tracked parent marker flush-left (`- ` or `1. `); the binary treats
+the indented children as part of that parent item and preserves them through reorder, done,
 reap, and transfer.
 
 ## Granular flags

@@ -18,6 +18,35 @@ use crate::component::{is_backlog_component, is_tracked_work_component};
 use crate::pending;
 use crate::snapshot;
 
+fn trim_tracked_parent_prefix(line: &str) -> &str {
+    let trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        return rest.trim_start();
+    }
+
+    let digit_len = trimmed.bytes().take_while(|b| b.is_ascii_digit()).count();
+    if digit_len == 0 {
+        return trimmed;
+    }
+    let (_, tail) = trimmed.split_at(digit_len);
+    let Some(tail) = tail.strip_prefix('.') else {
+        return trimmed;
+    };
+    if !tail.starts_with(char::is_whitespace) {
+        return trimmed;
+    }
+    tail.trim_start()
+}
+
+fn line_is_legacy_done_item(line: &str) -> bool {
+    let trimmed = line.trim();
+    let after_marker = trim_tracked_parent_prefix(line);
+    trimmed.starts_with("\u{2705}")
+        || after_marker.starts_with("[x]")
+        || after_marker.starts_with("[X]")
+        || after_marker.starts_with("[done]")
+}
+
 fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = component::parse(&content).context("failed to parse components")?;
@@ -217,7 +246,7 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
         lines
             .iter()
             .filter(|line| {
-                let trimmed = line.trim().trim_start_matches("- ").trim();
+                let trimmed = trim_tracked_parent_prefix(line);
                 trimmed != target
             })
             .map(|s| s.to_string())
@@ -243,13 +272,7 @@ pub fn prune(file: &Path) -> Result<()> {
     let lines: Vec<&str> = existing.lines().collect();
     let new_lines: Vec<String> = lines
         .iter()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.starts_with("- [x]")
-                && !trimmed.starts_with("- [X]")
-                && !trimmed.starts_with("- [done]")
-                && !trimmed.starts_with("\u{2705}")
-        })
+        .filter(|line| !line_is_legacy_done_item(line))
         .map(|s| s.to_string())
         .collect();
 
@@ -508,6 +531,16 @@ mod tests {
     }
 
     #[test]
+    fn remove_exact_match_supports_ordered_parent_items() {
+        let (_tmp, doc) = doc_with_pending("1. [ ] [#abcd] first item\n2. [ ] [#efgh] second item");
+        remove(&doc, "[ ] [#abcd] first item", false).unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("[#abcd] first item"));
+        assert!(content.contains("[#efgh] second item"));
+    }
+
+    #[test]
     fn prune_removes_checked_items() {
         let (_tmp, doc) = doc_with_pending("- [ ] active\n- [x] done\n✅ finished");
         prune(&doc).unwrap();
@@ -516,6 +549,16 @@ mod tests {
         assert!(content.contains("- [ ] active"));
         assert!(!content.contains("- [x] done"));
         assert!(!content.contains("finished"));
+    }
+
+    #[test]
+    fn prune_removes_checked_ordered_items() {
+        let (_tmp, doc) = doc_with_pending("1. [ ] active\n2. [x] done");
+        prune(&doc).unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("1. [ ] active"));
+        assert!(!content.contains("2. [x] done"));
     }
 
     #[test]

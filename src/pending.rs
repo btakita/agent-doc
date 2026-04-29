@@ -3,11 +3,12 @@
 //! Pure functions for parsing and mutating the `agent:pending` component body.
 //!
 //! Each pending item carries:
-//! - a GFM task-list checkbox (`- [ ]` or `- [x]`)
+//! - a GFM task-list checkbox (`- [ ]` / `1. [ ]` or `- [x]` / `1. [x]`)
 //! - an id prefix rendered as `[#xxxx]` (generated hash or caller-provided custom id)
 //! - free-form text
 //!
-//! Canonical form: `- [ ] [#a3f2] refactor preflight commit path`
+//! Canonical unordered form: `- [ ] [#a3f2] refactor preflight commit path`
+//! Canonical ordered form: `1. [ ] [#a3f2] refactor preflight commit path`
 //!
 //! This module is I/O-free. Callers (`pending_cmd.rs`, `preflight.rs`, `write.rs`)
 //! handle reading/writing files, locking, and git commits.
@@ -32,6 +33,28 @@ pub enum PendingState {
     Open,
     Gated,
     Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingListMarker {
+    Bullet,
+    Ordered(usize),
+}
+
+impl PendingListMarker {
+    fn render_prefix(self, ordered_index: Option<usize>) -> String {
+        match ordered_index {
+            Some(index) => format!("{index}."),
+            None => match self {
+                PendingListMarker::Bullet => "-".to_string(),
+                PendingListMarker::Ordered(index) => format!("{index}."),
+            },
+        }
+    }
+
+    fn is_ordered(self) -> bool {
+        matches!(self, PendingListMarker::Ordered(_))
+    }
 }
 
 impl PendingState {
@@ -118,6 +141,9 @@ pub fn validate_transition(from: PendingState, op: PendingOp) -> Result<Transiti
 /// A parsed pending list item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingItem {
+    /// Parent list marker. `-` is the default; ordered lists store the parsed
+    /// source ordinal and are renumbered canonically on render.
+    pub marker: PendingListMarker,
     /// Pending item id (no `#` prefix). Generated ids are lowercase base32; custom ids
     /// may be any non-empty ASCII alphanumeric string and are normalized to lowercase.
     pub id: String,
@@ -137,11 +163,21 @@ impl PendingItem {
     /// Render to canonical `- [<state>] [#id] text` form.
     /// Typed gates render as `[/release]`, `[/deploy]`, etc.
     pub fn render(&self) -> String {
+        self.render_with_ordered_index(None)
+    }
+
+    fn render_with_ordered_index(&self, ordered_index: Option<usize>) -> String {
         let checkbox = match (&self.state, &self.gate_type) {
             (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
             _ => format!("[{}]", self.state.box_char()),
         };
-        let mut out = format!("- {} [#{}] {}", checkbox, self.id, self.text);
+        let mut out = format!(
+            "{} {} [#{}] {}",
+            self.marker.render_prefix(ordered_index),
+            checkbox,
+            self.id,
+            self.text
+        );
         if !self.continuation.is_empty() {
             out.push('\n');
             out.push_str(&self.continuation);
@@ -223,11 +259,27 @@ impl PendingLayout {
 
     fn render(&self) -> String {
         let mut out = String::new();
+        let ordered_mode = self
+            .segments
+            .iter()
+            .filter_map(|segment| match segment {
+                PendingSegment::Item { item, .. } => Some(item.marker.is_ordered()),
+                PendingSegment::Text(_) => None,
+            })
+            .any(|is_ordered| is_ordered);
+        let mut ordered_index = 1usize;
         for segment in &self.segments {
             match segment {
                 PendingSegment::Text(raw) => out.push_str(raw),
                 PendingSegment::Item { item, has_newline } => {
-                    out.push_str(&item.render());
+                    let render = if ordered_mode {
+                        let render = item.render_with_ordered_index(Some(ordered_index));
+                        ordered_index += 1;
+                        render
+                    } else {
+                        item.render()
+                    };
+                    out.push_str(&render);
                     if *has_newline && item.continuation.is_empty() {
                         out.push('\n');
                     }
@@ -334,8 +386,8 @@ pub struct ShadowPendingReport {
 
 /// Parse the pending component body into (prelude, items, postlude).
 ///
-/// - Prelude: leading non-list lines (whitespace, non `- ` bullets).
-/// - Items: parsed `- ...` list entries (legacy or fully-migrated).
+/// - Prelude: leading non-list lines (whitespace, non tracked parent lines).
+/// - Items: parsed tracked entries (`- ...` / `1. ...`, legacy or fully-migrated).
 /// - Postlude: trailing non-list lines after the last item.
 ///
 /// Interleaved non-item lines between backlog entries are intentionally not
@@ -383,7 +435,7 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
 /// Returns `None` when the line is not a list item. When the id is missing,
 /// the returned item has an empty id — callers must run `backfill` to assign one.
 fn parse_item_line(line: &str) -> Option<PendingItem> {
-    let rest = line.strip_prefix("- ")?;
+    let (marker, rest) = parse_parent_list_marker(line)?;
     let rest = rest.trim_start();
 
     // Checkbox? Supports typed gates: [/release], [/deploy], etc.
@@ -437,12 +489,33 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
     };
 
     Some(PendingItem {
+        marker,
         id,
         state,
         gate_type,
         text: text.trim_end().to_string(),
         continuation: String::new(),
     })
+}
+
+fn parse_parent_list_marker(line: &str) -> Option<(PendingListMarker, &str)> {
+    if let Some(rest) = line.strip_prefix("- ") {
+        return Some((PendingListMarker::Bullet, rest));
+    }
+
+    let digit_len = line.bytes().take_while(|b| b.is_ascii_digit()).count();
+    if digit_len == 0 {
+        return None;
+    }
+
+    let (digits, tail) = line.split_at(digit_len);
+    let tail = tail.strip_prefix('.')?;
+    if !tail.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = tail.trim_start();
+    let ordinal = digits.parse::<usize>().ok()?;
+    Some((PendingListMarker::Ordered(ordinal), rest))
 }
 
 fn is_indented_continuation_line(line: &str) -> bool {
@@ -554,12 +627,21 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
 #[allow(dead_code)]
 pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> String {
     let mut out = String::new();
+    let ordered_mode = items.iter().any(|item| item.marker.is_ordered());
+    let mut ordered_index = 1usize;
     out.push_str(prelude);
     if !prelude.is_empty() && !prelude.ends_with('\n') {
         out.push('\n');
     }
     for item in items {
-        out.push_str(&item.render());
+        let render = if ordered_mode {
+            let render = item.render_with_ordered_index(Some(ordered_index));
+            ordered_index += 1;
+            render
+        } else {
+            item.render()
+        };
+        out.push_str(&render);
         if item.continuation.is_empty() {
             out.push('\n');
         } else if !item.continuation.ends_with('\n') {
@@ -1038,6 +1120,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     taken.insert(id.clone());
 
     layout.insert_first_item(PendingItem {
+        marker: PendingListMarker::Bullet,
         id: id.clone(),
         state: if gated {
             PendingState::Gated
@@ -1289,10 +1372,22 @@ mod tests {
         let body = "- [ ] [#a3f2] first\n- [x] [#b1c4] second\n";
         let (_, items, _) = parse_items(body);
         assert_eq!(items.len(), 2);
+        assert_eq!(items[0].marker, PendingListMarker::Bullet);
         assert_eq!(items[0].id, "a3f2");
         assert_eq!(items[0].state, PendingState::Open);
         assert_eq!(items[0].text, "first");
         assert_eq!(items[1].id, "b1c4");
+        assert_eq!(items[1].state, PendingState::Done);
+    }
+
+    #[test]
+    fn parse_ordered_items() {
+        let body = "1. [ ] [#a3f2] first\n2. [x] [#b1c4] second\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].marker, PendingListMarker::Ordered(1));
+        assert_eq!(items[0].id, "a3f2");
+        assert_eq!(items[1].marker, PendingListMarker::Ordered(2));
         assert_eq!(items[1].state, PendingState::Done);
     }
 
@@ -1367,6 +1462,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_nested_lines_attach_to_ordered_parent_item() {
+        let body = concat!(
+            "1. [ ] [#a3f2] parent task\n",
+            "   1. dependency one\n",
+            "   2. dependency two\n",
+            "2. [ ] [#b1c4] sibling task\n"
+        );
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].marker, PendingListMarker::Ordered(1));
+        assert_eq!(
+            items[0].continuation,
+            "   1. dependency one\n   2. dependency two\n"
+        );
+        assert_eq!(items[1].marker, PendingListMarker::Ordered(2));
+    }
+
+    #[test]
     fn render_roundtrip_canonical() {
         let body = "- [ ] [#a3f2] first\n- [x] [#b1c4] second\n";
         let (p, items, post) = parse_items(body);
@@ -1383,8 +1496,17 @@ mod tests {
     }
 
     #[test]
+    fn render_roundtrip_ordered_list() {
+        let body = "1. [ ] [#a3f2] open\n2. [/] [#b1c4] gated\n3. [x] [#c9e0] done\n";
+        let (p, items, post) = parse_items(body);
+        let out = render_items(&p, &items, &post);
+        assert_eq!(out, body);
+    }
+
+    #[test]
     fn render_emits_slash_for_gated() {
         let item = PendingItem {
+            marker: PendingListMarker::Bullet,
             id: "eg0w".to_string(),
             state: PendingState::Gated,
             gate_type: None,
@@ -1474,6 +1596,15 @@ mod tests {
         assert_eq!(new_body.matches("[#").count(), 2, "got: {new_body}");
         assert!(new_body.contains("  - child dependency\n"));
         assert!(new_body.contains("  - child subtask\n"));
+    }
+
+    #[test]
+    fn backfill_preserves_ordered_parent_items() {
+        let body = concat!("1. legacy one\n", "2. [ ] [#keep1] keep section\n");
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(new_body.starts_with("1. [ ] [#"));
+        assert!(new_body.contains("2. [ ] [#keep1] keep section"));
     }
 
     #[test]
@@ -1576,6 +1707,19 @@ mod tests {
         assert!(lines[2].contains("existing task"), "got: {}", new_body);
         assert_eq!(lines[3], "### Later");
         assert!(lines[4].contains("later task"), "got: {}", new_body);
+    }
+
+    #[test]
+    fn op_add_renumbers_ordered_lists() {
+        let body = "1. [ ] [#a1b2] existing task\n2. [ ] [#c3d4] later task\n";
+        let (new_body, _id) = op_add(body, "new first task", DOC_ID, false).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert!(lines[0].starts_with("1. "), "got: {}", new_body);
+        assert!(lines[0].contains("new first task"), "got: {}", new_body);
+        assert!(lines[1].starts_with("2. "), "got: {}", new_body);
+        assert!(lines[1].contains("existing task"), "got: {}", new_body);
+        assert!(lines[2].starts_with("3. "), "got: {}", new_body);
+        assert!(lines[2].contains("later task"), "got: {}", new_body);
     }
 
     #[test]
@@ -1914,6 +2058,16 @@ mod tests {
     }
 
     #[test]
+    fn op_reorder_renumbers_ordered_lists() {
+        let body = "1. [ ] [#a1b2] first\n2. [ ] [#c3d4] second\n3. [ ] [#e5f6] third\n";
+        let new_body = op_reorder(body, &["e5f6".to_string(), "a1b2".to_string()]).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert_eq!(lines[0], "1. [ ] [#e5f6] third");
+        assert_eq!(lines[1], "2. [ ] [#a1b2] first");
+        assert_eq!(lines[2], "3. [ ] [#c3d4] second");
+    }
+
+    #[test]
     fn op_reorder_unknown_id_errors() {
         let body = "- [ ] [#a1b2] one\n";
         assert!(op_reorder(body, &["zzzz".to_string()]).is_err());
@@ -2157,6 +2311,7 @@ mod tests {
     #[test]
     fn render_typed_gate() {
         let item = PendingItem {
+            marker: PendingListMarker::Bullet,
             id: "a1b2".to_string(),
             state: PendingState::Gated,
             gate_type: Some("release".to_string()),
@@ -2320,6 +2475,26 @@ mod tests {
         assert_eq!(
             moved,
             concat!("- [ ] [#move1] Parent task\n", "  - child dependency\n")
+        );
+    }
+
+    #[test]
+    fn extract_items_by_id_preserves_ordered_list_style() {
+        let body = concat!(
+            "1. [ ] [#move1] Parent task\n",
+            "2. [ ] [#keep1] Keep task\n",
+            "3. [ ] [#keep2] Keep task two\n"
+        );
+        let (remaining, moved, matched) =
+            extract_items_by_id(body, &["move1".to_string()]).unwrap();
+        assert_eq!(matched, vec!["move1".to_string()]);
+        assert_eq!(moved, "1. [ ] [#move1] Parent task\n");
+        assert_eq!(
+            remaining,
+            concat!(
+                "1. [ ] [#keep1] Keep task\n",
+                "2. [ ] [#keep2] Keep task two\n"
+            )
         );
     }
 

@@ -36,8 +36,8 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
 - Generated on first insert (via `--pending-add`) unless the caller explicitly
   provides a custom id with canonical `id=<custom> ` syntax; leading
   `[#custom] ` is accepted as compatibility input and normalized to the same
-  custom id. Custom ids are non-empty ASCII alphanumeric strings. Lazy
-  backfill still generates IDs.
+  custom id. Custom ids are non-empty ASCII alphanumeric strings with optional
+  hyphens. Lazy backfill still generates IDs.
 - Stable across reorders, text edits, and cycles.
 - Visible in rendered markdown (like a GitHub issue number) — no hidden state.
 - Opaque: the hash is not meaningful, just unique within the component.
@@ -203,7 +203,9 @@ After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls f
 
 **Ordered parent-item support:** A backlog or icebox may use flush-left ordered parent entries (`1. ...`, `2. ...`) instead of unordered `- ...` bullets. When any tracked parent entry in a component uses ordered style, the binary canonicalizes all tracked parent entries in that component as a single sequential ordered list in current item order. Adds, reorders, done/reap transitions, and selective transfers therefore renumber tracked parents instead of preserving stale ordinals.
 
-**Nested checklist support:** A tracked backlog/icebox item is the flush-left tracked parent line (`- ...` or `1. ...`) plus any following indented continuation lines (nested lists, dependency notes, indented paragraphs, etc.) up to the next flush-left tracked item or other non-indented structural content. Those continuation lines move with the parent item during reorder/transfer, survive backfill/edit/done transitions, and are reaped together with the parent when it reaches `[x]`. Indented child bullets do not become separate tracked `[#id]` items unless they are promoted to their own flush-left entry.
+**Nested checklist support:** A tracked backlog/icebox item is the flush-left tracked parent line (`- ...` or `1. ...`) plus any following indented continuation lines (nested lists, dependency notes, indented paragraphs, etc.) up to the next flush-left tracked item or other non-indented structural content. Those continuation lines move with the parent item during reorder/transfer, survive backfill/edit/done transitions, and are reaped together with the parent when it reaches `[x]`.
+
+Indented child task lines are canonicalized when they look like list items: the binary inserts missing checkboxes and nested ids shaped like `[#parentid-abcd]`, where `parentid` is the owning flush-left tracked item's id and `abcd` is a generated suffix. Those nested ids stay subordinate to the parent continuation block — they are not independent reorder/done targets unless the child is promoted to its own flush-left tracked entry.
 
 ## Implementation plan
 

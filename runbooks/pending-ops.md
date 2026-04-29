@@ -34,7 +34,9 @@ place; they mutate only the actual task bullets.
 Nested lists are supported under a backlog/icebox item as indented continuation
 lines. Keep the tracked parent marker flush-left (`- ` or `1. `); the binary treats
 the indented children as part of that parent item and preserves them through reorder, done,
-reap, and transfer.
+reap, and transfer. Nested child task lines are canonicalized too: the binary inserts
+missing checkboxes and nested ids shaped like `[#parentid-abcd]` so subtask bullets can
+be referenced without promoting them to their own flush-left parent items.
 
 ## Granular flags
 
@@ -61,7 +63,7 @@ agent-doc write plan.md --pending-add "id=fix42 add regression test"
 ```
 
 Rules:
-- `custom` is a non-empty ASCII alphanumeric string.
+- `custom` is a non-empty ASCII alphanumeric string; hyphens are allowed.
 - `id=#spec1 ...` is also accepted; the leading `#` is stripped.
 - Leading `[#spec1] ...` is accepted as compatibility input and normalized to the
   same custom id, but `id=<custom> ` remains the preferred form for agents.

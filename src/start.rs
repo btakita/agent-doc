@@ -15,8 +15,10 @@
 //!   session, `start` switches the caller's current client to the target
 //!   session before selecting the pane.
 //! - If `sessions.json` points at an alive pane but no live owner can still be
-//!   proven for the document, clears that stale registration before starting in
-//!   the current pane.
+//!   proven for the document, `start` first consults the per-session supervisor:
+//!   healthy supervisors are reused, restartable supervisors are restarted in
+//!   place, and only unavailable supervisors are treated as stale before
+//!   starting in the current pane.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
@@ -768,6 +770,13 @@ enum SupervisorHealth {
     NoSocket,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleRegisteredPaneAction {
+    ReuseRegistered,
+    RestartRegistered,
+    ClearStale,
+}
+
 fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
@@ -819,6 +828,16 @@ fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
     match crate::supervisor::ipc::send_command(&sock, &method) {
         Ok(resp) => resp.ok,
         Err(_) => false,
+    }
+}
+
+fn stale_registered_pane_action(supervisor_health: SupervisorHealth) -> StaleRegisteredPaneAction {
+    match supervisor_health {
+        SupervisorHealth::Healthy => StaleRegisteredPaneAction::ReuseRegistered,
+        SupervisorHealth::NeedsRestart => StaleRegisteredPaneAction::RestartRegistered,
+        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
+            StaleRegisteredPaneAction::ClearStale
+        }
     }
 }
 
@@ -1464,12 +1483,53 @@ pub fn run(file: &Path) -> Result<()> {
                 }
             }
             ExistingSessionPaneAction::ClearStale(stale_pane) => {
-                eprintln!(
-                    "[start] registered pane {} is alive but no live owner for {} was proven — clearing stale entry",
-                    stale_pane,
-                    file.display()
-                );
-                let _ = sessions::deregister(&session_id)?;
+                match stale_registered_pane_action(query_supervisor_health(file, &session_id)) {
+                    StaleRegisteredPaneAction::ReuseRegistered => {
+                        eprintln!(
+                            "[start] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — switching focus",
+                            stale_pane,
+                            file.display()
+                        );
+                        if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &stale_pane) {
+                            eprintln!(
+                                "[start] warning: failed to focus pane {}: {}",
+                                stale_pane, e
+                            );
+                        }
+                        return Ok(());
+                    }
+                    StaleRegisteredPaneAction::RestartRegistered => {
+                        eprintln!(
+                            "[start] registered pane {} has a restartable supervisor for {} despite missing live-owner proof — restarting in place",
+                            stale_pane,
+                            file.display()
+                        );
+                        if restart_via_supervisor(file, &session_id) {
+                            if let Err(e) =
+                                focus_existing_session_pane(&tmux, &pane_id, &stale_pane)
+                            {
+                                eprintln!(
+                                    "[start] warning: failed to focus pane {}: {}",
+                                    stale_pane, e
+                                );
+                            }
+                            return Ok(());
+                        }
+                        eprintln!(
+                            "[start] supervisor restart failed for pane {} — clearing stale entry",
+                            stale_pane
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                    StaleRegisteredPaneAction::ClearStale => {
+                        eprintln!(
+                            "[start] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — clearing stale entry",
+                            stale_pane,
+                            file.display()
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                }
             }
         }
     }
@@ -2571,6 +2631,26 @@ mod tests {
 
         let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
         assert_eq!(action, None);
+    }
+
+    #[test]
+    fn stale_registered_pane_uses_supervisor_before_clearing() {
+        assert_eq!(
+            stale_registered_pane_action(SupervisorHealth::Healthy),
+            StaleRegisteredPaneAction::ReuseRegistered
+        );
+        assert_eq!(
+            stale_registered_pane_action(SupervisorHealth::NeedsRestart),
+            StaleRegisteredPaneAction::RestartRegistered
+        );
+        assert_eq!(
+            stale_registered_pane_action(SupervisorHealth::Unreachable),
+            StaleRegisteredPaneAction::ClearStale
+        );
+        assert_eq!(
+            stale_registered_pane_action(SupervisorHealth::NoSocket),
+            StaleRegisteredPaneAction::ClearStale
+        );
     }
 
     #[test]

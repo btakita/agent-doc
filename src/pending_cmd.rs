@@ -85,6 +85,12 @@ pub fn doc_id_for(file: &Path) -> String {
     snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string())
 }
 
+fn canonicalize_component_content(file: &Path, content: &str) -> String {
+    let doc_id = doc_id_for(file);
+    let (canonical, _) = pending::backfill(content, &doc_id, &HashSet::new());
+    canonical
+}
+
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
@@ -94,7 +100,8 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     println!("{}", id);
     Ok(())
@@ -109,7 +116,8 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
         let existing = &full_content[comp.open_end..comp.close_start];
         let doc_id = doc_id_for(file);
         let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
-        let new_doc = comp.replace_content(&full_content, &new_content);
+        let canonical = canonicalize_component_content(file, &new_content);
+        let new_doc = comp.replace_content(&full_content, &canonical);
         std::fs::write(file, &new_doc)?;
         ids.push(id);
     }
@@ -137,7 +145,8 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_component_containing_open_id(file, id)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_done(existing, id)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     Ok(())
 }
@@ -152,7 +161,8 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
         // No-op (already gated). Skip the disk write so we don't churn mtime.
         return Ok(());
     }
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     Ok(())
 }
@@ -163,7 +173,8 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_ungate(existing, id)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     Ok(())
 }
@@ -173,7 +184,8 @@ pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_edit(existing, id, text)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     Ok(())
 }
@@ -193,7 +205,8 @@ pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_reorder(existing, ids)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     Ok(())
 }
@@ -214,7 +227,8 @@ pub fn reap(file: &Path) -> Result<()> {
         eprintln!("[pending] no [x] items to reap");
         return Ok(());
     }
-    let new_doc = comp.replace_content(&full_content, &final_content);
+    let canonical = canonicalize_component_content(file, &final_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     if changed {
         eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");
@@ -303,7 +317,8 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
         );
         return Ok(());
     }
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     eprintln!(
         "[pending] resolved {} [/{}] item(s): {}",
@@ -322,7 +337,8 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_set_gate_type(existing, id, gate_type)?;
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
     eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
     Ok(())
@@ -583,6 +599,36 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("<!-- agent:pending -->\n- [ ] [#keep1] Keep backlog item\n"));
         assert!(content.contains("<!-- agent:icebox -->\n- [x] [#ice01] Parked follow-up\n"));
+    }
+
+    #[test]
+    fn edit_canonicalizes_nested_subtask_ids_immediately() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#tmuxcrash] parent task\n");
+        edit(
+            &doc,
+            "tmuxcrash",
+            "parent task\n  - child dependency\n  - child subtask",
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        let pending = content
+            .split("<!-- agent:pending -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+            .unwrap();
+        let lines: Vec<&str> = pending.lines().collect();
+        assert_eq!(lines[0], "- [ ] [#tmuxcrash] parent task");
+        assert!(
+            lines[1].starts_with("  - [ ] [#tmuxcrash-"),
+            "got: {}",
+            lines[1]
+        );
+        assert!(
+            lines[2].starts_with("  - [ ] [#tmuxcrash-"),
+            "got: {}",
+            lines[2]
+        );
     }
 
     #[test]

@@ -615,7 +615,7 @@ Backlog and icebox bodies may include markdown headings or blank separator lines
 
 Tracked backlog and icebox parents may use either flush-left unordered `- ...` or ordered `1. ...` list markers. If any tracked parent in the component uses ordered style, the binary canonicalizes the whole tracked surface as a sequential ordered list in current item order so numeric priority stays valid after mutations.
 
-Nested lists are also supported inside backlog and icebox items. The canonical tracked item is the flush-left parent entry (`- ...` or `1. ...`); any indented continuation lines that follow it belong to that same item and must move/reap/edit with the parent block rather than being parsed as standalone tracked work.
+Nested lists are also supported inside backlog and icebox items. The canonical tracked item is the flush-left parent entry (`- ...` or `1. ...`); any indented continuation lines that follow it belong to that same item and must move/reap/edit with the parent block rather than being parsed as standalone tracked work. When an indented continuation line itself looks like a child task item, backfill canonicalizes it with a checkbox and a nested id shaped like `[#parentid-abcd]` while still keeping it subordinate to the parent block.
 
 ## terminal
 

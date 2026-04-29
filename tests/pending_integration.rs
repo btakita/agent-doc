@@ -121,18 +121,52 @@ fn pending_add_accepts_long_bracketed_custom_id_prefix() {
 }
 
 #[test]
-fn pending_add_rejects_invalid_custom_id_prefix() {
+fn pending_add_accepts_hyphenated_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
         .args([
             "backlog",
             doc.to_str().unwrap(),
             "add",
-            "id=bad-id first task",
+            "id=tmuxcrash-abcd first task",
         ])
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("invalid custom id"));
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#tmuxcrash-abcd] first task"));
+}
+
+#[test]
+fn pending_backfill_assigns_parent_prefixed_nested_subtask_ids() {
+    let (_tmp, doc) = setup_doc("- parent task\n  - child dependency\n  - child subtask");
+    agent_doc()
+        .args(["backlog", doc.to_str().unwrap(), "backfill"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let pending = content
+        .split("<!-- agent:pending -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+        .unwrap();
+    let lines: Vec<&str> = pending.lines().collect();
+    let parent_id = lines[0]
+        .split("[#")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("parent id");
+    assert!(lines[1].starts_with("  - [ ] [#"), "got: {}", lines[1]);
+    assert!(lines[2].starts_with("  - [ ] [#"), "got: {}", lines[2]);
+    assert!(
+        lines[1].contains(&format!("[#{}-", parent_id)),
+        "expected nested id prefixed by parent id, got: {}",
+        lines[1]
+    );
+    assert!(
+        lines[2].contains(&format!("[#{}-", parent_id)),
+        "expected nested id prefixed by parent id, got: {}",
+        lines[2]
+    );
 }
 
 #[test]

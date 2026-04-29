@@ -145,7 +145,8 @@ pub struct PendingItem {
     /// source ordinal and are renumbered canonically on render.
     pub marker: PendingListMarker,
     /// Pending item id (no `#` prefix). Generated ids are lowercase base32; custom ids
-    /// may be any non-empty ASCII alphanumeric string and are normalized to lowercase.
+    /// and nested subtask ids may be hyphenated ASCII alphanumeric strings and are
+    /// normalized to lowercase.
     pub id: String,
     /// Lifecycle state encoded by the GFM checkbox.
     pub state: PendingState,
@@ -523,7 +524,7 @@ fn is_indented_continuation_line(line: &str) -> bool {
 }
 
 pub(crate) fn is_valid_pending_id(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,7 +564,7 @@ pub(crate) fn ensure_no_leading_custom_id_prefix(text: &str, context: &str) -> R
 
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
-        "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings",
+        "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings (hyphen allowed)",
         raw_id.trim()
     )
 }
@@ -993,6 +994,84 @@ fn assign_unique_hash(text: &str, doc_id: &str, taken: &HashSet<String>) -> Stri
     }
 }
 
+/// Assign a nested subtask id using the parent id as a visible prefix.
+///
+/// Shape: `<parent_id>-<suffix>`, where `suffix` is a stable 4..=8 char hash.
+fn assign_unique_child_hash(
+    parent_id: &str,
+    text: &str,
+    doc_id: &str,
+    taken: &HashSet<String>,
+) -> String {
+    const RETRIES_PER_WIDTH: u64 = 4;
+    let seed = format!("{parent_id}:{text}");
+    let mut counter: u64 = 0;
+    loop {
+        let width = std::cmp::min(4 + (counter / RETRIES_PER_WIDTH) as usize, 8);
+        let suffix = generate_hash_n(&seed, doc_id, counter, width);
+        let candidate = format!("{parent_id}-{suffix}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        counter = counter.saturating_add(1);
+    }
+}
+
+fn split_indent(line: &str) -> (&str, &str) {
+    let idx = line
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))
+        .unwrap_or(line.len());
+    line.split_at(idx)
+}
+
+fn normalize_nested_subtasks(
+    continuation: &str,
+    parent_id: &str,
+    doc_id: &str,
+    taken: &mut HashSet<String>,
+) -> (String, bool) {
+    if continuation.is_empty() {
+        return (String::new(), false);
+    }
+
+    let mut changed = false;
+    let mut out = String::with_capacity(continuation.len());
+    for raw_line in continuation.split_inclusive('\n') {
+        let has_newline = raw_line.ends_with('\n');
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        if !is_indented_continuation_line(line) {
+            out.push_str(raw_line);
+            continue;
+        }
+
+        let (indent, trimmed) = split_indent(line);
+        let Some(mut child) = parse_item_line(trimmed) else {
+            out.push_str(raw_line);
+            continue;
+        };
+
+        if child.id.is_empty() {
+            child.id = assign_unique_child_hash(parent_id, &child.text, doc_id, taken);
+            taken.insert(child.id.clone());
+            changed = true;
+        } else {
+            taken.insert(child.id.clone());
+        }
+
+        let rendered = child.render();
+        if rendered != trimmed {
+            changed = true;
+        }
+        out.push_str(indent);
+        out.push_str(&rendered);
+        if has_newline {
+            out.push('\n');
+        }
+    }
+    (out, changed)
+}
+
 /// Lazy backfill: ensure every item has a hash id and a checkbox.
 ///
 /// - Items missing a hash get a new one (guaranteed unique within the component).
@@ -1010,14 +1089,20 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
 
     let mut changed = false;
     let rewritten = layout.replace_items(|item| {
-        if item.id.is_empty() {
-            let id = assign_unique_hash(&item.text, doc_id, &taken);
+        let mut next = item.clone();
+        if next.id.is_empty() {
+            let id = assign_unique_hash(&next.text, doc_id, &taken);
             taken.insert(id.clone());
+            next.id = id;
             changed = true;
-            Some(PendingItem { id, ..item.clone() })
-        } else {
-            Some(item.clone())
         }
+        let (continuation, nested_changed) =
+            normalize_nested_subtasks(&next.continuation, &next.id, doc_id, &mut taken);
+        if nested_changed {
+            next.continuation = continuation;
+            changed = true;
+        }
+        Some(next)
     });
 
     let new_body = rewritten.render();
@@ -1431,6 +1516,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_hyphenated_id() {
+        let body = "- [ ] [#tmuxcrash-abcd] child task\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "tmuxcrash-abcd");
+        assert_eq!(items[0].text, "child task");
+    }
+
+    #[test]
     fn parse_ordered_items() {
         let body = "1. [ ] [#a3f2] first\n2. [x] [#b1c4] second\n";
         let (_, items, _) = parse_items(body);
@@ -1634,7 +1728,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_preserves_nested_subtasks_without_assigning_child_ids() {
+    fn backfill_assigns_nested_subtask_ids_prefixed_by_parent() {
         let body = concat!(
             "- parent task\n",
             "  - child dependency\n",
@@ -1643,9 +1737,36 @@ mod tests {
         );
         let (new_body, changed) = backfill(body, DOC_ID, &ids());
         assert!(changed);
-        assert_eq!(new_body.matches("[#").count(), 2, "got: {new_body}");
-        assert!(new_body.contains("  - child dependency\n"));
-        assert!(new_body.contains("  - child subtask\n"));
+        assert_eq!(new_body.matches("[#").count(), 4, "got: {new_body}");
+        assert!(new_body.contains("  - [ ] [#"));
+        let lines: Vec<&str> = new_body.lines().collect();
+        let parent_line = lines[0];
+        let parent_id = parent_line
+            .split("[#")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("parent id");
+        assert!(
+            lines[1].contains(&format!("[#{}-", parent_id)),
+            "expected first child id prefixed by parent id, got: {}",
+            lines[1]
+        );
+        assert!(
+            lines[2].contains(&format!("[#{}-", parent_id)),
+            "expected second child id prefixed by parent id, got: {}",
+            lines[2]
+        );
+    }
+
+    #[test]
+    fn backfill_preserves_existing_nested_subtask_ids() {
+        let body = concat!(
+            "- [ ] [#tmuxcrash] parent task\n",
+            "  - [ ] [#tmuxcrash-abcd] child dependency\n"
+        );
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(!changed);
+        assert_eq!(new_body, body);
     }
 
     #[test]
@@ -1801,15 +1922,19 @@ mod tests {
     }
 
     #[test]
-    fn op_add_rejects_invalid_custom_id_prefix() {
-        let err = op_add("", "id=bad-id release checklist", DOC_ID, false).unwrap_err();
-        assert!(format!("{}", err).contains("invalid custom id"));
+    fn op_add_accepts_hyphenated_custom_id_prefix() {
+        let (new_body, id) =
+            op_add("", "id=tmuxcrash-abcd release checklist", DOC_ID, false).unwrap();
+        assert_eq!(id, "tmuxcrash-abcd");
+        assert!(new_body.contains("- [ ] [#tmuxcrash-abcd] release checklist"));
     }
 
     #[test]
-    fn op_add_rejects_invalid_bracketed_custom_id_prefix() {
-        let err = op_add("", "[#bad-id] release checklist", DOC_ID, false).unwrap_err();
-        assert!(format!("{}", err).contains("invalid custom id"));
+    fn op_add_accepts_hyphenated_bracketed_custom_id_prefix() {
+        let (new_body, id) =
+            op_add("", "[#tmuxcrash-abcd] release checklist", DOC_ID, false).unwrap();
+        assert_eq!(id, "tmuxcrash-abcd");
+        assert!(new_body.contains("- [ ] [#tmuxcrash-abcd] release checklist"));
     }
 
     #[test]

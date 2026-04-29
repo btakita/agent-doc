@@ -49,7 +49,21 @@ Plan for `#ckpb`:
 3. Add an integration regression for `compact --commit` followed by an expected-but-missing exchange patchback.
 
 `#ckpb` is now at the top of the backlog.
-<!-- agent:boundary:51a0752e -->
+❯ do #ckpb. spec-tests-commit-push
+### Re: #ckpb compact closeout scope — gpt-5
+
+Implemented `#ckpb` in `src/agent-doc`.
+
+- `compact --commit` now prints an explicit note that it committed only the compacted document state now in `HEAD`; any later console explanation still needs a normal `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`.
+- Added CLI regression coverage for that operator-facing note.
+- Updated `specs/07-commands.md` so the compact command contract says the same thing.
+
+Verification: `cargo test`
+
+Commit / push: `6773310` (`fix: clarify compact commit scope`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#ckpb` is done.
+<!-- agent:boundary:76e0c71b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -58,7 +72,7 @@ Plan for `#ckpb`:
 ## Pending / Not Builte
 
 <!-- agent:backlog -->
-- [ ] [#ckpb] Fail closed or emit an explicit operator notice when `compact --component exchange --commit` leaves the session clean but the responder’s console explanation is not part of the committed document. Repro from `tasks/agent-doc/agent-doc-bugs2.md` on Apr 29, 2026: commit `99d7b5502` archived and replaced `agent:exchange` with the compact summary, `session-check` later passed, and the follow-up explanation stayed in the harness because `commit_with_outcome()` treated the state as already committed / post-commit local drift instead of synthesizing a second assistant patchback. The fix should make that contract explicit or block the misleading closeout shape.
+- [ ] [#pdwg] Fail closed when a captured response patch updates a pending backlog item but the `pending_done` guard suppresses the write without surfacing a binary-owned recovery path. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `session-check` reported `response appears to complete existing pending #asch1 but no matching --pending-done was recorded this cycle`, the response stayed stranded in `.agent-doc/pending/...`, and the session required manual patchback into the document. The fix should either auto-recover by downgrading the closeout to a warning when the item remains open, or stop earlier with an explicit write-time interruption that includes the exact recovery command.
 - [ ] [#lvak] Tighten routed-cycle acknowledgment when a committed cycle already has prompt drift. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: rerouting to live pane `%393` logged `route_cycle_ack_skipped_live_child ... prompt_target: do #asch1. spec-tests-commit-push` even though `session-check` still reported `no new agent-doc cycle started`. A merely live child should not suppress the fresh-cycle proof when the previous cycle is closed and the prompt-bearing diff is still unresolved.
 - [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.

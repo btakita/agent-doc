@@ -59,7 +59,22 @@ Reviewed `src/tsift` with `cargo test` and `cargo clippy` and focused on indexin
 - `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed.
 
 #### Follow-up items added to backlog.
-<!-- agent:boundary:a155d62e -->
+❯ do #afyn. spec-test-build-install-commit-push
+### Re: #afyn spec-test-build-install-commit-push — gpt-5
+
+Implemented the coarse summaries extraction lock in `src/tsift` so only one `tsift summarize --extract` writer can mutate a cache at a time. The command now claims `summaries.lock` before stale-row deletion, freshness checks, and LLM calls, which closes the duplicate-spend / last-writer-wins race from the review.
+
+Added lock coverage in both `src/summarize.rs` and `src/main.rs`, updated `SPEC.md`, and ran the full requested verification/install flow:
+- `cargo test` passed (`420` unit tests and `42` integration tests)
+- `cargo clippy --all-targets --all-features -- -D warnings` passed
+- `cargo build` passed
+- `cargo install --path .` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `d84df20` (`fix: serialize summarize extractors`).
+
+Top remaining backlog item: `#bjen`.
+<!-- agent:boundary:02872d43 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -68,7 +83,6 @@ Reviewed `src/tsift` with `cargo test` and `cargo clippy` and focused on indexin
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#afyn] [recommended] Add a coarse summaries extraction lock or per-file lease so concurrent tsift summarize --extract runs cannot duplicate API work or race on replace/delete operations
 - [ ] [#bjen] [recommended] Route tsift search symbol-hit reads through the resilient read-only helpers and add a race test where a rollback-journal lock appears after precheck
 - [ ] [#8w9n] [recommended] Add resilient read-only handling for summaries.db in tsift status and summarize query paths, with degraded status/diagnostics instead of hard failure
 <!-- /agent:backlog -->

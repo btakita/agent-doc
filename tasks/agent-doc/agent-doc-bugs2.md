@@ -708,7 +708,17 @@ The `#asch1` reproduction in `src/boost-client/tasks/monsterrodholders.md` shows
 I captured the implementation plan in `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`. The plan is to reconstruct the exact failing closeout path, enforce one shared success invariant across `finalize`, `write --commit`, recovery, and hook replay, tighten `session-check` / exit propagation so this state blocks success, and add regression coverage for submodule-owned docs plus manual-repair and post-commit-drift variants.
 
 `#mcrc` remains open. No new backlog item is needed here because the existing `#mcrc` item already captures the follow-up work. This patchback is planning-only; no `src/agent-doc` code change or test run happened in the repair itself.
-<!-- agent:boundary:d3ad921e -->
+### Re: `patch:todo` destructive replace backlog items — gpt-5
+
+Captured.
+
+`#ptdr` and `#tdrl` are the same underlying bug: `patch:todo` is being treated as a destructive full replace, so a partial todo patch can silently delete untouched items. `#tdrl` is the stronger statement because it preserves the richer fix-space, but both entries point at the same failure mode and same `src/session-share/tasks/claudescore.md` repro.
+
+The `(HEAD)` suffixes in the exchange diff are boundary artifacts from earlier closeout normalization, not new implementation work. I am not treating those as fresh backlog-worthy changes in this cycle.
+
+No `src/agent-doc` code changed here and no test/build/install run happened in this closeout. This turn only records the document response and commits it.
+
+<!-- agent:boundary:3db7b6c4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -724,7 +734,21 @@ On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc tu
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1114806) in pane %411 for tasks/software/tsift.md [route] registered pane %411 still proves live ownership for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md — clearing stale startup-miss marker [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% u [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: registered pane %411 for tasks/software/tsift.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%411 pane_pid=1113432 pane_session=14 current_command=agent-doc)
 ```
 ---
-Add `agent-doc fix`. `agent-doc resync --fix` is an alias to `agent-doc fix`. Support an optional file-path to agent doc that I want to fix `agent-doc fix <path-to-file.md>`.
+When I quit the supervisor using Codex, the process does not complete the shutdown. I have to press Ctrl+C again. spec-test-build-install-commit-push
+```
+~/work/btakita/agent-loop main ⇡35 !12 ?7                                              9h 19m 27s  agent-loop 13:18:01
+❯ agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+[run] starting for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+[diff] doc=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.md doc_len=51228 snap_len=51185
+[diff] stripped: doc_len=48490 snap_len=48140
+[diff] changes detected, computing unified diff
+[perf] diff.compute total: 2ms
+[run] diff computed (2991 bytes)
+[commit] detected post-commit local drift for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md — HEAD already contains the committed response; leaving later local working-tree edits uncommitted
+[commit] staged snapshot already matches HEAD for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md — closing cycle as already committed
+[perf] commit total: 22ms
+Submitting to codex...
+```
 ---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
@@ -736,6 +760,8 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
+- [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

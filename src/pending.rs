@@ -148,6 +148,130 @@ impl PendingItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingSegment {
+    Text(String),
+    Item {
+        item: PendingItem,
+        has_newline: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct PendingLayout {
+    segments: Vec<PendingSegment>,
+}
+
+impl PendingLayout {
+    fn parse(body: &str) -> Self {
+        let mut segments = Vec::new();
+        for raw_line in body.split_inclusive('\n') {
+            let has_newline = raw_line.ends_with('\n');
+            let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+            if let Some(item) = parse_item_line(line) {
+                segments.push(PendingSegment::Item { item, has_newline });
+            } else {
+                segments.push(PendingSegment::Text(raw_line.to_string()));
+            }
+        }
+        if body.is_empty() {
+            return Self { segments };
+        }
+        Self { segments }
+    }
+
+    fn render(&self) -> String {
+        let mut out = String::new();
+        for segment in &self.segments {
+            match segment {
+                PendingSegment::Text(raw) => out.push_str(raw),
+                PendingSegment::Item { item, has_newline } => {
+                    out.push_str(&item.render());
+                    if *has_newline {
+                        out.push('\n');
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn items(&self) -> Vec<PendingItem> {
+        self.segments
+            .iter()
+            .filter_map(|segment| match segment {
+                PendingSegment::Item { item, .. } => Some(item.clone()),
+                PendingSegment::Text(_) => None,
+            })
+            .collect()
+    }
+
+    fn first_item_index(&self) -> Option<usize> {
+        self.segments
+            .iter()
+            .position(|segment| matches!(segment, PendingSegment::Item { .. }))
+    }
+
+    fn ensure_separator_before(&mut self, index: usize) {
+        if index == 0 {
+            return;
+        }
+        match &mut self.segments[index - 1] {
+            PendingSegment::Text(raw) => {
+                if !raw.is_empty() && !raw.ends_with('\n') {
+                    raw.push('\n');
+                }
+            }
+            PendingSegment::Item { has_newline, .. } => {
+                *has_newline = true;
+            }
+        }
+    }
+
+    fn insert_first_item(&mut self, item: PendingItem) {
+        let index = self.first_item_index().unwrap_or(self.segments.len());
+        self.ensure_separator_before(index);
+        self.segments.insert(
+            index,
+            PendingSegment::Item {
+                item,
+                has_newline: true,
+            },
+        );
+    }
+
+    fn replace_items<F>(&self, mut replacer: F) -> Self
+    where
+        F: FnMut(&PendingItem) -> Option<PendingItem>,
+    {
+        let mut segments = Vec::with_capacity(self.segments.len());
+        for segment in &self.segments {
+            match segment {
+                PendingSegment::Text(raw) => segments.push(PendingSegment::Text(raw.clone())),
+                PendingSegment::Item { item, has_newline } => {
+                    if let Some(next_item) = replacer(item) {
+                        segments.push(PendingSegment::Item {
+                            item: next_item,
+                            has_newline: *has_newline,
+                        });
+                    }
+                }
+            }
+        }
+        Self { segments }
+    }
+
+    fn non_item_segments(&self) -> Vec<String> {
+        self.segments
+            .iter()
+            .filter_map(|segment| match segment {
+                PendingSegment::Text(raw) => Some(raw.clone()),
+                PendingSegment::Item { .. } => None,
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShadowPendingItem {
     pub id: String,
     pub text: String,
@@ -171,63 +295,45 @@ pub struct ShadowPendingReport {
 /// - Prelude: leading non-list lines (whitespace, non `- ` bullets).
 /// - Items: parsed `- ...` list entries (legacy or fully-migrated).
 /// - Postlude: trailing non-list lines after the last item.
+///
+/// Interleaved non-item lines between backlog entries are intentionally not
+/// surfaced here. Mutation helpers preserve those lines through `PendingLayout`;
+/// `parse_items` remains the lossy item-only view used by reorder/diff checks.
 pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
-    let lines: Vec<&str> = body.lines().collect();
-
-    // Find first list item line.
-    let first_item = lines.iter().position(|l| is_item_line(l));
-    let first_item = match first_item {
-        Some(i) => i,
-        None => return (body.to_string(), Vec::new(), String::new()),
+    let layout = PendingLayout::parse(body);
+    let Some(first_item) = layout.first_item_index() else {
+        return (body.to_string(), Vec::new(), String::new());
     };
-
-    // Find last list item line.
-    let last_item = lines
+    let last_item = layout
+        .segments
         .iter()
-        .rposition(|l| is_item_line(l))
+        .rposition(|segment| matches!(segment, PendingSegment::Item { .. }))
         .unwrap_or(first_item);
 
-    let prelude = join_lines(
-        &lines[..first_item],
-        has_trailing_newline(body) || first_item > 0,
-    );
-    let postlude = if last_item + 1 < lines.len() {
-        join_lines(&lines[last_item + 1..], has_trailing_newline(body))
-    } else {
-        String::new()
-    };
+    let mut prelude = String::new();
+    for segment in &layout.segments[..first_item] {
+        if let PendingSegment::Text(raw) = segment {
+            prelude.push_str(raw);
+        }
+    }
+
+    let mut postlude = String::new();
+    if last_item + 1 < layout.segments.len() {
+        for segment in &layout.segments[last_item + 1..] {
+            if let PendingSegment::Text(raw) = segment {
+                postlude.push_str(raw);
+            }
+        }
+    }
 
     let mut items = Vec::new();
-    for line in &lines[first_item..=last_item] {
-        if let Some(item) = parse_item_line(line) {
-            items.push(item);
+    for segment in &layout.segments[first_item..=last_item] {
+        if let PendingSegment::Item { item, .. } = segment {
+            items.push(item.clone());
         }
-        // Non-item lines interleaved between items are dropped — callers must run
-        // backfill first to normalize. Blank lines are treated the same.
     }
 
     (prelude, items, postlude)
-}
-
-fn is_item_line(line: &str) -> bool {
-    let t = line.trim_start();
-    t.starts_with("- ") || t == "-"
-}
-
-fn has_trailing_newline(body: &str) -> bool {
-    body.ends_with('\n')
-}
-
-/// Rejoin lines with `\n`, preserving a trailing newline when `with_trailing` is true.
-fn join_lines(lines: &[&str], with_trailing: bool) -> String {
-    if lines.is_empty() {
-        return String::new();
-    }
-    let mut s = lines.join("\n");
-    if with_trailing {
-        s.push('\n');
-    }
-    s
 }
 
 /// Parse a single list item line into a `PendingItem` (id optional).
@@ -399,6 +505,7 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
 }
 
 /// Serialize items back to a body string.
+#[allow(dead_code)]
 pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> String {
     let mut out = String::new();
     out.push_str(prelude);
@@ -416,6 +523,14 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
         }
     }
     out
+}
+
+pub(crate) fn canonicalize_preserving_non_item_lines(body: &str) -> String {
+    PendingLayout::parse(body).render()
+}
+
+pub(crate) fn preserves_non_item_structure(lhs: &str, rhs: &str) -> bool {
+    PendingLayout::parse(lhs).non_item_segments() == PendingLayout::parse(rhs).non_item_segments()
 }
 
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
@@ -702,7 +817,8 @@ fn assign_unique_hash(text: &str, doc_id: &str, taken: &HashSet<String>) -> Stri
 /// - Checkboxes are normalized (default `[ ]`).
 /// - Returns `(new_body, changed)`. `changed = false` when the body was already canonical.
 pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (String, bool) {
-    let (prelude, items, postlude) = parse_items(body);
+    let layout = PendingLayout::parse(body);
+    let items = layout.items();
     let mut taken: HashSet<String> = existing_ids.clone();
     for item in &items {
         if !item.id.is_empty() {
@@ -711,19 +827,18 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
     }
 
     let mut changed = false;
-    let mut new_items = Vec::with_capacity(items.len());
-    for item in items {
+    let rewritten = layout.replace_items(|item| {
         if item.id.is_empty() {
             let id = assign_unique_hash(&item.text, doc_id, &taken);
             taken.insert(id.clone());
             changed = true;
-            new_items.push(PendingItem { id, ..item });
+            Some(PendingItem { id, ..item.clone() })
         } else {
-            new_items.push(item);
+            Some(item.clone())
         }
-    }
+    });
 
-    let new_body = render_items(&prelude, &new_items, &postlude);
+    let new_body = rewritten.render();
 
     // Also mark as changed when the canonical render differs from the input
     // (e.g., legacy whitespace / missing checkbox normalization).
@@ -745,7 +860,8 @@ pub fn reap(body: &str) -> Result<(String, Vec<String>)> {
 /// Used by preflight to archive reaped items to an `agent:pending-done`
 /// component when one exists (spec §3 step 3).
 pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
-    let (prelude, items, postlude) = parse_items(body);
+    let layout = PendingLayout::parse(body);
+    let items = layout.items();
     let missing_done: Vec<&PendingItem> = items
         .iter()
         .filter(|item| item.is_done() && item.id.is_empty())
@@ -762,20 +878,20 @@ pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
         );
     }
     let mut removed = Vec::new();
-    let mut kept = Vec::new();
-    for item in items {
+    let new_layout = layout.replace_items(|item| {
         if item.is_done() {
             if !item.id.is_empty() {
-                removed.push(item);
+                removed.push(item.clone());
             }
+            None
         } else {
-            kept.push(item);
+            Some(item.clone())
         }
-    }
+    });
     if removed.is_empty() {
         return Ok((body.to_string(), removed));
     }
-    let new_body = render_items(&prelude, &kept, &postlude);
+    let new_body = new_layout.render();
     Ok((new_body, removed))
 }
 
@@ -828,7 +944,8 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
             "pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items"
         );
     }
-    let (prelude, mut items, postlude) = parse_items(body);
+    let mut layout = PendingLayout::parse(body);
+    let items = layout.items();
 
     // Dedup: reject if an item with identical text already exists.
     if items.iter().any(|i| i.text == text) {
@@ -851,33 +968,39 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     };
     taken.insert(id.clone());
 
-    items.insert(
-        0,
-        PendingItem {
-            id: id.clone(),
-            state: if gated {
-                PendingState::Gated
-            } else {
-                PendingState::Open
-            },
-            gate_type: None,
-            text: text.to_string(),
+    layout.insert_first_item(PendingItem {
+        id: id.clone(),
+        state: if gated {
+            PendingState::Gated
+        } else {
+            PendingState::Open
         },
-    );
-    Ok((render_items(&prelude, &items, &postlude), id))
+        gate_type: None,
+        text: text.to_string(),
+    });
+    Ok((layout.render(), id))
 }
 
 /// Mark an item `[x]` by id. Phase 1: state-machine validation lives in
 /// the upcoming `pending_cmd` layer; this primitive forces Done unconditionally.
 pub fn op_done(body: &str, id: &str) -> Result<String> {
     let id = id.trim().to_lowercase();
-    let (prelude, mut items, postlude) = parse_items(body);
-    let item = items
-        .iter_mut()
-        .find(|i| i.id == id)
-        .ok_or_else(|| anyhow!("pending done: no item with id [#{}]", id))?;
-    item.state = PendingState::Done;
-    Ok(render_items(&prelude, &items, &postlude))
+    let mut found = false;
+    let layout = PendingLayout::parse(body).replace_items(|item| {
+        if item.id == id {
+            found = true;
+            let mut next = item.clone();
+            next.state = PendingState::Done;
+            next.gate_type = None;
+            Some(next)
+        } else {
+            Some(item.clone())
+        }
+    });
+    if !found {
+        return Err(anyhow!("pending done: no item with id [#{}]", id));
+    }
+    Ok(layout.render())
 }
 
 /// Transition an item to `Gated` (`[/]`) by id.
@@ -887,17 +1010,35 @@ pub fn op_done(body: &str, id: &str) -> Result<String> {
 /// - `Done → *`: error (cannot re-gate a completed item).
 pub fn op_gate(body: &str, id: &str) -> Result<String> {
     let id = id.trim().to_lowercase();
-    let (prelude, mut items, postlude) = parse_items(body);
-    let item = items
-        .iter_mut()
-        .find(|i| i.id == id)
+    let layout = PendingLayout::parse(body);
+    let current = layout
+        .items()
+        .into_iter()
+        .find(|item| item.id == id)
         .ok_or_else(|| anyhow!("pending gate: no item with id [#{}]", id))?;
-    match validate_transition(item.state, PendingOp::Gate)? {
-        TransitionResult::Transition(next) => {
-            item.state = next;
-            Ok(render_items(&prelude, &items, &postlude))
+    let transition = validate_transition(current.state, PendingOp::Gate)?;
+    let mut found = false;
+    let mut changed = false;
+    let rewritten = layout.replace_items(|item| {
+        if item.id != id {
+            return Some(item.clone());
         }
-        TransitionResult::NoOp => Ok(body.to_string()),
+        found = true;
+        match transition {
+            TransitionResult::Transition(next) => {
+                changed = true;
+                let mut next_item = item.clone();
+                next_item.state = next;
+                Some(next_item)
+            }
+            TransitionResult::NoOp => Some(item.clone()),
+        }
+    });
+    debug_assert!(found, "validated item must be present during replacement");
+    if !changed {
+        Ok(body.to_string())
+    } else {
+        Ok(rewritten.render())
     }
 }
 
@@ -908,17 +1049,36 @@ pub fn op_gate(body: &str, id: &str) -> Result<String> {
 /// - `Done → *`: error (cannot ungate a completed item).
 pub fn op_ungate(body: &str, id: &str) -> Result<String> {
     let id = id.trim().to_lowercase();
-    let (prelude, mut items, postlude) = parse_items(body);
-    let item = items
-        .iter_mut()
-        .find(|i| i.id == id)
+    let layout = PendingLayout::parse(body);
+    let current = layout
+        .items()
+        .into_iter()
+        .find(|item| item.id == id)
         .ok_or_else(|| anyhow!("pending ungate: no item with id [#{}]", id))?;
-    match validate_transition(item.state, PendingOp::Ungate)? {
-        TransitionResult::Transition(next) => {
-            item.state = next;
-            Ok(render_items(&prelude, &items, &postlude))
+    let transition = validate_transition(current.state, PendingOp::Ungate)?;
+    let mut found = false;
+    let mut changed = false;
+    let rewritten = layout.replace_items(|item| {
+        if item.id != id {
+            return Some(item.clone());
         }
-        TransitionResult::NoOp => Ok(body.to_string()),
+        found = true;
+        match transition {
+            TransitionResult::Transition(next) => {
+                changed = true;
+                let mut next_item = item.clone();
+                next_item.state = next;
+                next_item.gate_type = None;
+                Some(next_item)
+            }
+            TransitionResult::NoOp => Some(item.clone()),
+        }
+    });
+    debug_assert!(found, "validated item must be present during replacement");
+    if !changed {
+        Ok(body.to_string())
+    } else {
+        Ok(rewritten.render())
     }
 }
 
@@ -929,25 +1089,34 @@ pub fn op_edit(body: &str, id: &str, new_text: &str) -> Result<String> {
         bail!("pending edit: text must be non-empty");
     }
     let id = id.trim().to_lowercase();
-    let (prelude, mut items, postlude) = parse_items(body);
-    let item = items
-        .iter_mut()
-        .find(|i| i.id == id)
-        .ok_or_else(|| anyhow!("pending edit: no item with id [#{}]", id))?;
-    item.text = new_text.to_string();
-    Ok(render_items(&prelude, &items, &postlude))
+    let mut found = false;
+    let layout = PendingLayout::parse(body).replace_items(|item| {
+        if item.id == id {
+            found = true;
+            let mut next = item.clone();
+            next.text = new_text.to_string();
+            Some(next)
+        } else {
+            Some(item.clone())
+        }
+    });
+    if !found {
+        return Err(anyhow!("pending edit: no item with id [#{}]", id));
+    }
+    Ok(layout.render())
 }
 
-/// Clear all items from the body. Prelude/postlude are preserved.
+/// Clear all items from the body. Non-item lines, including headers, are preserved.
 pub fn op_clear(body: &str) -> Result<String> {
-    let (prelude, _items, postlude) = parse_items(body);
-    Ok(render_items(&prelude, &[], &postlude))
+    let cleared = PendingLayout::parse(body).replace_items(|_| None);
+    Ok(cleared.render())
 }
 
 /// Reorder items by id. Listed ids come first (in the given order); unlisted ids
 /// keep their relative order and follow.
 pub fn op_reorder(body: &str, ids: &[String]) -> Result<String> {
-    let (prelude, items, postlude) = parse_items(body);
+    let layout = PendingLayout::parse(body);
+    let items = layout.items();
     let requested: Vec<String> = ids.iter().map(|s| s.trim().to_lowercase()).collect();
     for id in &requested {
         if !items.iter().any(|i| i.id == *id) {
@@ -962,7 +1131,9 @@ pub fn op_reorder(body: &str, ids: &[String]) -> Result<String> {
         }
     }
     ordered.extend(remaining);
-    Ok(render_items(&prelude, &ordered, &postlude))
+    let mut ordered_iter = ordered.into_iter();
+    let reordered = layout.replace_items(|_| ordered_iter.next());
+    Ok(reordered.render())
 }
 
 /// Resolve all gated items matching a typed gate. Finds items with `[/<gate_type>]`
@@ -971,16 +1142,19 @@ pub fn op_reorder(body: &str, ids: &[String]) -> Result<String> {
 /// Only matches typed gates — untyped `[/]` items are never resolved by this op.
 pub fn op_resolve_gate(body: &str, gate_type: &str) -> (String, Vec<String>) {
     let gt = gate_type.trim().to_lowercase();
-    let (prelude, mut items, postlude) = parse_items(body);
     let mut resolved = Vec::new();
-    for item in &mut items {
+    let layout = PendingLayout::parse(body).replace_items(|item| {
         if item.state == PendingState::Gated && item.gate_type.as_deref() == Some(gt.as_str()) {
-            item.state = PendingState::Done;
-            item.gate_type = None;
-            resolved.push(item.id.clone());
+            let mut next = item.clone();
+            next.state = PendingState::Done;
+            next.gate_type = None;
+            resolved.push(next.id.clone());
+            Some(next)
+        } else {
+            Some(item.clone())
         }
-    }
-    (render_items(&prelude, &items, &postlude), resolved)
+    });
+    (layout.render(), resolved)
 }
 
 /// Set a typed gate on a gated item. The item must already be in `[/]` state.
@@ -995,20 +1169,31 @@ pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String>
     {
         bail!("invalid gate type: must be alphanumeric/dash/underscore");
     }
-    let (prelude, mut items, postlude) = parse_items(body);
-    let item = items
-        .iter_mut()
-        .find(|i| i.id == id)
+    let layout = PendingLayout::parse(body);
+    let current = layout
+        .items()
+        .into_iter()
+        .find(|item| item.id == id)
         .ok_or_else(|| anyhow!("pending set-gate-type: no item with id [#{}]", id))?;
-    if item.state != PendingState::Gated {
+    if current.state != PendingState::Gated {
         bail!(
             "pending set-gate-type: item [#{}] must be gated ([/]) to set a typed gate, current state: [{}]",
             id,
-            item.state.box_char()
+            current.state.box_char()
         );
     }
-    item.gate_type = Some(gt);
-    Ok(render_items(&prelude, &items, &postlude))
+    let mut found = false;
+    let rewritten = layout.replace_items(|item| {
+        if item.id != id {
+            return Some(item.clone());
+        }
+        found = true;
+        let mut next = item.clone();
+        next.gate_type = Some(gt.clone());
+        Some(next)
+    });
+    debug_assert!(found, "validated item must be present during replacement");
+    Ok(rewritten.render())
 }
 
 #[cfg(test)]
@@ -1166,6 +1351,26 @@ mod tests {
     }
 
     #[test]
+    fn backfill_preserves_interleaved_headers_and_blank_lines() {
+        let body = concat!(
+            "### Active\n",
+            "- legacy one\n",
+            "\n",
+            "### Later\n",
+            "- [ ] [#keep1] keep section\n"
+        );
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(new_body.contains("### Active"));
+        assert!(new_body.contains("\n\n### Later\n"));
+        assert!(new_body.contains("[#keep1] keep section"));
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert_eq!(lines[0], "### Active");
+        assert!(lines[1].starts_with("- [ ] [#"));
+        assert_eq!(lines[3], "### Later");
+    }
+
+    #[test]
     fn reap_skips_gated() {
         let body = "- [/] [#eg0w] gated\n- [x] [#c9e0] done\n";
         let (new_body, removed) = reap(body).unwrap();
@@ -1248,6 +1453,23 @@ mod tests {
             "expected previous first item second, got: {}",
             new_body
         );
+    }
+
+    #[test]
+    fn op_add_preserves_section_headers() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#a1b2] existing task\n",
+            "### Later\n",
+            "- [ ] [#c3d4] later task\n"
+        );
+        let (new_body, _id) = op_add(body, "new first task", DOC_ID, false).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert_eq!(lines[0], "### Active");
+        assert!(lines[1].contains("new first task"), "got: {}", new_body);
+        assert!(lines[2].contains("existing task"), "got: {}", new_body);
+        assert_eq!(lines[3], "### Later");
+        assert!(lines[4].contains("later task"), "got: {}", new_body);
     }
 
     #[test]
@@ -1525,6 +1747,19 @@ mod tests {
     }
 
     #[test]
+    fn op_clear_preserves_headers_and_spacing() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#a1b2] one\n",
+            "\n",
+            "### Later\n",
+            "- [ ] [#c3d4] two\n"
+        );
+        let new_body = op_clear(body).unwrap();
+        assert_eq!(new_body, "### Active\n\n### Later\n");
+    }
+
+    #[test]
     fn op_reorder_reorders_by_id() {
         let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] second\n- [ ] [#e5f6] third\n";
         let new_body = op_reorder(body, &["e5f6".to_string(), "a1b2".to_string()]).unwrap();
@@ -1532,6 +1767,24 @@ mod tests {
         assert_eq!(items[0].id, "e5f6");
         assert_eq!(items[1].id, "a1b2");
         assert_eq!(items[2].id, "c3d4");
+    }
+
+    #[test]
+    fn op_reorder_keeps_headers_in_place() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#a1b2] first\n",
+            "### Later\n",
+            "- [ ] [#c3d4] second\n",
+            "- [ ] [#e5f6] third\n"
+        );
+        let new_body = op_reorder(body, &["e5f6".to_string(), "a1b2".to_string()]).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert_eq!(lines[0], "### Active");
+        assert!(lines[1].contains("[#e5f6] third"), "got: {}", new_body);
+        assert_eq!(lines[2], "### Later");
+        assert!(lines[3].contains("[#a1b2] first"), "got: {}", new_body);
+        assert!(lines[4].contains("[#c3d4] second"), "got: {}", new_body);
     }
 
     #[test]

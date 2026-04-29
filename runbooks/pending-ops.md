@@ -21,6 +21,10 @@ Pending items carry stable IDs and GFM checkboxes:
 Preflight lazy-backfills IDs and checkboxes on any item that lacks them. You do not assign
 hashes yourself unless you intentionally use the `id=<custom> ` prefix on add.
 
+Backlog and icebox sections may also contain markdown headings or blank separator
+lines for organization. The granular pending ops preserve those non-item lines in
+place; they mutate only the actual task bullets.
+
 ## Granular flags
 
 Combine any number of flags in one `agent-doc write` call:

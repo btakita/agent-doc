@@ -589,6 +589,8 @@ Canonical entrypoint is `agent-doc backlog`. The legacy spelling `agent-doc pend
 
 Supported actions include `add`, `add-gated`, `remove`, `prune`/`reap`, `backfill`, `done`, `edit`, `clear`, `reorder`, `list`, `resolve-gate`, and `set-gate-type`. These actions operate on the canonical `agent:backlog` component while continuing to accept legacy `agent:pending` markers at the document-parsing layer.
 
+Backlog and icebox bodies may include markdown headings or blank separator lines between item groups. The backlog mutation helpers and accidental-patch normalizer must preserve those non-item lines; only the item slots are mutated/reordered.
+
 ## terminal
 
 `agent-doc terminal <FILE> [--session NAME]` — open an external terminal with tmux attached to the session.

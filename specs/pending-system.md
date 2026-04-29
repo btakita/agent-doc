@@ -184,15 +184,22 @@ Invert the current rule:
 
 ```markdown
 <!-- agent:backlog -->
+### Active
 - [ ] [#a3f2] implement --pending-reorder
 - [ ] [#b1c4] rewrite runbook to forbid replace:pending
+
+### Gated
 - [/] [#eg0w] per-file CommitLock + freshness gate — gate: v0.32.5 release
 - [/] [#a002] normalize_user_prompts safety rail — awaiting large-drift telemetry trip
+
+### Done
 - [x] [#c9e0] fix boundary repositioning
 <!-- /agent:backlog -->
 ```
 
 After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls forward. `#eg0w` and `#a002` remain untouched — they stay `[/]` until an operator explicitly promotes them to `[x]`.
+
+**Header preservation:** `agent:backlog` and `agent:icebox` may contain ordinary markdown headings or blank lines between item groups for organization. Granular pending mutations (`add`, `done`, `edit`, `clear`, `reorder`, `gate`, `ungate`, reap/backfill) must preserve those non-item lines in place. Reordering operates on the item slots only; it does not delete or auto-synthesize headings.
 
 ## Implementation plan
 

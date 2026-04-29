@@ -1061,8 +1061,7 @@ fn normalize_backlog_patch_response(
             )
         })?;
     let current_body = backlog_component.content(current_content);
-    let (current_prelude, current_items, current_postlude) =
-        crate::pending::parse_items(current_body);
+    let (_, current_items, _) = crate::pending::parse_items(current_body);
     let current_ids: HashSet<String> = current_items
         .iter()
         .filter(|item| !item.id.is_empty())
@@ -1077,62 +1076,37 @@ fn normalize_backlog_patch_response(
     let doc_id = crate::pending_cmd::doc_id_for(file);
     let (target_body, _) =
         crate::pending::backfill(&patches[backlog_index].content, &doc_id, &current_ids);
-    let (target_prelude, target_items, target_postlude) = crate::pending::parse_items(&target_body);
-    let rendered_target =
-        crate::pending::render_items(&target_prelude, &target_items, &target_postlude);
+    let (_, target_items, _) = crate::pending::parse_items(&target_body);
+    let rendered_target = crate::pending::canonicalize_preserving_non_item_lines(&target_body);
     if !same_ignoring_trailing_newlines(&rendered_target, &target_body) {
         anyhow::bail!(
             "ERR: pending/backlog patch could not be normalized into supported --pending-* operations"
         );
     }
-    if !same_ignoring_trailing_newlines(&current_prelude, &target_prelude)
-        || !same_ignoring_trailing_newlines(&current_postlude, &target_postlude)
-    {
+    if !crate::pending::preserves_non_item_structure(current_body, &target_body) {
         anyhow::bail!(
             "ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead"
         );
     }
 
     if !same_ignoring_trailing_newlines(current_body, &target_body) {
-        let mut normalized_body = crate::pending::op_clear(current_body)?;
+        let normalized_body = target_body.clone();
         let mut saw_pending_add = false;
         let mut pending_done_ids = Vec::new();
 
-        for item in target_items.iter().rev() {
+        for item in &target_items {
             crate::pending::ensure_no_leading_custom_id_prefix(
                 &item.text,
                 "ERR: pending/backlog patch",
             )?;
-            let add_text = if item.id.is_empty() {
-                item.text.clone()
-            } else {
-                format!("id={} {}", item.id, item.text)
-            };
-            let (new_body, assigned_id) =
-                crate::pending::op_add(&normalized_body, &add_text, &doc_id, false)?;
-            normalized_body = new_body;
-
-            if item.state == crate::pending::PendingState::Gated {
-                normalized_body = crate::pending::op_gate(&normalized_body, &assigned_id)?;
-                if let Some(gate_type) = item.gate_type.as_deref() {
-                    normalized_body = crate::pending::op_set_gate_type(
-                        &normalized_body,
-                        &assigned_id,
-                        gate_type,
-                    )?;
-                }
-            } else if item.state == crate::pending::PendingState::Done {
-                normalized_body = crate::pending::op_done(&normalized_body, &assigned_id)?;
-            }
-
-            if !current_ids.contains(&assigned_id) {
+            if !current_ids.contains(&item.id) {
                 saw_pending_add = true;
             }
             if item.state == crate::pending::PendingState::Done
-                && current_states.get(&assigned_id).copied()
+                && current_states.get(&item.id).copied()
                     != Some(crate::pending::PendingState::Done)
             {
-                pending_done_ids.push(assigned_id);
+                pending_done_ids.push(item.id.clone());
             }
         }
 
@@ -7282,6 +7256,39 @@ mod pending_patch_normalization_tests {
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn normalize_pending_patch_preserves_interleaved_headers() {
+        let tmp = TempDir::new().unwrap();
+        let backlog = concat!(
+            "### Active\n",
+            "- [ ] [#keep1] existing item\n",
+            "\n",
+            "### Later\n",
+            "- [ ] [#keep2] later item\n"
+        );
+        let (doc, content) = doc_with_backlog(&tmp, backlog);
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            concat!(
+                "### Active\n",
+                "- [ ] [#keep1] existing item\n",
+                "- [ ] [#new1] new top item\n",
+                "\n",
+                "### Later\n",
+                "- [ ] [#keep2] later item\n"
+            ),
+        )];
+
+        normalize_backlog_patch_response(&doc, &content, patches, String::new(), false)
+            .expect("header-preserving patch should normalize");
+
+        let rewritten = fs::read_to_string(&doc).unwrap();
+        assert!(
+            rewritten.contains("### Active\n- [ ] [#keep1] existing item\n- [ ] [#new1] new top item\n")
+        );
+        assert!(rewritten.contains("\n\n### Later\n- [ ] [#keep2] later item\n"));
     }
 
     #[test]

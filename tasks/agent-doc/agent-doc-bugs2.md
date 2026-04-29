@@ -180,7 +180,25 @@ Commit / push:
 - `4794e41` `fix: require explicit lazy-claim provenance`
 
 `#qmut` remains the top backlog item.
-<!-- agent:boundary:9ee9bb32 -->
+
+❯ do #qmut. spec-test-build-install-commit-push
+### Re: #qmut strict queue closeout — gpt-5
+Implemented in `src/agent-doc` and pushed `e835897` on `20260422/codex-agent-backend`.
+
+The fix closes both sides of the queue-advance bug. Strict closeout no longer consumes `agent:queue` before pending maintenance and the strict pending guards run, and `consume_queue_prompt()` now proves the document and snapshot transforms completely before it writes either one. That means a rejected strict closeout keeps the queue head in place instead of partially advancing the working tree or snapshot before the commit boundary.
+
+I updated the queue specs plus `VERSIONS.md`, and added a finalize integration regression that proves `#fix1` stays at the queue head when a later strict pending gate rejects the cycle.
+
+Verification:
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `e835897` `fix: delay strict queue consumption until closeout gates`
+
+`#fuback` is now the top remaining backlog item.
+<!-- agent:boundary:bd4f91d3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -190,6 +208,5 @@ compact exchange should peek into the backlog to provide more context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qmut] [recommended] Make strict queue consumption prove document + snapshot state before mutating either side or advancing the live queue
 - [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
 <!-- /agent:backlog -->

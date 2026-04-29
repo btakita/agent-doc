@@ -114,7 +114,23 @@ Verification:
 Commit / push: `9d289a1` (`fix: enforce codex network launch policy`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#ntwk` is done.
-<!-- agent:boundary:ce9d6152 -->
+### Re: #ntwk codex network policy — gpt-5
+
+Implemented `#ntwk` in `src/agent-doc`.
+
+- Added first-class `codex_network_access` handling in frontmatter/config so agent-doc can explicitly preserve, remove, or force `CODEX_SANDBOX_NETWORK_DISABLED` for Codex child sessions.
+- `start` and ordered `orchestrate` launches now log the effective Codex network policy and fail closed when `danger-full-access` is paired with inherited network disablement.
+- Updated the contract docs and added regression coverage for parsing, env propagation, and mismatch detection.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `9d289a1` (`fix: enforce codex network launch policy`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#ntwk` is done.
+<!-- agent:boundary:9f182814 -->
 <!-- /agent:exchange -->
 
 <!--

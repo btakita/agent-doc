@@ -48,22 +48,42 @@ pub enum StartupMissOrigin {
 pub struct SessionLogStatus {
     pub latest_start_pane: Option<String>,
     pub latest_start_timestamp: Option<u64>,
+    pub latest_run_timestamp: Option<u64>,
+    pub latest_run_event: Option<String>,
     pub last_event: Option<String>,
     pub saw_process_exit_after_latest_start: bool,
     pub saw_session_end_after_latest_start: bool,
+    pub saw_process_exit_after_latest_run: bool,
+    pub saw_session_end_after_latest_run: bool,
 }
 
 impl SessionLogStatus {
+    fn latest_anchor_timestamp(&self) -> Option<u64> {
+        self.latest_run_timestamp.or(self.latest_start_timestamp)
+    }
+
+    fn latest_anchor_closed(&self) -> bool {
+        if self.latest_run_timestamp.is_some() {
+            self.saw_process_exit_after_latest_run || self.saw_session_end_after_latest_run
+        } else {
+            self.saw_process_exit_after_latest_start || self.saw_session_end_after_latest_start
+        }
+    }
+
     pub fn latest_session_open(&self) -> bool {
-        self.latest_start_timestamp.is_some()
-            && !self.saw_process_exit_after_latest_start
-            && !self.saw_session_end_after_latest_start
+        self.latest_anchor_timestamp().is_some() && !self.latest_anchor_closed()
     }
 
     pub fn latest_session_closed(&self) -> bool {
-        self.latest_start_timestamp.is_some()
-            && (self.saw_process_exit_after_latest_start || self.saw_session_end_after_latest_start)
+        self.latest_anchor_timestamp().is_some() && self.latest_anchor_closed()
     }
+}
+
+fn is_harness_run_start_event(event: &str) -> bool {
+    matches!(
+        event.split_whitespace().next(),
+        Some(token) if token.ends_with("_start") || token.ends_with("_restart")
+    )
 }
 
 fn state_path(file: &Path) -> Result<Option<PathBuf>> {
@@ -227,9 +247,13 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let mut saw_start = false;
     let mut latest_start_pane = None;
     let mut latest_start_timestamp = None;
+    let mut latest_run_timestamp = None;
+    let mut latest_run_event = None;
     let mut last_event = None;
     let mut saw_process_exit_after_latest_start = false;
     let mut saw_session_end_after_latest_start = false;
+    let mut saw_process_exit_after_latest_run = false;
+    let mut saw_session_end_after_latest_run = false;
 
     for raw_line in content.lines() {
         let line = raw_line.trim();
@@ -252,9 +276,13 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
             latest_start_pane = event
                 .split_whitespace()
                 .find_map(|part| part.strip_prefix("pane=").map(ToOwned::to_owned));
+            latest_run_timestamp = None;
+            latest_run_event = None;
             last_event = Some(event.to_string());
             saw_process_exit_after_latest_start = false;
             saw_session_end_after_latest_start = false;
+            saw_process_exit_after_latest_run = false;
+            saw_session_end_after_latest_run = false;
             continue;
         }
 
@@ -262,12 +290,27 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
             continue;
         }
 
+        if is_harness_run_start_event(event) {
+            latest_run_timestamp = timestamp.or(latest_start_timestamp);
+            latest_run_event = Some(event.to_string());
+            last_event = Some(event.to_string());
+            saw_process_exit_after_latest_run = false;
+            saw_session_end_after_latest_run = false;
+            continue;
+        }
+
         last_event = Some(event.to_string());
         if event.contains("_exit code=") {
             saw_process_exit_after_latest_start = true;
+            if latest_run_timestamp.is_some() {
+                saw_process_exit_after_latest_run = true;
+            }
         }
         if event == "session_end" {
             saw_session_end_after_latest_start = true;
+            if latest_run_timestamp.is_some() {
+                saw_session_end_after_latest_run = true;
+            }
         }
     }
 
@@ -278,9 +321,13 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     Ok(Some(SessionLogStatus {
         latest_start_pane,
         latest_start_timestamp,
+        latest_run_timestamp,
+        latest_run_event,
         last_event,
         saw_process_exit_after_latest_start,
         saw_session_end_after_latest_start,
+        saw_process_exit_after_latest_run,
+        saw_session_end_after_latest_run,
     }))
 }
 
@@ -289,10 +336,21 @@ pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<St
         return Ok(None);
     };
     let latest_start = status
-        .latest_start_pane
+        .latest_run_event
         .as_deref()
-        .map(|pane| format!("latest session_start pane={pane}"))
-        .unwrap_or_else(|| "latest session_start pane=<unknown>".to_string());
+        .map(|event| {
+            format!(
+                "latest harness run `{event}` on pane={}",
+                status.latest_start_pane.as_deref().unwrap_or("<unknown>")
+            )
+        })
+        .unwrap_or_else(|| {
+            status
+                .latest_start_pane
+                .as_deref()
+                .map(|pane| format!("latest session_start pane={pane}"))
+                .unwrap_or_else(|| "latest session_start pane=<unknown>".to_string())
+        });
     let detail = if status.latest_session_open() {
         format!("{latest_start}; session log still has no later child exit or session_end")
     } else if status.latest_session_closed() {
@@ -301,6 +359,47 @@ pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<St
         latest_start
     };
     Ok(Some(detail))
+}
+
+pub fn latest_open_run_timestamp(status: &SessionLogStatus) -> Option<u64> {
+    if status.latest_session_open() {
+        status.latest_anchor_timestamp()
+    } else {
+        None
+    }
+}
+
+pub fn latest_log_anchor(status: &SessionLogStatus) -> String {
+    status
+        .latest_run_event
+        .as_deref()
+        .map(|event| {
+            format!(
+                "latest_run={} pane={}",
+                event,
+                status.latest_start_pane.as_deref().unwrap_or("?")
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "latest session_start pane={}",
+                status.latest_start_pane.as_deref().unwrap_or("?")
+            )
+        })
+}
+
+pub fn latest_log_outcome(status: &SessionLogStatus) -> &'static str {
+    if status.latest_session_open() {
+        "open"
+    } else if status.latest_session_closed() {
+        "closed"
+    } else {
+        "unknown"
+    }
+}
+
+pub fn latest_log_last_event(status: &SessionLogStatus) -> &str {
+    status.last_event.as_deref().unwrap_or("?")
 }
 
 pub fn record_session_loss(
@@ -424,15 +523,47 @@ mod tests {
             .unwrap()
             .expect("session log status");
         assert_eq!(status.latest_start_pane.as_deref(), Some("%41"));
+        assert_eq!(status.latest_run_timestamp, Some(3));
+        assert_eq!(
+            status.latest_run_event.as_deref(),
+            Some("codex_start mode=fresh restart_count=0")
+        );
         assert!(status.latest_session_open());
         assert!(!status.latest_session_closed());
         assert_eq!(
             session_log_diagnostic(&doc, "session-123").unwrap(),
             Some(
-                "latest session_start pane=%41; session log still has no later child exit or session_end"
+                "latest harness run `codex_start mode=fresh restart_count=0` on pane=%41; session log still has no later child exit or session_end"
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn session_log_status_reopens_after_child_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-789.log"),
+            "[1] session_start file=test.md pane=%52 session=session-789\n[2] codex_start mode=fresh restart_count=0\n[3] codex_exit code=0 restart_count=0\n[4] codex_restart mode=continue restart_count=1\n",
+        )
+        .unwrap();
+
+        let status = session_log_status(&doc, "session-789")
+            .unwrap()
+            .expect("session log status");
+        assert_eq!(status.latest_start_pane.as_deref(), Some("%52"));
+        assert_eq!(status.latest_start_timestamp, Some(1));
+        assert_eq!(status.latest_run_timestamp, Some(4));
+        assert_eq!(
+            status.latest_run_event.as_deref(),
+            Some("codex_restart mode=continue restart_count=1")
+        );
+        assert!(status.latest_session_open());
+        assert!(!status.latest_session_closed());
+        assert_eq!(latest_open_run_timestamp(&status), Some(4));
     }
 
     #[test]
@@ -451,6 +582,7 @@ mod tests {
             .unwrap()
             .expect("session log status");
         assert_eq!(status.latest_start_pane.as_deref(), Some("%52"));
+        assert_eq!(status.latest_run_timestamp, None);
         assert!(!status.latest_session_open());
         assert!(status.latest_session_closed());
     }

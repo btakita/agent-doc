@@ -302,8 +302,7 @@ fn startup_miss_superseded_by_later_open_start(
     log_status.is_some_and(|status| {
         status.latest_session_open()
             && status.latest_start_pane.as_deref() == Some(registered_pane)
-            && status
-                .latest_start_timestamp
+            && crate::startup_miss::latest_open_run_timestamp(status)
                 .is_some_and(|ts| ts > miss.timestamp)
     })
 }
@@ -348,20 +347,11 @@ fn startup_miss_route_provenance(
     log_status: Option<&crate::startup_miss::SessionLogStatus>,
 ) -> String {
     let log_detail = match log_status {
-        Some(status) if status.latest_session_open() => format!(
-            "session_log=open latest_start_pane={} last_event={}",
-            status.latest_start_pane.as_deref().unwrap_or("?"),
-            status.last_event.as_deref().unwrap_or("?")
-        ),
-        Some(status) if status.latest_session_closed() => format!(
-            "session_log=closed latest_start_pane={} last_event={}",
-            status.latest_start_pane.as_deref().unwrap_or("?"),
-            status.last_event.as_deref().unwrap_or("?")
-        ),
         Some(status) => format!(
-            "session_log=unknown latest_start_pane={} last_event={}",
-            status.latest_start_pane.as_deref().unwrap_or("?"),
-            status.last_event.as_deref().unwrap_or("?")
+            "session_log={} {} last_event={}",
+            crate::startup_miss::latest_log_outcome(status),
+            crate::startup_miss::latest_log_anchor(status),
+            crate::startup_miss::latest_log_last_event(status)
         ),
         None => "session_log=missing".to_string(),
     };
@@ -728,7 +718,7 @@ fn resolve_or_create_pane(
         if startup_miss_superseded_by_later_open_start(&miss, registered_pane, log_status.as_ref())
         {
             eprintln!(
-                "[route] registered pane {} proves a newer open session_start after startup-miss {} for {} — clearing stale marker",
+                "[route] registered pane {} proves a newer open harness run after startup-miss {} for {} — clearing stale marker",
                 registered_pane, miss_ts, file_path
             );
             crate::ops_log::log_op(
@@ -741,7 +731,7 @@ fn resolve_or_create_pane(
             let _ = crate::startup_miss::clear(file);
         } else {
             eprintln!(
-                "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open session_start — keeping marker until dispatch proves recovery",
+                "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open harness run — keeping marker until dispatch proves recovery",
                 registered_pane, file_path, miss_ts
             );
             crate::ops_log::log_op(
@@ -5445,18 +5435,26 @@ history line
         let closed_same_start = crate::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(10),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
             last_event: Some(
                 "auto_trigger_timeout harness=codex reason=no_prompt_after_30s".to_string(),
             ),
             saw_process_exit_after_latest_start: true,
             saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: true,
+            saw_session_end_after_latest_run: false,
         };
         let newer_open_start = crate::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
-            latest_start_timestamp: Some(11),
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+            last_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+            saw_process_exit_after_latest_start: true,
             saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
         };
 
         assert!(startup_miss_should_restart_live_owner(
@@ -5488,16 +5486,24 @@ history line
         let open = crate::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(1),
+            latest_run_timestamp: Some(1),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
             last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
             saw_process_exit_after_latest_start: false,
             saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
         };
         let closed = crate::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(1),
+            latest_run_timestamp: Some(1),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
             last_event: Some("session_end".to_string()),
             saw_process_exit_after_latest_start: true,
             saw_session_end_after_latest_start: true,
+            saw_process_exit_after_latest_run: true,
+            saw_session_end_after_latest_run: true,
         };
 
         assert!(startup_miss_should_fail_closed(

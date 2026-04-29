@@ -186,7 +186,7 @@ All of those passed.
 ❯ I don't want to deploy the parallel tmux tests must pass rule in the package. This rule is purely for agent-doc development.
 
 ❯ Why was the last response patchback duplicated? #agent-doc-bug
-### Re: parallel tmux policy scope + duplicate patchback — gpt-5 (HEAD)
+### Re: parallel tmux policy scope + duplicate patchback — gpt-5
 
 I reverted the packaged `src/agent-doc` docs so the parallel tmux rule is no longer being pushed into the package surface. It remains only in the local development harness surfaces for this workspace:
 - `.codex/AGENTS.md`
@@ -209,7 +209,7 @@ So the duplicate was not a second user answer. It was a closeout-recovery bug: c
 Plan: [plan-session-check-prefix-duplication.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-session-check-prefix-duplication.md)
 
 I added the bug back to backlog with that existing plan instead of creating a second plan file for the same root cause.
-<!-- agent:boundary:a0f351b1 -->
+<!-- agent:boundary:2c1259a3 -->
 <!-- /agent:exchange -->
 
 <!--

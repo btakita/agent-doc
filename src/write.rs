@@ -963,6 +963,57 @@ struct NormalizedTemplateResponse {
     unmatched: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TemplateResponseWriteProof {
+    explicit_components: Vec<String>,
+    unmatched_len: usize,
+}
+
+impl TemplateResponseWriteProof {
+    fn has_real_body(&self) -> bool {
+        !self.explicit_components.is_empty() || self.unmatched_len > 0
+    }
+}
+
+fn template_response_write_proof(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> TemplateResponseWriteProof {
+    TemplateResponseWriteProof {
+        explicit_components: patches
+            .iter()
+            .filter(|patch| patch.name != "frontmatter")
+            .filter(|patch| !is_backlog_component(&patch.name))
+            .filter(|patch| !patch.content.trim().is_empty())
+            .map(|patch| patch.name.clone())
+            .collect(),
+        unmatched_len: unmatched.trim().len(),
+    }
+}
+
+fn ensure_template_response_write_proof(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    let proof = template_response_write_proof(patches, unmatched);
+    if proof.has_real_body() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "template response contains no real response-body write — include at least one non-empty response patch or non-empty unmatched response body"
+    );
+}
+
+fn pending_replace_escape_hatch_enabled() -> bool {
+    std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        || std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+}
+
 fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
     left.trim_end_matches('\n') == right.trim_end_matches('\n')
 }
@@ -2293,6 +2344,9 @@ pub fn run_template(
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
+    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+        ensure_template_response_write_proof(&patches, &unmatched)?;
+    }
 
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
@@ -2452,6 +2506,9 @@ pub fn run_stream(
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
+    }
+    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+        ensure_template_response_write_proof(&patches, &unmatched)?;
     }
 
     if patches.is_empty() {
@@ -3003,6 +3060,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
+    }
+    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+        ensure_template_response_write_proof(&patches, &unmatched)?;
     }
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
@@ -6867,6 +6927,23 @@ mod verify_sidecar_normalization_tests {
         let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
         enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .expect("exchange-only orchestrate patch should be accepted");
+    }
+
+    #[test]
+    fn template_response_write_proof_accepts_nonempty_unmatched_body() {
+        let proof = super::template_response_write_proof(&[], "### Re: topic — gpt-5\nbody\n");
+        assert!(proof.has_real_body());
+        assert_eq!(proof.unmatched_len, "### Re: topic — gpt-5\nbody".len());
+    }
+
+    #[test]
+    fn template_response_write_proof_rejects_empty_response_shells() {
+        let patches = vec![
+            crate::template::PatchBlock::new("exchange", ""),
+            crate::template::PatchBlock::new("frontmatter", "agent: codex"),
+        ];
+        let err = super::ensure_template_response_write_proof(&patches, "").unwrap_err();
+        assert!(err.to_string().contains("no real response-body write"));
     }
 }
 

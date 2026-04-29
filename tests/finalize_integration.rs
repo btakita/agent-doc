@@ -17,6 +17,10 @@ fn session_template_doc_content() -> String {
     "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
+fn session_stream_doc_content() -> String {
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 fn setup_template_doc() -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
@@ -30,6 +34,14 @@ fn setup_session_template_doc() -> (TempDir, PathBuf) {
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, session_template_doc_content()).unwrap();
+    (tmp, doc)
+}
+
+fn setup_session_stream_doc() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, session_stream_doc_content()).unwrap();
     (tmp, doc)
 }
 
@@ -457,6 +469,36 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success();
+}
+
+#[test]
+fn finalize_stream_rejects_empty_exchange_shell_before_commit() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--stream"])
+        .write_stdin("<!-- patch:exchange -->\n<!-- /patch:exchange -->\n")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no real response-body write"));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !after.contains("### Re:"),
+        "strict CRDT finalize must not write an assistant response when the response shell is empty"
+    );
+    assert!(
+        after.contains("❯ Please reply"),
+        "the original prompt should remain visible after the rejected closeout"
+    );
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re:"),
+        "HEAD must not contain a committed assistant response when strict CRDT finalize rejects the response"
+    );
 }
 
 #[test]

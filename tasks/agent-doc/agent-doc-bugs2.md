@@ -428,7 +428,26 @@ Published:
 
 Note:
 - I staged and committed only the `#smst` hunks from `VERSIONS.md` and `specs/07-commands.md`; the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
-<!-- agent:boundary:593ebb7e -->
+❯ do #edcrash. spec-test-build-install-commit-push
+### Re: `#edcrash` — gpt-5
+
+I fixed the claimed-pane replacement path behind `#edcrash`.
+
+- `sync.rs` no longer relies only on argv/file-path matches before auto-start. It now runs the shared associated-pane recovery path, so a still-alive supervisor-backed pane can be recovered via supervisor child-PID fallback, re-registered, and rescued from stash instead of being replaced.
+- If more than one associated pane still proves ownership, sync now fails closed for that file and skips auto-start instead of creating another duplicate pane on top of the existing sessions.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added a regression that proves sync re-registers a supervisor-owned pane even when the foreground process tree no longer mentions the file.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `e63ca59` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I staged and committed only the `#edcrash` hunks. The pre-existing unrelated local edits in `VERSIONS.md`, `specs/07-commands.md`, `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
+<!-- agent:boundary:e99317b9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -442,7 +461,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#edcrash] Claimed pane crashes when editor navigates to the document. tmux-router sync kills/replaces the pane running `agent-doc start` without notifying the supervisor — the supervisor dies without logging `claude_exit` or `session_end`, leaving orphaned cycle state. 9+ orphaned sessions observed for `tasks/claudescore.md` (panes %416→%510) on Apr 29 2026. Fix: signal handler in supervisor, tmux-router claim awareness, crash-recovery logging on `session_start`. Plan: tasks/agent-doc/plan-editor-navigate-claim-crash.md
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.

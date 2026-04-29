@@ -103,7 +103,29 @@ Published:
 
 Note:
 - I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
-<!-- agent:boundary:8341f71a -->
+❯ commit + push all uncommitted files in src/agent-doc and src/tmux-router
+### Re: #agent-doc-bug stashed pane crash — opus-4-6
+
+Investigated the crash of the tmux session running `do #srrdgap` on `claudescore-3.md`.
+
+**Root cause:** the agent session in the stashed pane died silently while the user navigated to other files. The sync log shows no explicit kill, prune, or error — the process just disappeared during the ~21-minute stash period. When the user returned, sync detected "no alive pane" and auto-started a fresh session, but the previous cycle (`cycle-1777493370425`) was stuck in `preflight_started`.
+
+**Timeline from sync log:**
+1. `[1777493370]` — Routed trigger ran preflight on claudescore-3.md, starting the cycle
+2. User switched editor to claudescore.md, cca-alignment.md, etc.
+3. Sync stashed the claudescore-3.md pane and swapped in the focused file's pane
+4. Agent process in stashed pane died silently (no kill/prune/error logged)
+5. `[1777494668]` (~21 min later) — User switched back; sync found "no alive pane"
+6. `[1777494669]` — Auto-started %432 as replacement; stashed %425 (claudescore.md)
+
+**Recovery:** Preflight successfully recovered the stale cycle on next invocation, closing it as already-committed since HEAD content was intact. Document and user edits preserved.
+
+**Plan (added to backlog as `#stshcr`):**
+1. Add stash-health heartbeat — periodic liveness check for stashed panes
+2. On stash-death, close the orphaned cycle and log exit reason
+3. Investigate root cause — tmux signal propagation (SIGHUP?), idle timeout, or OOM
+4. If root cause is unavoidable, add session-preservation logic around stash/detach
+<!-- agent:boundary:d2e49070 -->
 <!-- /agent:exchange -->
 
 <!--

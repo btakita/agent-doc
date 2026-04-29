@@ -34,11 +34,12 @@
 //!   effective window if set) > `TMUX_PANE` / active pane.
 //! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
 //!   the project's configured tmux session (`project_tmux_session()`). Cross-session
-//!   mismatches are auto-forced with a warning — explicit claim always succeeds.
-//!   `--force` additionally overrides the binding invariant (commandeering another
-//!   document's pane). This prevents the stash/rescue routing dance that fires
-//!   whenever a document's pane is in the wrong session (`pane_session !=
-//!   target_session` in `route.rs`).
+//!   mismatches fail closed while the configured session is still alive; stale
+//!   configured sessions are auto-accepted, and explicit `--force` is required to
+//!   override a live cross-session mismatch. `--force` additionally overrides the
+//!   binding invariant (commandeering another document's pane). This prevents the
+//!   stash/rescue routing dance that fires whenever a document's pane is in the
+//!   wrong session (`pane_session != target_session` in `route.rs`).
 //! - Sets `agent_doc_format=template` and `agent_doc_write=crdt` in frontmatter when
 //!   neither `format`, `write_mode`, nor legacy `mode` is present.
 //! - Scaffolds default `## Status` and `## Exchange` component sections when the
@@ -135,6 +136,37 @@ pub(crate) fn cross_session_decision(
     CrossSessionDecision::Reject
 }
 
+fn enforce_cross_session_claim(
+    pane_id: &str,
+    pane_tmux_session: &str,
+    configured: &str,
+    decision: CrossSessionDecision,
+) -> Result<()> {
+    match decision {
+        CrossSessionDecision::Accept => Ok(()),
+        CrossSessionDecision::AcceptStale => {
+            eprintln!(
+                "[claim] configured session '{}' is not alive — accepting claim on pane {} in session '{}' (stale-session auto-force)",
+                configured, pane_id, pane_tmux_session
+            );
+            Ok(())
+        }
+        CrossSessionDecision::AcceptForce => {
+            eprintln!(
+                "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
+                pane_id, pane_tmux_session, configured
+            );
+            Ok(())
+        }
+        CrossSessionDecision::Reject => anyhow::bail!(
+            "pane {} is in tmux session '{}' but project session is '{}'; switch to the configured session or pass --force",
+            pane_id,
+            pane_tmux_session,
+            configured
+        ),
+    }
+}
+
 pub fn run(
     file: &Path,
     position: Option<&str>,
@@ -229,27 +261,12 @@ pub fn run(
             && pane_tmux_session != configured
         {
             let configured_alive = tmux.session_alive(&configured);
-            match cross_session_decision(&pane_tmux_session, &configured, configured_alive, force) {
-                CrossSessionDecision::Accept => {}
-                CrossSessionDecision::AcceptStale => {
-                    eprintln!(
-                        "[claim] configured session '{}' is not alive — accepting claim on pane {} in session '{}' (stale-session auto-force)",
-                        configured, pane_id, pane_tmux_session
-                    );
-                }
-                CrossSessionDecision::AcceptForce => {
-                    eprintln!(
-                        "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
-                        pane_id, pane_tmux_session, configured
-                    );
-                }
-                CrossSessionDecision::Reject => {
-                    eprintln!(
-                        "warning: pane {} is in tmux session '{}' but project session is '{}' — auto-forcing claim",
-                        pane_id, pane_tmux_session, configured
-                    );
-                }
-            }
+            enforce_cross_session_claim(
+                &pane_id,
+                &pane_tmux_session,
+                &configured,
+                cross_session_decision(&pane_tmux_session, &configured, configured_alive, force),
+            )?;
         }
     }
 
@@ -736,5 +753,15 @@ mod tests {
     fn cross_session_accept_force_when_configured_alive_and_force() {
         let d = cross_session_decision("claude", "0", true, true);
         assert_eq!(d, CrossSessionDecision::AcceptForce);
+    }
+
+    #[test]
+    fn enforce_cross_session_claim_errors_on_reject() {
+        let err = enforce_cross_session_claim("%12", "claude", "0", CrossSessionDecision::Reject)
+            .expect_err("reject should fail closed");
+        assert_eq!(
+            err.to_string(),
+            "pane %12 is in tmux session 'claude' but project session is '0'; switch to the configured session or pass --force"
+        );
     }
 }

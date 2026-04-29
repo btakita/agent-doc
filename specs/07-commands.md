@@ -146,11 +146,14 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Ensure session UUID in frontmatter (generate if missing)
 2. **Resolve effective window** (see Window Resolution below)
 3. Determine pane: `--pane P` overrides, else `--position` resolves via tmux pane geometry, else `$TMUX_PANE`
-4. Register session → pane in `sessions.json`, including window ID
+4. If the resolved pane is in a different tmux session than the configured project session, fail closed unless the configured session is stale or `--force` was passed
+5. Register session → pane in `sessions.json`, including window ID
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
 
 **Binding invariant enforcement:** If the target pane is already claimed by a different session (and the pane is alive), `claim` provisions a new pane for this document instead of erroring. This enforces the Binding invariant (§8.5): "never commandeer another document's pane." Use `--force` to explicitly overwrite the existing claim (discouraged — breaks the Binding invariant unless the old document is abandoned).
+
+**Cross-session claim guard:** `claim` must reject a pane that lives in another tmux session while the configured project session is still alive. The only allowed exceptions are an explicitly stale configured session (post-reboot recovery) or an explicit `--force` override.
 
 **Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status patch=replace -->` and `<!-- agent:exchange patch=append -->` components by default.
 

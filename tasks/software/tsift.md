@@ -161,7 +161,34 @@ Why they were not added automatically last cycle:
 - `agent-doc finalize` actually caught the missing backlog capture and failed before commit because `#code-review` expands to a backlog-required closeout.
 - I then used the explicit `` escape hatch to commit the findings-only review instead of re-running closeout with `--pending-add` flags. That suppression was my choice in the prior cycle, not the intended automatic path.
 - The separate `#agent-doc-bug` reproduced here is real: your direct harness follow-up did not enter the document, so preflight initially returned `no_changes`. That matches the existing `#prst` item in [tasks/agent-doc/agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md), so I did not create a duplicate bug entry.
-<!-- agent:boundary:a145803e -->
+❯ do #spath. spec-test-build-install-commit-push
+### Re: #spath — gpt-5
+
+Implemented nested-path scope inference for read-only workspace queries.
+
+What changed:
+- added shared submodule inference from nested workspace paths and routed `search`, `graph`, `communities`, `path`, and `explain` through the inferred scoped index when no explicit `--scope` is supplied
+- preserved the existing fail-closed behavior for true workspace-root queries that only have scoped `.tsift/indexes/*/index.db`
+- added regressions for nested-path inference across all five commands plus duplicate-leaf-name scope disambiguation
+- updated `SPEC.md` to document automatic scoped-index inference from nested workspace paths
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml`
+- `cargo build --manifest-path src/tsift/Cargo.toml`
+- `cargo install --path src/tsift --force`
+- installed-binary smoke test:
+  - `tsift index --workspace <tmp>`
+  - `tsift search alpha_helper --path <tmp>/src/alpha/nested --json --no-autoindex`
+  - `tsift graph alpha_main <tmp>/src/alpha/nested --json`
+
+#### Commit
+
+- `6908755` `fix: infer workspace scope from nested query paths`
+- pushed to `origin/main`
+
+This closes `#spath`. Remaining active backlog items are `#lintw` and `#lkws`.
+<!-- agent:boundary:cb37721c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -170,7 +197,6 @@ Why they were not added automatically last cycle:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#spath] infer submodule scope from nested workspace paths for read-only queries so search/graph/path/communities/explain do not require redundant --scope
 - [ ] [#lintw] make tsift lint --index <workspace-root> honor federation/isolation rules instead of loading private-scope entities
 - [ ] [#lkws] make tsift locks <nested-workspace-path> target the matching scoped index/lock state instead of the absent shared-root index
 <!-- /agent:backlog -->

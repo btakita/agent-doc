@@ -103,7 +103,24 @@ Verification:
 - `tsift --version` -> `tsift 0.1.21`
 
 Backlog is now down to `#locks1`.
-<!-- agent:boundary:8a0bf81a -->
+❯ do #locks1. spec-test-build-install-commit-push
+### Re: locks1 snapshot fallback for graph queries — gpt-5
+
+Implemented `#locks1` in `src/tsift` and pushed `65df665` (`fix: share snapshot fallback for graph queries`).
+
+What changed:
+- Added `IndexDb::open_read_only_resilient()` so read-only consumers probe the live `index.db` and automatically retry against a snapshot copy when a rollback-journal writer wedges the database.
+- Routed `graph`, `communities`, `path`, and `explain` through that shared resilient open path by updating `open_index_db()`, and reused the same helper for the existing read-only symbol/file loaders.
+- Added rollback-journal regression coverage for the shared helper plus all four graph-family commands, and updated `SPEC.md` to document snapshot fallback for read-only graph queries.
+
+Verification:
+- `cargo test` (`417` unit tests, `42` integration tests)
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.21`
+
+Backlog in this document is now clear.
+<!-- agent:boundary:df0c58da -->
 <!-- /agent:exchange -->
 
 <!--
@@ -112,7 +129,6 @@ Backlog is now down to `#locks1`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#locks1] [recommended] Route graph, explain, path, and communities through the same snapshot-fallback read-only index path used by lock-tolerant search and status helpers.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

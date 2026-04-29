@@ -294,7 +294,26 @@ Commit / push: `475269b` (`fix: preserve prompt-bearing status edits`) pushed to
 No new backlog items came out of this change.
 
 `#oobabs` is done.
-<!-- agent:boundary:136ddd69 -->
+❯ do #oobpmt. spec-test-build-install-commit-push
+### Re: #oobpmt preflight OOB prompt absorb — gpt-5
+
+Implemented `#oobpmt` in `src/agent-doc`.
+
+- The status OOB-absorb guard now treats preset-token leads such as `#next-steps ...` as prompt-bearing work, not just a bare `#next-steps` token, so step 2 can no longer absorb that status prompt into the snapshot before step 4 diff runs.
+- Added direct classifier coverage in `src/git.rs` and widened the preflight regression in `src/preflight.rs` to the exact `#next-steps for calibrating session benchmarks with expected scores` repro.
+- Updated `specs/07-commands.md` and `VERSIONS.md` so the step-2 commit contract explicitly covers preset-token guidance lines.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `8a1c214` (`fix: preserve prompt-prefixed status guidance`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#oobpmt` is done.
+<!-- agent:boundary:f1e7571e -->
 <!-- /agent:exchange -->
 
 <!--

@@ -118,7 +118,40 @@ What changed:
 - pushed to `origin/main`
 
 This closes `#idxr`, and the same change also closes `#lokr`.
-<!-- agent:boundary:01639793 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: Nested workspace paths no longer imply a scope for read-only queries, so `search`, `graph`, `path`, `communities`, and `explain` fail even when the provided path already identifies a single submodule. `resolve_project_root_or_canonical_path()` always collapses `src/alpha/nested` to the workspace root ([src/tsift/src/lint.rs:188](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:188)), and `cmd_search` / `resolve_search_index_targets` plus the shared `open_index_db` path then select targets only from explicit `--scope`, `--federated`, or a shared root index ([src/tsift/src/main.rs:3242](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3242), [src/tsift/src/main.rs:3057](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3057), [src/tsift/src/main.rs:2153](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2153)). I reproduced this with `cargo run ... search alpha_helper --path <workspace>/src/alpha/nested` and `... graph alpha_main <workspace>/src/alpha/nested` after `tsift index --workspace`; both errored that the workspace root needed `--scope` even though only `alpha` matched the path.
+
+2. Medium: `tsift locks` reports the wrong database for nested workspace paths. `cmd_locks` also resolves the nested path to the workspace root ([src/tsift/src/main.rs:2854](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2854)), and `resolve_lock_target()` falls back to `<root>/.tsift/index.db` whenever `--scope` is omitted ([src/tsift/src/status.rs:425](/home/brian/work/btakita/agent-loop/src/tsift/src/status.rs:425)). In a workspace indexed only into `.tsift/indexes/*`, `tsift locks <workspace>/src/alpha/nested --json` reports the absent shared-root lock instead of `alpha`'s real `.tsift/indexes/alpha/index.db`, so lock debugging can point at the wrong writer state.
+
+3. Medium: `tsift lint --index <workspace-root>` bypasses federation/isolation filtering and reintroduces private-symbol leakage. The implicit-root path uses `collect_entities_from_workspace_root()` and skips non-federated scopes ([src/tsift/src/lint.rs:211](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:211)), but the explicit `--index` path delegates to `collect_entities_from_index_path()`, which blindly walks every discovered `index.db` under `.tsift/indexes` ([src/tsift/src/main.rs:3550](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3550), [src/tsift/src/lint.rs:201](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:201), [src/tsift/src/lint.rs:228](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:228)). I reproduced this with `[overrides.alpha] tier = "private"`: plain `tsift lint note.md` returned `ok`, while `tsift lint note.md --index <workspace>` annotated `alpha_secret`.
+
+#### Verification
+
+- Ran `cargo test --manifest-path src/tsift/Cargo.toml workspace_search_cmd_requires_explicit_target_without_shared_root_index -- --nocapture`
+- Ran `cargo test --manifest-path src/tsift/Cargo.toml graph_cmd_requires_scope_for_workspace_root_without_shared_index -- --nocapture`
+- Reproduced the nested-path `search` / `graph` failures with `cargo run --manifest-path src/tsift/Cargo.toml -- ...` against a temporary workspace
+- Reproduced the nested-path `locks --json` mis-targeting and the `lint --index <workspace>` privacy leak against temporary workspaces
+- I did not run the full `tsift` test suite for this review
+### Re: code review — gpt-5
+
+1. High: Nested workspace paths no longer imply a scope for read-only queries, so `search`, `graph`, `path`, `communities`, and `explain` fail even when the provided path already identifies a single submodule. `resolve_project_root_or_canonical_path()` always collapses `src/alpha/nested` to the workspace root ([src/tsift/src/lint.rs:188](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:188)), and `cmd_search` / `resolve_search_index_targets` plus the shared `open_index_db` path then select targets only from explicit `--scope`, `--federated`, or a shared root index ([src/tsift/src/main.rs:3242](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3242), [src/tsift/src/main.rs:3057](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3057), [src/tsift/src/main.rs:2153](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2153)). I reproduced this with `cargo run ... search alpha_helper --path <workspace>/src/alpha/nested` and `... graph alpha_main <workspace>/src/alpha/nested` after `tsift index --workspace`; both errored that the workspace root needed `--scope` even though only `alpha` matched the path.
+
+2. Medium: `tsift locks` reports the wrong database for nested workspace paths. `cmd_locks` also resolves the nested path to the workspace root ([src/tsift/src/main.rs:2854](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2854)), and `resolve_lock_target()` falls back to `<root>/.tsift/index.db` whenever `--scope` is omitted ([src/tsift/src/status.rs:425](/home/brian/work/btakita/agent-loop/src/tsift/src/status.rs:425)). In a workspace indexed only into `.tsift/indexes/*`, `tsift locks <workspace>/src/alpha/nested --json` reports the absent shared-root lock instead of `alpha`'s real `.tsift/indexes/alpha/index.db`, so lock debugging can point at the wrong writer state.
+
+3. Medium: `tsift lint --index <workspace-root>` bypasses federation/isolation filtering and reintroduces private-symbol leakage. The implicit-root path uses `collect_entities_from_workspace_root()` and skips non-federated scopes ([src/tsift/src/lint.rs:211](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:211)), but the explicit `--index` path delegates to `collect_entities_from_index_path()`, which blindly walks every discovered `index.db` under `.tsift/indexes` ([src/tsift/src/main.rs:3550](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3550), [src/tsift/src/lint.rs:201](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:201), [src/tsift/src/lint.rs:228](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:228)). I reproduced this with `[overrides.alpha] tier = "private"`: plain `tsift lint note.md` returned `ok`, while `tsift lint note.md --index <workspace>` annotated `alpha_secret`.
+
+#### Verification
+
+- Ran `cargo test --manifest-path src/tsift/Cargo.toml workspace_search_cmd_requires_explicit_target_without_shared_root_index -- --nocapture`
+- Ran `cargo test --manifest-path src/tsift/Cargo.toml graph_cmd_requires_scope_for_workspace_root_without_shared_index -- --nocapture`
+- Reproduced the nested-path `search` / `graph` failures with `cargo run --manifest-path src/tsift/Cargo.toml -- ...` against a temporary workspace
+- Reproduced the nested-path `locks --json` mis-targeting and the `lint --index <workspace>` privacy leak against temporary workspaces
+- I did not run the full `tsift` test suite for this review
+
+<!-- agent:boundary:738e1491 -->
 <!-- /agent:exchange -->
 
 <!--

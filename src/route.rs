@@ -926,14 +926,19 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
+fn routed_cycle_ack_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
 fn should_require_routed_cycle_ack(
     baseline: Option<&crate::cycle_state::CycleState>,
     prompt_bearing_marker: Option<&str>,
-    live_child_for_file: bool,
 ) -> bool {
-    prompt_bearing_marker.is_some()
-        && !baseline.is_some_and(|state| state.is_open())
-        && !live_child_for_file
+    prompt_bearing_marker.is_some() && !baseline.is_some_and(|state| state.is_open())
 }
 
 fn pending_prompt_bearing_marker_for_route(
@@ -956,30 +961,20 @@ fn require_routed_cycle_ack(
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
 ) -> Result<()> {
-    if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker, live_child_for_file) {
-        if live_child_for_file && prompt_bearing_marker.is_some() {
-            let marker = prompt_bearing_marker.unwrap_or("(unknown)");
-            eprintln!(
-                "[route] skipping cycle ack for {} — live agent-doc child active in pane {}, pending {}",
-                file.display(),
-                pane,
-                marker
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_cycle_ack_skipped_live_child file={} pane={} marker={}",
-                    file.display(),
-                    pane,
-                    marker
-                ),
-            );
-        }
+    if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
         return Ok(());
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
-    match wait_for_start_ack(file, baseline, Duration::from_secs(15)) {
+    if live_child_for_file {
+        eprintln!(
+            "[route] live agent-doc child active in pane {} for {} — waiting for a new cycle ack for pending {}",
+            pane,
+            file.display(),
+            marker
+        );
+    }
+    match wait_for_start_ack(file, baseline, routed_cycle_ack_timeout()) {
         Some(state) => {
             crate::ops_log::log_op(
                 file,
@@ -1702,7 +1697,7 @@ fn auto_start_in_session(
             );
         }
 
-        match wait_for_start_ack(file, cycle_baseline.as_ref(), Duration::from_secs(15)) {
+        match wait_for_start_ack(file, cycle_baseline.as_ref(), routed_cycle_ack_timeout()) {
             Some(state) => {
                 crate::ops_log::log_op(
                     file,
@@ -2661,7 +2656,7 @@ history line
 
     #[test]
     fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
-        assert!(!should_require_routed_cycle_ack(None, None, false));
+        assert!(!should_require_routed_cycle_ack(None, None));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2672,7 +2667,6 @@ history line
         assert!(!should_require_routed_cycle_ack(
             Some(&open_state),
             Some("prompt_target: ❯ follow-up question"),
-            false,
         ));
 
         crate::cycle_state::mark_committed(
@@ -2686,18 +2680,11 @@ history line
         assert!(should_require_routed_cycle_ack(
             Some(&committed_state),
             Some("prompt_target: ❯ follow-up question"),
-            false,
-        ));
-        // Live child suppresses ack even on a committed cycle with prompt drift
-        assert!(!should_require_routed_cycle_ack(
-            Some(&committed_state),
-            Some("prompt_target: ❯ follow-up question"),
-            true,
         ));
     }
 
     #[test]
-    fn resolve_or_create_pane_skips_ack_when_live_child_active_for_file() {
+    fn resolve_or_create_pane_fails_closed_when_live_child_does_not_start_new_cycle() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -2719,9 +2706,7 @@ history line
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
 
-        // With a live agent-doc child, route should succeed (skip ack)
-        // instead of failing closed — the agent is already active.
-        resolve_or_create_pane(
+        let err = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -2731,7 +2716,12 @@ history line
             session,
             &HarnessConfig::codex(),
         )
-        .expect("route should succeed when live agent-doc child is active");
+        .expect_err("route should fail closed when the live child never starts a new cycle");
+        assert!(
+            err.to_string()
+                .contains("no new document cycle started for pending prompt_target"),
+            "unexpected error: {err:#}"
+        );
 
         let content = wait_for_pane_contains(
             &iso,
@@ -2746,7 +2736,7 @@ history line
     }
 
     #[test]
-    fn resolve_or_create_pane_ignores_same_committed_cycle_mutation_for_prompt_drift() {
+    fn resolve_or_create_pane_rejects_same_committed_cycle_mutation_for_prompt_drift() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -2768,9 +2758,20 @@ history line
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-same-cycle", &pane, &file_path).unwrap();
 
-        // With a live agent-doc child, route skips ack and succeeds —
-        // same-cycle committed baseline mutation is irrelevant.
-        resolve_or_create_pane(
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_already_current",
+                Some(&snapshot_for_thread),
+                Some(&snapshot_for_thread),
+            )
+            .unwrap();
+        });
+
+        let err = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -2780,7 +2781,12 @@ history line
             session,
             &HarnessConfig::codex(),
         )
-        .expect("route should succeed when live agent-doc child is active");
+        .expect_err("same-cycle committed churn must not satisfy routed live-pane ack");
+        assert!(
+            err.to_string()
+                .contains("no new document cycle started for pending prompt_target"),
+            "unexpected error: {err:#}"
+        );
 
         let content = wait_for_pane_contains(
             &iso,

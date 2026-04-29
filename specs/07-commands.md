@@ -762,7 +762,7 @@ Successful cycle acknowledgment (both `fresh_route_start_acknowledged` and `rout
 
 ### Live-child ack suppression
 
-When route detects a live agent-doc child process for the target file in the resolved pane (via `find_live_owner_pane`), the cycle ack requirement is suppressed. The agent is already active for the file — either mid-cycle or between cycles — so requiring a new cycle start from a routed trigger would produce spurious failures when the JB plugin's file watcher fires on the agent's own writes. Route still sends the command (the agent may need the trigger if idle), but does not fail or record a startup-miss when no new cycle starts. Logs `route_cycle_ack_skipped_live_child` for observability.
+When route detects a live agent-doc child process for the target file in the resolved pane (via `find_live_owner_pane`), it still sends the routed trigger, but prompt-bearing drift on top of a closed cycle must still produce a real per-document cycle acknowledgment. A merely live child is not proof that the new routed prompt was consumed into a fresh cycle. Route therefore waits for a newer cycle state and fails closed if none appears, even when the pane already owns the document. The only suppression remains the open-cycle case: if the baseline cycle is already in flight, route does not require another start ack for that same pending work.
 
 ## is_tracked FFI Export
 

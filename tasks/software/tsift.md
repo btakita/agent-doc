@@ -191,7 +191,33 @@ This closes `#spath`. Remaining active backlog items are `#lintw` and `#lkws`.
 ### Re: backlog capture note — gpt-5
 
 No new follow-up items were created in the `#spath` cycle; `#lintw` and `#lkws` were already present in `agent:backlog`.
-<!-- agent:boundary:4b30d11d -->
+❯ do #lintw. spec-test-build-install-commit-push
+### Re: #lintw — gpt-5
+
+Implemented the `lint --index` workspace-root federation fix in `tsift`.
+
+What changed:
+- aggregate workspace index targets (`<workspace>`, `.tsift`, `.tsift/index.db`, `.tsift/indexes`) now reuse the federation-aware workspace entity collector
+- explicit scoped targets still behave literally, so pointing `--index` at a specific private scope directory or `index.db` remains an intentional override
+- updated `SPEC.md` to document the workspace-aggregate vs explicit-scope behavior
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml`
+- `cargo build --manifest-path src/tsift/Cargo.toml`
+- `cargo install --path src/tsift --force`
+- installed-binary smoke test:
+  - `tsift index --workspace <tmp>`
+  - `tsift lint <tmp>/README.md --index <tmp> --json`
+  - confirmed `public_helper` was annotated and `private_helper` did not leak
+
+#### Commit
+
+- `227de26` `fix: honor federation for workspace lint indexes`
+- pushed to `origin/main`
+
+This closes `#lintw`. Remaining active backlog item is `#lkws`.
+<!-- agent:boundary:6a655a0c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -200,7 +226,6 @@ No new follow-up items were created in the `#spath` cycle; `#lintw` and `#lkws` 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lintw] make tsift lint --index <workspace-root> honor federation/isolation rules instead of loading private-scope entities
 - [ ] [#lkws] make tsift locks <nested-workspace-path> target the matching scoped index/lock state instead of the absent shared-root index
 <!-- /agent:backlog -->
 

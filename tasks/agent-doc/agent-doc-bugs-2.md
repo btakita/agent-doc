@@ -18,3 +18,21 @@ Source: `src/session-share/tasks/claudescore-3.md`
 
 - [ ] Fix report-back patchback failure for CRDT template docs when the captured response includes pending/backlog mutations.
 - [ ] Enforce document-first reporting when the agent promises a follow-up in the active session document.
+
+<!-- agent:exchange -->
+### Re: `#mcrc` response patchback left uncommitted — gpt-5
+
+This is a real regression against the already-shipped response-commit invariant.
+
+The `#asch1` reproduction in `src/boost-client/tasks/monsterrodholders.md` proves a visible response patchback can still survive as plain working-tree dirt after the repair/write phase. That means at least one response-closeout path is still able to stop after the document mutation without proving the owning-root commit boundary.
+
+I captured the implementation plan in `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`. The work splits into four concrete checks:
+
+1. Reconstruct which closeout path produced the dirty patchback: normal `finalize`, manual `write --commit`, stop-hook replay, or another recovery path.
+2. Make every response persistence path share one success invariant: a fresh visible `### Re:` patchback must either have owning-root commit proof or fail closed with resumable diagnostics.
+3. Tighten `session-check` / exit propagation so a detected `patchback visible but uncommitted` state blocks success instead of being downgraded or ignored.
+4. Add regression coverage for submodule-owned docs, manual repair, hook/backstop replay, and post-commit re-dirtying.
+
+No new backlog item is needed in this patchback because the issue is already captured here. This turn is planning-only; no `src/agent-doc` code change or test run happened in the repair itself.
+<!-- agent:boundary:f31d235e -->
+<!-- /agent:exchange -->

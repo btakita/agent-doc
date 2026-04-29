@@ -387,7 +387,7 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 No new backlog item was added because this `#agent-doc-bug` was fixed directly in this turn.
-❯ do #smst. spec-test-build-install-commit-push
+do #smst. spec-test-build-install-commit-push
 ### Re: `#smst` — gpt-5
 
 I fixed the stale startup-miss supersession path.
@@ -408,7 +408,27 @@ Published:
 
 Note:
 - I staged and committed only the `#smst` hunks from `VERSIONS.md` and `specs/07-commands.md`; the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
-<!-- agent:boundary:2dc6e7af -->
+### Re: `#smst` — gpt-5
+
+I fixed the stale startup-miss supersession path.
+
+- `startup_miss.rs` now detects when the persisted marker still points at an older pane but the session log plus `sessions.json` already prove a newer open registered owner for the same document.
+- `route.rs` clears that stale marker before it makes reuse/restart decisions, so reroute stops carrying historical pane-failure state into the current owner.
+- `session_check.rs` now heals the same stale-marker shape instead of warning about a fake current crash, and regression coverage was added for both the shared classifier and the post-commit cleanup path.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the cross-pane supersession rule.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `674e568` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I staged and committed only the `#smst` hunks from `VERSIONS.md` and `specs/07-commands.md`; the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
+<!-- agent:boundary:593ebb7e -->
 <!-- /agent:exchange -->
 
 <!--

@@ -257,7 +257,26 @@ Commit / push: `aad9dd9` (`fix: fail closed on stranded startup misses`) pushed 
 No new backlog items came out of this change.
 
 `#tmuxcrash` is done.
-<!-- agent:boundary:fa7d351e -->
+❯ do #oobabs. spec-test-build-install-commit-push
+### Re: #oobabs prompt-bearing status absorb — gpt-5
+
+Implemented `#oobabs` in `src/agent-doc`.
+
+- `git::commit` no longer absorbs status-component drift when the inserted status text contains prompt work, including bare preset tokens like `#next-steps`, imperative directives, or other prompt-bearing lines.
+- Added direct classifier coverage in `src/git.rs` and a full preflight regression in `src/preflight.rs` for the compact-follow-up status repro.
+- Updated `specs/07-commands.md` and `VERSIONS.md` so the step-2 commit contract explicitly says prompt-bearing status edits must survive into step 4.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `475269b` (`fix: preserve prompt-bearing status edits`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#oobabs` is done.
+<!-- agent:boundary:d1740d5f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -273,7 +292,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#oobabs] Preflight step 2 absorbs user prompt-preset additions as "out-of-band status mutations" before step 4 diffs, swallowing prompts. Repro from src/session-share/tasks/claudescore-3.md on Apr 29, 2026: user added #next-steps to agent:status after a compact exchange, preflight step 2 committed it as an OOB mutation and refreshed the snapshot, then step 4 reported no_changes:true. The fix should detect prompt-preset references in OOB mutations and either defer their commit or re-inject them as synthetic diff entries so the response cycle fires.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.

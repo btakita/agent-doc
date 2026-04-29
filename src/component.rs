@@ -87,6 +87,12 @@ pub fn is_icebox_component(name: &str) -> bool {
     name == ICEBOX_COMPONENT
 }
 
+/// Check whether a component name refers to tracked work that participates in
+/// `do #id` closeout (`agent:backlog` / legacy `agent:pending` and `agent:icebox`).
+pub fn is_tracked_work_component(name: &str) -> bool {
+    is_backlog_component(name) || is_icebox_component(name)
+}
+
 /// Strip deprecated `patch=...` (and legacy `mode=...`) attributes from
 /// backlog/pending component opening tags. The backlog component's patch mode
 /// is always `replace` by built-in default; the inline attribute is redundant

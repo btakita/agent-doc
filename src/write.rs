@@ -1103,8 +1103,7 @@ fn normalize_backlog_patch_response(
                 saw_pending_add = true;
             }
             if item.state == crate::pending::PendingState::Done
-                && current_states.get(&item.id).copied()
-                    != Some(crate::pending::PendingState::Done)
+                && current_states.get(&item.id).copied() != Some(crate::pending::PendingState::Done)
             {
                 pending_done_ids.push(item.id.clone());
             }
@@ -6911,12 +6910,38 @@ mod precommit_pending_capture_tests {
         pending_body: &str,
         pending_done_ids: &[&str],
     ) -> std::path::PathBuf {
+        setup_precommit_with_tracked_work(
+            root,
+            frontmatter,
+            response,
+            pending_body,
+            None,
+            pending_done_ids,
+        )
+    }
+
+    fn setup_precommit_with_tracked_work(
+        root: &std::path::Path,
+        frontmatter: &str,
+        response: &str,
+        pending_body: &str,
+        icebox_body: Option<&str>,
+        pending_done_ids: &[&str],
+    ) -> std::path::PathBuf {
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
-        let content = format!(
+        let mut content = format!(
             "{frontmatter}<!-- agent:exchange -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n{pending_body}<!-- /agent:pending -->\n"
         );
+        if let Some(icebox_body) = icebox_body {
+            content.push_str("\n<!-- agent:icebox -->\n");
+            content.push_str(icebox_body);
+            if !icebox_body.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str("<!-- /agent:icebox -->\n");
+        }
         fs::write(&doc, &content).unwrap();
         crate::snapshot::save(&doc, &content).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
@@ -7118,6 +7143,23 @@ mod precommit_pending_capture_tests {
     }
 
     #[test]
+    fn precommit_pending_done_blocks_for_icebox_only_item_without_recorded_done() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_tracked_work(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: #ice01 parked follow-up — gpt-5\n\nImplemented the parked follow-up.\n",
+            "- [ ] [#keep1] Keep backlog item\n",
+            Some("- [ ] [#ice01] Parked follow-up\n"),
+            &[],
+        );
+
+        let err = super::precommit_pending_done_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("#ice01"));
+        assert!(err.to_string().contains("--pending-done ice01"));
+    }
+
+    #[test]
     fn precommit_pending_done_warn_mode_skips_precommit_block() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_precommit_with_pending(
@@ -7286,7 +7328,8 @@ mod pending_patch_normalization_tests {
 
         let rewritten = fs::read_to_string(&doc).unwrap();
         assert!(
-            rewritten.contains("### Active\n- [ ] [#keep1] existing item\n- [ ] [#new1] new top item\n")
+            rewritten
+                .contains("### Active\n- [ ] [#keep1] existing item\n- [ ] [#new1] new top item\n")
         );
         assert!(rewritten.contains("\n\n### Later\n- [ ] [#keep2] later item\n"));
     }

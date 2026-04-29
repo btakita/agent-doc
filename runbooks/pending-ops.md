@@ -32,7 +32,7 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
-| `--pending-done <id>` | Mark `[x]` — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
+| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |
@@ -114,9 +114,10 @@ cycle which concrete plan file exists and should be opened.
 - **Unaccepted recommendations** → `--pending-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
 - **Existing `do #id` work that completed this cycle** → `--pending-done <id>` in
-  the same closeout command. Session-doc closeouts now fail before commit when a
-  response clearly completes `#id` but omits the matching done mutation. If the
-  item is code-complete but blocked on an external gate, prefer
+  the same closeout command whether the item lived in the live backlog or the
+  icebox. Session-doc closeouts now fail before commit when a response clearly
+  completes `#id` but omits the matching done mutation. If the item is
+  code-complete but blocked on an external gate, prefer
   `--pending-gate <id>` instead of leaving it silently open.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step

@@ -56,7 +56,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::component::is_backlog_component;
+use crate::component::{is_backlog_component, is_tracked_work_component};
 
 /// Event name prefix emitted by `preflight::run` that indicates a cycle
 /// started but may have been abandoned. If this is the final entry in
@@ -170,13 +170,11 @@ fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
     let Ok(components) = crate::component::parse(&content) else {
         return Ok(None);
     };
-    let Some(backlog) = components
+    let completed: Vec<crate::pending::PendingItem> = components
         .into_iter()
-        .find(|component| is_backlog_component(&component.name))
-    else {
-        return Ok(None);
-    };
-    let completed = completed_pending_items(backlog.content(&content));
+        .filter(|component| is_tracked_work_component(&component.name))
+        .flat_map(|component| completed_pending_items(component.content(&content)))
+        .collect();
     if completed.is_empty() {
         return Ok(None);
     }
@@ -196,7 +194,7 @@ fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(format!(
-        "[session-check] INTERRUPTED: document still contains completed backlog item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
+        "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
         refs
     )))
 }
@@ -672,7 +670,7 @@ pub(crate) fn detect_missing_pending_done_ids(
         return Ok(Vec::new());
     }
 
-    let open_ids = open_pending_ids(file)?;
+    let open_ids = open_tracked_work_ids(file)?;
     if open_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -716,21 +714,18 @@ pub(crate) fn response_text_for_guards(response: &str) -> String {
     response.to_string()
 }
 
-fn open_pending_ids(file: &Path) -> Result<Vec<String>> {
+fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
     let Ok(components) = crate::component::parse(&content) else {
         return Ok(Vec::new());
     };
-    let Some(pending) = components
+    Ok(components
         .into_iter()
-        .find(|component| is_backlog_component(&component.name))
-    else {
-        return Ok(Vec::new());
-    };
-
-    let body = &content[pending.open_end..pending.close_start];
-    let (_, items, _) = crate::pending::parse_items(body);
-    Ok(items
+        .filter(|component| is_tracked_work_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            items
+        })
         .into_iter()
         .filter(|item| !item.is_done())
         .map(|item| item.id)
@@ -1011,6 +1006,26 @@ mod tests {
         pending_body: Option<&str>,
         pending_done_ids: &[&str],
     ) -> std::path::PathBuf {
+        setup_committed_capture_with_tracked_work(
+            root,
+            frontmatter,
+            response,
+            had_pending_mutations,
+            pending_body,
+            None,
+            pending_done_ids,
+        )
+    }
+
+    fn setup_committed_capture_with_tracked_work(
+        root: &Path,
+        frontmatter: Option<&str>,
+        response: &str,
+        had_pending_mutations: bool,
+        pending_body: Option<&str>,
+        icebox_body: Option<&str>,
+        pending_done_ids: &[&str],
+    ) -> std::path::PathBuf {
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
@@ -1023,6 +1038,14 @@ mod tests {
                 current.push('\n');
             }
             current.push_str("<!-- /agent:pending -->\n");
+        }
+        if let Some(icebox_body) = icebox_body {
+            current.push_str("\n<!-- agent:icebox -->\n");
+            current.push_str(icebox_body);
+            if !icebox_body.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("<!-- /agent:icebox -->\n");
         }
         fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, &current).unwrap();
@@ -2105,6 +2128,31 @@ mod tests {
     }
 
     #[test]
+    fn session_check_pending_done_detects_icebox_only_open_item() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_tracked_work(
+            tmp.path(),
+            None,
+            "### Re: #ice01 parked follow-up — gpt-5\n\nImplemented the parked follow-up and verified it.\n",
+            false,
+            Some("- [ ] [#keep1] Keep backlog item\n"),
+            Some("- [ ] [#ice01] Parked follow-up\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("--pending-done ice01"));
+                assert!(message.contains("#ice01"));
+            }
+            other => {
+                panic!("expected strict-mode failure for icebox-only tracked work, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
     fn session_check_interrupts_when_completed_backlog_items_remain() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_committed_capture_with_pending(
@@ -2118,7 +2166,7 @@ mod tests {
 
         match inspect_with_warnings(&doc).unwrap().status {
             SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("completed backlog item(s)"));
+                assert!(message.contains("completed tracked item(s)"));
                 assert!(message.contains("#reap1"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
@@ -2139,8 +2187,30 @@ mod tests {
 
         match inspect_with_warnings(&doc).unwrap().status {
             SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("completed backlog item(s)"));
+                assert!(message.contains("completed tracked item(s)"));
                 assert!(message.contains("#reap1"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_interrupts_when_completed_icebox_items_remain() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_tracked_work(
+            tmp.path(),
+            None,
+            "### Re: #ice01 parked follow-up — gpt-5\n\nImplemented.\n",
+            false,
+            Some("- [ ] [#keep1] Keep backlog item\n"),
+            Some("- [x] [#ice01] Completed but not reaped\n"),
+            &["ice01"],
+        );
+
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("completed tracked item(s)"));
+                assert!(message.contains("#ice01"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
         }

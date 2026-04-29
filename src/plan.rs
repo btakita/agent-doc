@@ -35,7 +35,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::{component, component::is_backlog_component, diff, frontmatter, pending};
+use crate::{
+    component,
+    component::{is_backlog_component, is_tracked_work_component},
+    diff, frontmatter, pending,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -225,12 +229,14 @@ fn pending_mutations_for_doc(
         return Ok(Vec::new());
     }
 
-    let backlog_component = components
+    let items: Vec<pending::PendingItem> = components
         .iter()
-        .find(|component| is_backlog_component(&component.name))
-        .unwrap();
-
-    let (_, items, _) = pending::parse_items(backlog_component.content(content));
+        .filter(|component| is_tracked_work_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = pending::parse_items(component.content(content));
+            items
+        })
+        .collect();
     let mut pending_mutations: Vec<PendingMutationPlan> = Vec::new();
 
     for action in repo_actions {
@@ -409,6 +415,71 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    #[test]
+    fn build_plan_resolves_existing_icebox_item_for_do_directive() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+<!-- /agent:pending -->
+
+## Icebox
+
+<!-- agent:icebox -->
+- [ ] [#ice01] Parked follow-up
+<!-- /agent:icebox -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+do #ice01. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+<!-- /agent:pending -->
+
+## Icebox
+
+<!-- agent:icebox -->
+- [ ] [#ice01] Parked follow-up
+<!-- /agent:icebox -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.pending_mutations.len(), 1);
+        assert_eq!(
+            plan.pending_mutations[0].kind,
+            PendingMutationKind::ResolveExisting
+        );
+        assert_eq!(plan.pending_mutations[0].id, "ice01");
     }
 
     #[test]

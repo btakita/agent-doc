@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component;
-use crate::component::is_backlog_component;
+use crate::component::{is_backlog_component, is_tracked_work_component};
 use crate::pending;
 use crate::snapshot;
 
@@ -25,6 +25,27 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
         .into_iter()
         .find(|c| is_backlog_component(&c.name))
         .context("document has no backlog/pending component")?;
+    Ok((content, comp))
+}
+
+fn find_component_containing_open_id(
+    file: &Path,
+    id: &str,
+) -> Result<(String, component::Component)> {
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    let comp = components
+        .into_iter()
+        .find(|c| {
+            if !is_tracked_work_component(&c.name) {
+                return false;
+            }
+            let (_, items, _) = pending::parse_items(c.content(&content));
+            items
+                .into_iter()
+                .any(|item| item.id == id && item.state != pending::PendingState::Done)
+        })
+        .with_context(|| format!("id not found in backlog/icebox: {}", id))?;
     Ok((content, comp))
 }
 
@@ -84,7 +105,7 @@ pub fn backfill(file: &Path) -> Result<()> {
 
 /// Mark an item `[x]` by id.
 pub fn done(file: &Path, id: &str) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+    let (full_content, comp) = find_component_containing_open_id(file, id)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_done(existing, id)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
@@ -368,7 +389,7 @@ pub fn list(file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, fs, path::PathBuf};
+    use std::{fs, path::PathBuf};
     use tempfile::TempDir;
 
     fn setup_test_dir() -> (TempDir, PathBuf) {
@@ -381,6 +402,16 @@ mod tests {
         let content = format!(
             "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n",
             items
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        (tmp, doc)
+    }
+
+    fn doc_with_pending_and_icebox(pending_items: &str, icebox_items: &str) -> (TempDir, PathBuf) {
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:icebox -->\n{}\n<!-- /agent:icebox -->\n",
+            pending_items, icebox_items
         );
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
@@ -495,6 +526,20 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] active"));
         assert!(content.contains("- [ ] another"));
+    }
+
+    #[test]
+    fn done_marks_icebox_item_when_backlog_does_not_contain_id() {
+        let (_tmp, doc) = doc_with_pending_and_icebox(
+            "- [ ] [#keep1] Keep backlog item\n",
+            "- [ ] [#ice01] Parked follow-up\n",
+        );
+
+        done(&doc, "ice01").unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("<!-- agent:pending -->\n- [ ] [#keep1] Keep backlog item\n"));
+        assert!(content.contains("<!-- agent:icebox -->\n- [x] [#ice01] Parked follow-up\n"));
     }
 
     #[test]

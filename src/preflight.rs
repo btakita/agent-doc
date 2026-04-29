@@ -102,7 +102,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use crate::component::is_backlog_component;
+use crate::component::{is_backlog_component, is_tracked_work_component};
 use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
@@ -1241,43 +1241,91 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         Ok(cs) => cs,
         Err(_) => return Ok((false, 0)),
     };
-    let comp = match components
-        .into_iter()
-        .find(|c| is_backlog_component(&c.name))
-    {
-        Some(c) => c,
-        None => return Ok((false, 0)),
-    };
-    let body = &content[comp.open_end..comp.close_start];
+    let tracked_surfaces: Vec<String> = components
+        .iter()
+        .filter(|c| is_tracked_work_component(&c.name))
+        .map(|c| c.name.clone())
+        .collect();
+    if tracked_surfaces.is_empty() {
+        return Ok((false, 0));
+    }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let doc_id = snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string());
 
-    let mut current_body = body.to_string();
+    let mut current_content = content.clone();
+    let mut snapshot_content = snapshot::load(file)?;
     let mut mutated = false;
-    let saw_completed_before = !completed_pending_items(&current_body).is_empty();
+    let mut saw_completed_before = false;
 
-    // 1. Lazy backfill: assign missing hash ids and normalize checkboxes.
-    let (after_backfill, changed) =
-        crate::pending::backfill(&current_body, &doc_id, &std::collections::HashSet::new());
-    if changed {
-        eprintln!("[preflight] pending: backfilled missing hash ids / checkboxes");
-        current_body = after_backfill;
-        mutated = true;
-    }
+    for surface in &tracked_surfaces {
+        let components = crate::component::parse(&current_content)
+            .with_context(|| format!("failed to parse components while maintaining {}", surface))?;
+        let comp = components
+            .into_iter()
+            .find(|c| component_matches_tracked_surface(&c.name, surface))
+            .with_context(|| format!("document is missing the {} component", surface))?;
+        let body = comp.content(&current_content);
 
-    // 2. Reap `[x]` items. Collect full items (not just ids) so we can
-    //    archive them to `agent:pending-done` in step 2b below.
-    let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body)?;
-    if !removed_items.is_empty() {
-        let removed_ids: Vec<String> = removed_items.iter().map(|i| i.id.clone()).collect();
-        eprintln!(
-            "[preflight] pending: reaped {} item(s): {}",
-            removed_items.len(),
-            removed_ids.join(", ")
-        );
-        current_body = after_reap;
-        mutated = true;
+        let mut current_body = body.to_string();
+        let surface_label = maintenance_surface_label(surface);
+        saw_completed_before |= !completed_pending_items(&current_body).is_empty();
+
+        let (after_backfill, changed) =
+            crate::pending::backfill(&current_body, &doc_id, &std::collections::HashSet::new());
+        if changed {
+            eprintln!(
+                "[preflight] {}: backfilled missing hash ids / checkboxes",
+                surface_label
+            );
+            current_body = after_backfill;
+            mutated = true;
+        }
+
+        let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body)?;
+        if !removed_items.is_empty() {
+            let removed_ids: Vec<String> = removed_items.iter().map(|i| i.id.clone()).collect();
+            eprintln!(
+                "[preflight] {}: reaped {} item(s): {}",
+                surface_label,
+                removed_items.len(),
+                removed_ids.join(", ")
+            );
+            current_body = after_reap;
+            mutated = true;
+        }
+
+        if current_body == body {
+            continue;
+        }
+
+        current_content = comp.replace_content(&current_content, &current_body);
+        if !removed_items.is_empty()
+            && let Some(archived) = archive_pending_done(&current_content, &removed_items)
+        {
+            current_content = archived;
+        }
+
+        if let Some(ref mut snap_content) = snapshot_content {
+            let snap_comps = crate::component::parse(snap_content).ok();
+            let snap_comp = snap_comps
+                .and_then(|cs| {
+                    cs.into_iter()
+                        .find(|c| component_matches_tracked_surface(&c.name, surface))
+                })
+                .with_context(|| {
+                    format!(
+                        "pending maintenance: snapshot is missing the {} component",
+                        surface
+                    )
+                })?;
+            *snap_content = snap_comp.replace_content(snap_content, &current_body);
+            if !removed_items.is_empty()
+                && let Some(archived) = archive_pending_done(snap_content, &removed_items)
+            {
+                *snap_content = archived;
+            }
+        }
     }
 
     // 3. Persist any mutations to BOTH the working tree file and the snapshot.
@@ -1287,61 +1335,44 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     //    see #64mb: calling commit inside maintenance produced a second commit
     //    per preflight whenever anything mutated.
     if mutated {
-        // 3a. Working tree — preserves user edits outside the pending region.
-        let mut new_file_content = comp.replace_content(&content, &current_body);
-        if !removed_items.is_empty()
-            && let Some(archived) = archive_pending_done(&new_file_content, &removed_items)
-        {
-            new_file_content = archived;
-        }
-        std::fs::write(file, &new_file_content)
+        std::fs::write(file, &current_content)
             .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
 
-        // 3b. Snapshot — surgical replace of the pending (and optionally
-        //     pending-done) component in the snapshot content. User edits
-        //     elsewhere don't exist in the snapshot, so there's nothing to
-        //     preserve beyond the existing snapshot body.
-        if let Ok(Some(snap_content)) = snapshot::load(file) {
-            let snap_comps = crate::component::parse(&snap_content).ok();
-            if let Some(snap_pending) =
-                snap_comps.and_then(|cs| cs.into_iter().find(|c| is_backlog_component(&c.name)))
-            {
-                let mut new_snap = snap_pending.replace_content(&snap_content, &current_body);
-                if !removed_items.is_empty()
-                    && let Some(archived) = archive_pending_done(&new_snap, &removed_items)
-                {
-                    new_snap = archived;
-                }
-                if let Err(e) = snapshot::save(file, &new_snap) {
-                    eprintln!("[preflight] pending: snapshot sync warning: {}", e);
-                }
-            }
+        if let Some(snap_content) = &snapshot_content
+            && let Err(e) = snapshot::save(file, snap_content)
+        {
+            eprintln!("[preflight] pending: snapshot sync warning: {}", e);
         }
     }
 
     if saw_completed_before {
-        let persisted_content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to verify reap in {}", file.display()))?;
-        ensure_no_completed_backlog_items(&persisted_content, "working tree")?;
+        let persisted_content = if mutated {
+            current_content.clone()
+        } else {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to verify reap in {}", file.display()))?
+        };
+        ensure_no_completed_tracked_items(&persisted_content, "working tree")?;
 
         let snapshot_content = snapshot::load(file)?.with_context(|| {
             format!(
-                "pending maintenance reaped completed backlog items in {} but the snapshot is missing",
+                "pending maintenance reaped completed tracked items in {} but the snapshot is missing",
                 file.display()
             )
         })?;
-        ensure_no_completed_backlog_items(&snapshot_content, "snapshot")?;
+        ensure_no_completed_tracked_items(&snapshot_content, "snapshot")?;
     }
 
     // 4. Reorder detection: compare the snapshot's pending component to the current body.
+    let current_body = tracked_body_for_reorder(&current_content);
     let reordered = match snapshot::load(file).unwrap_or(None) {
         Some(snap) => {
             let snap_comp = crate::component::parse(&snap)
                 .ok()
                 .and_then(|comps| comps.into_iter().find(|c| is_backlog_component(&c.name)));
-            if let Some(sc) = snap_comp {
+            if let (Some(sc), Some(current_body)) = (snap_comp, current_body.as_deref()) {
                 let snap_body = &snap[sc.open_end..sc.close_start];
-                crate::pending::detect_reorder(snap_body, &current_body).is_some()
+                crate::pending::detect_reorder(snap_body, current_body).is_some()
             } else {
                 false
             }
@@ -1353,11 +1384,16 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     }
 
     // 5. Count gated items in the post-maintenance body.
-    let (_, items, _) = crate::pending::parse_items(&current_body);
-    let gated_count = items
-        .iter()
-        .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
-        .count();
+    let gated_count = current_body
+        .as_deref()
+        .map(|body| {
+            let (_, items, _) = crate::pending::parse_items(body);
+            items
+                .iter()
+                .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
+                .count()
+        })
+        .unwrap_or(0);
     if gated_count > 0 {
         eprintln!("[preflight] pending: {} gated item(s)", gated_count);
     }
@@ -1365,17 +1401,40 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     Ok((reordered, gated_count))
 }
 
-fn ensure_no_completed_backlog_items(content: &str, surface: &str) -> Result<()> {
+fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
+    if is_backlog_component(surface) {
+        is_backlog_component(name)
+    } else {
+        name == surface
+    }
+}
+
+fn maintenance_surface_label(surface: &str) -> &str {
+    if is_backlog_component(surface) {
+        "pending"
+    } else {
+        "icebox"
+    }
+}
+
+fn tracked_body_for_reorder(content: &str) -> Option<&str> {
+    crate::component::parse(content).ok().and_then(|comps| {
+        comps
+            .into_iter()
+            .find(|component| is_backlog_component(&component.name))
+            .map(|component| component.content(content))
+    })
+}
+
+fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
     let components = crate::component::parse(content).with_context(|| {
         format!("failed to parse {surface} components during pending reap check")
     })?;
-    let backlog = components
+    let completed: Vec<crate::pending::PendingItem> = components
         .into_iter()
-        .find(|component| is_backlog_component(&component.name))
-        .with_context(|| {
-            format!("pending reap check: {surface} is missing the backlog component")
-        })?;
-    let completed = completed_pending_items(backlog.content(content));
+        .filter(|component| is_tracked_work_component(&component.name))
+        .flat_map(|component| completed_pending_items(component.content(content)))
+        .collect();
     if completed.is_empty() {
         return Ok(());
     }
@@ -1391,7 +1450,7 @@ fn ensure_no_completed_backlog_items(content: &str, surface: &str) -> Result<()>
         })
         .collect::<Vec<_>>()
         .join(", ");
-    anyhow::bail!("pending maintenance left completed backlog items in the {surface}: {refs}");
+    anyhow::bail!("pending maintenance left completed tracked items in the {surface}: {refs}");
 }
 
 fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
@@ -2326,6 +2385,38 @@ mod tests {
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
         assert!(!snapshot_after.contains("[#reap1]"));
         assert!(snapshot_after.contains("[#keep1]"));
+    }
+
+    #[test]
+    fn pending_maintenance_reaps_completed_icebox_items_from_file_and_snapshot() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Icebox\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [x] [#ice01] Reap me from icebox\n",
+            "- [ ] [#keep2] Keep me parked\n",
+            "<!-- /agent:icebox -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
+        assert!(!reordered);
+        assert_eq!(gated_count, 0);
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(!file_after.contains("[#ice01]"));
+        assert!(file_after.contains("[#keep2]"));
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        assert!(!snapshot_after.contains("[#ice01]"));
+        assert!(snapshot_after.contains("[#keep2]"));
     }
 
     #[test]

@@ -281,6 +281,7 @@ Exits with error if the pane is dead or no session is registered.
 - Frontmatter `prompt_presets` are not the source of compaction truth. They may tune summary policy (for example, how many backlog items to mention), but the substantive state carried forward must come from the live backlog/queue/icebox components.
 - `--tag <name>` sets the pre-compact checkpoint tag; `--tag skip` disables tagging.
 - `--commit` closes out the compacted file through the same `agent-doc commit` path described above, rather than relying on an external raw `git commit`.
+- `--commit` only proves that the compacted document state itself reached `HEAD` (for `exchange`, typically the summary/archive-pointer rewrite). It does not also persist any later human console explanation; that follow-up still needs its own normal `finalize` / `write --commit` response cycle if it should appear in `exchange`.
 - When `--commit` is used and the project exposes `.agent-doc/patches/vcs-refresh.signal`, the closeout must verify that the refresh signal write succeeded; a failed signal write is a hard closeout failure, not a warning.
 
 ## skill

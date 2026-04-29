@@ -223,6 +223,43 @@ fn test_cli_bare_file_path_aliases_to_run() {
 }
 
 #[test]
+fn test_compact_commit_explains_commit_scope() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: first topic — gpt-5\n\
+        first body\n\n\
+        ### Re: second topic — gpt-5\n\
+        second body\n\
+        <!-- /agent:exchange -->\n";
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::write(&doc, content).unwrap();
+    seed_snapshot(root, &doc, content);
+    init_git_repo(root, &doc);
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args([
+        "compact",
+        doc.to_str().unwrap(),
+        "--component",
+        "exchange",
+        "--tag",
+        "skip",
+        "--commit",
+    ]);
+    cmd.assert().success().stderr(predicate::str::contains(
+        "[compact] note: --commit persists only the compacted document state now in HEAD",
+    ));
+}
+
+#[test]
 fn test_cli_repair_aliases_legacy_recover() {
     let tmp = tempfile::TempDir::new().unwrap();
     let missing = tmp.path().join("missing.md");

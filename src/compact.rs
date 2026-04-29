@@ -212,6 +212,9 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
             file.display()
         );
     }
+    eprintln!(
+        "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`"
+    );
     Ok(())
 }
 

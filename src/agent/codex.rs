@@ -446,7 +446,7 @@ mod tests {
             Some("bash".into()),
             Some(vec![
                 "-c".into(),
-                "echo >&2 'sandbox violation'; exit 1".into(),
+                "cat >/dev/null; echo >&2 'sandbox violation'; exit 1".into(),
             ]),
         );
         let iter = codex.send_streaming("ignored", None, false, None).unwrap();
@@ -464,7 +464,7 @@ mod tests {
             Some("bash".into()),
             Some(vec![
                 "-c".into(),
-                r#"echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.completed","usage":{}}'; echo >&2 'deprecation warning'"#
+                r#"cat >/dev/null; echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.completed","usage":{}}'; echo >&2 'deprecation warning'"#
                     .into(),
             ]),
         );
@@ -484,7 +484,7 @@ mod tests {
     fn streaming_stderr_empty_on_nonzero_exit() {
         let codex = Codex::new(
             Some("bash".into()),
-            Some(vec!["-c".into(), "exit 42".into()]),
+            Some(vec!["-c".into(), "cat >/dev/null; exit 42".into()]),
         );
         let iter = codex.send_streaming("ignored", None, false, None).unwrap();
         let chunks: Vec<_> = iter.collect();

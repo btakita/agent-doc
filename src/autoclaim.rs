@@ -69,7 +69,10 @@ pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
             return Ok(());
         }
     };
+    run_with_tmux_in_for_pane(tmux, base_dir, &pane_id)
+}
 
+fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &str) -> Result<()> {
     let mut registry = sessions::load_in(base_dir)?;
 
     // Find all entries mapped to the current pane
@@ -218,6 +221,12 @@ mod tests {
 
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Helper: set up a temp dir with a sessions.json containing a claim for the given pane.
     fn setup_registry(dir: &std::path::Path, pane_id: &str) {
         let mut reg = SessionRegistry::new();
@@ -241,7 +250,7 @@ mod tests {
 
     #[test]
     fn autoclaim_focuses_pane_with_claim() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = env_lock();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-focus");
         let dir = TempDir::new().unwrap();
 
@@ -255,16 +264,13 @@ mod tests {
         // Set up registry so the pane has a claim
         setup_registry(dir.path(), &pane_id);
 
-        // Set TMUX_PANE so current_pane() returns our test pane
-        unsafe { std::env::set_var("TMUX_PANE", &pane_id) };
-
         // Create a second pane so we can verify select_pane switches focus
         let pane2 = iso.new_window("test", dir.path()).unwrap();
         // Focus pane2 so autoclaim has to switch back to pane_id
         iso.select_pane(&pane2).unwrap();
 
         // Run autoclaim — should succeed and call select_pane
-        let result = run_with_tmux_in(&iso, dir.path());
+        let result = run_with_tmux_in_for_pane(&iso, dir.path(), &pane_id);
         assert!(result.is_ok(), "autoclaim should succeed: {:?}", result);
 
         // Verify select_pane was called: the active pane should now be pane_id, not pane2
@@ -273,8 +279,6 @@ mod tests {
             active, pane_id,
             "autoclaim should have focused the claimed pane"
         );
-
-        unsafe { std::env::remove_var("TMUX_PANE") };
     }
 
     /// Helper: set up a multi-file registry for sync tests.
@@ -305,7 +309,7 @@ mod tests {
 
     #[test]
     fn autoclaim_syncs_layout_with_multiple_files() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = env_lock();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-sync");
         let dir = TempDir::new().unwrap();
 
@@ -338,23 +342,18 @@ mod tests {
             ],
         );
 
-        // Set TMUX_PANE to pane1
-        unsafe { std::env::set_var("TMUX_PANE", &pane1) };
-
         // Run autoclaim — should trigger sync for multi-file window
-        let result = run_with_tmux_in(&iso, dir.path());
+        let result = run_with_tmux_in_for_pane(&iso, dir.path(), &pane1);
         assert!(result.is_ok(), "autoclaim should succeed: {:?}", result);
 
         // Verify both panes are still alive after sync
         assert!(iso.pane_alive(&pane1), "pane1 should be alive after sync");
         assert!(iso.pane_alive(&pane2), "pane2 should be alive after sync");
-
-        unsafe { std::env::remove_var("TMUX_PANE") };
     }
 
     #[test]
     fn autoclaim_no_claim_skips_focus() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = env_lock();
         let dir = TempDir::new().unwrap();
 
         // Empty registry — no claims
@@ -362,12 +361,7 @@ mod tests {
         std::fs::create_dir_all(&sessions_dir).unwrap();
         std::fs::write(sessions_dir.join("sessions.json"), "{}").unwrap();
 
-        // Set a fake pane ID
-        unsafe { std::env::set_var("TMUX_PANE", "%99999") };
-
-        let result = run_with_tmux_in(&Tmux::default_server(), dir.path());
+        let result = run_with_tmux_in_for_pane(&Tmux::default_server(), dir.path(), "%99999");
         assert!(result.is_ok());
-
-        unsafe { std::env::remove_var("TMUX_PANE") };
     }
 }

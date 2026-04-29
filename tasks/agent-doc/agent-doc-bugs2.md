@@ -585,7 +585,22 @@ So I would keep `#prst` open, but narrow its wording to that exact entry-point g
 
 There are no additional actionable follow-up items to capture in this cycle beyond the existing `#prst` backlog entry.
 
-<!-- agent:boundary:73e231ea -->
+❯ do #hpbd. spec-test-build-install-commit-push
+### Re: #hpbd historical patchback drift — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `b747f6f` (`fix: replay historical committed captures for orphan prompts`) to `origin/20260422/codex-agent-backend`.
+
+The fix teaches `repair` to reuse the newest committed durable capture only in the narrow historical-drift case that matched `tasks/software/tsift.md`: the live exchange still contains a matching orphan prompt target, but the captured `### Re:` heading is missing. Generic committed captures still stay inert, so this does not turn old committed responses into a broad replay source. I added the capture lookup helper, the orphan-prompt/topic matcher, a regression for the `#code-review`-style compaction miss, and a guard regression proving unrelated committed captures still do not replay. I also updated the repair command spec to document the exception.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_ignores_committed_capture_without_pending`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+No new backlog item came out of this fix. `#prst` is now the top remaining backlog item.
+<!-- agent:boundary:fe6a38ea -->
 <!-- /agent:exchange -->
 
 <!--
@@ -594,7 +609,6 @@ There are no additional actionable follow-up items to capture in this cycle beyo
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#hpbd] Fix historical patchback drift that left `tasks/software/tsift.md` showing `❯ #code-review` without the captured response. See `tasks/agent-doc/plan-tsift-historical-patchback-drift.md`.
 - [ ] [#prst] When a user invokes agent-doc <file> directly from the harness and the document itself still has no_changes, make preset-driven intent like #agent-doc-bug explicit instead of stopping at the diff-based no-changes path. The workflow should surface that the referenced document prompt_presets still imply plan and backlog handling even though the prompt came from chat rather than document edits.
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])

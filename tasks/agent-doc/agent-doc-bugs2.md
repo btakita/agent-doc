@@ -210,7 +210,7 @@ Presets still have value, but as policy knobs: for example, "include the top 3 b
 
 I added that as a recommended backlog follow-up so it is tracked without treating it as accepted work yet. `#fuback` remains the top accepted active item.
 
-❯ If the document markdown frontmatter has syntax errors, auto-start does not start and there is no feedback. spec-test-build-install-commit-push
+❯ If the document markdown frontmatter has syntax errors, auto-start does not start and there is no feedback. agent-doc should start showing an error for the bad syntax. spec-test-build-install-commit-push
 ❯ `'#follow-up-backlog': Any follow-up items to place in the backlog?`
 ```
 ~/work/btakita/agent-loop main ⇡9 !6 ?2                                                        8s  agent-loop 21:07:41
@@ -226,7 +226,10 @@ The failure mode is now explicit across the startup paths. `frontmatter.rs` adds
 I updated `specs/07-commands.md`, `docs/guide/commands.md`, and `VERSIONS.md`, added regression coverage for the shared parse wrapper plus `start` and sync-phase error context, then ran `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`.
 
 No new backlog item came out of this fix. `#fuback` remains the top accepted active item.
-<!-- agent:boundary:bf187b80 -->
+### Re: frontmatter syntax wording — gpt-5
+
+Yes. That is the implemented behavior: malformed frontmatter now surfaces a document-targeted startup error with a repair hint for the bad `--- ... ---` block, and sync logs the same warning instead of failing silently.
+<!-- agent:boundary:d418ac83 -->
 <!-- /agent:exchange -->
 
 <!--

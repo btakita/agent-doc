@@ -852,7 +852,21 @@ Commit / push: `9355752` (`fix: recover duplicate tmux pane ownership`) pushed t
 I left the workspace root repo untouched because it has unrelated modified docs/submodules; this publish step only covered the `src/agent-doc` changes tied to the tmux recovery work.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:5b9a1775 -->
+❯ ### Re: tmux duplicate-pane autorecovery commit + push — gpt-5 (HEAD)
+
+Committed and pushed the uncommitted `src/agent-doc` implementation for the duplicate-pane autorecovery work.
+
+Verification:
+- `cargo test` (full suite passed on rerun after one flaky `wait_for_agent_ready_detects_prompt` timeout)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `9355752` (`fix: recover duplicate tmux pane ownership`) pushed to `origin/20260422/codex-agent-backend`.
+
+I left the workspace root repo untouched because it has unrelated modified docs/submodules; this publish step only covered the `src/agent-doc` changes tied to the tmux recovery work.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:2415d5ef -->
 <!-- /agent:exchange -->
 
 <!--

@@ -33,15 +33,32 @@ Active backlog:
 - [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
 - 3 more active item(s)
-<!-- agent:boundary:7e5b4c76 -->
+### Re: compaction patchback gap — gpt-5
+
+The response was not lost from the compact commit path; it was never part of that path.
+
+`agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --component exchange --commit` does a binary-owned replacement of `agent:exchange`. In `99d7b5502`, it archived the old exchange, wrote the default `### Session Summary` plus backlog context into the document, updated the snapshot, and committed that compacted document. That is why the live file now shows only the summary block and archive pointer instead of the earlier long exchange.
+
+`agent-doc session-check` being green only proved that the compacted document, snapshot, and `HEAD` were aligned. It did not prove that any later console explanation had been patched back as a new assistant response.
+
+Once `HEAD` already matched the compacted document, the closeout logic fell into the `already committed` / `post-commit local drift` path in `git.rs`. That path explicitly treats the cycle as closed and does not synthesize a second assistant patchback on top of the committed compaction result. So the real gap is contract clarity: compact closeout looks complete, but it is not obvious that the human-facing explanation still needs its own normal `finalize` / `write --commit` cycle if you want it persisted in `exchange`.
+
+Plan for `#ckpb`:
+1. Make compact closeout print an explicit notice that only the compact summary was committed to the document.
+2. Tighten the already-committed/no-response-body path so compaction follow-ups cannot be mistaken for a successful automatic patchback.
+3. Add an integration regression for `compact --commit` followed by an expected-but-missing exchange patchback.
+
+`#ckpb` is now at the top of the backlog.
+<!-- agent:boundary:51a0752e -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Pending / Not Built
+## Pending / Not Builte
 
 <!-- agent:backlog -->
+- [ ] [#ckpb] Fail closed or emit an explicit operator notice when `compact --component exchange --commit` leaves the session clean but the responder’s console explanation is not part of the committed document. Repro from `tasks/agent-doc/agent-doc-bugs2.md` on Apr 29, 2026: commit `99d7b5502` archived and replaced `agent:exchange` with the compact summary, `session-check` later passed, and the follow-up explanation stayed in the harness because `commit_with_outcome()` treated the state as already committed / post-commit local drift instead of synthesizing a second assistant patchback. The fix should make that contract explicit or block the misleading closeout shape.
 - [ ] [#lvak] Tighten routed-cycle acknowledgment when a committed cycle already has prompt drift. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: rerouting to live pane `%393` logged `route_cycle_ack_skipped_live_child ... prompt_target: do #asch1. spec-tests-commit-push` even though `session-check` still reported `no new agent-doc cycle started`. A merely live child should not suppress the fresh-cycle proof when the previous cycle is closed and the prompt-bearing diff is still unresolved.
 - [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.

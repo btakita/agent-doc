@@ -241,6 +241,56 @@ fn startup_miss_requires_fresh_start(
     )
 }
 
+fn startup_miss_should_fail_closed(
+    pane_alive: bool,
+    registered_pane: &str,
+    live_owner: Option<&str>,
+    supervisor_health: SupervisorHealth,
+    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> bool {
+    pane_alive
+        && live_owner != Some(registered_pane)
+        && matches!(
+            supervisor_health,
+            SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
+        )
+        && log_status.is_some_and(crate::startup_miss::SessionLogStatus::latest_session_open)
+}
+
+fn startup_miss_route_provenance(
+    tmux: &Tmux,
+    pane_id: &str,
+    live_owner: Option<&str>,
+    supervisor_health: SupervisorHealth,
+    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> String {
+    let log_detail = match log_status {
+        Some(status) if status.latest_session_open() => format!(
+            "session_log=open latest_start_pane={} last_event={}",
+            status.latest_start_pane.as_deref().unwrap_or("?"),
+            status.last_event.as_deref().unwrap_or("?")
+        ),
+        Some(status) if status.latest_session_closed() => format!(
+            "session_log=closed latest_start_pane={} last_event={}",
+            status.latest_start_pane.as_deref().unwrap_or("?"),
+            status.last_event.as_deref().unwrap_or("?")
+        ),
+        Some(status) => format!(
+            "session_log=unknown latest_start_pane={} last_event={}",
+            status.latest_start_pane.as_deref().unwrap_or("?"),
+            status.last_event.as_deref().unwrap_or("?")
+        ),
+        None => "session_log=missing".to_string(),
+    };
+    format!(
+        "{} live_owner={} supervisor_health={:?} {}",
+        pane_route_provenance(tmux, pane_id),
+        live_owner.unwrap_or("none"),
+        supervisor_health,
+        log_detail
+    )
+}
+
 const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 
 fn startup_miss_diagnostic_message(file: &Path, reason: &str) -> String {
@@ -489,9 +539,52 @@ fn resolve_or_create_pane(
     // deregister it immediately so we fall through to auto-start instead of
     // reusing a pane that never successfully started a document cycle.
     if let Some(ref registered_pane) = registered {
-        if tmux.pane_alive(registered_pane)
-            && crate::startup_miss::is_startup_miss_pane(file, registered_pane)
+        if let Ok(Some(miss)) = crate::startup_miss::load(file)
+            && miss.pane_id == *registered_pane
+            && tmux.pane_alive(registered_pane)
         {
+            let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
+                .ok()
+                .flatten();
+            let provenance = startup_miss_route_provenance(
+                tmux,
+                registered_pane,
+                live_owner.as_deref(),
+                supervisor_health,
+                log_status.as_ref(),
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_detected file={} origin={:?} {}",
+                    file_path, miss.origin, provenance
+                ),
+            );
+            if startup_miss_should_fail_closed(
+                true,
+                registered_pane,
+                live_owner.as_deref(),
+                supervisor_health,
+                log_status.as_ref(),
+            ) {
+                eprintln!(
+                    "[route] startup-miss for {} is stranded, not crashed: {}",
+                    file_path, provenance
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_startup_miss_stranded file={} origin={:?} {}",
+                        file_path, miss.origin, provenance
+                    ),
+                );
+                anyhow::bail!(
+                    "startup-miss for {} remains unresolved on alive pane {}: {}. The last session never recorded a child exit or session_end, so route will not auto-start a replacement pane over a stranded session",
+                    file.display(),
+                    registered_pane,
+                    provenance
+                );
+            }
             if startup_miss_requires_fresh_start(
                 registered_pane,
                 live_owner.as_deref(),
@@ -4690,6 +4783,60 @@ history line
     }
 
     #[test]
+    fn startup_miss_fail_closed_only_for_alive_open_no_socket_sessions() {
+        let open = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(1),
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+        };
+        let closed = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(1),
+            last_event: Some("session_end".to_string()),
+            saw_process_exit_after_latest_start: true,
+            saw_session_end_after_latest_start: true,
+        };
+
+        assert!(startup_miss_should_fail_closed(
+            true,
+            "%42",
+            None,
+            SupervisorHealth::NoSocket,
+            Some(&open)
+        ));
+        assert!(!startup_miss_should_fail_closed(
+            true,
+            "%42",
+            Some("%42"),
+            SupervisorHealth::NoSocket,
+            Some(&open)
+        ));
+        assert!(!startup_miss_should_fail_closed(
+            true,
+            "%42",
+            None,
+            SupervisorHealth::Healthy,
+            Some(&open)
+        ));
+        assert!(!startup_miss_should_fail_closed(
+            true,
+            "%42",
+            None,
+            SupervisorHealth::NoSocket,
+            Some(&closed)
+        ));
+        assert!(!startup_miss_should_fail_closed(
+            false,
+            "%42",
+            None,
+            SupervisorHealth::NoSocket,
+            Some(&open)
+        ));
+    }
+
+    #[test]
     fn startup_miss_diagnostic_message_includes_retry_command() {
         let doc = std::path::Path::new("tasks/agent-doc/agent-doc-bugs2.md");
         let message = startup_miss_diagnostic_message(
@@ -4713,7 +4860,10 @@ history line
 
         send_keys_with_retry(&iso, &pane, "printf '> '");
         let before = wait_for_pane_contains(&iso, &pane, "> ", std::time::Duration::from_secs(5));
-        assert!(before.contains("> "), "shell prompt should be visible: {before}");
+        assert!(
+            before.contains("> "),
+            "shell prompt should be visible: {before}"
+        );
 
         emit_startup_miss_diagnostic(&iso, &pane, &doc, "startup timed out");
 

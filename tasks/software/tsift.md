@@ -90,7 +90,35 @@ The earlier federated lexical search, lint entity leakage, summarize root-resolu
 - Ran `cargo test -p tsift locks -- --nocapture`
 - Ran `cargo test -p tsift search_cmd_uses_ancestor_project_root_for_nested_paths -- --nocapture`
 - Reproduced nested-path behavior with `cargo run --manifest-path src/tsift/Cargo.toml -- index ...` and `... -- locks ...` against temporary directories
-<!-- agent:boundary:2e6df4d2 -->
+
+❯ do #idxr. spec-test-build-install-commit-push
+### Re: #idxr — gpt-5
+
+Implemented the nested-root fix in `tsift`, and I carried the sibling `locks` bug with it because both entrypoints were bypassing the shared root resolver.
+
+What changed:
+- `cmd_index` and `cmd_locks` now resolve nested paths through the shared project/workspace resolver instead of raw `canonicalize()`.
+- The resolver now treats an ancestor workspace `.gitmodules` as a root signal in addition to `.tsift/`, so `tsift index --workspace <nested>` works before any `.tsift/` exists.
+- Added regressions for nested project roots, nested workspace roots, and lock targeting.
+- Updated `SPEC.md` to document nested-path behavior for `index` and `locks`.
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml`
+- `cargo build --manifest-path src/tsift/Cargo.toml`
+- `cargo install --path src/tsift --force`
+- Reproduced with installed `tsift`:
+  - `tsift index <root>/src/nested` reused `<root>/.tsift/index.db` and did not create `<root>/src/nested/.tsift/index.db`
+  - `tsift locks <root>/src/nested --json` reported `db_path=<root>/.tsift/index.db`
+  - `tsift index --workspace <workspace>/docs/nested` created `.tsift/indexes/alpha/index.db` and `.tsift/indexes/beta/index.db` at the workspace root
+
+#### Commit
+
+- `e0a2ba2` `fix: resolve nested roots for index and locks`
+- pushed to `origin/main`
+
+This closes `#idxr`, and the same change also closes `#lokr`.
+<!-- agent:boundary:f26db589 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -74,7 +74,7 @@ Added lock coverage in both `src/summarize.rs` and `src/main.rs`, updated `SPEC.
 Committed and pushed `src/tsift` `main` as `d84df20` (`fix: serialize summarize extractors`).
 
 Top remaining backlog item: `#bjen`.
-<!-- agent:boundary:02872d43 -->
+<!-- agent:boundary:c36abd17 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -83,7 +83,6 @@ Top remaining backlog item: `#bjen`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bjen] [recommended] Route tsift search symbol-hit reads through the resilient read-only helpers and add a race test where a rollback-journal lock appears after precheck
 - [ ] [#8w9n] [recommended] Add resilient read-only handling for summaries.db in tsift status and summarize query paths, with degraded status/diagnostics instead of hard failure
 <!-- /agent:backlog -->
 

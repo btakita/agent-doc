@@ -9,8 +9,8 @@
 //!   - Code blocks containing `## User` / `## Assistant` headings are not treated as section
 //!     boundaries.
 //! - **Template/stream mode (full compact):** when `keep` is `None`, archives the full content of
-//!   a named component (default `exchange`) and replaces it with a one-line summary marker;
-//!   optionally accepts a custom `--message`.
+//!   a named component (default `exchange`) and replaces it with a summary marker; optionally
+//!   accepts a custom `--message`.
 //! - **Template/stream mode (partial compact):** when `keep` is `Some(N)`, archives all but the
 //!   last N `### Re:` topic sections; rebuilds the component with an archive summary + kept topics.
 //!   - The preamble (content before the first `### Re:` heading) is always preserved; use
@@ -56,6 +56,8 @@
 //! - partial_compact_keep_threshold: sections ≤ keep → no-op
 //! - partial_compact_archive_format: archive contains preamble + archived sections
 //! - partial_compact_result_format: result has archive pointer + preamble (or message) + kept sections
+//! - exchange_compact_default_summary_includes_live_state_context: default full compact summary
+//!   carries forward backlog/queue/icebox context when present
 //! - compact_with_commit_writes_vcs_refresh_signal: `--commit` closeout creates an `agent-doc`
 //!   commit and updates `.agent-doc/patches/vcs-refresh.signal` when that refresh channel exists
 //! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
@@ -64,7 +66,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, frontmatter, snapshot};
+use crate::{component, frontmatter, pending, queue, snapshot};
 
 /// A parsed exchange pair (User prompt + Assistant response).
 #[derive(Debug)]
@@ -74,6 +76,9 @@ struct Exchange {
     /// The assistant's content (without the `## Assistant` heading)
     assistant: String,
 }
+
+const COMPACT_SUMMARY_ITEM_LIMIT: usize = 3;
+const COMPACT_SUMMARY_TEXT_LIMIT: usize = 120;
 
 /// Run the compact command.
 ///
@@ -241,6 +246,7 @@ fn run_component_compact(
     // Build summary marker
     let summary = match message {
         Some(msg) => format!("{}\n", msg),
+        None if target == "exchange" => build_exchange_compact_summary(content, &archive_path),
         None => format!(
             "*Compacted. Content archived to `{}`*\n",
             archive_path.display()
@@ -444,6 +450,167 @@ fn build_component_archive(original: &str, component_name: &str, content: &str) 
     archive.push('\n');
 
     archive
+}
+
+fn build_exchange_compact_summary(content: &str, archive_path: &Path) -> String {
+    let mut summary = String::from("### Session Summary\n\n");
+    summary.push_str(&format!(
+        "*Compacted. Content archived to `{}`*\n",
+        archive_path.display()
+    ));
+
+    let Ok(components) = component::parse(content) else {
+        return summary;
+    };
+
+    let backlog = summarize_backlog_component(&components, content);
+    let queued = summarize_queue_component(&components, content);
+    let icebox = summarize_icebox_component(&components, content);
+
+    append_compact_summary_section(&mut summary, "Active backlog", &backlog);
+    append_compact_summary_section(&mut summary, "Queue", &queued);
+    append_compact_summary_section(&mut summary, "Icebox", &icebox);
+
+    summary
+}
+
+fn append_compact_summary_section(summary: &mut String, title: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    summary.push('\n');
+    summary.push_str(title);
+    summary.push_str(":\n");
+    for item in items {
+        summary.push_str("- ");
+        summary.push_str(item);
+        summary.push('\n');
+    }
+}
+
+fn summarize_backlog_component(components: &[component::Component], content: &str) -> Vec<String> {
+    let Some(comp) = components
+        .iter()
+        .find(|c| component::is_backlog_component(&c.name))
+    else {
+        return Vec::new();
+    };
+
+    summarize_pending_body(comp.content(content))
+}
+
+fn summarize_icebox_component(components: &[component::Component], content: &str) -> Vec<String> {
+    let Some(comp) = components
+        .iter()
+        .find(|c| component::is_icebox_component(&c.name))
+    else {
+        return Vec::new();
+    };
+
+    summarize_pending_body(comp.content(content))
+}
+
+fn summarize_pending_body(body: &str) -> Vec<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let (_, items, _) = pending::parse_items(body);
+    let active: Vec<&pending::PendingItem> = items.iter().filter(|item| !item.is_done()).collect();
+    if !active.is_empty() {
+        let mut summary: Vec<String> = active
+            .iter()
+            .take(COMPACT_SUMMARY_ITEM_LIMIT)
+            .map(|item| render_pending_summary(item))
+            .collect();
+        if active.len() > COMPACT_SUMMARY_ITEM_LIMIT {
+            summary.push(format!(
+                "{} more active item(s)",
+                active.len() - COMPACT_SUMMARY_ITEM_LIMIT
+            ));
+        }
+        return summary;
+    }
+
+    summarize_freeform_component(trimmed)
+}
+
+fn render_pending_summary(item: &pending::PendingItem) -> String {
+    let checkbox = match (&item.state, &item.gate_type) {
+        (pending::PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
+        _ => format!("[{}]", item.state.box_char()),
+    };
+    format!("{} [#{}] {}", checkbox, item.id, item.text)
+}
+
+fn summarize_queue_component(components: &[component::Component], content: &str) -> Vec<String> {
+    let Some(comp) = components.iter().find(|c| c.name == "queue") else {
+        return Vec::new();
+    };
+
+    let body = comp.content(content);
+    if body.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let Ok(entries) = queue::parse(body) else {
+        return summarize_freeform_component(body.trim());
+    };
+
+    let Some(first_prompt) = queue::first_prompt(&entries) else {
+        return Vec::new();
+    };
+
+    let prompts = queue::prompts(&entries);
+    let mut summary = vec![format!(
+        "Next prompt: {}",
+        summarize_queue_prompt(&first_prompt.text)
+    )];
+    if prompts.len() > 1 {
+        summary.push(format!(
+            "{} additional queued prompt(s) remain",
+            prompts.len() - 1
+        ));
+    }
+    summary
+}
+
+fn summarize_queue_prompt(text: &str) -> String {
+    let mut non_empty = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first_line = non_empty.next().unwrap_or("");
+    let mut summary = collapse_whitespace(first_line);
+    if summary.is_empty() {
+        summary = collapse_whitespace(text);
+    }
+    if non_empty.next().is_some() {
+        summary.push_str(" ...");
+    }
+    truncate_with_ellipsis(&summary, COMPACT_SUMMARY_TEXT_LIMIT)
+}
+
+fn summarize_freeform_component(body: &str) -> Vec<String> {
+    let excerpt = truncate_with_ellipsis(&collapse_whitespace(body), COMPACT_SUMMARY_TEXT_LIMIT);
+    if excerpt.is_empty() {
+        Vec::new()
+    } else {
+        vec![excerpt]
+    }
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+
+    let mut out: String = text.chars().take(max_chars.saturating_sub(3)).collect();
+    out.push_str("...");
+    out
 }
 
 /// Parse the document body into User/Assistant exchange pairs.
@@ -950,6 +1117,68 @@ mod tests {
             .to_string();
         assert!(exchange_after.contains("Compacted summary."));
         assert!(!exchange_after.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn exchange_compact_default_summary_includes_live_state_context() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-summary\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do #next. run targeted test\n",
+            "- do #later. build and install\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#rpaj] Make compact exchange synthesize backlog-aware context\n",
+            "- [/release] [#ship] Wait for release window\n",
+            "- [x] [#done] Already handled\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Icebox\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#parked] Parked follow-up for later\n",
+            "<!-- /agent:icebox -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact(&file, doc, "exchange", None, false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let components = component::parse(&result).unwrap();
+        let exchange = components
+            .iter()
+            .find(|c| c.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert!(exchange.contains("### Session Summary"));
+        assert!(exchange.contains("*Compacted. Content archived to `"));
+        assert!(exchange.contains("Active backlog:"));
+        assert!(
+            exchange.contains("[ ] [#rpaj] Make compact exchange synthesize backlog-aware context")
+        );
+        assert!(exchange.contains("[/release] [#ship] Wait for release window"));
+        assert!(!exchange.contains("[#done]"));
+        assert!(exchange.contains("Queue:"));
+        assert!(exchange.contains("Next prompt: do #next. run targeted test"));
+        assert!(exchange.contains("1 additional queued prompt(s) remain"));
+        assert!(exchange.contains("Icebox:"));
+        assert!(exchange.contains("[ ] [#parked] Parked follow-up for later"));
+        assert!(!exchange.contains("### Re: topic one"));
     }
 
     #[test]

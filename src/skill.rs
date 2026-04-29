@@ -1134,6 +1134,10 @@ mod tests {
         assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
         assert!(content.contains("binary-owned `agent-doc commit` path"));
         assert!(content.contains("VCS refresh signal"));
+        assert!(content.contains("agent:backlog"));
+        assert!(content.contains("agent:queue"));
+        assert!(content.contains("agent:icebox"));
+        assert!(content.contains("prompt_presets"));
     }
 
     #[test]

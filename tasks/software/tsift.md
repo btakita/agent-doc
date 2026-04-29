@@ -674,7 +674,30 @@ Commit/push:
 - `btakita/tsift@2ff956b` (`fix: keep workspace status scope-aware`) pushed to `origin/main`.
 
 Top of backlog: `#wssearch`.
-<!-- agent:boundary:253f8676 -->
+
+❯ do #wssearch. spec-test-build-install-commit-push
+### Re: do #wssearch — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- plain `tsift search` on a workspace root now fails closed when the workspace only has scoped `.tsift/indexes/<scope>/index.db` files, instead of auto-creating a shared root `.tsift/index.db`
+- the new error tells the caller to pick `--scope <scope>` or `--federated`, and it lists both the available scopes and the currently indexed scopes
+- added regressions in both the direct command path (`src/main.rs`) and the compiled CLI surface (`tests/exit_code.rs`)
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.21`, and refreshed the installed binary
+
+Verification:
+- `cargo test workspace_search_cmd_requires_explicit_target_without_shared_root_index -- --nocapture` passed.
+- `cargo test workspace_search_requires_explicit_scope_or_federated_without_shared_root_index --test exit_code -- --nocapture` passed.
+- `make check` passed: 384 unit tests + 37 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.21`.
+
+Commit/push:
+- `btakita/tsift@b96cd73` (`fix: require explicit target for workspace search`) pushed to `origin/main`.
+
+Top of backlog: `#tmv7`.
+<!-- agent:boundary:e8a6f7a6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -683,7 +706,6 @@ Top of backlog: `#wssearch`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wssearch] [recommended] Make default workspace search fail closed or require explicit --scope/--federated instead of auto-creating a shared root index
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

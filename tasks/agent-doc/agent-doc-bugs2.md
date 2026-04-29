@@ -834,7 +834,10 @@ Verification:
 
 No repo commit or push yet.
 No new backlog item came out of this change.
-<!-- agent:boundary:9ff7c731 -->
+### Re: tmux duplicate-pane autorecovery closeout — gpt-5
+
+This follow-up only closes the prompt-bearing diff that remained after the prior patchback. No additional code changes, tests, or backlog items came out of this normalization pass.
+<!-- agent:boundary:f462d6b3 -->
 <!-- /agent:exchange -->
 
 <!--

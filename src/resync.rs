@@ -315,7 +315,10 @@ fn kill_redundant_associated_stash_panes(
         if !candidate.is_stash() {
             continue;
         }
-        if registry.values().any(|entry| entry.pane == candidate.pane_id) {
+        if registry
+            .values()
+            .any(|entry| entry.pane == candidate.pane_id)
+        {
             eprintln!(
                 "resync: preserving redundant pane {} because it is still registered",
                 candidate.pane_id
@@ -901,19 +904,20 @@ fn purge_unregistered_stash_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes:
         if registered_panes.contains(pane_id.as_str()) {
             continue;
         }
+        if let Some(owner_file) = live_owned_registered_file_for_pane(tmux, pane_id, &registry) {
+            eprintln!(
+                "resync: stash pane {} is unregistered but still owns {} — skipping kill",
+                pane_id, owner_file
+            );
+            continue;
+        }
         match classify_pane_process(tmux, pane_id) {
-            PaneProcessKind::IdleShell(_) => {
+            PaneProcessKind::IdleShell(_) | PaneProcessKind::Agent(_) => {
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
                 } else {
                     killed_count += 1;
                 }
-            }
-            PaneProcessKind::Agent(cmd) => {
-                eprintln!(
-                    "resync: stash pane {} running '{}' is unregistered — skipping kill (may be rescuable)",
-                    pane_id, cmd
-                );
             }
             PaneProcessKind::Foreign(_) | PaneProcessKind::UnknownTransient => {}
         }
@@ -2656,6 +2660,31 @@ mod tests {
         assert!(
             !iso.pane_alive(&pane2),
             "unregistered agent pane with no live owner should be killed"
+        );
+    }
+
+    #[test]
+    fn purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner() {
+        let iso = IsolatedTmux::new("resync-purge-agent-no-owner-bulk");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.send_keys(&pane2, &format!("exec {}", script.display()))
+            .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let windows = fetch_all_window_metadata(&iso);
+        let panes = fetch_all_pane_metadata(&iso);
+        purge_unregistered_stash_panes_bulk(&iso, &windows, &panes);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            !iso.pane_alive(&pane2),
+            "bulk stash purge should kill unregistered agent panes with no live owner"
         );
     }
 

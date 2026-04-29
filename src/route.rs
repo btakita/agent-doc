@@ -2085,49 +2085,63 @@ fn wait_for_agent_ready(
     let start = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(500);
     let mut poll_count = 0u32;
+    let mut ready_streak = 0u32;
+    let mut last_ready_line: Option<String> = None;
 
     while start.elapsed() < timeout {
-        if pane_has_prompt(tmux, pane_id, harness) {
-            eprintln!(
-                "[route] {} ready after {:.1}s ({} polls)",
-                harness.binary,
-                start.elapsed().as_secs_f64(),
-                poll_count
-            );
-            return true;
-        }
+        if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
+            match ready_prompt_candidate(&content, harness) {
+                Some(line) => {
+                    if last_ready_line.as_deref() == Some(line.as_str()) {
+                        ready_streak += 1;
+                    } else {
+                        ready_streak = 1;
+                        last_ready_line = Some(line);
+                    }
+                    if ready_streak >= 2 {
+                        eprintln!(
+                            "[route] {} ready after {:.1}s ({} polls)",
+                            harness.binary,
+                            start.elapsed().as_secs_f64(),
+                            poll_count
+                        );
+                        return true;
+                    }
+                }
+                None => {
+                    ready_streak = 0;
+                    last_ready_line = None;
+                }
+            }
 
-        poll_count += 1;
-        if poll_count.is_multiple_of(10)
-            && let Ok(content) = sessions::capture_pane(tmux, pane_id)
-        {
-            let last_line = content
-                .lines()
-                .rev()
-                .find(|l| !l.trim().is_empty())
-                .map(prompt::strip_ansi)
-                .unwrap_or_default();
-            eprintln!(
-                "[route] Still waiting for {} ({:.0}s)... last line: {}",
-                harness.binary,
-                start.elapsed().as_secs_f64(),
-                &last_line[..std::cmp::min(60, last_line.len())]
-            );
+            poll_count += 1;
+            if poll_count.is_multiple_of(10) {
+                let last_line = content
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .map(prompt::strip_ansi)
+                    .unwrap_or_default();
+                eprintln!(
+                    "[route] Still waiting for {} ({:.0}s)... last line: {}",
+                    harness.binary,
+                    start.elapsed().as_secs_f64(),
+                    &last_line[..std::cmp::min(60, last_line.len())]
+                );
+            }
         }
         std::thread::sleep(poll_interval);
     }
     false
 }
 
-/// Check if pane content shows the agent's idle prompt.
-fn pane_has_prompt(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
-    if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
-        harness
-            .last_prompt_candidate(&content)
-            .is_some_and(|line| harness.is_prompt_line(&line))
-    } else {
-        false
+fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
+    if harness.has_busy_cue(content) {
+        return None;
     }
+    harness
+        .last_prompt_candidate(content)
+        .filter(|line| harness.is_prompt_line(line))
 }
 
 /// After a lazy claim, sync tmux layout for all files in the same window.
@@ -2853,6 +2867,39 @@ mod tests {
         assert!(
             ready,
             "should detect › prompt for codex harness even when a footer/status line follows it"
+        );
+    }
+
+    #[test]
+    fn wait_for_agent_ready_rejects_codex_queue_message_footer() {
+        let _tmux_guard = tmux_start_lock();
+        let iso = IsolatedTmux::new("route-test-codex-queue-message");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock codex launch"
+        );
+
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "› \n"; printf "tab to queue message\n"; printf "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n"; cat'"#;
+        send_keys_with_retry(&iso, &pane, script);
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting codex...",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting codex..."),
+            "mock codex never started in pane: {content}"
+        );
+
+        let harness = HarnessConfig::codex();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
+        assert!(
+            !ready,
+            "queue-message footer must not count as an idle Codex prompt"
         );
     }
 
@@ -3616,7 +3663,7 @@ history line
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
-            ready && pane_has_prompt(&iso, &pane, &harness),
+            ready && ready_prompt_candidate(&content, &harness).is_some(),
             "should detect ❯ in pane content, got: {}",
             content
         );

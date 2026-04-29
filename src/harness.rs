@@ -163,6 +163,30 @@ impl HarnessConfig {
         self.binary == "codex" && trimmed.contains("·") && trimmed.contains("Context ")
     }
 
+    /// Return true when recent pane output indicates the harness is present but
+    /// not actually idle for a routed trigger yet.
+    pub fn has_busy_cue(&self, output: &str) -> bool {
+        if crate::prompt::parse_prompt(output).active {
+            return true;
+        }
+
+        if self.binary != "codex" {
+            return false;
+        }
+
+        output
+            .lines()
+            .rev()
+            .take(8)
+            .map(crate::prompt::strip_ansi)
+            .map(|line| line.trim().to_ascii_lowercase())
+            .any(|line| {
+                line == "tab to queue message"
+                    || line.starts_with("tab to queue message ")
+                    || line.contains(" tab to queue message")
+            })
+    }
+
     /// Return the most recent non-empty, non-footer line from a captured transcript.
     pub fn last_prompt_candidate(&self, output: &str) -> Option<String> {
         output
@@ -367,6 +391,39 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
             h.last_prompt_candidate(output).as_deref(),
             Some("Working...")
         );
+    }
+
+    #[test]
+    fn has_busy_cue_detects_codex_queue_message_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn has_busy_cue_detects_active_permission_prompt() {
+        let h = HarnessConfig::claude();
+        let output = r#"
+  ⎿  Running…
+
+────────────────────────────────────────────────────────
+ Bash command
+
+   tmux capture-pane -t %73 -p
+   Capture pane content
+
+ Do you want to proceed?
+   [1] Yes
+ ❯ [2] Yes, and don't ask again for: tmux capture-pane:*
+   [3] No
+
+ Esc to cancel · ctrl+e to explain
+"#;
+        assert!(h.has_busy_cue(output));
     }
 
     #[test]

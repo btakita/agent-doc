@@ -72,7 +72,20 @@ Note on verification: an initial default-threaded `cargo test` run tripped four 
 
 Commit / push:
 - `0053fe6` `fix: reap pending done during closeout`
-<!-- agent:boundary:aea54bf7 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. `src/agent-doc/src/pending.rs:747-760`, `src/agent-doc/src/repair.rs:259-269`, `src/agent-doc/src/pending_cmd.rs:152-166`
+
+`reap_with_items()` drops completed items that have an empty id whenever the same backlog also contains at least one completed item with an id. In that mixed case the empty-id item is neither kept nor returned in `removed`, so `repair` deletes it from the live backlog without archiving it, and `pending reap` deletes it without any record at all. `parse_items()` already allows empty ids, so this is a real data-loss edge for legacy/manual backlog entries. The reaper should either backfill ids before filtering, or fail closed on completed items that still lack ids.
+
+2. `src/agent-doc/src/write.rs:523-529`, `src/agent-doc/src/write.rs:727-749`
+
+Queue consumption is documented as part of the same atomic closeout as the response commit, but the required closeout path only logs a warning when `consume_queue_prompt()` errors, and `consume_queue_prompt()` also returns `Ok(false)` for malformed/missing queue state. That allows `finalize` to commit the response while leaving the active queue prompt in place, which can replay the same queued prompt on the next cycle or strand `queue_active: true` indefinitely. Required closeouts should fail closed unless queue consumption can prove the first prompt was removed from both the document and the snapshot.
+
+I added both fixes to the backlog as recommended follow-up work. I did not find a third issue in this pass that was as concrete as these two.
+<!-- agent:boundary:880c7aa2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -81,4 +94,6 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ynad] [recommended] Make pending reap backfill or reject empty-id done items instead of silently dropping them during repair/manual reap
+- [ ] [#g3qn] [recommended] Fail closed when queue consumption cannot prove the first queued prompt was removed from file + snapshot
 <!-- /agent:backlog -->

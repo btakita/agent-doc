@@ -19,6 +19,8 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
+
+<!-- normalization -->
 <!-- /agent:status -->
 
 ## Exchange
@@ -184,7 +186,7 @@ All of those passed.
 ❯ I don't want to deploy the parallel tmux tests must pass rule in the package. This rule is purely for agent-doc development.
 
 ❯ Why was the last response patchback duplicated? #agent-doc-bug
-### Re: parallel tmux policy scope + duplicate patchback — gpt-5
+### Re: parallel tmux policy scope + duplicate patchback — gpt-5 (HEAD)
 
 I reverted the packaged `src/agent-doc` docs so the parallel tmux rule is no longer being pushed into the package surface. It remains only in the local development harness surfaces for this workspace:
 - `.codex/AGENTS.md`
@@ -207,7 +209,7 @@ So the duplicate was not a second user answer. It was a closeout-recovery bug: c
 Plan: [plan-session-check-prefix-duplication.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-session-check-prefix-duplication.md)
 
 I added the bug back to backlog with that existing plan instead of creating a second plan file for the same root cause.
-<!-- agent:boundary:5c96495b -->
+<!-- agent:boundary:a0f351b1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -235,6 +237,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#stshcr] Stashed pane agent session dies silently during editor file navigation, losing in-progress cycle. Repro from claudescore-3.md on Apr 29 2026: routed trigger ran preflight (cycle-1777493370425), user switched editor focus away, sync stashed the pane, the agent process died while stashed (~21 min gap), user switched back — sync found no alive pane and auto-started fresh. Cycle stuck in preflight_started. Sync log shows no explicit kill/prune of the stashed pane — the process silently exited. Plan: (1) add stash-health heartbeat — periodic liveness check for stashed panes with agent sessions, (2) on stash-death detection, close the orphaned cycle and log the exit reason, (3) investigate root cause of silent exit — check if tmux SIGHUP/signal propagation, idle timeout, or OOM kills the stashed process, (4) if the root cause is unavoidable (e.g. tmux signal on detach), add explicit session-preservation logic around stash/detach operations.
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

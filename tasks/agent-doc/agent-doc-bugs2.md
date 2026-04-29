@@ -181,7 +181,33 @@ Verification I ran for this policy change:
 - `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
 
 All of those passed.
-<!-- agent:boundary:701b9570 -->
+❯ I don't want to deploy the parallel tmux tests must pass rule in the package. This rule is purely for agent-doc development.
+
+❯ Why was the last response patchback duplicated? #agent-doc-bug
+### Re: parallel tmux policy scope + duplicate patchback — gpt-5
+
+I reverted the packaged `src/agent-doc` docs so the parallel tmux rule is no longer being pushed into the package surface. It remains only in the local development harness surfaces for this workspace:
+- `.codex/AGENTS.md`
+- `.claude/skills/agent-doc/SKILL.md`
+
+Verification after that scope correction:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+
+Both passed.
+
+Why the last response patchback duplicated:
+1. `agent-doc finalize` wrote and committed the response successfully.
+2. The post-write `session-check` then failed closed because the prompt-bearing user line was still bare text instead of the binary-owned `❯ `-prefixed form.
+3. I used the documented recovery path `agent-doc write --commit` with the same response body.
+4. In this failure shape, the binary treated that recovery as a fresh response write instead of a dedup/canonicalization-only repair, so it appended the same `### Re:` block a second time.
+
+So the duplicate was not a second user answer. It was a closeout-recovery bug: committed response first, then prompt-prefix/session-check failure, then same-response replay without a strong enough duplicate guard.
+
+Plan: [plan-session-check-prefix-duplication.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-session-check-prefix-duplication.md)
+
+I added the bug back to backlog with that existing plan instead of creating a second plan file for the same root cause.
+<!-- agent:boundary:5c96495b -->
 <!-- /agent:exchange -->
 
 <!--

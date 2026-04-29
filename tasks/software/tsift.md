@@ -53,7 +53,24 @@ What I’d recommend next:
 1. Fix the summarize scope base first, because it can silently point extraction at the wrong subtree.
 2. Add deleted-file cleanup for diff extraction, then update summary coverage to reflect only live files.
 3. Unify read-only index opening behind one snapshot-aware helper so every analysis command gets the same lock behavior.
-<!-- agent:boundary:90ee9b71 -->
+❯ do #scope1. spec-test-build-install-commit-push
+### Re: scope1 summarize extract path base — gpt-5
+
+Implemented `#scope1` in `src/tsift` and pushed `dd06649` (`fix: anchor summarize extract paths to --path`).
+
+What changed:
+- `cmd_summarize()` now keeps the ancestor project/workspace root for shared cache/config lookup, but resolves relative `--extract` paths from the caller's `--path` anchor instead of the promoted root.
+- Added regression coverage for both nested-directory anchors and file-path anchors, plus a CLI-level integration test for `--path <nested> --extract .` so repo-root files are no longer swept in accidentally.
+- Updated `SPEC.md` to match the actual contract: relative extract paths resolve against `--path` (or that file's parent directory) while still reusing the ancestor project's shared summary cache.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.21`
+
+Remaining backlog is unchanged apart from closing `#scope1`; `#cache1` and `#locks1` are still pending.
+<!-- agent:boundary:ac991a65 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -62,7 +79,6 @@ What I’d recommend next:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#scope1] [recommended] Fix summarize extract path resolution to respect the path base, and add regression coverage for nested path plus extract dot.
 - [ ] [#cache1] [recommended] Delete removed files from summaries.db during summarize diff extraction, and compute summary coverage from live indexed files only.
 - [ ] [#locks1] [recommended] Route graph, explain, path, and communities through the same snapshot-fallback read-only index path used by lock-tolerant search and status helpers.
 <!-- /agent:backlog -->

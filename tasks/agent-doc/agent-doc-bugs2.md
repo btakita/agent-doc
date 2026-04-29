@@ -866,11 +866,7 @@ Commit / push: `9355752` (`fix: recover duplicate tmux pane ownership`) pushed t
 I left the workspace root repo untouched because it has unrelated modified docs/submodules; this publish step only covered the `src/agent-doc` changes tied to the tmux recovery work.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:2415d5ef -->
-<!-- /agent:exchange -->
-
-<!--
-When I quit the supervisor using Codex, the process does not complete the shutdown. I had to press Ctrl+C again. spec-test-build-install-commit-push
+❯ In a previous session, when I quit the supervisor that was managing a Codex session, the process did not complete the shutdown. I had to press Ctrl+C again. Should we also log the timestamp to better locate the session? spec-test-build-install-commit-push
 ```
 ~/work/btakita/agent-loop main ⇡35 !12 ?7                                              9h 19m 27s  agent-loop 13:18:01
 ❯ agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
@@ -885,7 +881,31 @@ When I quit the supervisor using Codex, the process does not complete the shutdo
 [perf] commit total: 22ms
 Submitting to codex...
 ```
----
+### Re: supervisor shutdown provenance after Codex quit — gpt-5
+
+Implemented a concrete fix in `src/agent-doc`.
+
+The session logs already had timestamps; the real gap was that the supervisor did not log what happened at the post-Ctrl-D quit prompt. That is why the recent `b26b9957-8de6-4eae-bb98-5d7fe4d6b781` log could end with `ctrl_d_prompt_user` and then jump straight to `codex_start mode=fresh_restart restart_count=1` without proving whether stdin hit EOF, Enter was consumed, or stray input was read.
+
+I changed the supervisor prompt path so:
+- clean-exit / Ctrl-D / resume-failure prompts now log the actual decision (`user_quit*`, `user_restart_fresh`, or `prompt_input_invalid ...`)
+- stdin EOF at that prompt exits the supervisor instead of acting like an implicit restart
+- non-empty non-`q` input is rejected and re-prompted instead of silently restarting fresh
+
+Updated `specs/supervisor.md` and `VERSIONS.md`, and added unit coverage for prompt-decision classification and logged input summaries.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `f348770` (`fix: log supervisor prompt decisions`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:bc638d7f -->
+<!-- /agent:exchange -->
+
+<!--
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

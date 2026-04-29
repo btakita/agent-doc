@@ -10,6 +10,7 @@ prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. Any follow-up items to place in the backlog?
   '#commit-push': commit + push all uncommitted files
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
@@ -229,7 +230,28 @@ No new backlog item came out of this fix. `#fuback` remains the top accepted act
 ### Re: frontmatter syntax wording — gpt-5
 
 Yes. That is the implemented behavior: malformed frontmatter now surfaces a document-targeted startup error with a repair hint for the bad `--- ... ---` block, and sync logs the same warning instead of failing silently.
-<!-- agent:boundary:d418ac83 -->
+
+❯ The following frontmatter prevents a startup. The pane does not appear so it seems like nothing happens during autostart. spec-test-build-install-commit-push
+```
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#commit-push': commit + push all uncommitted files
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
+  '#next-steps': '#follow-up-backlog' Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
+  "#spec-test-commit-push": update spec + tests. commit + push
+```
+### Re: autostart malformed frontmatter visibility — gpt-5
+
+Implemented in `src/agent-doc` and pushed `949bf1c` on `2026-04-28`.
+
+The missing piece was `sync.rs`: the bad frontmatter path already logged a warning and skipped auto-start, but editor-driven auto-starts had no pane and therefore no obvious visible feedback. Sync now mirrors that exact warning into the document's `agent:status` component when present, updates the snapshot in the same helper, and clears only that sync-owned status message once the frontmatter parses again. That covers both `resolve_file` and `auto-start` parse failures without clobbering unrelated status text.
+
+I updated `specs/07-commands.md`, `docs/guide/commands.md`, and `VERSIONS.md`, added regression coverage for status surfacing/clearing in `sync.rs`, then ran `cargo fmt`, `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`.
+
+No new backlog item came out of this fix. `#fuback` remains the top accepted active item.
+<!-- agent:boundary:a0c49d88 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 
 const BACKLOG_SIGNALS: &[&str] = &[
     "tasks",
@@ -47,6 +48,24 @@ pub(crate) fn prompt_requests_backlog_work(
     effective_prompt_texts(prompt_targets, added_diff_lines, prompt_presets)
         .iter()
         .any(|text| text_requests_backlog_work(text))
+}
+
+pub(crate) fn explicit_backlog_targets(
+    current_file: &Path,
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+) -> Vec<PathBuf> {
+    let mut targets = Vec::new();
+    for text in effective_prompt_texts(prompt_targets, added_diff_lines, prompt_presets) {
+        let Some(target) = explicit_backlog_target_in_text(current_file, &text) else {
+            continue;
+        };
+        if !targets.iter().any(|existing| existing == &target) {
+            targets.push(target);
+        }
+    }
+    targets
 }
 
 pub(crate) fn response_explicitly_has_no_followups(response_text: &str) -> bool {
@@ -194,6 +213,17 @@ fn text_requests_backlog_work(text: &str) -> bool {
     BACKLOG_SIGNALS.iter().any(|signal| lower.contains(signal))
 }
 
+fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Option<PathBuf> {
+    let lower = text.to_ascii_lowercase();
+    let references_backlog_target = lower.contains("add to the backlog of")
+        || lower.contains("add to backlog of")
+        || lower.contains("backlog of ");
+    if !references_backlog_target {
+        return None;
+    }
+    crate::security::referenced_markdown_path(current_file, text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +272,31 @@ mod tests {
         assert!(!response_explicitly_has_no_followups(
             "I did not find a third issue in this pass."
         ));
+    }
+
+    #[test]
+    fn explicit_backlog_target_detected_via_prompt_preset_expansion() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let current = dir.path().join("tasks/source.md");
+        let target = dir.path().join("tasks/bugs.md");
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(&target, "# bugs\n").unwrap();
+
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+
+        let targets = explicit_backlog_targets(
+            &current,
+            &["#agent-doc-bug".to_string()],
+            &[],
+            &presets,
+        );
+
+        assert_eq!(targets, vec![target]);
     }
 }

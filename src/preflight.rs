@@ -99,7 +99,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::component::{is_backlog_component, is_tracked_work_component};
@@ -282,6 +282,72 @@ fn push_unique_prompt_bearing_changes(
             target.push(value);
         }
     }
+}
+
+fn tracked_work_component_fingerprint(content: &str) -> Result<(Option<String>, Option<String>)> {
+    let components = crate::component::parse(content).context("failed to parse document components")?;
+    let component = components
+        .iter()
+        .find(|component| is_backlog_component(&component.name))
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| is_tracked_work_component(&component.name))
+        });
+    let Some(component) = component else {
+        return Ok((None, None));
+    };
+
+    let name = if is_backlog_component(&component.name) {
+        "backlog".to_string()
+    } else {
+        component.name.clone()
+    };
+    let hash = crate::ops_log::content_hash(component.content(content));
+    Ok((Some(name), Some(hash)))
+}
+
+fn explicit_backlog_target_requirements(
+    source_file: &Path,
+    source_frontmatter: &frontmatter::Frontmatter,
+    targets: &[PathBuf],
+) -> Result<Vec<crate::cycle_state::BacklogTargetRequirement>> {
+    let mut requirements = Vec::new();
+    for target in targets {
+        let target_existing = if target.exists() {
+            Some(
+                std::fs::read_to_string(target)
+                    .with_context(|| format!("failed to read {}", target.display()))?,
+            )
+        } else {
+            None
+        };
+        let target_frontmatter = if let Some(content) = target_existing.as_ref() {
+            Some(frontmatter::parse_for_file(content, target)?.0)
+        } else {
+            None
+        };
+        crate::security::enforce_cross_document_review(
+            "preflight prompt contract",
+            source_file,
+            source_frontmatter,
+            target,
+            target_frontmatter.as_ref(),
+        )?;
+        let (component, baseline_hash) = match target_existing.as_deref() {
+            Some(content) => tracked_work_component_fingerprint(content)?,
+            None => (None, None),
+        };
+        requirements.push(crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(target)
+                .unwrap_or_else(|_| target.to_path_buf())
+                .display()
+                .to_string(),
+            component,
+            baseline_hash,
+        });
+    }
+    Ok(requirements)
 }
 
 /// Extract a human-readable short model name from a full model ID.
@@ -1150,6 +1216,7 @@ pub fn run(file: &Path) -> Result<()> {
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
     // agent_doc_model_tier frontmatter, diff heuristic.
     let (
+        source_frontmatter,
         frontmatter_tier,
         component_tier_value,
         frontmatter_env,
@@ -1157,17 +1224,40 @@ pub fn run(file: &Path) -> Result<()> {
         frontmatter_prompt_presets,
     ) = match std::fs::read_to_string(file) {
         Ok(content) => {
-            let (fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
+            let (source_fm, fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
                 .ok()
                 .map(|(fm, _)| {
                     let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
-                    (fm.model_tier, fm.env, resolved, fm.prompt_presets)
+                    let fm_tier = fm.model_tier;
+                    let env_map = fm.env.clone();
+                    let prompt_presets = fm.prompt_presets.clone();
+                    (
+                        fm,
+                        fm_tier,
+                        env_map,
+                        resolved,
+                        prompt_presets,
+                    )
                 })
                 .unwrap_or_default();
             let comp_value = agent_doc::model_tier::extract_model_component(&content);
-            (fm_tier, comp_value, env_map, fm_model, prompt_presets)
+            (
+                source_fm,
+                fm_tier,
+                comp_value,
+                env_map,
+                fm_model,
+                prompt_presets,
+            )
         }
-        Err(_) => (None, None, Default::default(), None, Default::default()),
+        Err(_) => (
+            frontmatter::Frontmatter::default(),
+            None,
+            None,
+            Default::default(),
+            None,
+            Default::default(),
+        ),
     };
     let component_tier = component_tier_value.as_deref().and_then(|v| {
         agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
@@ -1201,8 +1291,20 @@ pub fn run(file: &Path) -> Result<()> {
         &added_diff_lines,
         &frontmatter_prompt_presets,
     );
+    let explicit_backlog_targets = crate::prompt_contract::explicit_backlog_targets(
+        file,
+        &prompt_targets,
+        &added_diff_lines,
+        &frontmatter_prompt_presets,
+    );
+    let explicit_backlog_requirements =
+        explicit_backlog_target_requirements(file, &source_frontmatter, &explicit_backlog_targets)?;
     if !no_changes {
         crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
+        crate::cycle_state::record_backlog_target_requirements(
+            file,
+            &explicit_backlog_requirements,
+        )?;
     }
 
     // Diff heuristic — counts user-added lines (excluding +++ headers).

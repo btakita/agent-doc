@@ -517,7 +517,17 @@ fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
     if response_text.trim().is_empty() {
         return Ok(GuardResult::None);
     }
+    let missing_targets = crate::write::unresolved_backlog_capture_targets(file, &state);
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_targets.is_empty()
+    {
+        return Ok(GuardResult::Error(format!(
+            "[session-check] error: committed response came from a prompt that required backlog capture in {}, but those tracked-work surfaces did not change this cycle",
+            missing_targets.join(", ")
+        )));
+    }
     if state.requires_backlog_capture
+        && state.required_backlog_targets.is_empty()
         && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
         return Ok(GuardResult::Error(

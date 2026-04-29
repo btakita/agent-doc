@@ -45,6 +45,8 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --by
 4. Commits target; saves both snapshots
 5. Warns about any IDs that didn't match
 
+If the source document's active prompt contract explicitly says to "add to the backlog of <TARGET>", this target-side backlog change is the proof that later `finalize` / `session-check` expects. A response that names the preset but leaves the referenced target backlog unchanged should fail closed.
+
 ## Referral (pointer instead of copy)
 
 Inserts a structured referral tag in the target, leaving content in the source. The target session can read the source for context without duplicating history.

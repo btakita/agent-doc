@@ -710,6 +710,55 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn unresolved_backlog_capture_targets(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+) -> Vec<String> {
+    let current = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+
+    state
+        .required_backlog_targets
+        .iter()
+        .filter(|target| {
+            let target_path = Path::new(&target.path);
+            let normalized_target =
+                std::fs::canonicalize(target_path).unwrap_or_else(|_| target_path.to_path_buf());
+            if normalized_target == current {
+                return !state.had_pending_mutations;
+            }
+
+            let Ok(Some(content)) = std::fs::read_to_string(&normalized_target).map(Some) else {
+                return true;
+            };
+            let Ok(components) = crate::component::parse(&content) else {
+                return true;
+            };
+            let component = target
+                .component
+                .as_deref()
+                .and_then(|name| components.iter().find(|component| component.name == name))
+                .or_else(|| {
+                    components.iter().find(|component| {
+                        crate::component::is_backlog_component(&component.name)
+                    })
+                })
+                .or_else(|| {
+                    components.iter().find(|component| {
+                        crate::component::is_tracked_work_component(&component.name)
+                    })
+                });
+            let current_hash = component.map(|component| crate::ops_log::content_hash(component.content(&content)));
+            match (&target.baseline_hash, current_hash) {
+                (Some(expected), Some(current)) => current == *expected,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => true,
+            }
+        })
+        .map(|target| target.path.clone())
+        .collect()
+}
+
 fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(());
@@ -732,7 +781,22 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     if response_text.trim().is_empty() {
         return Ok(());
     }
+    let missing_targets = unresolved_backlog_capture_targets(file, &state);
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_targets.is_empty()
+    {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: active prompt required backlog capture in {} \
+             but those tracked-work surfaces did not change this cycle\n\
+             [finalize] hint: update those backlog targets before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            missing_targets.join(", ")
+        );
+    }
     if state.requires_backlog_capture
+        && state.required_backlog_targets.is_empty()
         && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
         anyhow::bail!(
@@ -795,9 +859,28 @@ fn prewrite_pending_capture_check(
     if response_text.trim().is_empty() {
         return Ok(());
     }
+    let missing_targets = state
+        .as_ref()
+        .map(|state| unresolved_backlog_capture_targets(file, state))
+        .unwrap_or_default();
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_targets.is_empty()
+    {
+        anyhow::bail!(
+            "[finalize] pre-write gate: active prompt required backlog capture in {} \
+             but those tracked-work surfaces did not change this cycle\n\
+             [finalize] hint: update those backlog targets before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            missing_targets.join(", ")
+        );
+    }
     if state
         .as_ref()
-        .is_some_and(|state| state.requires_backlog_capture)
+        .is_some_and(|state| {
+            state.requires_backlog_capture && state.required_backlog_targets.is_empty()
+        })
         && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
         anyhow::bail!(
@@ -7280,6 +7363,23 @@ mod precommit_pending_capture_tests {
         doc
     }
 
+    fn write_backlog_doc(path: &Path, backlog_body: &str) {
+        let content = format!(
+            "---\nagent_doc_session: target\n---\n\n<!-- agent:backlog -->\n{backlog_body}<!-- /agent:backlog -->\n"
+        );
+        fs::write(path, content).unwrap();
+    }
+
+    fn backlog_component_hash(path: &Path) -> String {
+        let content = fs::read_to_string(path).unwrap();
+        let components = crate::component::parse(&content).unwrap();
+        let component = components
+            .iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .unwrap();
+        crate::ops_log::content_hash(component.content(&content))
+    }
+
     fn init_git_repo(root: &Path, tracked: &Path) {
         ProcessCommand::new("git")
             .current_dir(root)
@@ -7422,6 +7522,68 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_capture_check(&doc)
             .expect("explicit no-follow-up proof should satisfy backlog-required closeout");
+    }
+
+    #[test]
+    fn precommit_blocks_when_explicit_backlog_target_is_unchanged() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nTransferred issue notes.\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(
+            &doc,
+            &[crate::cycle_state::BacklogTargetRequirement {
+                path: std::fs::canonicalize(&target)
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                component: Some("backlog".to_string()),
+                baseline_hash: Some(backlog_component_hash(&target)),
+            }],
+        )
+        .unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("required backlog capture in"));
+        assert!(err.to_string().contains(target.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn precommit_allows_when_explicit_backlog_target_changed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nTransferred issue notes.\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+        let requirement = crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(&target)
+                .unwrap()
+                .display()
+                .to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some(backlog_component_hash(&target)),
+        };
+        write_backlog_doc(
+            &target,
+            "- [ ] [#new1] New transferred item\n- [ ] [#old1] Existing item\n",
+        );
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("changed explicit backlog target should satisfy closeout");
     }
 
     #[test]

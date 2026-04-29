@@ -44,6 +44,15 @@ pub enum CyclePhase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BacklogTargetRequirement {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CycleState {
     pub cycle_id: String,
     pub file: String,
@@ -67,6 +76,8 @@ pub struct CycleState {
     pub had_pending_mutations: bool,
     #[serde(default)]
     pub requires_backlog_capture: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_backlog_targets: Vec<BacklogTargetRequirement>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
 }
@@ -111,6 +122,7 @@ pub fn start_preflight(
         response_sha256: None,
         had_pending_mutations: false,
         requires_backlog_capture: false,
+        required_backlog_targets: Vec::new(),
         pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
@@ -215,6 +227,21 @@ pub fn record_backlog_capture_requirement(
     Ok(Some(state))
 }
 
+pub fn record_backlog_target_requirements(
+    file: &Path,
+    requirements: &[BacklogTargetRequirement],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.required_backlog_targets != requirements {
+        state.required_backlog_targets = requirements.to_vec();
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -291,6 +318,7 @@ fn synthetic_state_with_id(
         response_sha256: None,
         had_pending_mutations: false,
         requires_backlog_capture: false,
+        required_backlog_targets: Vec::new(),
         pending_done_ids: Vec::new(),
     }
 }
@@ -425,6 +453,26 @@ mod tests {
             .unwrap();
         assert!(state.requires_backlog_capture);
         assert!(load(&doc).unwrap().unwrap().requires_backlog_capture);
+    }
+
+    #[test]
+    fn record_backlog_target_requirements_persists_targets() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let requirements = vec![BacklogTargetRequirement {
+            path: dir.path().join("tasks/bugs.md").display().to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some("abc".to_string()),
+        }];
+
+        let state = record_backlog_target_requirements(&doc, &requirements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.required_backlog_targets, requirements);
+        assert_eq!(load(&doc).unwrap().unwrap().required_backlog_targets, requirements);
     }
 
     #[test]

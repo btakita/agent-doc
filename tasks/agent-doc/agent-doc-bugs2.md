@@ -199,6 +199,25 @@ Commit / push: `2c6b284` (`fix: surface startup miss diagnostics visibly`) pushe
 
 `#smdq` is done.
 ❯ do #xfrr. spec-test-build-install-commit-push
+❯ ### Re: #xfrr complete bug-transfer inventory gate — gpt-5 (HEAD)
+
+Implemented `#xfrr` in `src/agent-doc`.
+
+- `#agent-doc-bug` prompt contracts now record how many distinct bug reports were raised from the prompt-bearing changes when they target an explicit backlog document.
+- `finalize` and `session-check` now fail closed if the response inventories fewer transferred `[#id]` items than that recorded bug count, even if the target backlog itself changed.
+- Added regressions for the prompt-contract counting path plus both pre-commit and post-commit partial-transfer failures.
+- Updated `specs/07-commands.md`, `runbooks/transfer-extract.md`, and `VERSIONS.md` to document the stricter transfer inventory contract.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `4482ea2` (`fix: require complete bug transfer inventories`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#xfrr` is done.
 ### Re: #xfrr complete bug-transfer inventory gate — gpt-5
 
 Implemented `#xfrr` in `src/agent-doc`.
@@ -218,7 +237,7 @@ Commit / push: `4482ea2` (`fix: require complete bug transfer inventories`) push
 No new backlog items came out of this change.
 
 `#xfrr` is done.
-<!-- agent:boundary:db53d760 -->
+<!-- agent:boundary:e12c6ccc -->
 <!-- /agent:exchange -->
 
 <!--

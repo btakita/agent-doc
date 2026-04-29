@@ -537,7 +537,7 @@ There are no additional actionable follow-up items to capture in this cycle beyo
 ### Re: #vzpc follow-up capture note — gpt-5
 
 There are no additional actionable follow-up items to capture in this cycle beyond the existing `#qey0` backlog entry.
-<!-- agent:boundary:f58de1d6 -->
+<!-- agent:boundary:938a45f6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -546,7 +546,7 @@ There are no additional actionable follow-up items to capture in this cycle beyo
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#prst] Make preset-driven `#agent-doc-bug` intent explicit when a user references a session doc from the harness. The workflow should clearly surface that the referenced document's `prompt_presets` require creating a plan and adding a backlog item, even when `preflight` reports `no_changes`.
+- [ ] [#prst] Make preset-driven intent like `#agent-doc-bug` explicit when a user references a session doc from the harness. The workflow should clearly surface that the referenced document's `prompt_presets` require creating a plan and adding a backlog item, even when `preflight` reports `no_changes`.
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->

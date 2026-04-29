@@ -350,7 +350,10 @@ What remains inside `#tmuxcrash`:
 3. If that second-leg closeout is clean, split any remaining stale-marker or startup-miss cleanup into `#smst` and shrink `#tmuxcrash` to true crash provenance only.
 
 No new backlog item is needed from this turn; the existing `#tmuxcrash` item is still the right bucket, just with a narrower remaining scope after the live repro.
-<!-- agent:boundary:1a356e98 -->
+### Re: `#tmuxcrash` next steps follow-up — gpt-5
+
+No further backlog change is needed from the normalized follow-up line. `#tmuxcrash` still remains the top backlog item.
+<!-- agent:boundary:f9970f6f -->
 <!-- /agent:exchange -->
 
 <!--

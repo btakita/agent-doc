@@ -123,7 +123,24 @@ Verification:
 
 Commit / push:
 - `a753288` `fix: fail closed on queue consumption drift`
-<!-- agent:boundary:6fbfa7d7 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. `src/agent-doc/src/write.rs:523-547`, `src/agent-doc/src/write.rs:734-856`
+
+`finalize` advances the live `agent:queue` before the rest of strict closeout is proven. `consume_queue_prompt()` writes the mutated document at line 794, then only afterwards validates and updates the snapshot, and the caller runs that step before pending-maintenance, pending guards, and commit. Any later failure in that chain can leave the queued prompt removed from the working document even though the cycle never committed. In the cases where the snapshot update already landed, the next cycle can lose the prompt entirely. Queue consumption needs one fail-closed transaction: prove both transforms first, then persist them only after the remaining strict closeout gates are known to pass.
+
+2. `src/agent-doc/src/claim.rs:227-252`
+
+`cross_session_decision()` has a real `Reject` state, but `claim::run()` never enforces it. The `Reject` match arm only logs an “auto-forcing claim” warning and then falls through into the normal claim path, so `agent-doc claim` can silently rebind a document into the wrong live tmux session even when the configured session is healthy and the user did not pass `--force`. That breaks the current binding/session invariant and is a plausible root cause for cross-session pane drift.
+
+3. `src/agent-doc/src/route.rs:688-721`, `src/agent-doc/src/route.rs:1166-1175`
+
+Lazy-claim still has a pane-theft path. When a registered pane dies, route builds `claimed_panes` from the current repo’s `sessions.json` only, then adopts `tmux.active_pane(session_name)` if it is alive and looks like any agent process. There is no proof that the candidate belongs to the same repo, the same document family, or even the same `agent-doc` registry. In a superproject/submodule setup, an active pane from `src/session-share` or any unrelated Codex/Claude pane in the same tmux session but outside the local registry can be silently commandeered.
+
+I added `#qmut`, `#xclm`, and `#lzcl` to the backlog as recommended follow-ups. The top backlog item is `#qmut`.
+<!-- agent:boundary:663fca51 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -132,4 +149,7 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#qmut] [recommended] Make strict queue consumption prove document + snapshot state before mutating either side or advancing the live queue
+- [ ] [#xclm] [recommended] Enforce cross-session claim rejection unless --force is explicitly present
+- [ ] [#lzcl] [recommended] Strengthen lazy-claim ownership proof so route cannot adopt unrelated active agent panes across registries/repos
 <!-- /agent:backlog -->

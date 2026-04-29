@@ -68,8 +68,12 @@
 //!   When >1 pane auto-starts in a single call, a batch summary is printed:
 //!   `[sync] auto-started N panes: %XX→file1, %YY→file2`. Both messages go to
 //!   `/tmp/agent-doc-sync.log` for forensic analysis.
-//! - Auto-start detects duplicate panes via `find_alive_pane_for_file`, which scans
-//!   process command lines (`ps -p <pid> -o command=`) before spawning. The `col_args`
+//! - Auto-start detects duplicate panes before spawning. It first resolves
+//!   session-associated panes via shared live-owner proof
+//!   (`find_associated_panes` / supervisor PID fallback), which can recover a live
+//!   supervisor-backed pane even when the foreground process tree no longer includes
+//!   the document path. Ambiguous multi-pane ownership now fails closed for that file
+//!   instead of auto-starting another replacement session on top. The `col_args`
 //!   slice is passed through to `route::provision_pane` so new panes split in the
 //!   correct direction based on column position (`is_first_column`).
 //! - `register_synced_files` updates or creates registry entries for every file
@@ -1265,111 +1269,18 @@ fn run_with_options(
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
             let file_str = file_path.to_string_lossy().to_string();
-            if let Some(existing) = find_alive_pane_for_file(tmux, &file_str) {
-                eprintln!(
-                    "[sync] found alive pane {} for {} (re-registering)",
-                    existing,
-                    file_path.display()
-                );
-                if let Err(e) = sessions::register(&session_id, &existing, &file_str) {
-                    eprintln!(
-                        "[sync] warning: re-register failed for {}: {}",
-                        file_path.display(),
-                        e
-                    );
-                }
-                // If the found pane is in stash, rescue it to the agent-doc window
-                // so tmux_router::sync can arrange it properly.
-                if let Ok(win_id) = tmux.pane_window(&existing) {
-                    let win_name = tmux
-                        .cmd()
-                        .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
-                        .output()
-                        .ok()
-                        .filter(|o| o.status.success())
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .unwrap_or_default();
-                    if win_name == "stash" || win_name.starts_with("stash-") {
-                        let target_sess = context_session.as_deref().unwrap_or("");
-                        let pane_session = tmux
-                            .cmd()
-                            .args(["display-message", "-t", &existing, "-p", "#{session_name}"])
-                            .output()
-                            .ok()
-                            .filter(|o| o.status.success())
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                            .unwrap_or_default();
-                        if !target_sess.is_empty() && pane_session != target_sess {
-                            eprintln!(
-                                "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
-                                existing,
-                                file_path.display(),
-                                pane_session,
-                                target_sess
-                            );
-                            sync_log(&format!(
-                                "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
-                                existing,
-                                file_path.display(),
-                                pane_session,
-                                target_sess
-                            ));
-                            continue;
-                        }
-                        let rescue_win = window.map(|w| w.to_string()).or_else(|| {
-                            if !target_sess.is_empty() {
-                                let candidate = format!("{}:agent-doc", target_sess);
-                                if !tmux
-                                    .list_window_panes(&candidate)
-                                    .unwrap_or_default()
-                                    .is_empty()
-                                {
-                                    Some(candidate)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        });
-                        if let Some(ref target_win) = rescue_win {
-                            let target_panes =
-                                tmux.list_panes_ordered(target_win).unwrap_or_default();
-                            let split_before = crate::route::is_first_column(file_path, col_args);
-                            let target = if split_before {
-                                target_panes.first()
-                            } else {
-                                target_panes.last()
-                            };
-                            if let Some(target) = target {
-                                let join_flag = if split_before { "-dbh" } else { "-dh" };
-                                eprintln!(
-                                    "[sync] rescuing stashed pane {} for {} to window {}",
-                                    existing,
-                                    file_path.display(),
-                                    target_win
-                                );
-                                if sessions::join_pane_guarded(
-                                    tmux,
-                                    &existing,
-                                    target,
-                                    target_sess,
-                                    join_flag,
-                                )
-                                .is_ok()
-                                {
-                                    eprintln!(
-                                        "[sync] rescued stashed pane {} via join-pane",
-                                        existing
-                                    );
-                                } else {
-                                    eprintln!("[sync] stash rescue failed for pane {}", existing);
-                                }
-                            }
-                        }
-                    }
-                }
-                continue;
+            match recover_existing_associated_pane(
+                tmux,
+                file_path,
+                &session_id,
+                &file_str,
+                context_session.as_deref(),
+                window,
+                col_args,
+            ) {
+                ExistingAssociatedPaneRecovery::Recovered
+                | ExistingAssociatedPaneRecovery::Ambiguous => continue,
+                ExistingAssociatedPaneRecovery::None => {}
             }
 
             if let Some(ref pane) = registered_pane {
@@ -1755,6 +1666,7 @@ fn find_alive_pane_for_file_inner(
     None
 }
 
+#[allow(dead_code)]
 pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
     find_alive_pane_for_file_inner(tmux, file_path, None, true)
 }
@@ -1981,6 +1893,186 @@ pub(crate) fn resolve_associated_panes(
     }
 
     AssociatedPaneResolution::Ambiguous(candidates)
+}
+
+fn rescue_stashed_associated_pane(
+    tmux: &Tmux,
+    pane_id: &str,
+    file_path: &Path,
+    context_session: Option<&str>,
+    window: Option<&str>,
+    col_args: &[String],
+) {
+    let target_sess = context_session.unwrap_or("");
+    let pane_session = tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    if !target_sess.is_empty() && pane_session != target_sess {
+        eprintln!(
+            "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
+            pane_id,
+            file_path.display(),
+            pane_session,
+            target_sess
+        );
+        sync_log(&format!(
+            "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
+            pane_id,
+            file_path.display(),
+            pane_session,
+            target_sess
+        ));
+        return;
+    }
+
+    let rescue_win = window.map(|w| w.to_string()).or_else(|| {
+        if target_sess.is_empty() {
+            None
+        } else {
+            let candidate = format!("{}:agent-doc", target_sess);
+            if !tmux
+                .list_window_panes(&candidate)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                Some(candidate)
+            } else {
+                None
+            }
+        }
+    });
+    let Some(target_win) = rescue_win else {
+        return;
+    };
+
+    let target_panes = tmux.list_panes_ordered(&target_win).unwrap_or_default();
+    let split_before = crate::route::is_first_column(file_path, col_args);
+    let target = if split_before {
+        target_panes.first()
+    } else {
+        target_panes.last()
+    };
+    let Some(target) = target else {
+        return;
+    };
+
+    let join_flag = if split_before { "-dbh" } else { "-dh" };
+    eprintln!(
+        "[sync] rescuing stashed pane {} for {} to window {}",
+        pane_id,
+        file_path.display(),
+        target_win
+    );
+    sync_log(&format!(
+        "rescue_action=join-pane src={} dst={} target_window={} join_flag={}",
+        pane_id, target, target_win, join_flag
+    ));
+    match sessions::join_pane_guarded(tmux, pane_id, target, target_sess, join_flag) {
+        Ok(()) => {
+            eprintln!("[sync] rescued stashed pane {} via join-pane", pane_id);
+            sync_log(&format!(
+                "rescue_result=join-pane ok=true pane={} target={}",
+                pane_id, target
+            ));
+        }
+        Err(e) => {
+            eprintln!("[sync] stash rescue failed for pane {}: {}", pane_id, e);
+            sync_log(&format!(
+                "rescue_result=join-pane ok=false pane={} target={} err={}",
+                pane_id, target, e
+            ));
+        }
+    }
+}
+
+enum ExistingAssociatedPaneRecovery {
+    Recovered,
+    Ambiguous,
+    None,
+}
+
+fn recover_existing_associated_pane(
+    tmux: &Tmux,
+    file_path: &Path,
+    session_id: &str,
+    file_str: &str,
+    context_session: Option<&str>,
+    window: Option<&str>,
+    col_args: &[String],
+) -> ExistingAssociatedPaneRecovery {
+    let candidates = find_associated_panes(tmux, file_path, session_id);
+    match resolve_associated_panes(candidates, window) {
+        AssociatedPaneResolution::Selected { winner, redundant } => {
+            eprintln!(
+                "[sync] found associated pane {} for {} via {}{}",
+                winner.pane_id,
+                file_path.display(),
+                winner.source_summary(),
+                if redundant.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} redundant pane(s) still associated)", redundant.len())
+                }
+            );
+            sync_log(&format!(
+                "associated_pane_recovered file={} pane={} sources={} redundant={}",
+                file_path.display(),
+                winner.pane_id,
+                winner.source_summary(),
+                redundant.len()
+            ));
+            if let Err(e) = sessions::register(session_id, &winner.pane_id, file_str) {
+                eprintln!(
+                    "[sync] warning: re-register failed for {} via associated pane {}: {}",
+                    file_path.display(),
+                    winner.pane_id,
+                    e
+                );
+            }
+            if winner.is_stash() {
+                rescue_stashed_associated_pane(
+                    tmux,
+                    &winner.pane_id,
+                    file_path,
+                    context_session,
+                    window,
+                    col_args,
+                );
+            }
+            ExistingAssociatedPaneRecovery::Recovered
+        }
+        AssociatedPaneResolution::Ambiguous(candidates) => {
+            let detail = candidates
+                .iter()
+                .map(|candidate| {
+                    format!(
+                        "{}:{}:{}:{}",
+                        candidate.pane_id,
+                        candidate.window_name,
+                        candidate.window_id,
+                        candidate.source_summary()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "[sync] warning: multiple panes are still associated with {} — skipping auto-start until one is claimed explicitly",
+                file_path.display()
+            );
+            sync_log(&format!(
+                "associated_pane_ambiguous file={} candidates={}",
+                file_path.display(),
+                detail
+            ));
+            ExistingAssociatedPaneRecovery::Ambiguous
+        }
+        AssociatedPaneResolution::None => ExistingAssociatedPaneRecovery::None,
+    }
 }
 
 pub(crate) fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
@@ -2371,6 +2463,63 @@ mod tests {
             }
             other => panic!("expected ambiguous resolution, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn recover_existing_associated_pane_reregisters_supervisor_owned_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: associated-supervisor\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-associated-supervisor");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let pane_pid = iso
+            .raw_cmd(&["display-message", "-t", &pane, "-p", "#{pane_pid}"])
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+
+        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            tmp.path(),
+            "associated-supervisor",
+            move |method| match method {
+                crate::supervisor::ipc::IpcMethod::Pid => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                        "pid": pane_pid
+                    }))
+                }
+                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
+
+        let file_str = doc.to_string_lossy().to_string();
+        let recovery = recover_existing_associated_pane(
+            &iso,
+            &doc,
+            "associated-supervisor",
+            &file_str,
+            Some("test"),
+            None,
+            &["tasks/owned.md".to_string()],
+        );
+
+        assert!(matches!(
+            recovery,
+            ExistingAssociatedPaneRecovery::Recovered
+        ));
+        assert_eq!(
+            sessions::lookup("associated-supervisor").unwrap(),
+            Some(pane.clone())
+        );
+
+        std::env::set_current_dir(old_dir).unwrap();
     }
 
     #[test]

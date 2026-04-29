@@ -49,7 +49,22 @@ Icebox:
 Residual risk: I did not find regression coverage for duplicate-leaf scope lint discovery, so finding 2 looks unguarded today.
 
 Verification: `cargo test -q` passed locally (403 unit tests, 40 integration tests).
-<!-- agent:boundary:271c553a -->
+❯ do #dafv. spec-test-commit-push
+### Re: #dafv spec-test-commit-push — gpt-5
+
+Implemented the summarize extract lock-tolerance fix in `src/tsift` and pushed it on `main` as `ca6e490` (`fix: reuse index snapshot fallback for summarize extract`).
+
+Changes:
+- `src/summarize.rs` now routes symbol preload through `IndexDb::file_symbols_read_only(...)` instead of opening SQLite directly.
+- `src/index.rs` adds the shared file-symbol read helper with the same busy-timeout plus snapshot fallback path used by other read-only index consumers, and it now preserves lock errors through the `sqlite_master` probe so the retry path actually triggers.
+- `src/summarize.rs` adds a rollback-journal lock regression test, and `SPEC.md` now documents that `tsift summarize --extract` inherits the snapshot fallback behavior during symbol preload.
+
+Verification:
+- `cargo test` (404 unit tests, 40 integration tests)
+
+Push:
+- `origin/main` -> `ca6e490`
+<!-- agent:boundary:96e6e730 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -58,7 +73,6 @@ Verification: `cargo test -q` passed locally (403 unit tests, 40 integration tes
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dafv] [recommended] Reuse IndexDb's lock-tolerant read path for summarize symbol lookup so  survives concurrent index activity
 - [ ] [#rttp] [recommended] Make lint index discovery recurse through nested  paths for duplicate-leaf workspace scopes
 - [ ] [#98pz] [recommended] Remove the repo-root  fallback from lint workspace entity discovery unless it is an intentional compatibility surface
 <!-- /agent:backlog -->

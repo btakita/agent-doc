@@ -92,7 +92,24 @@ Verification I reran now against current `main`:
 `#bjen` has now been reaped from the backlog. Top remaining backlog item: `#8w9n`.
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-<!-- agent:boundary:abef8b1b -->
+### Re: #bjen spec-test-build-install-commit-push — gpt-5
+
+The last tmux pane crash interrupted document closeout, but the `#bjen` work itself was already complete in `src/tsift`.
+
+- `src/tsift` `main` already contains the fix as commit `bc0404a` (`fix: harden search post-precheck reads`), pushed to `origin/main`.
+- The post-precheck search read path is hardened through the resilient read-only helper, and the rollback-journal race is covered by `search_cmd_uses_snapshot_fallback_when_rollback_journal_lock_appears_after_precheck`.
+- `SPEC.md` already documents that hardened search behavior.
+
+Verification I reran now against current `main`:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`421` unit tests and `42` integration tests)
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+`#bjen` has now been reaped from the backlog. Top remaining backlog item: `#8w9n`.
+
+Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
+<!-- agent:boundary:d31eb1e6 -->
 <!-- /agent:exchange -->
 
 <!--

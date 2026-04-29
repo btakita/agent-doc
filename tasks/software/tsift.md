@@ -39,7 +39,21 @@ Recent completed work:
 State:
 - No active backlog items remain in this document.
 - Icebox remains open for graphify follow-ups: `#9jc8`, `#zv4m`, `#rd2f`.
-<!-- agent:boundary:9acdc1b1 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. `summarize --extract` is not honoring its own CLI contract for relative paths. The flag help says relative extract paths resolve against `--path`, but `cmd_summarize()` resolves the project root first and then `resolve_extract_scope()` joins relative `--extract` values against that root instead (`src/tsift/src/main.rs:2602`, `src/tsift/src/main.rs:3033-3038`). In practice, `tsift summarize --path src/alpha --extract .` will walk the workspace root, not `src/alpha`. Root cause: the command is using one path value for both workspace-root discovery and user-requested extraction scope.
+
+2. `summarize --extract --diff` never evicts deleted files from `summaries.db`, so stale summaries can survive indefinitely and `status` can over-report coverage. The diff collector explicitly drops deletions with `--diff-filter=d` and then filters to existing files only (`src/tsift/src/summarize.rs:571-589`). The extract loop only ever calls `replace_file()` for files that still exist (`src/tsift/src/main.rs:2606-2670`), while `status` trusts `COUNT(DISTINCT file_path)` as live cache coverage (`src/tsift/src/status.rs:286-315`). Root cause: the summary cache has a write path for replacements, and even a `delete_by_file()` helper, but no deletion reconciliation pass.
+
+3. The read-only analysis commands still have a lock-tolerance gap. `graph`, `explain`, `path`, and `communities` all share `open_index_db()`, which directly calls `IndexDb::open_read_only()` (`src/tsift/src/main.rs:2157-2166`). The snapshot-fallback recovery for rollback-journal locks exists only in the specialized helper entry points in `index.rs` (`src/tsift/src/index.rs:347-389`, `src/tsift/src/index.rs:415-434`). That means a wedged rollback-journal lock can still break read-only graph analysis even though search, lint symbol loading, and status inspection were already hardened. Root cause: lock recovery is implemented as ad hoc wrapper functions instead of a shared read-only open abstraction.
+
+What I’d recommend next:
+1. Fix the summarize scope base first, because it can silently point extraction at the wrong subtree.
+2. Add deleted-file cleanup for diff extraction, then update summary coverage to reflect only live files.
+3. Unify read-only index opening behind one snapshot-aware helper so every analysis command gets the same lock behavior.
+<!-- agent:boundary:90ee9b71 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -48,6 +62,9 @@ State:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#scope1] [recommended] Fix summarize extract path resolution to respect the path base, and add regression coverage for nested path plus extract dot.
+- [ ] [#cache1] [recommended] Delete removed files from summaries.db during summarize diff extraction, and compute summary coverage from live indexed files only.
+- [ ] [#locks1] [recommended] Route graph, explain, path, and communities through the same snapshot-fallback read-only index path used by lock-tolerant search and status helpers.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -261,6 +261,125 @@ fn filter_registry_for_target(
         .collect()
 }
 
+fn format_associated_pane_fix_error(
+    file: &Path,
+    candidates: &[crate::sync::AssociatedPaneCandidate],
+    preferred_window: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "multiple tmux panes are associated with {}; fix will not auto-pick one.",
+        file.display()
+    )];
+    if let Some(window_id) = preferred_window {
+        lines.push(format!(
+            "Preferred active window: {}. Inspect one pane, claim it explicitly, then kill the redundant panes.",
+            window_id
+        ));
+    } else {
+        lines.push(
+            "Inspect one pane, claim it explicitly, then kill the redundant panes.".to_string(),
+        );
+    }
+    for candidate in candidates {
+        lines.push(format!(
+            "  - {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+        lines.push(format!(
+            "    view: tmux capture-pane -pt {} | tail -n 80",
+            candidate.pane_id
+        ));
+        lines.push(format!(
+            "    assign: agent-doc claim {} --pane {} --force",
+            file.display(),
+            candidate.pane_id
+        ));
+        lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
+    }
+    lines.join("\n")
+}
+
+fn kill_redundant_associated_stash_panes(
+    tmux: &Tmux,
+    redundant: &[crate::sync::AssociatedPaneCandidate],
+) -> usize {
+    let registry = sessions::load().unwrap_or_default();
+    let mut killed = 0;
+
+    for candidate in redundant {
+        if !candidate.is_stash() {
+            continue;
+        }
+        if registry.values().any(|entry| entry.pane == candidate.pane_id) {
+            eprintln!(
+                "resync: preserving redundant pane {} because it is still registered",
+                candidate.pane_id
+            );
+            continue;
+        }
+        match tmux.kill_pane(&candidate.pane_id) {
+            Ok(()) => {
+                killed += 1;
+                eprintln!(
+                    "resync: killed redundant stash pane {} for duplicate document session",
+                    candidate.pane_id
+                );
+            }
+            Err(err) => eprintln!(
+                "resync: failed to kill redundant stash pane {}: {}",
+                candidate.pane_id, err
+            ),
+        }
+    }
+
+    killed
+}
+
+fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
+    let Some(session_id) = frontmatter::read_session_id(target) else {
+        return Ok(());
+    };
+
+    let preferred_window = config::project_tmux_session()
+        .as_deref()
+        .and_then(|session| tmux.active_window(session));
+    let candidates = crate::sync::find_associated_panes(tmux, target, &session_id);
+    match crate::sync::resolve_associated_panes(candidates, preferred_window.as_deref()) {
+        crate::sync::AssociatedPaneResolution::None => Ok(()),
+        crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
+            if sessions::lookup(&session_id)?.as_deref() != Some(winner.pane_id.as_str()) {
+                sessions::register(&session_id, &winner.pane_id, &target.to_string_lossy())?;
+                eprintln!(
+                    "resync: re-registered {} to pane {}",
+                    target.display(),
+                    winner.pane_id
+                );
+            }
+            let killed = kill_redundant_associated_stash_panes(tmux, &redundant);
+            if killed > 0 {
+                eprintln!(
+                    "resync: removed {} redundant stash pane(s) for {}",
+                    killed,
+                    target.display()
+                );
+            }
+            Ok(())
+        }
+        crate::sync::AssociatedPaneResolution::Ambiguous(candidates) => {
+            anyhow::bail!(format_associated_pane_fix_error(
+                target,
+                &candidates,
+                preferred_window.as_deref()
+            ));
+        }
+    }
+}
+
 fn prune_dead_entries_for_target_in_registry<F>(
     registry: &mut sessions::SessionRegistry,
     target: &Path,
@@ -1625,6 +1744,10 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
                 };
                 eprintln!("  {} (pane {} removed)", label, entry.pane);
             }
+        }
+
+        if fix {
+            recover_target_document_pane(&tmux, &target)?;
         }
 
         let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);

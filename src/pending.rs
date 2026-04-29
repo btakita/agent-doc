@@ -697,6 +697,7 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
                 || crate::component::is_icebox_component(&component.name)
         })
         .map(|component| (component.open_start, component.close_end))
+        .chain(compact_exchange_summary_ranges(doc, &components))
         .collect();
     let code_ranges = crate::component::find_code_ranges(doc);
 
@@ -743,6 +744,46 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     }
 
     Ok(report)
+}
+
+fn compact_exchange_summary_ranges<'a>(
+    doc: &'a str,
+    components: &'a [crate::component::Component],
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    components.iter().filter_map(|component| {
+        if component.name != "exchange" {
+            return None;
+        }
+
+        let content = component.content(doc);
+        let mut offset = 0usize;
+        let mut summary_start = None;
+        let mut summary_end = None;
+        for raw_line in content.split_inclusive('\n') {
+            let line = raw_line.strip_suffix('\n').unwrap_or(raw_line).trim();
+            let abs_start = component.open_end + offset;
+            offset += raw_line.len();
+
+            if summary_start.is_none() {
+                if line == "### Session Summary" {
+                    summary_start = Some(abs_start);
+                }
+                continue;
+            }
+
+            if line.starts_with('❯')
+                || line.starts_with("### Re:")
+                || line.starts_with("#### Re:")
+                || line.starts_with("##### Re:")
+                || line.starts_with("<!-- agent:boundary:")
+            {
+                summary_end = Some(abs_start);
+                break;
+            }
+        }
+
+        summary_start.map(|start| (start, summary_end.unwrap_or(component.close_start)))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2520,6 +2561,32 @@ mod tests {
             "```md\n",
             "- [ ] [#code1] Example only\n",
             "```\n"
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert!(report.duplicated_in_live_backlog.is_empty());
+        assert!(report.shadow_only.is_empty());
+    }
+
+    #[test]
+    fn detect_shadow_open_items_ignores_compact_exchange_summary_items() {
+        let doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "Icebox:\n",
+            "- [ ] [#cold1] Intentionally parked\n",
+            "- [ ] [#cold2] Still parked\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#cold1] Intentionally parked\n",
+            "- [ ] [#cold2] Still parked\n",
+            "<!-- /agent:icebox -->\n"
         );
 
         let report = detect_shadow_open_items(doc).unwrap();

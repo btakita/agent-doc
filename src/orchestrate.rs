@@ -660,8 +660,7 @@ fn run_ordered_task_step(
         .or_else(|| global_config.agents.get(agent_name));
     let mut launch_env = expanded_env;
     if agent_name == "codex" {
-        let codex_network_access =
-            crate::agent::resolve_codex_network_access(&fm, global_config);
+        let codex_network_access = crate::agent::resolve_codex_network_access(&fm, global_config);
         crate::agent::apply_codex_network_access_env_overrides(
             &mut launch_env,
             codex_network_access,
@@ -717,14 +716,8 @@ fn run_ordered_task_step(
             (response, finalize)
         }
     } else {
-        let response = agent_runner.send_fresh(
-            file,
-            &prompt,
-            agent_name,
-            agent_config,
-            launch_env,
-            model,
-        )?;
+        let response =
+            agent_runner.send_fresh(file, &prompt, agent_name, agent_config, launch_env, model)?;
         let finalize = response.clone();
         (response, finalize)
     };

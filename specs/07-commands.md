@@ -118,7 +118,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 1. Prune stale entries from `sessions.json`
 2. Ensure session UUID in frontmatter (generate if missing)
 3. Look up pane in `sessions.json`
-4. If the registered pane is alive, first try to prove that it still owns the document via tmux process-tree match on the file path, then supervisor child-PID fallback. When that proof succeeds, route must first see the harness's idle prompt in that pane; only then does it send `/agent-doc <FILE>` via `send_keys`, run the Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), and focus the pane. If the pane never becomes idle, route fails closed instead of drafting input into a busy session.
+4. If the registered pane is alive, first collect all panes that still prove ownership of the document via tmux process-tree match on the file path and supervisor child-PID fallback. Route only auto-picks a winner when that evidence is decisive: a single provable owner overall, or a single provable owner in the active tmux window while every other candidate is already stashed. Otherwise it fails closed with an explicit ambiguity report that lists every candidate pane plus direct `tmux capture-pane`, `agent-doc claim --pane`, and `tmux kill-pane` follow-up commands. When a winner is found, route must first see the harness's idle prompt in that pane; only then does it send `/agent-doc <FILE>` via `send_keys`, run the Enter verification loop (polls for command text disappearance every 300ms, retries Enter on each poll, up to 5s timeout), and focus the pane. If the pane never becomes idle, route fails closed instead of drafting input into a busy session.
 5. If the registered pane is alive but no live-owner proof succeeds, route still probes the pane's supervisor health before declaring it stale:
    - **Healthy** supervisor → reuse the registered pane and send the routed command there, but only after the same idle-prompt gate passes
    - **Needs restart** (reachable supervisor, child halted/degraded/not running) → send supervisor `restart`, refocus the same pane, and require a fresh routed-cycle ack instead of spawning a second pane
@@ -212,6 +212,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **Scoped mode (`FILE` provided):**
 - Resolve `FILE` through the normal cwd/git-root path resolver and require the document to exist.
+- Before generic issue detection, gather all provable owner panes for that document. If there is a unique winner, re-register the document to that pane immediately; when the winner is in the active tmux window, redundant unregistered stash panes for the same document are killed during this scoped fix pass. If multiple candidates remain, fail closed with the same actionable ambiguity report used by `route`.
 - Limit dead-pane pruning, issue detection, and fix application to registry entries whose stored document path resolves to that same file.
 - Do not mutate unrelated documents' registry entries, stash windows, or orphan cleanup state during a scoped run.
 
@@ -233,7 +234,7 @@ Exits with error if the pane is dead or no session is registered.
 
 **Auto-start stash overflow (route):** When `auto_start_in_session` tries `split-window` alongside a registered pane and the split fails (e.g. minimum pane size constraint), it falls back to `tmux new-window` then immediately calls `stash_pane` to move the new pane into the stash window — avoiding a visible throwaway window in the session.
 
-**Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations. Uses bulk metadata fetching (2 subprocess calls: `list-windows -a` + `list-panes -a`) instead of per-pane queries. Stranded panes (no valid return target) are deregistered on first failure to prevent repeated expensive lookups. **Stash pane safety:** unregistered agent processes (`agent-doc`, `claude`, `node`) in stash windows are never auto-killed — only idle shells are purged. This prevents loss of active Claude sessions when the registry goes stale.
+**Automatic pruning:** `resync::prune()` (step 1 only — no issue detection or fixing) runs automatically before `route`, `sync`, and `claim` operations. Uses bulk metadata fetching (2 subprocess calls: `list-windows -a` + `list-panes -a`) instead of per-pane queries. Stranded panes (no valid return target) are deregistered on first failure to prevent repeated expensive lookups. **Stash pane safety:** unregistered agent processes (`agent-doc`, `claude`, `node`) in stash windows are never auto-killed during ordinary prune/report flows — only idle shells are purged. The one exception is the scoped `fix <FILE>` duplicate-owner recovery path, which may kill redundant unregistered stash panes after it has already re-bound the document to a unique provable winner.
 
 ## fix
 

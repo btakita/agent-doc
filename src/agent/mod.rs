@@ -81,9 +81,7 @@ impl CodexNetworkPolicyStatus {
             }
         };
         match self.sandbox_mode.as_deref() {
-            Some(mode) => format!(
-                "{effective} (policy: {requested}, sandbox: {mode}; {detail})"
-            ),
+            Some(mode) => format!("{effective} (policy: {requested}, sandbox: {mode}; {detail})"),
             None => format!("{effective} (policy: {requested}; {detail})"),
         }
     }
@@ -162,7 +160,10 @@ pub fn apply_codex_network_access_env_map(
             env.remove(CODEX_SANDBOX_NETWORK_DISABLED_ENV);
         }
         CodexNetworkAccess::Disabled => {
-            env.insert(CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(), "1".to_string());
+            env.insert(
+                CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
+                "1".to_string(),
+            );
         }
     }
 }
@@ -173,10 +174,9 @@ pub fn apply_codex_network_access_env_overrides(
 ) {
     match access {
         CodexNetworkAccess::Inherit => {}
-        CodexNetworkAccess::Enabled => env.push((
-            CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
-            None,
-        )),
+        CodexNetworkAccess::Enabled => {
+            env.push((CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(), None))
+        }
         CodexNetworkAccess::Disabled => env.push((
             CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
             Some("1".to_string()),
@@ -573,11 +573,8 @@ mod tests {
     fn codex_network_status_detects_inherited_disable_mismatch() {
         let _guard = EnvGuard::set(CODEX_SANDBOX_NETWORK_DISABLED_ENV, "1");
         let args = vec!["-s".to_string(), "danger-full-access".to_string()];
-        let status = codex_network_status_from_overrides(
-            &args,
-            CodexNetworkAccess::Inherit,
-            &Vec::new(),
-        );
+        let status =
+            codex_network_status_from_overrides(&args, CodexNetworkAccess::Inherit, &Vec::new());
         assert!(status.effective_disabled);
         assert!(status.mismatch_error().is_some());
     }

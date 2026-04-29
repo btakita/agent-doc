@@ -1238,7 +1238,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             false
         };
 
+    let snapshot_matches_current_file = snapshot_content
+        .as_deref()
+        .is_some_and(|snapshot| snapshot == file_content);
+
     if !repaired_committed_historical
+        && !snapshot_matches_current_file
         && let Some((Some(kind), Some(marker))) = committed_historical_patchback.as_ref()
     {
         crate::ops_log::log_op(
@@ -2669,8 +2674,8 @@ mod tests {
     }
 
     #[test]
-    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference_with_guidance(
-    ) {
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference_with_guidance()
+     {
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             Compacted.\n\
@@ -4533,6 +4538,121 @@ mod tests {
         assert!(
             log.contains("commit_blocked_committed_historical_patchback file="),
             "ops log should record the blocked historical patchback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_allows_current_snapshot_to_replace_committed_historical_patchback() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let clean = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, clean).unwrap();
+        crate::snapshot::save(&doc, clean).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let historical_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n\n",
+            "#code-review\n",
+            "### Re: code review — gpt-5\n\n",
+            "Historical patchback.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, historical_head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let compacted = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [x] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, compacted).unwrap();
+        crate::snapshot::save(&doc, compacted).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(compacted),
+            Some(compacted),
+        )
+        .unwrap();
+
+        let did_commit =
+            commit(&doc).expect("current snapshot/file should replace the historical patchback");
+        assert!(did_commit, "replacement commit should be created");
+
+        let head_doc = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head_doc),
+            normalize_transient_agent_doc_markers(compacted),
+            "HEAD should advance to the compacted document:\n{head_doc}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("commit_blocked_committed_historical_patchback file="),
+            "historical patchback should not block replacement commit:\n{log}"
         );
     }
 

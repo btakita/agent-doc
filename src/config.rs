@@ -26,8 +26,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 // Import ModelConfig from the library version (works in both binary and library contexts)
-use agent_doc::model_tier::ModelConfig;
 use crate::frontmatter::CodexNetworkAccess;
+use agent_doc::model_tier::ModelConfig;
 
 // Re-export project-level configuration from the shared module (for convenience)
 pub use crate::project_config::{

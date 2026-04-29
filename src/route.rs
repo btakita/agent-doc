@@ -174,6 +174,50 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
     )
 }
 
+fn format_associated_pane_resolution_error(
+    file: &Path,
+    candidates: &[crate::sync::AssociatedPaneCandidate],
+    preferred_window: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "multiple tmux panes are associated with {}; route cannot safely auto-pick one.",
+        file.display()
+    )];
+    if let Some(window_id) = preferred_window {
+        lines.push(format!(
+            "Preferred active window: {}. Resolve by inspecting one pane, claiming it explicitly, then killing the redundant panes.",
+            window_id
+        ));
+    } else {
+        lines.push(
+            "Resolve by inspecting one pane, claiming it explicitly, then killing the redundant panes."
+                .to_string(),
+        );
+    }
+    for candidate in candidates {
+        lines.push(format!(
+            "  - {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+        lines.push(format!(
+            "    view: tmux capture-pane -pt {} | tail -n 80",
+            candidate.pane_id
+        ));
+        lines.push(format!(
+            "    assign: agent-doc claim {} --pane {} --force",
+            file.display(),
+            candidate.pane_id
+        ));
+        lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
+    }
+    lines.join("\n")
+}
+
 fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
@@ -532,6 +576,12 @@ fn resolve_or_create_pane(
     } else {
         SupervisorHealth::NoSocket
     };
+    let preferred_active_window = tmux.active_window(target_session);
+    let associated_candidates = crate::sync::find_associated_panes(tmux, file, session_id);
+    let associated_resolution = crate::sync::resolve_associated_panes(
+        associated_candidates.clone(),
+        preferred_active_window.as_deref(),
+    );
 
     // Strategy 0: If a previous startup-miss was recorded for the registered pane,
     // deregister it immediately so we fall through to auto-start instead of
@@ -644,8 +694,33 @@ fn resolve_or_create_pane(
     // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
+            if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) =
+                &associated_resolution
+            {
+                let error = format_associated_pane_resolution_error(
+                    file,
+                    candidates,
+                    preferred_active_window.as_deref(),
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_associated_pane_ambiguous file={} count={}",
+                        file_path,
+                        candidates.len()
+                    ),
+                );
+                anyhow::bail!(error);
+            }
             let mut stale_registration_cleared = false;
-            match live_owner.as_deref() {
+            let preferred_owner = match &associated_resolution {
+                crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
+                    Some(winner.pane_id.as_str())
+                }
+                crate::sync::AssociatedPaneResolution::None
+                | crate::sync::AssociatedPaneResolution::Ambiguous(_) => None,
+            };
+            match preferred_owner.or(live_owner.as_deref()) {
                 Some(owner) if owner != registered_pane => {
                     eprintln!(
                         "[route] registered pane {} is alive, but live owner for {} is pane {} — re-registering",
@@ -805,8 +880,31 @@ fn resolve_or_create_pane(
         .filter(|e| tmux.pane_alive(&e.pane))
         .map(|e| e.pane.clone())
         .collect();
+    if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution {
+        let error = format_associated_pane_resolution_error(
+            file,
+            candidates,
+            preferred_active_window.as_deref(),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_associated_pane_ambiguous file={} count={}",
+                file_path,
+                candidates.len()
+            ),
+        );
+        anyhow::bail!(error);
+    }
+    let existing_owner = match &associated_resolution {
+        crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
+            Some(winner.pane_id.as_str())
+        }
+        crate::sync::AssociatedPaneResolution::None
+        | crate::sync::AssociatedPaneResolution::Ambiguous(_) => live_owner.as_deref(),
+    };
     if registered.is_some()
-        && let Some(existing) = live_owner
+        && let Some(existing) = existing_owner
     {
         eprintln!(
             "[route] found existing running pane {} for {}, re-registering",
@@ -825,7 +923,7 @@ fn resolve_or_create_pane(
             pending_prompt_marker.as_deref(),
             true,
         )?;
-        return Ok(existing);
+        return Ok(existing.to_string());
     }
     if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)

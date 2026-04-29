@@ -81,7 +81,7 @@ impl HarnessConfig {
             binary: "codex".into(),
             restart_behavior: RestartBehavior::Prepend(vec!["resume".into(), "--last".into()]),
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
-            prompt_patterns: vec!["❯".into(), ">".into()],
+            prompt_patterns: vec!["❯".into(), ">".into(), "›".into()],
             trigger_command_template: "agent-doc {file}".into(),
             env_remove: vec!["CODEX_CLI".into(), "CODEX".into()],
             supports_no_mcp: false,
@@ -147,6 +147,27 @@ impl HarnessConfig {
         self.prompt_patterns
             .iter()
             .any(|p| trimmed == p || trimmed.starts_with(&format!("{} ", p)))
+    }
+
+    /// Return true when the line is harness UI chrome that should not be treated as
+    /// prompt-bearing user/agent output.
+    pub fn is_ignorable_output_line(&self, line: &str) -> bool {
+        let stripped = crate::prompt::strip_ansi(line);
+        let trimmed = stripped.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        self.binary == "codex" && trimmed.contains("·") && trimmed.contains("Context ")
+    }
+
+    /// Return the most recent non-empty, non-footer line from a captured transcript.
+    pub fn last_prompt_candidate(&self, output: &str) -> Option<String> {
+        output
+            .lines()
+            .rev()
+            .map(crate::prompt::strip_ansi)
+            .map(|line| line.trim().to_string())
+            .find(|line| !self.is_ignorable_output_line(line))
     }
 
     /// Check if a process name is recognized as an agent process for this harness.
@@ -316,6 +337,32 @@ mod tests {
         assert!(h.is_prompt_line(">"));
         assert!(h.is_prompt_line("> "));
         assert!(h.is_prompt_line("  >  "));
+        assert!(h.is_prompt_line("›"));
+        assert!(h.is_prompt_line("› "));
+    }
+
+    #[test]
+    fn last_prompt_candidate_skips_codex_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.last_prompt_candidate(output).as_deref(), Some("›"));
+    }
+
+    #[test]
+    fn last_prompt_candidate_preserves_busy_codex_output_above_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+Working...
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("Working...")
+        );
     }
 
     #[test]

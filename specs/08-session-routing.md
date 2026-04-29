@@ -51,7 +51,7 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Dead fallback session guard:** Route may fall back to the current tmux session or an already-alive harness fallback session, but it must not auto-start a brand-new implicit fallback session such as `"claude"` or `"codex"` just because no explicit target survived resolution. If the only remaining target is a dead implicit fallback name, route fails closed.
 
-**Duplicate-pane guard:** When a document's registry entry is stale but there is still a live pane whose process tree is already running that document, route re-registers and reuses that pane before attempting lazy-claim or auto-start.
+**Duplicate-pane guard:** When a document's registry entry is stale but there are still live panes whose process trees or supervisor PID still prove that document, route first computes the full candidate set. It only auto-picks when the winner is unambiguous: a single provable owner overall, or a single owner in the active tmux window while every other candidate is already stashed. Otherwise route fails closed with an ambiguity report and direct inspect/claim/kill commands.
 
 **Failed fresh-start cleanup guard:** If route creates a new pane, registers it, and later fails closed because fresh-start acknowledgment was not observed, cleanup must preserve that pane when it is still the live registered owner for the document. The operator should see the startup-ack failure, not a killed pane.
 
@@ -79,6 +79,7 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 - Successful route replacements do not kill older stash panes unless the cleanup path has explicit provenance that the older pane is a throwaway artifact from the current recovery attempt
+- Scoped `agent-doc fix <FILE>` may kill redundant unregistered stash panes for that document, but only after it has already rebound the file to a unique provable winner
 
 **Commit write contract:** `commit()` always stages a clean snapshot copy (no `(HEAD)`, no stale boundaries) and normalizes the boundary to end-of-exchange. The committed blob and snapshot converge to the same clean shape. The working tree and editor buffer preserve `(HEAD)` annotations so the user can see which response headings are new.
 

@@ -531,22 +531,20 @@ fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     }
 }
 
-fn latest_nonempty_output_line(shared: &SupervisorShared) -> Option<String> {
+fn latest_prompt_candidate_line(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<String> {
     let recent = shared.recent_output.lock().unwrap();
     let output = String::from_utf8_lossy(&recent);
-    output
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
+    harness.last_prompt_candidate(&output)
 }
 
 fn current_child_prompt_visible(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    let Some(line) = latest_nonempty_output_line(shared) else {
+    let Some(line) = latest_prompt_candidate_line(shared, harness) else {
         return false;
     };
     let stripped = crate::prompt::strip_ansi(&line);
@@ -1466,8 +1464,7 @@ pub fn run(file: &Path) -> Result<()> {
         base_args.push("--no-mcp".into());
     }
     if harness.binary == "codex" {
-        let codex_network_access =
-            crate::agent::resolve_codex_network_access(&fm, &global_config);
+        let codex_network_access = crate::agent::resolve_codex_network_access(&fm, &global_config);
         crate::agent::apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
         let status = crate::agent::codex_network_status_from_env_map(
             &base_args,
@@ -2820,6 +2817,31 @@ mod tests {
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
         assert!(current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn current_child_prompt_visible_skips_codex_footer_line() {
+        let shared = SupervisorShared::new("test");
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n".as_bytes(),
+        );
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
+        let shared = SupervisorShared::new("test");
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"resumed child still printing\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+        assert!(!current_child_prompt_visible(&shared, &harness));
     }
 
     // --- StopSignal + writer thread tests ---

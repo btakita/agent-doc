@@ -66,7 +66,26 @@ Note:
 - I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
 - The remaining startup-miss cleanup follow-up is already tracked in `#smst`, so I did not add another backlog item for this turn.
 
-<!-- agent:boundary:42c00e66 -->
+❯ do #sgdr. spec-test-build-install-commit-push
+### Re: nested submodule gitdir writable roots — gpt-5
+
+I fixed `#sgdr`.
+
+- Fresh workspace-write launches now walk the current repo's `.git/modules/...` tree and append every nested child submodule gitdir to the Claude/Codex `--add-dir` set, in addition to the existing superproject working tree / gitdir roots. That covers the `src/boost-client` -> `src/monsterrodholders-dev` shape where the working tree was writable but the real gitdir lived under `.../.git/modules/.../modules/...`.
+- Added regression coverage in both `git.rs` and `agent/mod.rs`, and updated the config / command / git specs plus `VERSIONS.md` to document the deeper writable-root contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test` still intermittently fails in the full parallel suite on `resync::tests::purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner`; rerunning that test in isolation passed, and the new targeted regressions passed
+- `cargo build`
+- `cargo install --path . --force`
+
+Published:
+- `src/agent-doc` commit `f6e66ff` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
+<!-- agent:boundary:d1140ea7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -92,7 +111,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgdr] Nested submodule gitdir writes can still fail under Codex with a misleading `index.lock` error when the working tree is writable but the real gitdir under the superproject `.git/modules/...` tree is not. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: a commit inside `src/boost-client/src/monsterrodholders-dev` failed with `fatal: Unable to create '/home/brian/work/btakita/agent-loop/.git/modules/src/boost-client/modules/src/monsterrodholders-dev/index.lock': Read-only file system`. Plan: (1) reproduce and resolve the full writable-root set for nested submodules, (2) fix agent-doc/Codex launch + resume paths so those gitdirs are writable whenever commit/pointer updates are expected, and (3) add regression coverage for nested `.git/modules/...` commit flows. Working notes: `tasks/agent-doc/plan-submodule-gitdir-permission-issue.md`.
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

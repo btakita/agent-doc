@@ -794,10 +794,35 @@ Spec / coverage / verification:
 Commit / push: `2b26a78` (`fix: scope failed route cleanup`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:beca06e0 -->
+### Re: tmux route crash/root-cause investigation — gpt-5
+
+Implemented a concrete fix in `src/agent-doc`.
+
+The repeated `agent-doc route` failure you pasted had two different signals mixed together:
+
+- The `registered pane ... is not showing an idle codex prompt` path was a correct fail-closed refusal. The pane was still busy inside a live `agent-doc`/Codex session, so route should not inject another trigger.
+- The real crash bug was the cleanup path that ran after a failed route. It inferred ownership from "any pane that appeared in the target window during this attempt" and killed `%418`, even though `.agent-doc/logs/tsift-v0.1.log` shows `%418` was the fresh `session_start` pane for `tasks/software/tsift.md`, not an orphan from this document's failed route.
+
+I changed route cleanup to track only panes created by the current route attempt and to resolve the preservation check from the routed document's own project root instead of the caller's cwd. That keeps concurrent sibling panes in the same tmux window out of the cleanup set.
+
+Spec / coverage / verification:
+- Added route regression coverage for the attempt-local cleanup boundary plus the project-root-backed preserve check.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to make the cleanup contract explicit.
+- Verification: `cargo test`, `cargo build`, `cargo install --path . --force`
+
+Commit / push: `2b26a78` (`fix: scope failed route cleanup`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:91e8f4bc -->
 <!-- /agent:exchange -->
 
 <!--
+After running `agent-doc fix src/session-share/tasks/claudescore-3.md`, `Run Agent Doc` from the JB Plugin still has a sync error. Please make a robust autorecovery by searching all open agent-doc sessions and prefer picking the session seen in the active `agent-doc` tmux window. If the tmux pane for the document is not in the active `agent-doc` tmux window, search the stash for a tmux pane that claims the document. If there are more than 1 tmux panes associated with the document, surface an error and provide a path for the user to select the correct pane. In the selection, provide a way for the user to view each associated tmux pane and a way to assign one of the tmux panes to be registered as the associated tmux pane to the document. The kill the rest of the redundant tmux panes. The user may also manually kill redundant tmux panes and then rerun `agent-doc` or `agent-doc fix <file.md>`:
+```
+agent-doc route failed (exit 1): resync: stash pane %417 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %408 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %420 running 'agent-doc' is unregistered — skipping kill (may be rescuable) [route] target tmux session: 14 [sync] found alive agent-doc child (pid 22126) in pane %419 for tasks/claudescore-3.md [route] Still waiting for claude (5s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (10s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (15s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) Error: registered pane %419 for tasks/claudescore-3.md is not showing an idle claude prompt; refusing to inject a routed trigger into a busy session (pane=%419 pane_pid=20406 pane_session=14 current_command=agent-doc)
+```
+---
+Given the reoccurring issues we have had with tmux, should we merge the tmux-router into agent-doc? Or is there a clean separation of concerns that will be followed with agentic development?
 ---
 On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc turn. The JB plugin surfaced an error. spec-test-build-install-commit-push:
 ```
@@ -830,6 +855,8 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#scpd] Session-check prompt prefix failure causes response duplication — finalize commits the response but session-check fails on the bare user prompt line (missing ❯ prefix), then the skill's recovery write --commit appends a second copy. Repro from tasks/claudescore-3.md on Apr 29 2026: both #sbtcconduct and speeding-up-benchmarks responses were duplicated. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
+- [ ] [#nbla] Skill does not execute #agent-doc-bug preset contract when handling chat-level bug reports — no plan created and no backlog items added to agent-doc-bugs2.md. Repro from tasks/claudescore-3.md on Apr 29 2026: user reported two bugs in chat with #agent-doc-bug tag, skill acknowledged but did not create plans or transfer bugs to the agent-doc-bugs2 backlog. Related to #ppct (preset contract enforcement).
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.

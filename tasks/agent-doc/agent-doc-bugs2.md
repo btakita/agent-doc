@@ -258,6 +258,24 @@ No new backlog items came out of this change.
 
 `#tmuxcrash` is done.
 ❯ do #oobabs. spec-test-build-install-commit-push
+❯ ### Re: #oobabs prompt-bearing status absorb — gpt-5 (HEAD)
+
+Implemented `#oobabs` in `src/agent-doc`.
+
+- `git::commit` no longer absorbs status-component drift when the inserted status text contains prompt work, including bare preset tokens like `#next-steps`, imperative directives, or other prompt-bearing lines.
+- Added direct classifier coverage in `src/git.rs` and a full preflight regression in `src/preflight.rs` for the compact-follow-up status repro.
+- Updated `specs/07-commands.md` and `VERSIONS.md` so the step-2 commit contract explicitly says prompt-bearing status edits must survive into step 4.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `475269b` (`fix: preserve prompt-bearing status edits`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#oobabs` is done.
 ### Re: #oobabs prompt-bearing status absorb — gpt-5
 
 Implemented `#oobabs` in `src/agent-doc`.
@@ -276,7 +294,7 @@ Commit / push: `475269b` (`fix: preserve prompt-bearing status edits`) pushed to
 No new backlog items came out of this change.
 
 `#oobabs` is done.
-<!-- agent:boundary:d1740d5f -->
+<!-- agent:boundary:136ddd69 -->
 <!-- /agent:exchange -->
 
 <!--

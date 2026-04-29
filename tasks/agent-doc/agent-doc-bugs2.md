@@ -125,7 +125,16 @@ Investigated the crash of the tmux session running `do #srrdgap` on `claudescore
 2. On stash-death, close the orphaned cycle and log exit reason
 3. Investigate root cause — tmux signal propagation (SIGHUP?), idle timeout, or OOM
 4. If root cause is unavoidable, add session-preservation logic around stash/detach
-<!-- agent:boundary:d2e49070 -->
+### Re: commit + push pending repo changes — gpt-5
+
+I committed and pushed the remaining uncommitted files in `src/agent-doc`.
+
+- `src/agent-doc` commit `e9b18f3` (`style: format sync and terminal`) is now pushed to `origin/20260422/codex-agent-backend`.
+- `src/tmux-router` was already clean, so there was nothing to commit or push there.
+
+Note:
+- The `src/agent-doc` diff was formatting-only in `src/sync.rs` and `src/terminal.rs`.
+<!-- agent:boundary:e6cc7f0d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -151,6 +160,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#stshcr] Stashed pane agent session dies silently during editor file navigation, losing in-progress cycle. Repro from claudescore-3.md on Apr 29 2026: routed trigger ran preflight (cycle-1777493370425), user switched editor focus away, sync stashed the pane, the agent process died while stashed (~21 min gap), user switched back — sync found no alive pane and auto-started fresh. Cycle stuck in preflight_started. Sync log shows no explicit kill/prune of the stashed pane — the process silently exited. Plan: (1) add stash-health heartbeat — periodic liveness check for stashed panes with agent sessions, (2) on stash-death detection, close the orphaned cycle and log the exit reason, (3) investigate root cause of silent exit — check if tmux SIGHUP/signal propagation, idle timeout, or OOM kills the stashed process, (4) if the root cause is unavoidable (e.g. tmux signal on detach), add explicit session-preservation logic around stash/detach operations.
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

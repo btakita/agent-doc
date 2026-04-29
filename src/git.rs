@@ -705,8 +705,76 @@ fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &s
         .all(|item| file_ids.contains(item.id.as_str()))
 }
 
+fn strip_promptish_list_prefix(line: &str) -> &str {
+    let mut trimmed = line.trim();
+
+    if let Some(rest) = trimmed.strip_prefix('❯') {
+        trimmed = rest.trim_start();
+    }
+
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        return rest.trim_start();
+    }
+
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 {
+        let rest = &trimmed[digits..];
+        if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            return rest.trim_start();
+        }
+    }
+
+    trimmed
+}
+
+fn starts_with_bare_prompt_preset_reference(line: &str) -> bool {
+    let trimmed = strip_promptish_list_prefix(line);
+    let Some(rest) = trimmed.strip_prefix('#') else {
+        return false;
+    };
+    let mut chars = rest.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+fn status_mutation_introduces_prompt_work(snapshot_content: &str, file_content: &str) -> bool {
+    let diff = similar::TextDiff::from_lines(snapshot_content, file_content);
+    let mut added = String::new();
+
+    for change in diff.iter_all_changes() {
+        if change.tag() == similar::ChangeTag::Insert {
+            added.push_str(change.value());
+        }
+    }
+
+    if added.trim().is_empty() {
+        return false;
+    }
+
+    if !crate::diff::extract_prompt_preset_requests_from_text(&added).is_empty() {
+        return true;
+    }
+
+    added.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty()
+            && (crate::diff::text_line_looks_like_prompt_target(trimmed)
+                || starts_with_bare_prompt_preset_reference(trimmed))
+    })
+}
+
 fn is_safe_out_of_band_status_mutation(snapshot_content: &str, file_content: &str) -> bool {
     snapshot_content.trim() != file_content.trim()
+        && !status_mutation_introduces_prompt_work(snapshot_content, file_content)
 }
 
 fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
@@ -2573,6 +2641,23 @@ mod tests {
         assert_eq!(
             classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
             Some("status+exchange")
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            Compacted.\n\
+            <!-- /agent:status -->\n";
+        let file = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:status patch=replace -->\n\
+            #next-steps\n\
+            <!-- /agent:status -->\n";
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
         );
     }
 

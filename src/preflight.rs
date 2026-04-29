@@ -3043,6 +3043,90 @@ mod tests {
     }
 
     #[test]
+    fn preflight_status_prompt_preset_addition_does_not_swallow_diff() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Print the top backlog item.\n",
+            "---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Compacted.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "Compacted.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Print the top backlog item.\n",
+            "---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Compacted.\n",
+            "#next-steps\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "Compacted.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "preflight should still open a response cycle for the prompt-preset status edit"
+        );
+
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after, snapshot,
+            "snapshot must not absorb prompt-bearing status drift"
+        );
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "git show HEAD:session.md failed");
+        let head_text = String::from_utf8_lossy(&head.stdout);
+        assert_eq!(
+            head_text.as_ref(),
+            snapshot,
+            "step 2 commit must not silently commit the prompt-preset status edit:\n{head_text}"
+        );
+    }
+
+    #[test]
     fn preflight_boundary_artifact_only_diff_does_not_start_cycle() {
         let dir = setup_project();
         let root = dir.path();

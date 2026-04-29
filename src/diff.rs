@@ -361,6 +361,10 @@ fn line_looks_like_prompt_target(line: &str) -> bool {
             || looks_like_imperative_directive(trimmed))
 }
 
+pub(crate) fn text_line_looks_like_prompt_target(line: &str) -> bool {
+    line_looks_like_prompt_target(line)
+}
+
 fn block_looks_like_prompt_target(block: &str) -> bool {
     block.lines().any(line_looks_like_prompt_target)
 }

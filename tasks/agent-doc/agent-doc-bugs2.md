@@ -446,7 +446,53 @@ Implemented in `src/agent-doc` and pushed on 2026-04-28 as `7db6070` (`fix: pres
 Backlog and icebox headings, separators, and other non-item lines are now preserved through the granular pending ops path and through replace-pending normalization/repair. I updated the command/spec docs and `VERSIONS.md` alongside the code change.
 
 Verification completed with `cargo fmt`, `cargo build`, `cargo install --path . --force`, and focused coverage for pending normalization and repair. The full serial suite `cargo test -- --test-threads=1` still hit one existing flaky route prompt-readiness test (`route::tests::resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts`), but an isolated rerun of that exact test passed after the implementation landed.
-<!-- agent:boundary:2e1e7751 -->
+
+❯ do #idbx. spec-test-build-install-commit-push
+### Re: #idbx icebox-only closeout — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-28 as `d4fa8c7` (`fix: close icebox tracked work with pending-done`) to `origin/20260422/codex-agent-backend`.
+
+The closeout contract now treats `agent:icebox` the same way as live backlog work for `do #id` completion. Concretely:
+- pending-done detection now scans still-open tracked ids across backlog and icebox
+- `--pending-done <id>` now finds and marks an id in either tracked list surface
+- strict closeout maintenance now reaps completed icebox items through the same snapshot/archive path as backlog items
+- plan output now emits `resolve_existing` when a `do #id` targets an icebox-only item
+
+I updated the pending/spec docs and `VERSIONS.md`, and added regression coverage across `pending_cmd`, `session_check`, `write`, `preflight`, and `plan`.
+
+Verification:
+- `cargo fmt`
+- `cargo test --lib`
+- `cargo test -- --test-threads=1`
+- `cargo test orchestrate_streams_step_patchback_before_finalize --test run_integration -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: the first full serial suite run hit one transient `run_integration` failure while spawning `agent-doc finalize` inside `orchestrate_streams_step_patchback_before_finalize`; rerunning that exact test immediately passed, and the new tracked-work / icebox coverage stayed green throughout.
+### Re: #idbx icebox-only closeout — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-28 as `d4fa8c7` (`fix: close icebox tracked work with pending-done`) to `origin/20260422/codex-agent-backend`.
+
+The closeout contract now treats `agent:icebox` the same way as live backlog work for `do #id` completion. Concretely:
+- pending-done detection now scans still-open tracked ids across backlog and icebox
+- `--pending-done <id>` now finds and marks an id in either tracked list surface
+- strict closeout maintenance now reaps completed icebox items through the same snapshot/archive path as backlog items
+- plan output now emits `resolve_existing` when a `do #id` targets an icebox-only item
+
+I updated the pending/spec docs and `VERSIONS.md`, and added regression coverage across `pending_cmd`, `session_check`, `write`, `preflight`, and `plan`.
+
+Verification:
+- `cargo fmt`
+- `cargo test --lib`
+- `cargo test -- --test-threads=1`
+- `cargo test orchestrate_streams_step_patchback_before_finalize --test run_integration -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: the first full serial suite run hit one transient `run_integration` failure while spawning `agent-doc finalize` inside `orchestrate_streams_step_patchback_before_finalize`; rerunning that exact test immediately passed, and the new tracked-work / icebox coverage stayed green throughout.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:77c2264f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -455,7 +501,6 @@ Verification completed with `cargo fmt`, `cargo build`, `cargo install --path . 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#idbx] Fix `do #id` closeout for icebox-only items; treat `agent:icebox` as tracked work for pending-done detection and `--pending-done` mutation. Plan: `tasks/agent-doc/plan-icebox-done-closeout.md`
 - [ ] [#w4va] Support nested lists in the backlog and icebox for subtasks and dependencies
 - [ ] [#vzpc] Support optional numeric lists in the backlog to enforce order
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.

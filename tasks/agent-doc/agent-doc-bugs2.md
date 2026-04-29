@@ -534,7 +534,10 @@ I committed only the `#vzpc` staged work as `d6ba935`; unrelated local edits in 
 ### Re: #vzpc follow-up capture note — gpt-5
 
 There are no additional actionable follow-up items to capture in this cycle beyond the existing `#qey0` backlog entry.
-<!-- agent:boundary:1cd1943f -->
+### Re: #vzpc follow-up capture note — gpt-5
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#qey0` backlog entry.
+<!-- agent:boundary:f58de1d6 -->
 <!-- /agent:exchange -->
 
 <!--

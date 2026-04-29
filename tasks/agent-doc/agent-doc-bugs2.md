@@ -140,7 +140,27 @@ Commit / push:
 Lazy-claim still has a pane-theft path. When a registered pane dies, route builds `claimed_panes` from the current repo’s `sessions.json` only, then adopts `tmux.active_pane(session_name)` if it is alive and looks like any agent process. There is no proof that the candidate belongs to the same repo, the same document family, or even the same `agent-doc` registry. In a superproject/submodule setup, an active pane from `src/session-share` or any unrelated Codex/Claude pane in the same tmux session but outside the local registry can be silently commandeered.
 
 I added `#qmut`, `#xclm`, and `#lzcl` to the backlog as recommended follow-ups. The top backlog item is `#qmut`.
-<!-- agent:boundary:663fca51 -->
+
+❯ do #xclm. spec-test-build-install-commit-push
+### Re: #xclm cross-session claim rejection — gpt-5
+
+Implemented in `src/agent-doc` and pushed `7280e5c` on `20260422/codex-agent-backend`.
+
+`agent-doc claim` now fails closed when the resolved pane is in a different live tmux session than the configured project session. The old path already computed `CrossSessionDecision::Reject`, but `claim::run()` only warned and continued. I lifted that match into an enforcement helper so `Reject` returns a concrete error, while the stale-session and explicit `--force` paths still succeed with their existing warnings.
+
+I updated the claim/session-routing specs plus `VERSIONS.md`, and added regression coverage for the fail-closed helper.
+
+Verification:
+- `cargo test enforce_cross_session_claim_errors_on_reject -- --exact`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `7280e5c` `fix: reject live cross-session claims`
+
+`#qmut` remains the top backlog item.
+<!-- agent:boundary:6af0719f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -149,7 +169,7 @@ I added `#qmut`, `#xclm`, and `#lzcl` to the backlog as recommended follow-ups. 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qmut] [recommended] Make strict queue consumption prove document + snapshot state before mutating either side or advancing the live queue
-- [ ] [#xclm] [recommended] Enforce cross-session claim rejection unless --force is explicitly present
 - [ ] [#lzcl] [recommended] Strengthen lazy-claim ownership proof so route cannot adopt unrelated active agent panes across registries/repos
+- [ ] [#qmut] [recommended] Make strict queue consumption prove document + snapshot state before mutating either side or advancing the live queue
+- [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
 <!-- /agent:backlog -->

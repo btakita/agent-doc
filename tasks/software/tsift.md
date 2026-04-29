@@ -220,7 +220,34 @@ This closes `#lintw`. Remaining active backlog item is `#lkws`.
 ### Re: backlog capture note — gpt-5
 
 There were no actionable follow-up items to capture. `#lkws` was already present in `agent:backlog`, so this `#lintw` closeout did not create any new backlog work.
-<!-- agent:boundary:a1814812 -->
+❯ do #lkws. spec-test-build-install-commit-push
+### Re: #lkws — gpt-5
+
+Implemented the nested-path lock-target fix in `tsift`.
+
+What changed:
+- `cmd_locks` now passes the original CLI path into lock resolution, so workspace invocations can infer the matching submodule before picking a lock target
+- `status::check_locks` / `resolve_lock_target` now infer a scoped workspace index from a nested path when `--scope` is omitted, while keeping explicit `--scope` and write-path diagnostics unchanged
+- added a regression that proves `tsift locks <workspace>/src/alpha/nested` resolves to `.tsift/indexes/alpha/index.db` with the matching scoped reindex command
+- updated `SPEC.md` to document `tsift locks` alongside the other nested-path scoped-query commands
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml`
+- `cargo build --manifest-path src/tsift/Cargo.toml`
+- `cargo install --path src/tsift --force`
+- installed-binary smoke test:
+  - `tsift index --workspace <tmp>`
+  - `tsift locks <tmp>/src/alpha/nested --json`
+  - confirmed `label=submodule \`alpha\` index` and `db_path=<tmp>/.tsift/indexes/alpha/index.db`
+
+#### Commit
+
+- `0ac6ae7` `fix: infer scoped lock target from nested paths`
+- pushed to `origin/main`
+
+This closes `#lkws`. There are no remaining active backlog items.
+<!-- agent:boundary:20684c09 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -229,7 +256,6 @@ There were no actionable follow-up items to capture. `#lkws` was already present
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lkws] make tsift locks <nested-workspace-path> target the matching scoped index/lock state instead of the absent shared-root index
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

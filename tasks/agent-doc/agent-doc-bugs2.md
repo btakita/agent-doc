@@ -902,7 +902,47 @@ Verification:
 Commit / push: `f348770` (`fix: log supervisor prompt decisions`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:bc638d7f -->
+❯ I ran the following command.
+```
+❯ /agent-doc fix /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+
+● Running agent-doc preflight on claudescore-3.md.
+
+● Bash(agent-doc --version)
+  ⎿  agent-doc 0.33.16
+
+● Bash(agent-doc fix tasks/claudescore-3.md 2>&1)
+  ⎿  All 1 matching session(s) for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md ha
+     ve live panes.
+     [sync] recovered live pane %423 for session 7b453f47 via supervisor pid 2613430
+     … +7 lines (ctrl+o to expand)
+
+● The agent-doc fix command reports no session/process issues for tasks/claudescore-3.md. The file has an active
+  session in pane %423 and all sessions are healthy — nothing to fix.
+```
+❯ But `Run Agent Doc` in Idea resulted with the following error:
+```
+agent-doc route failed (exit 1): resync: stash pane %417 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %420 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %408 running 'agent-doc' is unregistered — skipping kill (may be rescuable) [route] target tmux session: 14 [sync] found alive agent-doc child (pid 2613343) in pane %423 for tasks/claudescore-3.md [route] Still waiting for claude (5s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (10s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (15s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) Error: registered pane %423 for tasks/claudescore-3.md is not showing an idle claude prompt; refusing to inject a routed trigger into a busy session (pane=%423 pane_pid=2612184 pane_session=14 current_command=agent-doc)
+```
+
+❯ spec-test-build-install-commit-push
+### Re: JB route failure after `fix` on claudescore-3.md — gpt-5
+
+Implemented a concrete fix in `src/agent-doc`.
+
+`agent-doc fix /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md` was not misrouting the document. The owning pane `%423` was already the correct live session. The failure was later in `route`: its idle gate still expected Claude to expose a bare `❯` / `⏵` prompt line, but the pane was actually showing the newer idle composer chrome `⏵⏵ bypass permissions on (shift+tab to cycle)`. Route treated that as busy output, waited 15 seconds, and then refused to inject the routed trigger.
+
+I changed the Claude prompt matcher so that this double-chevron composer line counts as idle prompt state, added a route regression for that exact capture shape, and updated the routing spec plus `VERSIONS.md` to document the behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `784fdb4` (`fix: detect claude composer prompt in route`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:ff69a865 -->
 <!-- /agent:exchange -->
 
 <!--

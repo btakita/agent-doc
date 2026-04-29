@@ -237,7 +237,27 @@ Commit / push: `4482ea2` (`fix: require complete bug transfer inventories`) push
 No new backlog items came out of this change.
 
 `#xfrr` is done.
-<!-- agent:boundary:e12c6ccc -->
+❯ do #tmuxcrash. spec-test-build-install-commit-push
+### Re: #tmuxcrash tmux-pane crash / stranded-session provenance — gpt-5
+
+Implemented `#tmuxcrash` in `src/agent-doc`.
+
+- Startup-miss reruns now inspect the owning session log and distinguish a true dead-pane recovery from the stranded shape where the pane is still alive but the latest `session_start` never recorded a later child exit or `session_end`.
+- `route` now fails closed with exact provenance on that stranded-session shape instead of auto-starting another replacement pane and making the failure look like a generic tmux-pane crash.
+- `session-check` now includes the same startup-miss session-log detail in its warning output, and the routing spec / `VERSIONS.md` were updated to document the stricter contract.
+- Added regression coverage for session-log parsing plus the new route fail-closed decision.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `aad9dd9` (`fix: fail closed on stranded startup misses`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#tmuxcrash` is done.
+<!-- agent:boundary:95f6a1e8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -253,7 +273,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash] Stabilize repeated tmux-pane crash / stranded-session reports. Repro from Apr 29, 2026: `tasks/software/tsift.md` hit `route_cycle_start_missing ... pane=%411` while `.agent-doc/logs/tsift-v0.1.log` shows `session_start` for `%411` with no matching `codex_exit` or `session_end`, and `tasks/agent-doc/agent-doc-bugs2.md` likewise has a later `session_start` with no closeout plus a persisted startup-miss marker. The fix should distinguish true pane death from startup-miss / stranded-supervisor states, emit exact provenance, and stop reruns from surfacing as a generic "tmux pane crashed" failure. Plan: `tasks/agent-doc/plan-tmux-pane-crash-stability.md`
 - [ ] [#oobabs] Preflight step 2 absorbs user prompt-preset additions as "out-of-band status mutations" before step 4 diffs, swallowing prompts. Repro from src/session-share/tasks/claudescore-3.md on Apr 29, 2026: user added #next-steps to agent:status after a compact exchange, preflight step 2 committed it as an OOB mutation and refreshed the snapshot, then step 4 reported no_changes:true. The fix should detect prompt-preset references in OOB mutations and either defer their commit or re-inject them as synthetic diff entries so the response cycle fires.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

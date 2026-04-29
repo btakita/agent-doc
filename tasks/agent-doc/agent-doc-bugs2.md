@@ -358,7 +358,86 @@ Added the requested backlog items.
 I moved the multi-user item out of `agent:icebox` and into the live backlog. I could not make `#multi-user` the canonical backlog id in this cycle because the current id validator only accepts ASCII alphanumeric ids, so I preserved `[#multi-user]` in the backlog text as the requested alias instead.
 
 I did not run spec/test/build/install here because this turn was a backlog-capture request, not an implementation cycle.
-<!-- agent:boundary:9c478c1c -->
+
+❯ do #xna3. spec-test-build-install-commit-push
+### Re: #xna3 icebox transfer support — gpt-5
+
+Implemented in `src/agent-doc` and pushed `49499a6` on `2026-04-28`.
+
+The transfer path now treats `agent:icebox` as a first-class tracked list surface. `agent-doc transfer ... --items` now accepts `icebox` as well as `backlog`/legacy `pending`, full transfers of non-list components carry both backlog and icebox items into the target, and auto-created targets now use the full status/exchange/queue/backlog/icebox scaffold. I also normalized backlog alias handling in transfer lookups so legacy `pending` requests still resolve against canonical backlog documents.
+
+I updated `specs/07-commands.md`, the transfer/extract runbook, `VERSIONS.md`, and added CLI regressions covering auto-created target scaffolding plus selective icebox transfer.
+
+Verification:
+- `cargo fmt`
+- `cargo test test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold --test test_cli`
+- `cargo test test_transfer_items_supports_icebox_component --test test_cli`
+- `cargo test -- --test-threads=1`
+- `cargo test route::tests::wait_for_agent_ready_detects_prompt -- --exact`
+- `cargo test route::tests::full_auto_start_flow -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: the full serial suite hit two existing route prompt-readiness flakes once (`wait_for_agent_ready_detects_prompt`, `full_auto_start_flow`); both passed immediately on isolated rerun, and the new transfer coverage stayed green throughout.
+
+Commit / push:
+- `49499a6` `fix: transfer icebox alongside backlog`
+
+`#rfbj` remains the top backlog item.
+### Re: #xna3 icebox transfer support — gpt-5
+
+Implemented in `src/agent-doc` and pushed `49499a6` on `2026-04-28`.
+
+The transfer path now treats `agent:icebox` as a first-class tracked list surface. `agent-doc transfer ... --items` now accepts `icebox` as well as `backlog`/legacy `pending`, full transfers of non-list components carry both backlog and icebox items into the target, and auto-created targets now use the full status/exchange/queue/backlog/icebox scaffold. I also normalized backlog alias handling in transfer lookups so legacy `pending` requests still resolve against canonical backlog documents.
+
+I updated `specs/07-commands.md`, the transfer/extract runbook, `VERSIONS.md`, and added CLI regressions covering auto-created target scaffolding plus selective icebox transfer.
+
+Verification:
+- `cargo fmt`
+- `cargo test test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold --test test_cli`
+- `cargo test test_transfer_items_supports_icebox_component --test test_cli`
+- `cargo test -- --test-threads=1`
+- `cargo test route::tests::wait_for_agent_ready_detects_prompt -- --exact`
+- `cargo test route::tests::full_auto_start_flow -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: the full serial suite hit two existing route prompt-readiness flakes once (`wait_for_agent_ready_detects_prompt`, `full_auto_start_flow`); both passed immediately on isolated rerun, and the new transfer coverage stayed green throughout.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#rfbj` backlog entry.
+
+Commit / push:
+- `49499a6` `fix: transfer icebox alongside backlog`
+
+`#rfbj` remains the top backlog item.
+### Re: #xna3 icebox transfer support — gpt-5
+
+Implemented in `src/agent-doc` and pushed `49499a6` on `2026-04-28`.
+
+The transfer path now treats `agent:icebox` as a first-class tracked list surface. `agent-doc transfer ... --items` now accepts `icebox` as well as `backlog`/legacy `pending`, full transfers of non-list components carry both backlog and icebox items into the target, and auto-created targets now use the full status/exchange/queue/backlog/icebox scaffold. I also normalized backlog alias handling in transfer lookups so legacy `pending` requests still resolve against canonical backlog documents.
+
+I updated `specs/07-commands.md`, the transfer/extract runbook, `VERSIONS.md`, and added CLI regressions covering auto-created target scaffolding plus selective icebox transfer.
+
+Verification:
+- `cargo fmt`
+- `cargo test test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold --test test_cli`
+- `cargo test test_transfer_items_supports_icebox_component --test test_cli`
+- `cargo test -- --test-threads=1`
+- `cargo test route::tests::wait_for_agent_ready_detects_prompt -- --exact`
+- `cargo test route::tests::full_auto_start_flow -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note on verification: the full serial suite hit two existing route prompt-readiness flakes once (`wait_for_agent_ready_detects_prompt`, `full_auto_start_flow`); both passed immediately on isolated rerun, and the new transfer coverage stayed green throughout.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#rfbj` backlog entry.
+
+
+Commit / push:
+- `49499a6` `fix: transfer icebox alongside backlog`
+
+`#rfbj` remains the top backlog item.
+<!-- agent:boundary:b7fb1d64 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -367,7 +446,6 @@ I did not run spec/test/build/install here because this turn was a backlog-captu
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#xna3] Create an agent:icebox element to stash items that may be put into the backlog later. The transfer command and other mechanisms that use the backlog should also support the icebox.
 - [ ] [#rfbj] Support headers in the backlog and icebox to organize + categorize long lists.
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage (requested alias/tag: [#multi-user])

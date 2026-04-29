@@ -188,7 +188,10 @@ What changed:
 - pushed to `origin/main`
 
 This closes `#spath`. Remaining active backlog items are `#lintw` and `#lkws`.
-<!-- agent:boundary:cb37721c -->
+### Re: backlog capture note — gpt-5
+
+No new follow-up items were created in the `#spath` cycle; `#lintw` and `#lkws` were already present in `agent:backlog`.
+<!-- agent:boundary:4b30d11d -->
 <!-- /agent:exchange -->
 
 <!--

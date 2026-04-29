@@ -623,7 +623,28 @@ Commit / push:
 - `9105b22` `fix: honor harness prompts on no-diff entry`
 
 No new backlog item came out of this fix. `#qey0` is now the top remaining backlog item.
-<!-- agent:boundary:97418738 -->
+
+❯ do #qey0. spec-test-build-install-commit-push
+### Re: #qey0 editor highlighting — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `6a733ef` (`feat: highlight agent-doc markdown structures`) to `origin/20260422/codex-agent-backend`.
+
+The editor integrations now visually distinguish agent-doc-specific markdown instead of treating it all as ordinary prose. I added a shared Rust token scanner in `src/syntax.rs` plus the new `agent_doc_visual_tokens_json` FFI export, then wired both editor plugins to that same token stream. VS Code now applies live decorations for component comments, patch comments, boundary markers, `### Re:` headings, `❯` prompts, tracked `[#id]` tags, and scratch HTML comments. The JetBrains plugin now applies matching editor highlighters through the same FFI-backed ranges. Fenced and inline code examples are intentionally excluded so example markup stays untouched.
+
+I also updated the shared editor spec, editor integration guide, plugin README, and release notes, and bumped the VS Code extension to `0.2.10` and the JetBrains plugin to `0.2.78`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` in `src/agent-doc/editors/jetbrains`
+
+Commit / push:
+- `6a733ef` `feat: highlight agent-doc markdown structures`
+
+No new backlog item came out of this fix. `#1eet` is now the top remaining backlog item.
+<!-- agent:boundary:08586fb3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -632,7 +653,6 @@ No new backlog item came out of this fix. `#qey0` is now the top remaining backl
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qey0] Create a configuration for JB and VSCode that supports visually distinguishing agent-doc elements. Include html-style comments which I use for a scratch area.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->
 

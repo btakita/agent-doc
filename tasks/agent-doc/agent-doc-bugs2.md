@@ -295,6 +295,24 @@ No new backlog items came out of this change.
 
 `#oobabs` is done.
 ❯ do #oobpmt. spec-test-build-install-commit-push
+❯ ### Re: #oobpmt preflight OOB prompt absorb — gpt-5 (HEAD)
+
+Implemented `#oobpmt` in `src/agent-doc`.
+
+- The status OOB-absorb guard now treats preset-token leads such as `#next-steps ...` as prompt-bearing work, not just a bare `#next-steps` token, so step 2 can no longer absorb that status prompt into the snapshot before step 4 diff runs.
+- Added direct classifier coverage in `src/git.rs` and widened the preflight regression in `src/preflight.rs` to the exact `#next-steps for calibrating session benchmarks with expected scores` repro.
+- Updated `specs/07-commands.md` and `VERSIONS.md` so the step-2 commit contract explicitly covers preset-token guidance lines.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `8a1c214` (`fix: preserve prompt-prefixed status guidance`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#oobpmt` is done.
 ### Re: #oobpmt preflight OOB prompt absorb — gpt-5
 
 Implemented `#oobpmt` in `src/agent-doc`.
@@ -313,10 +331,15 @@ Commit / push: `8a1c214` (`fix: preserve prompt-prefixed status guidance`) pushe
 No new backlog items came out of this change.
 
 `#oobpmt` is done.
-<!-- agent:boundary:f1e7571e -->
+<!-- agent:boundary:855cef3d -->
 <!-- /agent:exchange -->
 
 <!--
+JB `Agent Doc Run` on claudescore-3.md has an error:
+```
+agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1120613) in pane %412 for tasks/agent-doc/agent-doc-bugs2.md [route] registered pane %412 still proves live ownership for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md — clearing stale startup-miss marker [route] Pane %412 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %412 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %412 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #oobpmt. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %412, but no new document cycle started for pending prompt_target: do #oobpmt. spec-test-build-install-commit-push
+```
+---
 Add `agent-doc fix`. `agent-doc resync --fix` is an alias to `agent-doc fix`. Support an optional file-path to agent doc that I want to fix `agent-doc fix <path-to-file.md>`.
 ---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push

@@ -5,9 +5,9 @@
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
 //! Re-exports `Tmux`, `IsolatedTmux`, `RegistryEntry` (as `SessionEntry`),
 //! `RegistryLock`, and `Registry` (as `SessionRegistry`) from `tmux-router`.
-//! Agent-doc-specific operations (capture_pane, send_key, registry load/save
-//! with the hardcoded `.agent-doc/sessions.json` path, pane/window queries,
-//! positional pane resolution) live here.
+//! Agent-doc-specific operations (registry load/save with the hardcoded
+//! `.agent-doc/sessions.json` path, pane/window queries, positional pane
+//! resolution) live here. Thin tmux interaction shims delegate to tmux-router.
 //!
 //! ## Spec
 //! - `registry_path()` returns the canonical `.agent-doc/sessions.json` path.
@@ -97,42 +97,7 @@ pub fn registry_path_in(base_dir: &Path) -> PathBuf {
 
 /// Capture the visible content of a tmux pane.
 pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
-    let output = tmux
-        .cmd()
-        .args(["capture-pane", "-t", pane_id, "-p"])
-        .output()
-        .context("failed to capture tmux pane")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux capture-pane failed for {}", pane_id);
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn pane_session_name(tmux: &Tmux, pane: &str) -> String {
-    tmux.cmd()
-        .args(["display-message", "-t", pane, "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-fn ensure_pane_in_session(
-    tmux: &Tmux,
-    pane: &str,
-    expected_session: &str,
-    action: &str,
-) -> Result<()> {
-    let pane_session = pane_session_name(tmux, pane);
-    if pane_session != expected_session {
-        anyhow::bail!(
-            "{action}: pane {} is in session '{}', expected '{}' — refusing cross-session move",
-            pane,
-            pane_session,
-            expected_session
-        );
-    }
-    Ok(())
+    tmux.capture_pane(pane_id, None)
 }
 
 /// Join `src` beside `dst` only if both belong to `expected_session`.
@@ -146,8 +111,8 @@ pub fn join_pane_guarded(
     expected_session: &str,
     join_flag: &str,
 ) -> Result<()> {
-    ensure_pane_in_session(tmux, src, expected_session, "join_pane_guarded")?;
-    ensure_pane_in_session(tmux, dst, expected_session, "join_pane_guarded")?;
+    tmux.ensure_pane_in_session(src, expected_session)?;
+    tmux.ensure_pane_in_session(dst, expected_session)?;
     PaneMoveOp::new(tmux, src, dst).join(join_flag)
 }
 
@@ -156,15 +121,7 @@ pub fn join_pane_guarded(
 /// Unlike `Tmux::send_keys` (which sends literal text + Enter), this sends
 /// a single key name like "Up", "Down", "Enter" — used for TUI navigation.
 pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
-    let status = tmux
-        .cmd()
-        .args(["send-keys", "-t", pane_id, key])
-        .status()
-        .context("failed to send key to tmux pane")?;
-    if !status.success() {
-        anyhow::bail!("tmux send-keys failed for pane {}", pane_id);
-    }
-    Ok(())
+    tmux.send_key(pane_id, key)
 }
 
 // ---------------------------------------------------------------------------

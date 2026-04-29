@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Local tmux-router development is now first-class in agent-loop.** The workspace root now patches `tmux-router` to the sibling `src/tmux-router` checkout via `.cargo/config.toml`, the harness instruction surfaces (`AGENTS.md`, `SKILL.md`, `CLAUDE.md`) now tell Codex/Claude to treat that crate as a live development target when generic tmux behavior moves out of `agent-doc`, and `sessions.rs` / related helpers now delegate reusable session/key primitives to `tmux-router` instead of carrying their own shell-level copies.
+
 - **Added `agent-doc fix` as the canonical session-repair surface, with document-scoped targeting.** `main.rs` now exposes a top-level `fix [FILE]` command, while `resync --fix [FILE]` routes through the same implementation. `resync.rs` now accepts an optional target document, limits dead-pane pruning and issue/fix application to matching registry entries for that file, and leaves unrelated stash/orphan cleanup untouched during scoped runs. Updated command metadata, CLI coverage, and `specs/07-commands.md`.
 
 - **Preflight no longer swallows prompt-bearing status edits into step-2 OOB absorbs.** `git.rs` now rejects safe-status snapshot absorbs when the inserted status text contains prompt work, including preset-token leads like `#next-steps` and `#next-steps ...`, imperative directives, or other prompt-bearing lines. That keeps compact-follow-up status edits visible to `preflight` step 4 instead of letting step 2 commit them as prior-cycle out-of-band status churn and collapse the turn to `no_changes`. Added direct classifier coverage plus a preflight regression for the compacted-status repro, and updated the commit spec.

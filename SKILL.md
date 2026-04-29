@@ -30,6 +30,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 - **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
 - **Imperative edits are executable directives** — when the user writes `do #id`, `go`, `fix this`, `run tests`, `build + install`, `commit + push`, or similar inside the session document, treat that as authorization to perform the requested repo work from the document context. Do not require the same instruction to be repeated in chat.
+- **Local tmux stack work spans sibling repos** — in the `agent-loop` workspace, `src/tmux-router` is a first-class development target for `src/agent-doc`. When a task moves generic tmux pane/session behavior out of `agent-doc`, update the sibling crate too and rely on the workspace cargo patch at `.cargo/config.toml` so local builds exercise the moved code.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
 - **Show progress** — stream your response in the console so the user sees real-time feedback.
 

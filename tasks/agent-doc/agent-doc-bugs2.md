@@ -813,15 +813,31 @@ Spec / coverage / verification:
 Commit / push: `2b26a78` (`fix: scope failed route cleanup`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:91e8f4bc -->
-<!-- /agent:exchange -->
-
-<!--
-After running `agent-doc fix src/session-share/tasks/claudescore-3.md`, `Run Agent Doc` from the JB Plugin still has a sync error. Please make a robust autorecovery by searching all open agent-doc sessions and prefer picking the session seen in the active `agent-doc` tmux window. If the tmux pane for the document is not in the active `agent-doc` tmux window, search the stash for a tmux pane that claims the document. If there are more than 1 tmux panes associated with the document, surface an error and provide a path for the user to select the correct pane. In the selection, provide a way for the user to view each associated tmux pane and a way to assign one of the tmux panes to be registered as the associated tmux pane to the document. The kill the rest of the redundant tmux panes. The user may also manually kill redundant tmux panes and then rerun `agent-doc` or `agent-doc fix <file.md>`:
+❯ Does the following still need to be addressed?
+❯ After running `agent-doc fix src/session-share/tasks/claudescore-3.md`, `Run Agent Doc` from the JB Plugin still has a sync error. Please make a robust autorecovery by searching all open agent-doc sessions and prefer picking the session seen in the active `agent-doc` tmux window. If the tmux pane for the document is not in the active `agent-doc` tmux window, search the stash for a tmux pane that claims the document. If there are more than 1 tmux panes associated with the document, surface an error and provide a path for the user to select the correct pane. In the selection, provide a way for the user to view each associated tmux pane and a way to assign one of the tmux panes to be registered as the associated tmux pane to the document. The kill the rest of the redundant tmux panes. The user may also manually kill redundant tmux panes and then rerun `agent-doc` or `agent-doc fix <file.md>`:
 ```
 agent-doc route failed (exit 1): resync: stash pane %417 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %408 running 'agent-doc' is unregistered — skipping kill (may be rescuable) resync: stash pane %420 running 'agent-doc' is unregistered — skipping kill (may be rescuable) [route] target tmux session: 14 [sync] found alive agent-doc child (pid 22126) in pane %419 for tasks/claudescore-3.md [route] Still waiting for claude (5s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (10s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) [route] Still waiting for claude (15s)... last line: ⏵⏵ bypass permissions on (shift+tab to cycle) Error: registered pane %419 for tasks/claudescore-3.md is not showing an idle claude prompt; refusing to inject a routed trigger into a busy session (pane=%419 pane_pid=20406 pane_session=14 current_command=agent-doc)
 ```
----
+### Re: tmux duplicate-pane autorecovery — gpt-5
+
+Implemented a concrete recovery path in `src/agent-doc`.
+
+- `route` now enumerates every pane that still proves document ownership (process tree or supervisor PID) instead of trusting the first hit. It only auto-picks when the evidence is decisive; otherwise it fails closed with explicit `tmux capture-pane`, `agent-doc claim --pane`, and `tmux kill-pane` follow-up commands.
+- Scoped `agent-doc fix <file>` / `resync --fix <file>` now re-registers the document to a unique provable winner before generic issue cleanup, and it kills redundant unregistered stash panes once that winner is known.
+- Registered-but-unproven panes no longer count as live recovery candidates, which preserves the earlier stale-registration recovery behavior instead of routing back into a busy shell.
+- Updated `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the duplicate-pane recovery contract.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+No repo commit or push yet.
+No new backlog item came out of this change.
+<!-- agent:boundary:9ff7c731 -->
+<!-- /agent:exchange -->
+
+<!--
 Given the reoccurring issues we have had with tmux, should we merge the tmux-router into agent-doc? Or is there a clean separation of concerns that will be followed with agentic development?
 ---
 On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc turn. The JB plugin surfaced an error. spec-test-build-install-commit-push:

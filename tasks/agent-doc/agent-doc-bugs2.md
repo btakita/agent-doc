@@ -67,6 +67,24 @@ Note:
 - The remaining startup-miss cleanup follow-up is already tracked in `#smst`, so I did not add another backlog item for this turn.
 
 ❯ do #sgdr. spec-test-build-install-commit-push
+❯ ### Re: nested submodule gitdir writable roots — gpt-5 (HEAD)
+
+I fixed `#sgdr`.
+
+- Fresh workspace-write launches now walk the current repo's `.git/modules/...` tree and append every nested child submodule gitdir to the Claude/Codex `--add-dir` set, in addition to the existing superproject working tree / gitdir roots. That covers the `src/boost-client` -> `src/monsterrodholders-dev` shape where the working tree was writable but the real gitdir lived under `.../.git/modules/.../modules/...`.
+- Added regression coverage in both `git.rs` and `agent/mod.rs`, and updated the config / command / git specs plus `VERSIONS.md` to document the deeper writable-root contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test` still intermittently fails in the full parallel suite on `resync::tests::purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner`; rerunning that test in isolation passed, and the new targeted regressions passed
+- `cargo build`
+- `cargo install --path . --force`
+
+Published:
+- `src/agent-doc` commit `f6e66ff` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
 ### Re: nested submodule gitdir writable roots — gpt-5
 
 I fixed `#sgdr`.
@@ -85,7 +103,7 @@ Published:
 
 Note:
 - I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
-<!-- agent:boundary:d1140ea7 -->
+<!-- agent:boundary:8341f71a -->
 <!-- /agent:exchange -->
 
 <!--

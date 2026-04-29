@@ -25,6 +25,11 @@ Backlog and icebox sections may also contain markdown headings or blank separato
 lines for organization. The granular pending ops preserve those non-item lines in
 place; they mutate only the actual task bullets.
 
+Nested lists are supported under a backlog/icebox item as indented continuation
+lines. Keep the tracked parent bullet flush-left; the binary treats the indented
+children as part of that parent item and preserves them through reorder, done,
+reap, and transfer.
+
 ## Granular flags
 
 Combine any number of flags in one `agent-doc write` call:

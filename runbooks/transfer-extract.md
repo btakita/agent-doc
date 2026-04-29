@@ -27,7 +27,7 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --by
 
 **`--bypass-claim`:** Required when the target document is owned by a different tmux pane. Without it, transfer checks pane ownership and refuses to write to another pane's document. Always use `--bypass-claim` for cross-session transfers — it signals deliberate intent.
 
-**`--items`:** Selective backlog or icebox transfer. Only moves lines containing `[#id]` for each specified ID. Remaining items stay in the source. Valid with `component=pending`, `component=backlog`, or `component=icebox`. IDs can include or omit the `#` prefix.
+**`--items`:** Selective backlog or icebox transfer. Moves the tracked parent item whose flush-left line contains `[#id]`, along with any indented nested continuation lines under that item. Remaining items stay in the source. Valid with `component=pending`, `component=backlog`, or `component=icebox`. IDs can include or omit the `#` prefix.
 
 **What happens (full transfer):**
 1. Checks pane ownership of target (unless `--bypass-claim`)
@@ -40,8 +40,8 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --by
 
 **What happens (--items selective):**
 1. Checks pane ownership (unless `--bypass-claim`)
-2. Scans the source backlog or icebox for lines matching `[#id]` patterns
-3. Moves matched lines to the same target component; leaves unmatched in source
+2. Scans the source backlog or icebox for tracked parent items matching `[#id]`
+3. Moves each matched item block, including indented nested lines, to the same target component; leaves unmatched items in source
 4. Commits target; saves both snapshots
 5. Warns about any IDs that didn't match
 

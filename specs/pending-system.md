@@ -201,6 +201,8 @@ After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls f
 
 **Header preservation:** `agent:backlog` and `agent:icebox` may contain ordinary markdown headings or blank lines between item groups for organization. Granular pending mutations (`add`, `done`, `edit`, `clear`, `reorder`, `gate`, `ungate`, reap/backfill) must preserve those non-item lines in place. Reordering operates on the item slots only; it does not delete or auto-synthesize headings.
 
+**Nested checklist support:** A tracked backlog/icebox item is the flush-left `- ...` line plus any following indented continuation lines (nested lists, dependency notes, indented paragraphs, etc.) up to the next flush-left tracked item or other non-indented structural content. Those continuation lines move with the parent item during reorder/transfer, survive backfill/edit/done transitions, and are reaped together with the parent when it reaches `[x]`. Indented child bullets do not become separate tracked `[#id]` items unless they are promoted to their own flush-left entry.
+
 ## Implementation plan
 
 1. **Rust — commands** (`src/write.rs`, `src/pending.rs`):

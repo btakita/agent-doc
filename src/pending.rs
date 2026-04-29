@@ -128,6 +128,9 @@ pub struct PendingItem {
     pub gate_type: Option<String>,
     /// Bullet text after the hash prefix.
     pub text: String,
+    /// Raw indented continuation lines that belong to this item (for nested
+    /// lists, dependency notes, etc.). Stored without the leading item line.
+    pub continuation: String,
 }
 
 impl PendingItem {
@@ -138,7 +141,12 @@ impl PendingItem {
             (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
             _ => format!("[{}]", self.state.box_char()),
         };
-        format!("- {} [#{}] {}", checkbox, self.id, self.text)
+        let mut out = format!("- {} [#{}] {}", checkbox, self.id, self.text);
+        if !self.continuation.is_empty() {
+            out.push('\n');
+            out.push_str(&self.continuation);
+        }
+        out
     }
 
     /// Convenience: true when state is `Done` (`[x]`).
@@ -163,18 +171,52 @@ struct PendingLayout {
 
 impl PendingLayout {
     fn parse(body: &str) -> Self {
+        if body.is_empty() {
+            return Self {
+                segments: Vec::new(),
+            };
+        }
+
         let mut segments = Vec::new();
-        for raw_line in body.split_inclusive('\n') {
+        let lines: Vec<&str> = body.split_inclusive('\n').collect();
+        let mut index = 0usize;
+        while index < lines.len() {
+            let raw_line = lines[index];
             let has_newline = raw_line.ends_with('\n');
             let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
-            if let Some(item) = parse_item_line(line) {
+            if let Some(mut item) = parse_item_line(line) {
+                index += 1;
+                let mut continuation = String::new();
+                let mut pending_blank_lines = String::new();
+                while index < lines.len() {
+                    let next_raw = lines[index];
+                    let next_line = next_raw.strip_suffix('\n').unwrap_or(next_raw);
+                    if parse_item_line(next_line).is_some() {
+                        break;
+                    }
+                    if next_line.is_empty() {
+                        pending_blank_lines.push_str(next_raw);
+                        index += 1;
+                        continue;
+                    }
+                    if is_indented_continuation_line(next_line) {
+                        continuation.push_str(&pending_blank_lines);
+                        pending_blank_lines.clear();
+                        continuation.push_str(next_raw);
+                        index += 1;
+                        continue;
+                    }
+                    break;
+                }
+                item.continuation = continuation;
                 segments.push(PendingSegment::Item { item, has_newline });
+                if !pending_blank_lines.is_empty() {
+                    segments.push(PendingSegment::Text(pending_blank_lines));
+                }
             } else {
                 segments.push(PendingSegment::Text(raw_line.to_string()));
+                index += 1;
             }
-        }
-        if body.is_empty() {
-            return Self { segments };
         }
         Self { segments }
     }
@@ -186,7 +228,7 @@ impl PendingLayout {
                 PendingSegment::Text(raw) => out.push_str(raw),
                 PendingSegment::Item { item, has_newline } => {
                     out.push_str(&item.render());
-                    if *has_newline {
+                    if *has_newline && item.continuation.is_empty() {
                         out.push('\n');
                     }
                 }
@@ -341,8 +383,7 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
 /// Returns `None` when the line is not a list item. When the id is missing,
 /// the returned item has an empty id — callers must run `backfill` to assign one.
 fn parse_item_line(line: &str) -> Option<PendingItem> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("- ")?;
+    let rest = line.strip_prefix("- ")?;
     let rest = rest.trim_start();
 
     // Checkbox? Supports typed gates: [/release], [/deploy], etc.
@@ -400,7 +441,12 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         state,
         gate_type,
         text: text.trim_end().to_string(),
+        continuation: String::new(),
     })
+}
+
+fn is_indented_continuation_line(line: &str) -> bool {
+    line.starts_with(' ') || line.starts_with('\t')
 }
 
 pub(crate) fn is_valid_pending_id(s: &str) -> bool {
@@ -514,7 +560,11 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
     }
     for item in items {
         out.push_str(&item.render());
-        out.push('\n');
+        if item.continuation.is_empty() {
+            out.push('\n');
+        } else if !item.continuation.ends_with('\n') {
+            out.push('\n');
+        }
     }
     if !postlude.is_empty() {
         out.push_str(postlude);
@@ -895,6 +945,25 @@ pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
     Ok((new_body, removed))
 }
 
+/// Remove specific tracked items by id while preserving surrounding non-item
+/// structure in the source body. Returns `(remaining_body, moved_body, matched_ids)`.
+pub fn extract_items_by_id(body: &str, ids: &[String]) -> Result<(String, String, Vec<String>)> {
+    let requested: Vec<String> = ids.iter().map(|id| id.trim().to_lowercase()).collect();
+    let mut matched_ids = Vec::new();
+    let mut moved_items = Vec::new();
+    let remaining = PendingLayout::parse(body).replace_items(|item| {
+        if requested.iter().any(|id| *id == item.id) {
+            matched_ids.push(item.id.clone());
+            moved_items.push(item.clone());
+            None
+        } else {
+            Some(item.clone())
+        }
+    });
+    let moved_body = render_items("", &moved_items, "");
+    Ok((remaining.render(), moved_body, matched_ids))
+}
+
 /// Detect reorder: returns `Some(current_order)` when id-sets match but order differs.
 /// Returns `None` when id-sets differ or order is identical.
 pub fn detect_reorder(snapshot_body: &str, current_body: &str) -> Option<Vec<String>> {
@@ -977,6 +1046,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
         },
         gate_type: None,
         text: text.to_string(),
+        continuation: String::new(),
     });
     Ok((layout.render(), id))
 }
@@ -1277,6 +1347,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_nested_lines_attach_to_parent_item() {
+        let body = concat!(
+            "- [ ] [#a3f2] parent task\n",
+            "  - dependency one\n",
+            "  - dependency two\n",
+            "- [ ] [#b1c4] sibling task\n"
+        );
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "a3f2");
+        assert_eq!(items[0].text, "parent task");
+        assert_eq!(
+            items[0].continuation,
+            "  - dependency one\n  - dependency two\n"
+        );
+        assert_eq!(items[1].id, "b1c4");
+        assert!(items[1].continuation.is_empty());
+    }
+
+    #[test]
     fn render_roundtrip_canonical() {
         let body = "- [ ] [#a3f2] first\n- [x] [#b1c4] second\n";
         let (p, items, post) = parse_items(body);
@@ -1299,6 +1389,7 @@ mod tests {
             state: PendingState::Gated,
             gate_type: None,
             text: "CommitLock".to_string(),
+            continuation: String::new(),
         };
         assert_eq!(item.render(), "- [/] [#eg0w] CommitLock");
     }
@@ -1368,6 +1459,21 @@ mod tests {
         assert_eq!(lines[0], "### Active");
         assert!(lines[1].starts_with("- [ ] [#"));
         assert_eq!(lines[3], "### Later");
+    }
+
+    #[test]
+    fn backfill_preserves_nested_subtasks_without_assigning_child_ids() {
+        let body = concat!(
+            "- parent task\n",
+            "  - child dependency\n",
+            "  - child subtask\n",
+            "- sibling task\n"
+        );
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert_eq!(new_body.matches("[#").count(), 2, "got: {new_body}");
+        assert!(new_body.contains("  - child dependency\n"));
+        assert!(new_body.contains("  - child subtask\n"));
     }
 
     #[test]
@@ -1788,6 +1894,26 @@ mod tests {
     }
 
     #[test]
+    fn op_reorder_moves_nested_subtasks_with_parent_item() {
+        let body = concat!(
+            "- [ ] [#a1b2] first\n",
+            "  - child a\n",
+            "- [ ] [#c3d4] second\n",
+            "  - child b\n"
+        );
+        let new_body = op_reorder(body, &["c3d4".to_string()]).unwrap();
+        assert_eq!(
+            new_body,
+            concat!(
+                "- [ ] [#c3d4] second\n",
+                "  - child b\n",
+                "- [ ] [#a1b2] first\n",
+                "  - child a\n"
+            )
+        );
+    }
+
+    #[test]
     fn op_reorder_unknown_id_errors() {
         let body = "- [ ] [#a1b2] one\n";
         assert!(op_reorder(body, &["zzzz".to_string()]).is_err());
@@ -2035,6 +2161,7 @@ mod tests {
             state: PendingState::Gated,
             gate_type: Some("release".to_string()),
             text: "Release v0.32.4".to_string(),
+            continuation: String::new(),
         };
         assert_eq!(item.render(), "- [/release] [#a1b2] Release v0.32.4");
     }
@@ -2159,6 +2286,40 @@ mod tests {
                 .map(|item| item.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["lost1"]
+        );
+    }
+
+    #[test]
+    fn detect_shadow_open_items_ignores_indented_nested_ids() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Parent task\n",
+            "  - [ ] [#nested1] Nested checklist item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert!(report.duplicated_in_live_backlog.is_empty());
+        assert!(report.shadow_only.is_empty());
+    }
+
+    #[test]
+    fn extract_items_by_id_preserves_nested_subtasks() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#move1] Parent task\n",
+            "  - child dependency\n",
+            "- [ ] [#keep1] Keep task\n"
+        );
+        let (remaining, moved, matched) =
+            extract_items_by_id(body, &["move1".to_string()]).unwrap();
+        assert_eq!(matched, vec!["move1".to_string()]);
+        assert!(remaining.contains("### Active\n"));
+        assert!(!remaining.contains("[#move1]"));
+        assert!(remaining.contains("[#keep1] Keep task"));
+        assert_eq!(
+            moved,
+            concat!("- [ ] [#move1] Parent task\n", "  - child dependency\n")
         );
     }
 

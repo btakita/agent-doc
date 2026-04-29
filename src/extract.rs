@@ -496,28 +496,10 @@ fn transfer_pending_items(
         );
     }
 
-    let mut matched_lines: Vec<String> = Vec::new();
-    let mut remaining_lines: Vec<String> = Vec::new();
-    let mut matched_ids: Vec<String> = Vec::new();
+    let (remaining_body, matched_body, matched_ids) =
+        crate::pending::extract_items_by_id(pending_content, ids)?;
 
-    for line in pending_content.lines() {
-        let mut is_match = false;
-        for id in ids {
-            let pattern = format!("[#{}]", id);
-            if line.contains(&pattern) {
-                is_match = true;
-                matched_ids.push(id.clone());
-                break;
-            }
-        }
-        if is_match {
-            matched_lines.push(line.to_string());
-        } else {
-            remaining_lines.push(line.to_string());
-        }
-    }
-
-    if matched_lines.is_empty() {
+    if matched_ids.is_empty() {
         let id_list: Vec<String> = ids.iter().map(|id| format!("#{}", id)).collect();
         anyhow::bail!(
             "no {} items matched: {}",
@@ -526,11 +508,11 @@ fn transfer_pending_items(
         );
     }
 
-    // Update source: keep only remaining lines
-    let new_pending_content = if remaining_lines.is_empty() {
+    // Update source: keep only remaining items / structure
+    let new_pending_content = if remaining_body.trim().is_empty() {
         "\n".to_string()
     } else {
-        format!("{}\n", remaining_lines.join("\n"))
+        remaining_body
     };
     let new_source = source_pending.replace_content(&source_content, &new_pending_content);
     write::atomic_write_pub(source, &new_source)?;
@@ -542,13 +524,13 @@ fn transfer_pending_items(
         .find(|c| matches_requested_component(component_name, &c.name));
     let new_target = if let Some(tp) = target_pending {
         let existing = tp.content(&target_content);
-        let appended = format!("{}{}\n", existing, matched_lines.join("\n"));
+        let appended = format!("{}{}", existing, matched_body);
         tp.replace_content(&target_content, &appended)
     } else {
         format!(
             "{}\n{}\n",
             target_content.trim_end(),
-            matched_lines.join("\n")
+            matched_body.trim_end()
         )
     };
 
@@ -559,7 +541,7 @@ fn transfer_pending_items(
 
     eprintln!(
         "[transfer] Moved {} {} item(s) ({}) from {} → {}",
-        matched_lines.len(),
+        matched_ids.len(),
         component_name,
         matched_ids
             .iter()

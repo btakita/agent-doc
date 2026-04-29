@@ -552,7 +552,7 @@ differences).
 1. **Argument validation:** if `--items` is set and component is not `pending`, `backlog`, or `icebox`, reject immediately.
 2. Validate source exists; auto-create target if missing (template format with status/exchange/queue/backlog/icebox scaffold)
 3. **Pane ownership check:** unless `--bypass-claim` is set, verify the current tmux pane owns the target document's session. If a different pane owns it, reject with an error suggesting `--bypass-claim`.
-4. **If `--items` is set (selective mode):** match backlog or icebox lines by `[#id]` pattern, move only matching lines to the same component in target, leave the rest in source. Report unmatched IDs as warnings.
+4. **If `--items` is set (selective mode):** match backlog or icebox parent items by `[#id]` pattern on their flush-left tracked line, move the entire matching item block (including indented nested continuation lines) to the same component in target, leave the rest in source. Report unmatched IDs as warnings.
 5. **Otherwise (full transfer):** read named component from source; bail if empty or absent. Clear source component (single newline). Append content to target's matching component with `> **[TRANSFER from <source>]** (timestamp)` annotation.
 6. If the transferred component is not backlog/pending or icebox, also merge both backlog and icebox items from source → target
 7. Commit the target so transferred headings appear in git HEAD (prevents `(HEAD)` marking on next cycle)
@@ -560,7 +560,7 @@ differences).
 
 **`--bypass-claim`:** Explicitly opt into cross-pane transfer. Required when the target document is owned by a different tmux pane. Without it, transfer refuses to write to another pane's document. This flag exists because transfers are deliberate user actions (not concurrent writes) and should not be blocked by session ownership.
 
-**`--items`:** Selective backlog or icebox transfer. Only moves items whose lines contain `[#id]` for each comma-separated ID. IDs may include or omit the `#` prefix (both `--items "#abc,#def"` and `--items "abc,def"` work). Valid with `component=pending`, `component=backlog`, or `component=icebox`. Mutually exclusive with `--referral`.
+**`--items`:** Selective backlog or icebox transfer. Only moves items whose flush-left tracked parent line contains `[#id]` for each comma-separated ID, together with any indented nested continuation lines that belong to that parent block. IDs may include or omit the `#` prefix (both `--items "#abc,#def"` and `--items "abc,def"` work). Valid with `component=pending`, `component=backlog`, or `component=icebox`. Mutually exclusive with `--referral`.
 
 **`--referral`:** Instead of moving content, inserts a structured referral pointer in the target's component:
 ```html
@@ -590,6 +590,8 @@ Canonical entrypoint is `agent-doc backlog`. The legacy spelling `agent-doc pend
 Supported actions include `add`, `add-gated`, `remove`, `prune`/`reap`, `backfill`, `done`, `edit`, `clear`, `reorder`, `list`, `resolve-gate`, and `set-gate-type`. These actions operate on the canonical `agent:backlog` component while continuing to accept legacy `agent:pending` markers at the document-parsing layer.
 
 Backlog and icebox bodies may include markdown headings or blank separator lines between item groups. The backlog mutation helpers and accidental-patch normalizer must preserve those non-item lines; only the item slots are mutated/reordered.
+
+Nested lists are also supported inside backlog and icebox items. The canonical tracked item is the flush-left `- ...` entry; any indented continuation lines that follow it belong to that same item and must move/reap/edit with the parent block rather than being parsed as standalone tracked work.
 
 ## terminal
 

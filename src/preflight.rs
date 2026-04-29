@@ -1910,7 +1910,16 @@ pub(crate) fn archive_pending_done(
         new_body.push('\n');
     }
     for item in removed {
-        new_body.push_str(&format!("- {} [#{}] {}\n", today, item.id, item.text));
+        new_body.push_str(&format!("- {} [#{}] {}", today, item.id, item.text));
+        if item.continuation.is_empty() {
+            new_body.push('\n');
+        } else {
+            new_body.push('\n');
+            new_body.push_str(&item.continuation);
+            if !item.continuation.ends_with('\n') {
+                new_body.push('\n');
+            }
+        }
     }
 
     Some(archive.replace_content(content, &new_body))

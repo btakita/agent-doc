@@ -198,7 +198,18 @@ Commit / push:
 - `e835897` `fix: delay strict queue consumption until closeout gates`
 
 `#fuback` is now the top remaining backlog item.
-<!-- agent:boundary:bd4f91d3 -->
+
+❯ compact exchange should peek into the backlog to provide more context. Should I rely on presets or should agent-doc intelligently compact the exchange to preserve context for the backlog items?
+### Re: compact exchange backlog context — gpt-5
+
+Use intelligent backlog-aware compaction as the default, and keep presets as optional overlays rather than the primary source of truth.
+
+The backlog, queue, and icebox are already the canonical state surfaces. Presets are static prompt sugar. If compaction relies mainly on presets, it can preserve tone or workflow hints while still dropping the actual unresolved work. A safer compacted checkpoint should explicitly carry forward the top open backlog items, the queue head when present, any gated or iceboxed items that still matter, and any recently-stated backlog conclusion that would otherwise become stale.
+
+Presets still have value, but as policy knobs: for example, "include the top 3 backlog items" or "always mention the active queue head". I would not use them as the source of substantive context. State should come from the live document components; presets should shape how that state is summarized.
+
+I added that as a recommended backlog follow-up so it is tracked without treating it as accepted work yet. `#fuback` remains the top accepted active item.
+<!-- agent:boundary:11cdfdb8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -208,5 +219,6 @@ compact exchange should peek into the backlog to provide more context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rpaj] [recommended] Make compact exchange synthesize backlog-aware context from live backlog/queue/icebox state; use presets only to tune summary policy
 - [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
 <!-- /agent:backlog -->

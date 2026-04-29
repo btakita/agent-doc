@@ -79,7 +79,23 @@ Verification:
 - `cargo build`
 - `cargo install --path .`
 - installed binary reports `tsift 0.1.21`
-<!-- agent:boundary:f4844473 -->
+
+❯ do #ggft. spec-test-build-install-commit-push
+### Re: #ggft — gpt-5
+
+Implemented the summarize root-resolution fix in `src/tsift` and pushed it as `b9cbd25` (`fix: resolve summarize workspace roots`).
+
+What changed:
+- `tsift summarize` now resolves `--path` through the nearest ancestor `.tsift` project/workspace root before opening `summaries.db`, computing `--diff`, or resolving scoped symbol context.
+- Added nested-path regression coverage in both the unit test layer and `tests/exit_code.rs` so query and extract flows reuse the shared root cache instead of creating shadow caches under nested directories.
+- Updated `SPEC.md` to document the ancestor-root behavior for `summarize`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- installed binary reports `tsift 0.1.21`
+<!-- agent:boundary:44ea2888 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -88,7 +104,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ggft] [recommended] Resolve summarize roots through the same project/workspace helper used by search/status/lint, and add nested-path coverage.
 - [ ] [#35ms] [recommended] Make tsift edit transactional; add a regression test for partial write failure.
 <!-- /agent:backlog -->
 

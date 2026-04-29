@@ -93,7 +93,23 @@ Verification:
 
 Push:
 - `origin/main` -> `19f0e48`
-<!-- agent:boundary:bad38312 -->
+❯ do #98pz. spec-test-commit-push
+### Re: #98pz spec-test-commit-push — gpt-5
+
+Implemented `#98pz` in `src/tsift` and pushed `main` to `20eecfe` (`fix: ignore repo-root index db in lint`).
+
+Changes:
+- `src/lint.rs` no longer treats `root/index.db` as part of workspace aggregate lint discovery; workspace targets now only read `.tsift`-owned indexes unless the caller explicitly passes another `index.db` path.
+- Added a unit regression proving workspace-root entity collection ignores an unrelated repo-root SQLite file.
+- Added a CLI regression proving `tsift lint README.md --json` still succeeds in a workspace even when `./index.db` exists with unrelated schema.
+- Updated `SPEC.md` to document that aggregate lint discovery ignores repo-root `index.db` unless it is targeted explicitly.
+
+Verification:
+- `cargo test` (406 unit tests, 42 integration tests)
+
+Push:
+- `origin/main` -> `20eecfe`
+<!-- agent:boundary:3b2d4c09 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -102,7 +118,6 @@ Push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#98pz] [recommended] Remove the repo-root  fallback from lint workspace entity discovery unless it is an intentional compatibility surface
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

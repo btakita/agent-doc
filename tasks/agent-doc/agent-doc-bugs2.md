@@ -317,7 +317,7 @@ Commit / push:
 - `55c16a0` `fix: enforce backlog-required review capture`
 
 No new backlog item came out of this change.
-<!-- agent:boundary:5ee3c0f9 -->
+<!-- agent:boundary:d9833ec6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -329,5 +329,8 @@ Support headers in the backlog and icebox to organize + categorize long lists.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#x6e9] [#multi-user] Research how we can make agennn
 <!-- /agent:backlog -->
+
+<!-- agent:icebox -->
+- [ ] [#x6e9] [#multi-user] Research how we can make agent-doc safe for multi user usage
+<!-- /agent:icebox -->

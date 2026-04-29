@@ -3151,15 +3151,15 @@ pub fn run_stream(
             // Uses the snapshot (loaded above) to identify new lines.
             // Compute normalization targets for the IPC plugin so the editor also shows
             // the prefix immediately (not just the snapshot).
-            let normalize_prefix_lines: Vec<String> =
-                if let Ok(Some(ref snap)) = snapshot::load(file) {
-                    let before = content_ours.clone();
-                    content_ours =
-                        normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
-                    extract_normalization_targets(&before, &content_ours)
-                } else {
-                    vec![]
-                };
+            let snapshot_doc = snapshot::load(file).ok().flatten();
+            let normalize_prefix_lines: Vec<String> = if let Some(ref snap) = snapshot_doc {
+                let before = content_ours.clone();
+                content_ours =
+                    normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
+                extract_normalization_targets(&before, &content_ours)
+            } else {
+                vec![]
+            };
 
             // Lift pending out of exchange if nested (structural repair)
             content_ours = lift_pending_from_exchange_safe(&content_ours, file);
@@ -3291,19 +3291,26 @@ pub fn run_stream(
             let (final_content, crdt_state) = if content_current == base {
                 let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
                 (content_ours.clone(), doc.encode_state())
-            } else if response_already_in_current(base, &content_ours, &content_current) {
+            } else if let Some(repaired_current) = adopt_current_response_without_duplication(
+                file,
+                base,
+                &content_ours,
+                &content_current,
+                snapshot_doc.as_deref(),
+            )? {
                 // Plugin already applied the response before the sidecar ack
-                // arrived. Using content_current preserves user edits and avoids
-                // duplicating the response via CRDT merge.
+                // arrived. Re-normalize the current transcript so a retry can
+                // still restore missing `❯ ` prefixes without duplicating the
+                // response via CRDT merge.
                 eprintln!(
-                    "[write] IPC timeout path: response already in current file (plugin applied), skipping CRDT merge"
+                    "[write] IPC timeout path: response already in current file; adopting normalized current content"
                 );
                 crate::ops_log::log_op(
                     file,
-                    "ipc_timeout_plugin_already_applied: skipping CRDT merge",
+                    "ipc_timeout_plugin_already_applied: adopting normalized current content",
                 );
-                let doc = crate::crdt::CrdtDoc::from_text(&content_current);
-                (content_current.clone(), doc.encode_state())
+                let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
+                (repaired_current, doc.encode_state())
             } else {
                 eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
                 let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
@@ -3418,7 +3425,8 @@ pub fn run_stream(
 
     // Normalize user input in exchange: add ❯  prefix to user-added lines.
     // Load snapshot to identify which lines are new (user-typed this cycle).
-    if let Ok(Some(snap)) = snapshot::load(file) {
+    let snapshot_doc = snapshot::load(file).ok().flatten();
+    if let Some(ref snap) = snapshot_doc {
         content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, &snap, file);
     }
 
@@ -3437,6 +3445,18 @@ pub fn run_stream(
         // No edits — build CRDT state from result
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
+    } else if let Some(repaired_current) = adopt_current_response_without_duplication(
+        file,
+        base,
+        &content_ours,
+        &content_current,
+        snapshot_doc.as_deref(),
+    )? {
+        eprintln!(
+            "[write] response already present in current file; adopting normalized current content"
+        );
+        let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
+        (repaired_current, doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
         // Use baseline as CRDT base instead of stored state from previous cycle.
@@ -4866,6 +4886,28 @@ fn response_already_in_current(base: &str, content_ours: &str, content_current: 
     }
 
     detected
+}
+
+/// When the current file already contains the response block, prefer adopting
+/// that current content and re-running transcript normalization instead of
+/// CRDT-merging the same response a second time.
+fn adopt_current_response_without_duplication(
+    file: &Path,
+    base: &str,
+    content_ours: &str,
+    content_current: &str,
+    snapshot: Option<&str>,
+) -> Result<Option<String>> {
+    if !response_already_in_current(base, content_ours, content_current) {
+        return Ok(None);
+    }
+
+    let mut repaired = content_current.to_string();
+    if let Some(snapshot_doc) = snapshot {
+        repaired = normalize_user_prompts_in_exchange_safe(&repaired, base, snapshot_doc, file);
+    }
+    repaired = normalize_template_structure_or_fail(&repaired, file)?;
+    Ok(Some(repaired))
 }
 
 /// Transfer the `agent:pending` component content from `source` into `target`.
@@ -7202,6 +7244,56 @@ Same content.
             !response_already_in_current(base, base, base),
             "should return false when ours equals base"
         );
+    }
+
+    #[test]
+    fn adopt_current_response_without_duplication_repairs_bare_prompt_prefix() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #scpd. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+❯ do #scpd. spec-test-build-install-commit-push
+### Re: #scpd retry — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #scpd. spec-test-build-install-commit-push
+### Re: #scpd retry — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, content_current).unwrap();
+        let repaired = adopt_current_response_without_duplication(
+            &doc,
+            base,
+            content_ours,
+            content_current,
+            Some(snapshot),
+        )
+        .unwrap()
+        .expect("response should be adopted from current");
+
+        assert!(repaired.contains("❯ do #scpd. spec-test-build-install-commit-push"));
+        assert!(!repaired.contains("\ndo #scpd. spec-test-build-install-commit-push\n"));
+        assert_eq!(repaired.matches("### Re: #scpd retry — gpt-5").count(), 1);
     }
 }
 

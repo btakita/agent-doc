@@ -433,7 +433,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 **Response-commit invariant:** Every appended response must cross a commit boundary unless the user explicitly asks to leave it uncommitted. The default happy-path command for normal response cycles is `agent-doc finalize <FILE>`; bare `agent-doc write` is for explicit no-commit exceptions or intermediate checkpoints, not for the final response.
 
-**Write dedup (v0.28.2):** All four write paths skip the actual write when the merged/patched content is identical to the current file on disk. On dedup, pending state is cleared and the function returns early. Events are logged to stderr and appended (with backtrace) to `/tmp/agent-doc-write-dedup.log`.
+**Write dedup (v0.28.2):** All four write paths skip the actual write when the merged/patched content is identical to the current file on disk. On dedup, pending state is cleared and the function returns early. Events are logged to stderr and appended (with backtrace) to `/tmp/agent-doc-write-dedup.log`. For stream retries with an explicit baseline, if the current exchange already contains the response block, the binary must adopt the current document and re-run transcript normalization (including `❯ ` prefix repair) instead of CRDT-merging the same response a second time.
 
 **Pane ownership verification (v0.28.2):** `verify_pane_ownership()` is called at the top of `run`, `run_template`, and `run_stream`. It reads the document's `session` frontmatter field, looks up the owning pane in the session registry, and compares it to the current tmux pane. If a different pane definitively owns the session, the write is rejected. The check is lenient: it passes silently when not in tmux, when there is no session ID, or when the pane is indeterminate.
 

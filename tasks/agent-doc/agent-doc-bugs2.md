@@ -331,14 +331,30 @@ Commit / push: `8a1c214` (`fix: preserve prompt-prefixed status guidance`) pushe
 No new backlog items came out of this change.
 
 `#oobpmt` is done.
-<!-- agent:boundary:855cef3d -->
-<!-- /agent:exchange -->
-
-<!--
-JB `Agent Doc Run` on claudescore-3.md has an error:
+❯ JB `Agent Doc Run` on claudescore-3.md has an error:
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1120613) in pane %412 for tasks/agent-doc/agent-doc-bugs2.md [route] registered pane %412 still proves live ownership for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md — clearing stale startup-miss marker [route] Pane %412 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %412 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %412 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #oobpmt. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %412, but no new document cycle started for pending prompt_target: do #oobpmt. spec-test-build-install-commit-push
 ```
+### Re: JB Agent Doc Run live-pane busy dispatch — gpt-5
+
+Implemented the routed live-pane fix in `src/agent-doc`.
+
+- Route now waits for the harness's current idle prompt before injecting into any already-running pane.
+- Tightened `pane_has_prompt()` so a stale `>` or `❯` still visible in scrollback no longer counts as an idle session; only the latest non-empty pane line can satisfy the prompt check.
+- Added a regression that keeps a registered `agent-doc` process alive without surfacing a new prompt and proves route fails closed before dispatching into it. Updated `specs/07-commands.md` to match the enforced contract.
+
+The JetBrains error text appears to have been surfaced while you were on `claudescore-3.md`, but the route log itself shows the failing dispatch target was this document's live pane `%412` for `tasks/agent-doc/agent-doc-bugs2.md`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+No new backlog items came out of this change.
+<!-- agent:boundary:d9acb6bd -->
+<!-- /agent:exchange -->
+
+<!--
 ---
 Add `agent-doc fix`. `agent-doc resync --fix` is an alias to `agent-doc fix`. Support an optional file-path to agent doc that I want to fix `agent-doc fix <path-to-file.md>`.
 ---

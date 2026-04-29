@@ -8,10 +8,10 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. Any follow-up items to place in the backlog?
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
-  '#next-steps': '#follow-up-backlog' Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -19,11 +19,6 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-[agent-doc sync] malformed frontmatter during resolve_file.
-
-sync resolve_file frontmatter: invalid YAML frontmatter in tasks/agent-doc/agent-doc-bugs2.md: did not find expected key at line 13 column 39, while parsing a block mapping at line 9 column 3
-
-Fix the frontmatter between the opening and closing --- markers, then rerun the command.
 <!-- /agent:status -->
 
 ## Exchange
@@ -256,7 +251,34 @@ The missing piece was `sync.rs`: the bad frontmatter path already logged a warni
 I updated `specs/07-commands.md`, `docs/guide/commands.md`, and `VERSIONS.md`, added regression coverage for status surfacing/clearing in `sync.rs`, then ran `cargo fmt`, `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`.
 
 No new backlog item came out of this fix. `#fuback` remains the top accepted active item.
-<!-- agent:boundary:14e9b9bf -->
+
+❯ Can the error message be more user-friendly? For example, show the text that is in error...like Rust's compiler. spec-test-build-install-commit-push
+```
+[agent-doc sync] malformed frontmatter during resolve_file.
+
+sync resolve_file frontmatter: invalid YAML frontmatter in tasks/agent-doc/agent-doc-bugs2.md: did not find expected key at line 13 column 39, while parsing a block mapping at line 9 column 3
+
+Fix the frontmatter between the opening and closing --- markers, then rerun the command.
+```
+### Re: frontmatter error excerpt — gpt-5
+
+Implemented in `src/agent-doc` and pushed `c49040d` on `2026-04-28`.
+
+The malformed-frontmatter error is now more readable in the exact path that matters. `frontmatter::parse_for_file()` now keeps the existing file-targeted error and repair hint, but when `serde_yaml` reports a location it adds a compiler-style excerpt of the frontmatter with a caret at the reported line/column. I also changed `ensure_session_for_file()` to go through that same file-aware parser first, so `start` and `route` get the richer message before UUID assignment instead of falling back to the older generic wrapper. Sync inherits it automatically because it already routes through `parse_for_file()`.
+
+I updated the regression checks in `frontmatter.rs`, `start.rs`, and `sync.rs`, and refreshed `specs/07-commands.md`, `docs/guide/commands.md`, and `VERSIONS.md` to document the excerpted error shape.
+
+Verification:
+- `cargo fmt`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `c49040d` `fix: show frontmatter parse excerpt`
+
+No new backlog item came out of this change. `#fuback` remains the top accepted active item.
+<!-- agent:boundary:13466c33 -->
 <!-- /agent:exchange -->
 
 <!--

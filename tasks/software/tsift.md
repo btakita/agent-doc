@@ -46,7 +46,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 - I do not see a regression test that proves federated lexical search excludes isolated/private scopes.
 - I do not see nested-path coverage for `summarize` root resolution.
 - I did not run the full test suite for this review; the findings above are from code inspection.
-<!-- agent:boundary:c72d1793 -->
+
+❯ do #dpeh. spec-test-build-install-commit-push
+### Re: #dpeh — gpt-5
+
+Implemented the federated search fix in `src/tsift` and pushed it as `b4f6b33` (`fix: scope federated lexical search`).
+
+What changed:
+- `tsift search --federated` now runs the sift pass only across eligible federated scope roots instead of the workspace root, then merges and reranks those hits at the workspace layer. That keeps lexical results aligned with the same scope filter already used for federated symbol search.
+- Added regression tests covering both `isolated` and `private` scope tiers for federated lexical search.
+- Updated `SPEC.md` to document the scoped federated sift behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- installed binary reports `tsift 0.1.21`
+<!-- agent:boundary:a7982194 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -55,15 +71,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dpeh] [recommended] Restrict federated lexical search to the same eligible scope set used for federated symbol search; add regression coverage for isolated/private scopes.
 - [ ] [#618r] [recommended] Make lint entity collection config-aware so workspace linting excludes private/isolated indexes unless the caller opts in.
 - [ ] [#ggft] [recommended] Resolve summarize roots through the same project/workspace helper used by search/status/lint, and add nested-path coverage.
-- [ ] [#35ms] [recommended] Make tsift edit transactional or explicitly non-atomic; add a regression test for partial write failure.
+- [ ] [#35ms] [recommended] Make tsift edit transactional; add a regression test for partial write failure.
+<!-- /agent:backlog -->
+
+<!-- agent:icebox -->
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- /agent:backlog -->
+<!-- /agent:icebox -->
 
 <!--
 -->

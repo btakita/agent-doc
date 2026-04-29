@@ -245,7 +245,23 @@ run_every = "7d"
 - Parse age from file mtime, not filename heuristics.
 - Log kept vs deleted files so the cleanup is auditable.
 - Add tests for threshold handling, newest-baseline preservation, and active-document safety.
-<!-- agent:boundary:3e2f5dee -->
+### Re: scoped fix command — gpt-5
+
+Implemented the CLI and scoped repair flow.
+
+- Added `agent-doc fix [FILE]` with optional `--session` for targeted document repair.
+- Wired `agent-doc resync --fix [FILE]` to the same fix path.
+- Scoped resync/fix internals so a provided markdown path limits registry pruning and repair to that document instead of running a global sweep.
+- Updated command/spec docs and added CLI coverage for `fix` plus `resync --fix [FILE]`.
+
+Verification:
+- `cargo fmt --all`
+- targeted CLI/resync tests
+- `make check`
+- `make install`
+
+Committed and pushed in `src/agent-doc` as `0cec88b` (`feat: add scoped agent-doc fix command`).
+<!-- agent:boundary:48607898 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

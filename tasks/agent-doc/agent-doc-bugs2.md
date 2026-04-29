@@ -321,7 +321,21 @@ Published:
 
 Note:
 - I did not run a live tmux-backed manual repro on this repo in this turn, so I left the broader `#tmuxcrash` backlog item in place for that end-to-end proof instead of marking it fully closed.
-<!-- agent:boundary:f77181df -->
+
+❯ Can you perform a "live tmux-backed manual repro on this repo"?
+### Re: live tmux-backed manual repro — gpt-5
+
+I ran a live tmux-backed manual repro in an isolated worktree at `tmp/live-tmux-repro`.
+
+- Happy path: I routed a real prompt into a dedicated tmux pane (`%496`), and that session completed end-to-end. The disposable doc wrote `REPRO-OK` and committed it in the temp worktree (`e75593be4`).
+- Recovery leg: I then killed pane `%496`, leaving a stale session registration, and routed a second prompt. `agent-doc route` pruned the stale session, detected there was no live pane, and auto-started a fresh pane (`%497`) instead of surfacing a fake crash on the dead pane.
+- Setup wrinkle: launching `start` from a shell that still inherited the current tmux context tried to reuse the active pane, so I restarted that leg from inside the dedicated tmux pane itself. After that correction, the routed recovery signal behaved as expected.
+
+Note:
+- I cleaned up the disposable tmux pane/window after the repro.
+- I did not let the second recovery leg run all the way through a second response write-back; I stopped after the fresh-pane recovery path was proven live.
+- I left the ignored temp worktree at `tmp/live-tmux-repro` if you want to inspect the repro doc/logs.
+<!-- agent:boundary:82b611aa -->
 <!-- /agent:exchange -->
 
 <!--

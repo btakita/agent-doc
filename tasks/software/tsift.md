@@ -651,7 +651,30 @@ Commit/push:
 - `btakita/tsift@bea2991` (`fix: resolve nested query paths to tsift root`) pushed to `origin/main`.
 
 Top of backlog: `#wsmix`.
-<!-- agent:boundary:020de715 -->
+
+❯ do #wsmix. spec-test-build-install-commit-push
+### Re: do #wsmix — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift status` now treats workspace scoped indexes as the authoritative status surface whenever `.gitmodules` defines scopes, even if a shared root `.tsift/index.db` is also present.
+- mixed root-plus-scoped workspaces now continue to report `workspace_scopes` / `missing_scopes` and stay `stale` until every configured scope has its own `index.db`.
+- added regressions in both the direct status helpers (`src/status.rs`) and the compiled CLI surface (`tests/exit_code.rs`) for the mixed-layout case.
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.20`, and refreshed the installed binary.
+
+Verification:
+- `cargo test status_workspace --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `cargo test status_reports_missing_workspace_scopes_even_when_root_index_exists_in_json --test exit_code --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `make check` passed: 383 unit tests + 36 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.20`.
+
+Commit/push:
+- `btakita/tsift@2ff956b` (`fix: keep workspace status scope-aware`) pushed to `origin/main`.
+
+Top of backlog: `#wssearch`.
+<!-- agent:boundary:253f8676 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -660,7 +683,6 @@ Top of backlog: `#wsmix`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wsmix] [recommended] Make workspace status account for scoped indexes even when .tsift/index.db also exists, so missing scoped DBs cannot masquerade as fresh
 - [ ] [#wssearch] [recommended] Make default workspace search fail closed or require explicit --scope/--federated instead of auto-creating a shared root index
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

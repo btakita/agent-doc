@@ -437,7 +437,7 @@ Commit / push:
 - `49499a6` `fix: transfer icebox alongside backlog`
 
 `#rfbj` remains the top backlog item.
-<!-- agent:boundary:b7fb1d64 -->
+<!-- agent:boundary:14f62b64 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -447,6 +447,8 @@ Commit / push:
 
 <!-- agent:backlog -->
 - [ ] [#rfbj] Support headers in the backlog and icebox to organize + categorize long lists.
+- [ ] [#w4va] Support nested lists in the backlog and icebox for subtasks and dependencies
+- [ ] [#vzpc] Support optional numeric lists in the backlog to enforce order
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->

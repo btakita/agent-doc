@@ -298,7 +298,26 @@ Commit / push:
 - `157bc64` `fix: preserve live state in exchange compaction`
 
 No new backlog item came out of this change. `#fuback` remains the top accepted active item.
-<!-- agent:boundary:09da4f15 -->
+
+❯ do #fuback. spec-test-build-install-commit-push
+### Re: #fuback follow-up backlog capture — gpt-5
+
+Implemented in `src/agent-doc` and pushed `55c16a0` on `2026-04-28`.
+
+The missing invariant is now binary-owned instead of relying on review prose shape alone. I added a prompt-contract helper that expands backlog-related intent from changed diff lines plus recursive frontmatter `prompt_presets`, persists that requirement in cycle state during preflight, and makes both `plan` and closeout use the same contract. That means preset-driven review prompts such as `#code-review` -> `#follow-up-backlog` now surface as `expect_add`, and `finalize` / `session-check` fail closed unless the cycle either records backlog mutations or explicitly says there were no actionable follow-up items to capture.
+
+I also added regression coverage for preset-expanded detection, the new pre-commit/post-commit backlog-required guard, and the explicit-no-followups escape hatch. While running the full serial suite, three existing route tests exposed a prompt-timeout flake in the mock pane helper, so I widened that test-only wait to keep the requested full-suite verification stable under load.
+
+Verification:
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `55c16a0` `fix: enforce backlog-required review capture`
+
+No new backlog item came out of this change.
+<!-- agent:boundary:5ee3c0f9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -310,5 +329,5 @@ Support headers in the backlog and icebox to organize + categorize long lists.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
+- [ ] [#x6e9] [#multi-user] Research how we can make agennn
 <!-- /agent:backlog -->

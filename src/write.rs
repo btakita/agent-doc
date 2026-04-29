@@ -738,16 +738,17 @@ pub(crate) fn unresolved_backlog_capture_targets(
                 .as_deref()
                 .and_then(|name| components.iter().find(|component| component.name == name))
                 .or_else(|| {
-                    components.iter().find(|component| {
-                        crate::component::is_backlog_component(&component.name)
-                    })
+                    components
+                        .iter()
+                        .find(|component| crate::component::is_backlog_component(&component.name))
                 })
                 .or_else(|| {
                     components.iter().find(|component| {
                         crate::component::is_tracked_work_component(&component.name)
                     })
                 });
-            let current_hash = component.map(|component| crate::ops_log::content_hash(component.content(&content)));
+            let current_hash = component
+                .map(|component| crate::ops_log::content_hash(component.content(&content)));
             match (&target.baseline_hash, current_hash) {
                 (Some(expected), Some(current)) => current == *expected,
                 (Some(_), None) => true,
@@ -756,6 +757,128 @@ pub(crate) fn unresolved_backlog_capture_targets(
             }
         })
         .map(|target| target.path.clone())
+        .collect()
+}
+
+fn normalize_pending_id(id: &str) -> String {
+    id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
+fn tracked_work_ids_from_component_body(body: &str) -> HashSet<String> {
+    let (_, items, _) = crate::pending::parse_items(body);
+    items
+        .into_iter()
+        .filter(|item| !item.is_done())
+        .map(|item| normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+fn tracked_work_ids_for_target(
+    content: &str,
+    preferred_component: Option<&str>,
+) -> Result<HashSet<String>> {
+    let components = crate::component::parse(content)?;
+    let component = preferred_component
+        .and_then(|name| components.iter().find(|component| component.name == name))
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| crate::component::is_backlog_component(&component.name))
+        })
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| crate::component::is_tracked_work_component(&component.name))
+        });
+    Ok(component
+        .map(|component| tracked_work_ids_from_component_body(component.content(content)))
+        .unwrap_or_default())
+}
+
+fn promised_backlog_item_ids_from_response(
+    response_text: &str,
+    state: &crate::cycle_state::CycleState,
+) -> Vec<String> {
+    let baseline_ids: HashSet<String> = state
+        .required_backlog_targets
+        .iter()
+        .flat_map(|target| target.baseline_item_ids.iter())
+        .map(|id| normalize_pending_id(id))
+        .collect();
+    let (_, items, _) = crate::pending::parse_items(response_text);
+    let mut promised = Vec::new();
+    for item in items.into_iter().filter(|item| !item.is_done()) {
+        let id = normalize_pending_id(&item.id);
+        if id.is_empty()
+            || baseline_ids.contains(&id)
+            || promised.iter().any(|existing| existing == &id)
+        {
+            continue;
+        }
+        promised.push(id);
+    }
+    promised
+}
+
+pub(crate) fn promised_backlog_item_inventory_shortfall(
+    state: &crate::cycle_state::CycleState,
+    response_text: &str,
+) -> Option<(usize, usize)> {
+    if state.required_backlog_targets.is_empty() || state.required_explicit_backlog_item_count == 0
+    {
+        return None;
+    }
+
+    let promised_count = promised_backlog_item_ids_from_response(response_text, state).len();
+    if promised_count >= state.required_explicit_backlog_item_count {
+        None
+    } else {
+        Some((state.required_explicit_backlog_item_count, promised_count))
+    }
+}
+
+pub(crate) fn unresolved_promised_backlog_item_ids(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+    response_text: &str,
+) -> Vec<String> {
+    if state.required_backlog_targets.is_empty() {
+        return Vec::new();
+    }
+
+    let promised_ids = promised_backlog_item_ids_from_response(response_text, state);
+    if promised_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let current = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let mut current_target_ids = HashSet::new();
+    for target in &state.required_backlog_targets {
+        let target_path = Path::new(&target.path);
+        let normalized_target =
+            std::fs::canonicalize(target_path).unwrap_or_else(|_| target_path.to_path_buf());
+        let content = if normalized_target == current {
+            match std::fs::read_to_string(file) {
+                Ok(content) => content,
+                Err(_) => continue,
+            }
+        } else {
+            match std::fs::read_to_string(&normalized_target) {
+                Ok(content) => content,
+                Err(_) => continue,
+            }
+        };
+        let Ok(ids) = tracked_work_ids_for_target(&content, target.component.as_deref()) else {
+            continue;
+        };
+        current_target_ids.extend(ids);
+    }
+
+    promised_ids
+        .into_iter()
+        .filter(|id| !current_target_ids.contains(id))
+        .map(|id| format!("#{}", id))
         .collect()
 }
 
@@ -793,6 +916,48 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
              add <!-- no-pending-capture --> to suppress, \
              or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
             missing_targets.join(", ")
+        );
+    }
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) =
+            promised_backlog_item_inventory_shortfall(&state, &response_text)
+    {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
+             but the response only enumerated {} explicit backlog item(s) for target(s) {}\n\
+             [finalize] hint: enumerate each transferred bug as a tracked backlog item in the response \
+             (for example `- [ ] [#id] ...`) before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            expected_count,
+            promised_count,
+            state
+                .required_backlog_targets
+                .iter()
+                .map(|target| target.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let missing_ids = unresolved_promised_backlog_item_ids(file, &state, &response_text);
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_ids.is_empty()
+    {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: response promised new tracked item(s) {} \
+             for explicit backlog target(s) {}, but those ids are still missing after this cycle\n\
+             [finalize] hint: transfer every listed item into the explicit target backlog, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            missing_ids.join(", "),
+            state
+                .required_backlog_targets
+                .iter()
+                .map(|target| target.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     if state.requires_backlog_capture
@@ -876,12 +1041,65 @@ fn prewrite_pending_capture_check(
             missing_targets.join(", ")
         );
     }
-    if state
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) = state
+            .as_ref()
+            .and_then(|state| promised_backlog_item_inventory_shortfall(state, &response_text))
+    {
+        anyhow::bail!(
+            "[finalize] pre-write gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
+             but the response only enumerated {} explicit backlog item(s) for target(s) {}\n\
+             [finalize] hint: enumerate each transferred bug as a tracked backlog item in the response \
+             (for example `- [ ] [#id] ...`) before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            expected_count,
+            promised_count,
+            state
+                .as_ref()
+                .map(|state| {
+                    state
+                        .required_backlog_targets
+                        .iter()
+                        .map(|target| target.path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default()
+        );
+    }
+    let missing_ids = state
         .as_ref()
-        .is_some_and(|state| {
-            state.requires_backlog_capture && state.required_backlog_targets.is_empty()
-        })
-        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        .map(|state| unresolved_promised_backlog_item_ids(file, state, &response_text))
+        .unwrap_or_default();
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_ids.is_empty()
+    {
+        anyhow::bail!(
+            "[finalize] pre-write gate: response promised new tracked item(s) {} \
+             for explicit backlog target(s) {}, but those ids are still missing after this cycle\n\
+             [finalize] hint: transfer every listed item into the explicit target backlog, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            missing_ids.join(", "),
+            state
+                .as_ref()
+                .map(|state| {
+                    state
+                        .required_backlog_targets
+                        .iter()
+                        .map(|target| target.path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default()
+        );
+    }
+    if state.as_ref().is_some_and(|state| {
+        state.requires_backlog_capture && state.required_backlog_targets.is_empty()
+    }) && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
         anyhow::bail!(
             "[finalize] pre-write gate: active prompt requested backlog capture \
@@ -7546,6 +7764,7 @@ mod precommit_pending_capture_tests {
                     .to_string(),
                 component: Some("backlog".to_string()),
                 baseline_hash: Some(backlog_component_hash(&target)),
+                baseline_item_ids: vec!["old1".to_string()],
             }],
         )
         .unwrap();
@@ -7573,6 +7792,7 @@ mod precommit_pending_capture_tests {
                 .to_string(),
             component: Some("backlog".to_string()),
             baseline_hash: Some(backlog_component_hash(&target)),
+            baseline_item_ids: vec!["old1".to_string()],
         };
         write_backlog_doc(
             &target,
@@ -7584,6 +7804,79 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_capture_check(&doc)
             .expect("changed explicit backlog target should satisfy closeout");
+    }
+
+    #[test]
+    fn precommit_blocks_when_bug_transfer_inventory_is_smaller_than_prompt_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(
+            &target,
+            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n- [ ] [#old1] Existing item\n",
+        );
+        let requirement = crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(&target)
+                .unwrap()
+                .display()
+                .to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some("baseline".to_string()),
+            baseline_item_ids: vec!["old1".to_string()],
+        };
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        crate::cycle_state::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("described at least 4 distinct issue(s)")
+        );
+        assert!(
+            err.to_string()
+                .contains("only enumerated 2 explicit backlog item(s)")
+        );
+    }
+
+    #[test]
+    fn precommit_blocks_when_response_promises_multiple_new_target_items_but_only_some_exist() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#mcrc] Uncommitted repair follow-up\n- [ ] [#lvls] Preserve list-shape constraint\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+        let requirement = crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(&target)
+                .unwrap()
+                .display()
+                .to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some(backlog_component_hash(&target)),
+            baseline_item_ids: vec!["old1".to_string()],
+        };
+        write_backlog_doc(
+            &target,
+            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#old1] Existing item\n",
+        );
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("promised new tracked item(s)"));
+        assert!(err.to_string().contains("#mcrc"));
+        assert!(err.to_string().contains("#lvls"));
     }
 
     #[test]

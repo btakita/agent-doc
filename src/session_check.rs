@@ -526,6 +526,38 @@ fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
             missing_targets.join(", ")
         )));
     }
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) =
+            crate::write::promised_backlog_item_inventory_shortfall(&state, &response_text)
+    {
+        return Ok(GuardResult::Error(format!(
+            "[session-check] error: active #agent-doc-bug contract described at least {} distinct issue(s), but the committed response only enumerated {} explicit backlog item(s) for target(s) {}",
+            expected_count,
+            promised_count,
+            state
+                .required_backlog_targets
+                .iter()
+                .map(|target| target.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    let missing_ids =
+        crate::write::unresolved_promised_backlog_item_ids(file, &state, &response_text);
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !missing_ids.is_empty()
+    {
+        return Ok(GuardResult::Error(format!(
+            "[session-check] error: committed response promised new tracked item(s) {} for explicit backlog target(s) {}, but those ids are still missing after this cycle",
+            missing_ids.join(", "),
+            state
+                .required_backlog_targets
+                .iter()
+                .map(|target| target.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
     if state.requires_backlog_capture
         && state.required_backlog_targets.is_empty()
         && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
@@ -1078,6 +1110,23 @@ mod tests {
             .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
+    }
+
+    fn write_backlog_doc(path: &Path, backlog_body: &str) {
+        let content = format!(
+            "---\nagent_doc_session: target\n---\n\n<!-- agent:backlog -->\n{backlog_body}<!-- /agent:backlog -->\n"
+        );
+        fs::write(path, content).unwrap();
+    }
+
+    fn backlog_component_hash(path: &Path) -> String {
+        let content = fs::read_to_string(path).unwrap();
+        let components = crate::component::parse(&content).unwrap();
+        let component = components
+            .iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .unwrap();
+        crate::ops_log::content_hash(component.content(&content))
     }
 
     #[test]
@@ -2076,6 +2125,83 @@ mod tests {
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_blocks_when_bug_transfer_inventory_is_smaller_than_prompt_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n"),
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(
+            &target,
+            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n- [ ] [#old1] Existing item\n",
+        );
+        let requirement = crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(&target)
+                .unwrap()
+                .display()
+                .to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some("baseline".to_string()),
+            baseline_item_ids: vec!["old1".to_string()],
+        };
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        crate::cycle_state::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("described at least 4 distinct issue(s)"));
+                assert!(message.contains("only enumerated 2 explicit backlog item(s)"));
+            }
+            other => panic!("expected bug-transfer inventory failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_blocks_when_response_promises_multiple_new_target_items_but_only_some_exist() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n"),
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#mcrc] Uncommitted repair follow-up\n- [ ] [#lvls] Preserve list-shape constraint\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+        let requirement = crate::cycle_state::BacklogTargetRequirement {
+            path: std::fs::canonicalize(&target)
+                .unwrap()
+                .display()
+                .to_string(),
+            component: Some("backlog".to_string()),
+            baseline_hash: Some(backlog_component_hash(&target)),
+            baseline_item_ids: vec!["old1".to_string()],
+        };
+        write_backlog_doc(
+            &target,
+            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#old1] Existing item\n",
+        );
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("promised new tracked item(s)"));
+                assert!(message.contains("#mcrc"));
+                assert!(message.contains("#lvls"));
+            }
+            other => panic!("expected promised-transfer failure, got {other:?}"),
+        }
     }
 
     #[test]

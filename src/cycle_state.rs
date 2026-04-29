@@ -50,6 +50,8 @@ pub struct BacklogTargetRequirement {
     pub component: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub baseline_item_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +80,8 @@ pub struct CycleState {
     pub requires_backlog_capture: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_backlog_targets: Vec<BacklogTargetRequirement>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub required_explicit_backlog_item_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
 }
@@ -123,6 +127,7 @@ pub fn start_preflight(
         had_pending_mutations: false,
         requires_backlog_capture: false,
         required_backlog_targets: Vec::new(),
+        required_explicit_backlog_item_count: 0,
         pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
@@ -242,6 +247,21 @@ pub fn record_backlog_target_requirements(
     Ok(Some(state))
 }
 
+pub fn record_required_explicit_backlog_item_count(
+    file: &Path,
+    count: usize,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.required_explicit_backlog_item_count != count {
+        state.required_explicit_backlog_item_count = count;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -319,8 +339,13 @@ fn synthetic_state_with_id(
         had_pending_mutations: false,
         requires_backlog_capture: false,
         required_backlog_targets: Vec::new(),
+        required_explicit_backlog_item_count: 0,
         pending_done_ids: Vec::new(),
     }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 fn normalized_content_hash(content: &str) -> String {
@@ -466,13 +491,37 @@ mod tests {
             path: dir.path().join("tasks/bugs.md").display().to_string(),
             component: Some("backlog".to_string()),
             baseline_hash: Some("abc".to_string()),
+            baseline_item_ids: vec!["bug1".to_string()],
         }];
 
         let state = record_backlog_target_requirements(&doc, &requirements)
             .unwrap()
             .unwrap();
         assert_eq!(state.required_backlog_targets, requirements);
-        assert_eq!(load(&doc).unwrap().unwrap().required_backlog_targets, requirements);
+        assert_eq!(
+            load(&doc).unwrap().unwrap().required_backlog_targets,
+            requirements
+        );
+    }
+
+    #[test]
+    fn record_required_explicit_backlog_item_count_persists_count() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_required_explicit_backlog_item_count(&doc, 3)
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.required_explicit_backlog_item_count, 3);
+        assert_eq!(
+            load(&doc)
+                .unwrap()
+                .unwrap()
+                .required_explicit_backlog_item_count,
+            3
+        );
     }
 
     #[test]

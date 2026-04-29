@@ -45,7 +45,7 @@ agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --by
 4. Commits target; saves both snapshots
 5. Warns about any IDs that didn't match
 
-If the source document's active prompt contract explicitly says to "add to the backlog of <TARGET>", this target-side backlog change is the proof that later `finalize` / `session-check` expects. A response that names the preset but leaves the referenced target backlog unchanged should fail closed.
+If the source document's active prompt contract explicitly says to "add to the backlog of <TARGET>", this target-side backlog change is the proof that later `finalize` / `session-check` expects. A response that names the preset but leaves the referenced target backlog unchanged should fail closed. If the response body lists concrete new tracked items such as `- [ ] [#id] ...`, every newly listed id must be present in the live target backlog before closeout succeeds; changing the target backlog in some other way is not enough. For `#agent-doc-bug`, a generic "transferred" note is no longer sufficient when the prompt-bearing changes described multiple bugs: the response must enumerate the transferred backlog items explicitly so closeout can prove the full set landed.
 
 ## Referral (pointer instead of copy)
 

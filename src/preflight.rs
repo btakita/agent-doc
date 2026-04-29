@@ -284,8 +284,11 @@ fn push_unique_prompt_bearing_changes(
     }
 }
 
-fn tracked_work_component_fingerprint(content: &str) -> Result<(Option<String>, Option<String>)> {
-    let components = crate::component::parse(content).context("failed to parse document components")?;
+fn tracked_work_component_fingerprint(
+    content: &str,
+) -> Result<(Option<String>, Option<String>, Vec<String>)> {
+    let components =
+        crate::component::parse(content).context("failed to parse document components")?;
     let component = components
         .iter()
         .find(|component| is_backlog_component(&component.name))
@@ -295,7 +298,7 @@ fn tracked_work_component_fingerprint(content: &str) -> Result<(Option<String>, 
                 .find(|component| is_tracked_work_component(&component.name))
         });
     let Some(component) = component else {
-        return Ok((None, None));
+        return Ok((None, None, Vec::new()));
     };
 
     let name = if is_backlog_component(&component.name) {
@@ -304,7 +307,14 @@ fn tracked_work_component_fingerprint(content: &str) -> Result<(Option<String>, 
         component.name.clone()
     };
     let hash = crate::ops_log::content_hash(component.content(content));
-    Ok((Some(name), Some(hash)))
+    let (_, items, _) = crate::pending::parse_items(component.content(content));
+    let item_ids = items
+        .into_iter()
+        .filter(|item| !item.is_done())
+        .map(|item| item.id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
+    Ok((Some(name), Some(hash), item_ids))
 }
 
 fn explicit_backlog_target_requirements(
@@ -334,9 +344,9 @@ fn explicit_backlog_target_requirements(
             target,
             target_frontmatter.as_ref(),
         )?;
-        let (component, baseline_hash) = match target_existing.as_deref() {
+        let (component, baseline_hash, baseline_item_ids) = match target_existing.as_deref() {
             Some(content) => tracked_work_component_fingerprint(content)?,
-            None => (None, None),
+            None => (None, None, Vec::new()),
         };
         requirements.push(crate::cycle_state::BacklogTargetRequirement {
             path: std::fs::canonicalize(target)
@@ -345,6 +355,7 @@ fn explicit_backlog_target_requirements(
                 .to_string(),
             component,
             baseline_hash,
+            baseline_item_ids,
         });
     }
     Ok(requirements)
@@ -1224,22 +1235,17 @@ pub fn run(file: &Path) -> Result<()> {
         frontmatter_prompt_presets,
     ) = match std::fs::read_to_string(file) {
         Ok(content) => {
-            let (source_fm, fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
-                .ok()
-                .map(|(fm, _)| {
-                    let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
-                    let fm_tier = fm.model_tier;
-                    let env_map = fm.env.clone();
-                    let prompt_presets = fm.prompt_presets.clone();
-                    (
-                        fm,
-                        fm_tier,
-                        env_map,
-                        resolved,
-                        prompt_presets,
-                    )
-                })
-                .unwrap_or_default();
+            let (source_fm, fm_tier, env_map, fm_model, prompt_presets) =
+                frontmatter::parse(&content)
+                    .ok()
+                    .map(|(fm, _)| {
+                        let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
+                        let fm_tier = fm.model_tier;
+                        let env_map = fm.env.clone();
+                        let prompt_presets = fm.prompt_presets.clone();
+                        (fm, fm_tier, env_map, resolved, prompt_presets)
+                    })
+                    .unwrap_or_default();
             let comp_value = agent_doc::model_tier::extract_model_component(&content);
             (
                 source_fm,
@@ -1299,11 +1305,25 @@ pub fn run(file: &Path) -> Result<()> {
     );
     let explicit_backlog_requirements =
         explicit_backlog_target_requirements(file, &source_frontmatter, &explicit_backlog_targets)?;
+    let required_explicit_backlog_item_count = if explicit_backlog_requirements.is_empty() {
+        0
+    } else {
+        crate::prompt_contract::required_explicit_backlog_item_count(
+            &prompt_targets,
+            &added_diff_lines,
+            &frontmatter_prompt_presets,
+            &prompt_bearing_changes,
+        )
+    };
     if !no_changes {
         crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
         crate::cycle_state::record_backlog_target_requirements(
             file,
             &explicit_backlog_requirements,
+        )?;
+        crate::cycle_state::record_required_explicit_backlog_item_count(
+            file,
+            required_explicit_backlog_item_count,
         )?;
     }
 

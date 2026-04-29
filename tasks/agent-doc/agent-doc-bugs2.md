@@ -280,7 +280,28 @@ Published:
 Note:
 - The first `cargo test` attempt hit a leaked tmux test-session artifact (`duplicate session: test`) during a parallel verification run; I reran the failing test in isolation and then reran the full suite serially, which passed cleanly.
 - I left the pre-existing unrelated local edits in `src/agent/codex.rs` and `src/autoclaim.rs` untouched.
-<!-- agent:boundary:9fd85117 -->
+❯ commit + push all uncommitted files in src/agent-doc
+### Re: commit + push pending `src/agent-doc` changes — gpt-5
+
+I committed and pushed the remaining uncommitted `src/agent-doc` files.
+
+Committed files:
+- `src/agent/codex.rs`
+- `src/autoclaim.rs`
+
+What changed:
+- `src/autoclaim.rs` now exposes a pane-specific helper for tests instead of mutating `TMUX_PANE`, which removes global env coupling from the autoclaim harness coverage.
+- `src/agent/codex.rs` test commands now drain stdin before exiting, which makes the streaming stderr coverage more faithful to the real subprocess shape.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml codex::tests:: -- --nocapture`
+
+Published:
+- `src/agent-doc` commit `cf07404` pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item was added for this turn.
+<!-- agent:boundary:05bd3516 -->
 <!-- /agent:exchange -->
 
 <!--

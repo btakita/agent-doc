@@ -95,7 +95,24 @@ Verification:
 - `cargo build`
 - `cargo install --path .`
 - installed binary reports `tsift 0.1.21`
-<!-- agent:boundary:44ea2888 -->
+
+❯ do #35ms. spec-test-build-install-commit-push
+### Re: #35ms — gpt-5
+
+Implemented the transactional `tsift edit` fix in `src/tsift` and pushed it as `00af3d4` (`fix: make edit batches transactional`).
+
+What changed:
+- `tsift edit` now stages every rewritten file beside its target, then swaps originals through per-file backup slots so the batch only lands after validation and staging complete.
+- If any later swap fails, tsift rolls earlier files back to their original contents before returning an error instead of leaving a partially-written batch behind.
+- Added a regression test that simulates a later swap failure and proves earlier files are restored.
+- Updated `SPEC.md` to document the staged/rollback behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- installed binary reports `tsift 0.1.21`
+<!-- agent:boundary:1c5e6e88 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -104,7 +121,6 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#35ms] [recommended] Make tsift edit transactional; add a regression test for partial write failure.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

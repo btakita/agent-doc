@@ -46,7 +46,27 @@ Open backlog still active after compaction:
 Unanswered user report preserved as open context:
 - After `compact agent:exchange`, routed triggers still failed with `no new document cycle started` for pane `%422`, and the JetBrains plugin later reported multiple unregistered stash panes while rerouting to `tasks/monsterrodholders.md` pane `%408`.
 - The user also asked why the drafted startup-miss diagnostic `echo` text appeared in the bound Codex pane and was not Entered; that path was later addressed by `#smdq`, which switched the diagnostic to a tmux display overlay.
-<!-- agent:boundary:5eede6a4 -->
+### Re: routed-cycle ack false positives — gpt-5
+
+I fixed the two symptoms from the new report.
+
+- Route no longer treats a visible Codex prompt glyph as sufficient proof of idleness. It now rejects active permission prompts, rejects the Codex `tab to queue message` footer, and requires two consecutive idle-prompt samples before injecting a routed trigger. That closes the `codex ready after 0.0s` -> `no new document cycle started` failure mode when the pane is busy or queue-only.
+- Bulk stash cleanup now kills unregistered orphaned agent panes unless live-owner proof still ties the pane to a registered document. That stops the repeated `unregistered — skipping kill (may be rescuable)` buildup across reroutes.
+- Spec and version notes are updated in `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Published:
+- `src/agent-doc` commit `802b4c3` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the existing unrelated local edits in `src/agent-doc/src/sync.rs` and `src/agent-doc/src/terminal.rs` untouched.
+- The remaining startup-miss cleanup follow-up is already tracked in `#smst`, so I did not add another backlog item for this turn.
+
+<!-- agent:boundary:42c00e66 -->
 <!-- /agent:exchange -->
 
 <!--

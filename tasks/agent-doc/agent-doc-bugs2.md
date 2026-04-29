@@ -130,7 +130,24 @@ Verification:
 Commit / push: `9d289a1` (`fix: enforce codex network launch policy`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#ntwk` is done.
-<!-- agent:boundary:9f182814 -->
+❯ do #ppct. spec-test-build-install-commit-push
+### Re: #ppct prompt preset backlog contract — gpt-5
+
+Implemented `#ppct` in `src/agent-doc`.
+
+- Prompt-preset backlog contracts now expand into explicit target requirements during preflight, including named backlog documents like `Add to the backlog of ...`.
+- `finalize` and `session-check` now fail closed if the referenced target backlog/pending surface did not change during the cycle, instead of accepting unchanged source backlog state.
+- Added coverage for preset target extraction, cycle-state persistence, and closeout pass/fail behavior, and updated the command spec and transfer runbook to document the target-aware gate.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `96763d5` (`fix: enforce prompt preset backlog contracts`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#ppct` is done.
+<!-- agent:boundary:65ecd75c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -139,7 +156,7 @@ Commit / push: `9d289a1` (`fix: enforce codex network launch policy`) pushed to 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/ta****sks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
+- [ ] [#smdq] Fix startup-miss diagnostics that are queued into the harness input buffer instead of being surfaced visibly. Repro from `tasks/agent-doc/agent-doc-bugs2.md` on April 29, 2026: `ops.log` recorded `route_cycle_start_missing` for Codex pane `%399` on `do #ppct. spec-test-build-install-commit-push`, but the live pane stayed open and showed a drafted `echo '[agent-doc] startup-miss: ...'` line with Codex UI text `tab to queue message`. `route.rs` currently sends the diagnostic text with `tmux.send_keys_raw(...)`, so the recovery hint can sit as unsent input and make the pane look crashed. Plan: `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

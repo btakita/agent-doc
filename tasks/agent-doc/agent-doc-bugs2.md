@@ -771,14 +771,33 @@ Commit / push:
 - `agent-loop`: `afadb8b01` (`feat: wire local tmux-router development`) pushed to `origin/main`
 
 No new backlog item came out of this change.
-<!-- agent:boundary:4ca5b048 -->
-<!-- /agent:exchange -->
-
-<!--
-I'm getting many tmux crashes and `agent-doc route` errors. Please investigate my recent work to understand root causes.
+❯ I'm getting many tmux crashes and `agent-doc route` errors. Please investigate my recent work to understand root causes. spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1120613) in pane %412 for tasks/agent-doc/agent-doc-bugs2.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] cleaning up orphaned pane %418 (created during failed route) Error: registered pane %412 for tasks/agent-doc/agent-doc-bugs2.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%412 pane_pid=1119220 pane_session=14 current_command=agent-doc)
 ```
+### Re: tmux route crash/root-cause investigation — gpt-5
+
+Implemented a concrete fix in `src/agent-doc`.
+
+The repeated `agent-doc route` failure you pasted had two different signals mixed together:
+
+- The `registered pane ... is not showing an idle codex prompt` path was a correct fail-closed refusal. The pane was still busy inside a live `agent-doc`/Codex session, so route should not inject another trigger.
+- The real crash bug was the cleanup path that ran after a failed route. It inferred ownership from "any pane that appeared in the target window during this attempt" and killed `%418`, even though `.agent-doc/logs/tsift-v0.1.log` shows `%418` was the fresh `session_start` pane for `tasks/software/tsift.md`, not an orphan from this document's failed route.
+
+I changed route cleanup to track only panes created by the current route attempt and to resolve the preservation check from the routed document's own project root instead of the caller's cwd. That keeps concurrent sibling panes in the same tmux window out of the cleanup set.
+
+Spec / coverage / verification:
+- Added route regression coverage for the attempt-local cleanup boundary plus the project-root-backed preserve check.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to make the cleanup contract explicit.
+- Verification: `cargo test`, `cargo build`, `cargo install --path . --force`
+
+Commit / push: `2b26a78` (`fix: scope failed route cleanup`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:beca06e0 -->
+<!-- /agent:exchange -->
+
+<!--
 ---
 On tsift.md, I cancelled a run, restarted the Codex session. Ran an agent-doc turn. The JB plugin surfaced an error. spec-test-build-install-commit-push:
 ```

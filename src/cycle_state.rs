@@ -82,6 +82,8 @@ pub struct CycleState {
     pub required_backlog_targets: Vec<BacklogTargetRequirement>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub required_explicit_backlog_item_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub required_plan_reference_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
 }
@@ -128,6 +130,7 @@ pub fn start_preflight(
         requires_backlog_capture: false,
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
+        required_plan_reference_count: 0,
         pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
@@ -262,6 +265,21 @@ pub fn record_required_explicit_backlog_item_count(
     Ok(Some(state))
 }
 
+pub fn record_required_plan_reference_count(
+    file: &Path,
+    count: usize,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.required_plan_reference_count != count {
+        state.required_plan_reference_count = count;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -340,6 +358,7 @@ fn synthetic_state_with_id(
         requires_backlog_capture: false,
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
+        required_plan_reference_count: 0,
         pending_done_ids: Vec::new(),
     }
 }
@@ -521,6 +540,23 @@ mod tests {
                 .unwrap()
                 .required_explicit_backlog_item_count,
             3
+        );
+    }
+
+    #[test]
+    fn record_required_plan_reference_count_persists_count() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_required_plan_reference_count(&doc, 2)
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.required_plan_reference_count, 2);
+        assert_eq!(
+            load(&doc).unwrap().unwrap().required_plan_reference_count,
+            2
         );
     }
 

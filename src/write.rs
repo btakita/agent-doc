@@ -838,6 +838,58 @@ pub(crate) fn promised_backlog_item_inventory_shortfall(
     }
 }
 
+fn promised_plan_reference_paths(file: &Path, response_text: &str) -> Vec<String> {
+    let mut promised = Vec::new();
+    for raw_line in response_text.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") || trimmed.starts_with('>') {
+            continue;
+        }
+        if !trimmed.to_ascii_lowercase().contains("plan") {
+            continue;
+        }
+        let Some(path) = crate::security::referenced_markdown_path(file, trimmed) else {
+            continue;
+        };
+        if !path.exists() {
+            continue;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !file_name.contains("plan") {
+            continue;
+        }
+        let normalized = std::fs::canonicalize(&path)
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        if !promised.iter().any(|existing| existing == &normalized) {
+            promised.push(normalized);
+        }
+    }
+    promised
+}
+
+pub(crate) fn promised_plan_reference_shortfall(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+    response_text: &str,
+) -> Option<(usize, usize)> {
+    if state.required_plan_reference_count == 0 {
+        return None;
+    }
+
+    let promised_count = promised_plan_reference_paths(file, response_text).len();
+    if promised_count >= state.required_plan_reference_count {
+        None
+    } else {
+        Some((state.required_plan_reference_count, promised_count))
+    }
+}
+
 pub(crate) fn unresolved_promised_backlog_item_ids(
     file: &Path,
     state: &crate::cycle_state::CycleState,
@@ -938,6 +990,22 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
                 .map(|target| target.path.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
+        );
+    }
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) =
+            promised_plan_reference_shortfall(file, &state, &response_text)
+    {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
+             but the response only cited {} existing plan path(s)\n\
+             [finalize] hint: create each plan file and cite it in the response \
+             (for example `Plan: tasks/agent-doc/plan-foo.md`) before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            expected_count,
+            promised_count
         );
     }
     let missing_ids = unresolved_promised_backlog_item_ids(file, &state, &response_text);
@@ -1067,6 +1135,23 @@ fn prewrite_pending_capture_check(
                         .join(", ")
                 })
                 .unwrap_or_default()
+        );
+    }
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) = state
+            .as_ref()
+            .and_then(|state| promised_plan_reference_shortfall(file, state, &response_text))
+    {
+        anyhow::bail!(
+            "[finalize] pre-write gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
+             but the response only cited {} existing plan path(s)\n\
+             [finalize] hint: create each plan file and cite it in the response \
+             (for example `Plan: tasks/agent-doc/plan-foo.md`) before finalize, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures",
+            expected_count,
+            promised_count
         );
     }
     let missing_ids = state
@@ -7969,6 +8054,59 @@ mod precommit_pending_capture_tests {
         assert!(err.to_string().contains("promised new tracked item(s)"));
         assert!(err.to_string().contains("#mcrc"));
         assert!(err.to_string().contains("#lvls"));
+    }
+
+    #[test]
+    fn precommit_blocks_when_bug_plan_reference_inventory_is_smaller_than_prompt_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nFiled two bugs.\nPlan: `tasks/agent-doc/plan-session-check-prefix-duplication.md`\n",
+            false,
+        );
+        let plan = tmp
+            .path()
+            .join("tasks/agent-doc/plan-session-check-prefix-duplication.md");
+        std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
+        std::fs::write(&plan, "# Plan\n").unwrap();
+
+        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("required at least 2 explicit plan reference(s)")
+        );
+        assert!(
+            err.to_string()
+                .contains("only cited 1 existing plan path(s)")
+        );
+    }
+
+    #[test]
+    fn precommit_allows_when_bug_plan_reference_inventory_matches_prompt_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nFiled two bugs.\n1. **#scpd** Plan: `tasks/agent-doc/plan-session-check-prefix-duplication.md`\n2. **#nbla** Plan: `tasks/agent-doc/plan-chat-level-agent-doc-bug-contract.md`\n",
+            false,
+        );
+        let first_plan = tmp
+            .path()
+            .join("tasks/agent-doc/plan-session-check-prefix-duplication.md");
+        let second_plan = tmp
+            .path()
+            .join("tasks/agent-doc/plan-chat-level-agent-doc-bug-contract.md");
+        std::fs::create_dir_all(first_plan.parent().unwrap()).unwrap();
+        std::fs::write(&first_plan, "# Plan\n").unwrap();
+        std::fs::write(&second_plan, "# Plan\n").unwrap();
+
+        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("matching plan references should satisfy closeout");
     }
 
     #[test]

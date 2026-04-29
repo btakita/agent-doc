@@ -547,6 +547,15 @@ fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
                 .join(", ")
         )));
     }
+    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && let Some((expected_count, promised_count)) =
+            crate::write::promised_plan_reference_shortfall(file, &state, &response_text)
+    {
+        return Ok(GuardResult::Error(format!(
+            "[session-check] error: active #agent-doc-bug contract required at least {} explicit plan reference(s), but the committed response only cited {} existing plan path(s)",
+            expected_count, promised_count,
+        )));
+    }
     let missing_ids =
         crate::write::unresolved_promised_backlog_item_ids(file, &state, &response_text);
     if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
@@ -2205,6 +2214,33 @@ mod tests {
                 assert!(message.contains("#lvls"));
             }
             other => panic!("expected promised-transfer failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_blocks_when_bug_plan_reference_inventory_is_smaller_than_prompt_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n"),
+            "### Re: #agent-doc-bug — opus-4-6\n\nFiled two bugs.\nPlan: `tasks/agent-doc/plan-session-check-prefix-duplication.md`\n",
+            false,
+        );
+        let plan = tmp
+            .path()
+            .join("tasks/agent-doc/plan-session-check-prefix-duplication.md");
+        std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
+        std::fs::write(&plan, "# Plan\n").unwrap();
+
+        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("required at least 2 explicit plan reference(s)"));
+                assert!(message.contains("only cited 1 existing plan path(s)"));
+            }
+            other => panic!("expected plan-reference inventory failure, got {other:?}"),
         }
     }
 

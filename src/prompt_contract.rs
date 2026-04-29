@@ -40,6 +40,16 @@ const NO_FOLLOWUP_PHRASES: &[&str] = &[
     "no new follow up work",
 ];
 
+pub(crate) fn prompt_requests_plan_work(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+) -> bool {
+    effective_prompt_texts(prompt_targets, added_diff_lines, prompt_presets)
+        .iter()
+        .any(|text| text_requests_plan_work(text))
+}
+
 pub(crate) fn prompt_requests_backlog_work(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -90,25 +100,28 @@ pub(crate) fn required_explicit_backlog_item_count(
         return 0;
     }
 
-    let content_edit_count = prompt_bearing_changes
-        .iter()
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::ContentEdit)
-        .map(|change| count_issue_units_in_text(&change.text))
-        .sum::<usize>();
-    if content_edit_count > 0 {
-        return content_edit_count;
+    required_issue_unit_count(prompt_bearing_changes)
+}
+
+pub(crate) fn required_plan_reference_count(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+) -> usize {
+    if !effective_prompt_references_preset(
+        prompt_targets,
+        added_diff_lines,
+        prompt_presets,
+        "#agent-doc-bug",
+    ) {
+        return 0;
+    }
+    if !prompt_requests_plan_work(prompt_targets, added_diff_lines, prompt_presets) {
+        return 0;
     }
 
-    let prompt_target_count = prompt_bearing_changes
-        .iter()
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
-        .map(|change| count_issue_units_in_text(&change.text))
-        .sum::<usize>();
-    if prompt_target_count > 0 {
-        return prompt_target_count;
-    }
-
-    1
+    required_issue_unit_count(prompt_bearing_changes)
 }
 
 fn effective_prompt_texts(
@@ -264,6 +277,11 @@ fn text_requests_backlog_work(text: &str) -> bool {
     BACKLOG_SIGNALS.iter().any(|signal| lower.contains(signal))
 }
 
+fn text_requests_plan_work(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("create a plan") || lower.contains("write a plan")
+}
+
 fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Option<PathBuf> {
     let lower = text.to_ascii_lowercase();
     let references_backlog_target = lower.contains("add to the backlog of")
@@ -330,6 +348,28 @@ fn count_issue_units_in_text(text: &str) -> usize {
     }
 }
 
+fn required_issue_unit_count(prompt_bearing_changes: &[crate::diff::PromptBearingChange]) -> usize {
+    let content_edit_count = prompt_bearing_changes
+        .iter()
+        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::ContentEdit)
+        .map(|change| count_issue_units_in_text(&change.text))
+        .sum::<usize>();
+    if content_edit_count > 0 {
+        return content_edit_count;
+    }
+
+    let prompt_target_count = prompt_bearing_changes
+        .iter()
+        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .map(|change| count_issue_units_in_text(&change.text))
+        .sum::<usize>();
+    if prompt_target_count > 0 {
+        return prompt_target_count;
+    }
+
+    1
+}
+
 fn is_top_level_issue_list_item(trimmed: &str) -> bool {
     trimmed.starts_with("- ") || trimmed.starts_with("* ") || is_numbered_list_item(trimmed)
 }
@@ -375,6 +415,21 @@ mod tests {
 
         assert!(prompt_requests_backlog_work(
             &["#code-review".to_string()],
+            &[],
+            &presets
+        ));
+    }
+
+    #[test]
+    fn plan_request_detected_via_recursive_prompt_preset_expansion() {
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+
+        assert!(prompt_requests_plan_work(
+            &["Please report this agent-doc missing feature. #agent-doc-bug".to_string()],
             &[],
             &presets
         ));
@@ -468,5 +523,34 @@ mod tests {
         );
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn required_plan_reference_count_tracks_issue_inventory_for_agent_doc_bug() {
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+        let changes = vec![
+            crate::diff::PromptBearingChange {
+                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                text: "Please report this agent-doc missing feature. #agent-doc-bug".to_string(),
+            },
+            crate::diff::PromptBearingChange {
+                kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+                text: "1. First missing transfer\n2. Second missing transfer\n3. Third missing transfer"
+                    .to_string(),
+            },
+        ];
+
+        let count = required_plan_reference_count(
+            &["Please report this agent-doc missing feature. #agent-doc-bug".to_string()],
+            &[],
+            &presets,
+            &changes,
+        );
+
+        assert_eq!(count, 3);
     }
 }

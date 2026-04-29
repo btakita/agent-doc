@@ -102,6 +102,8 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 
 **Prefer wrapping exchange responses in `<!-- patch:exchange -->`** for clarity. Raw (unwrapped) content also works via boundary synthesis.
 
+**`#agent-doc-bug` plan proof:** when the prompt contract says to create a plan, create the plan file before closeout and cite each plan path explicitly in the response (for example `Plan: tasks/agent-doc/plan-foo.md`). `finalize` / `session-check` now fail closed if the response covers multiple bug reports but cites fewer existing plan files than the contract requires.
+
 ### 1b. Update pending (template mode)
 
 If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Custom pending IDs should use `--pending-add "id=spec1 text"`; leading `--pending-add "[#spec1] text"` is accepted for compatibility but is not the canonical form. Full-replace via `<!-- replace:backlog -->` or `<!-- patch:backlog -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).

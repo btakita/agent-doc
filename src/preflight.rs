@@ -1315,6 +1315,12 @@ pub fn run(file: &Path) -> Result<()> {
             &prompt_bearing_changes,
         )
     };
+    let required_plan_reference_count = crate::prompt_contract::required_plan_reference_count(
+        &prompt_targets,
+        &added_diff_lines,
+        &frontmatter_prompt_presets,
+        &prompt_bearing_changes,
+    );
     if !no_changes {
         crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
         crate::cycle_state::record_backlog_target_requirements(
@@ -1324,6 +1330,10 @@ pub fn run(file: &Path) -> Result<()> {
         crate::cycle_state::record_required_explicit_backlog_item_count(
             file,
             required_explicit_backlog_item_count,
+        )?;
+        crate::cycle_state::record_required_plan_reference_count(
+            file,
+            required_plan_reference_count,
         )?;
     }
 

@@ -942,7 +942,25 @@ Verification:
 Commit / push: `784fdb4` (`fix: detect claude composer prompt in route`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:ff69a865 -->
+❯ do #scpd. spec-test-build-install-commit-push
+### Re: #scpd session-check retry dedup — gpt-5
+
+Implemented `#scpd` in `src/agent-doc`.
+
+- Stream/write retry paths now detect when the current exchange already contains the response block and adopt the current document with transcript normalization instead of CRDT-merging the same response a second time.
+- That retry path now still repairs missing `❯ ` prompt prefixes, so the follow-up closeout can fix the bare user prompt without appending a duplicate response.
+- Updated `specs/07-commands.md` and added regression coverage for the bare-prompt retry case.
+
+Verification:
+- `cargo test adopt_current_response_without_duplication_repairs_bare_prompt_prefix -- --nocapture`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `f36a3db` (`fix: avoid duplicate retry patchbacks`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:1f9fbccb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -956,7 +974,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#scpd] Session-check prompt prefix failure causes response duplication — finalize commits the response but session-check fails on the bare user prompt line (missing ❯ prefix), then the skill's recovery write --commit appends a second copy. Repro from tasks/claudescore-3.md on Apr 29 2026: both #sbtcconduct and speeding-up-benchmarks responses were duplicated. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#nbla] Skill does not execute #agent-doc-bug preset contract when handling chat-level bug reports — no plan created and no backlog items added to agent-doc-bugs2.md. Repro from tasks/claudescore-3.md on Apr 29 2026: user reported two bugs in chat with #agent-doc-bug tag, skill acknowledged but did not create plans or transfer bugs to the agent-doc-bugs2 backlog. Related to #ppct (preset contract enforcement).
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.

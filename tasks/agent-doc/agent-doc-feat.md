@@ -200,7 +200,7 @@ Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_d
 
 **No new tests needed** — this is a best-effort log+warn sanity check. Testing would require loading the actual native library. The version function itself is already tested via the Rust test suite.
 ❯ Version bump agent-doc + plugins. build agent-doc + plugins. Install new agent-doc for testing.
-### Re: version bump + build — sonnet-4-6 (HEAD)
+### Re: version bump + build — sonnet-4-6
 
 **Versions bumped:**
 - `Cargo.toml` + `pyproject.toml`: 0.33.4 → 0.33.5
@@ -245,7 +245,7 @@ run_every = "7d"
 - Parse age from file mtime, not filename heuristics.
 - Log kept vs deleted files so the cleanup is auditable.
 - Add tests for threshold handling, newest-baseline preservation, and active-document safety.
-<!-- agent:boundary:687a068a -->
+<!-- agent:boundary:3e2f5dee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

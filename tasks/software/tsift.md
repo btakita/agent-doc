@@ -118,7 +118,7 @@ What changed:
 - pushed to `origin/main`
 
 This closes `#idxr`, and the same change also closes `#lokr`.
-<!-- agent:boundary:f0316369 -->
+<!-- agent:boundary:01639793 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -127,8 +127,6 @@ This closes `#idxr`, and the same change also closes `#lokr`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#idxr] [recommended] Normalize cmd_index path resolution to use project/workspace root discovery; nested invocations currently create a new nested .tsift/index.db instead of reusing the ancestor root index.
-- [x] [#lokr] [recommended] Normalize cmd_locks path resolution to use project/workspace root discovery and add nested-path coverage; nested invocations currently inspect a synthetic nested lock path instead of the real ancestor index lock.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

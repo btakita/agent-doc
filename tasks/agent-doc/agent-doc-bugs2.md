@@ -80,16 +80,32 @@ Verification:
 Commit / push: `a0f4742` (`fix: fail before write on pending closeout gates`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#pdwg` is done.
-<!-- agent:boundary:3f5cc80e -->
+❯ do #lvak. spec-test-build-install-commit-push
+### Re: #lvak routed live-pane acknowledgment — gpt-5
+
+Implemented `#lvak` in `src/agent-doc`.
+
+- Routed triggers into an already-live pane now still require a fresh cycle acknowledgment when the document has prompt-bearing drift on top of a committed cycle; only genuinely open cycles still skip the extra ack wait.
+- Removed the misleading live-child ack-skip path, tightened the route tests to fail on no-op/same-cycle churn, and updated the route command spec to match the enforced behavior.
+- Added a test-only routed-ack timeout helper so the fail-closed live-pane regressions stay fast without changing the production 15s wait.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `c9dcdb7` (`fix: require live route ack for prompt drift`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#lvak` is done.
+<!-- agent:boundary:f64b372a -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Pending / Not Builte
+## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lvak] Tighten routed-cycle acknowledgment when a committed cycle already has prompt drift. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: rerouting to live pane `%393` logged `route_cycle_ack_skipped_live_child ... prompt_target: do #asch1. spec-tests-commit-push` even though `session-check` still reported `no new agent-doc cycle started`. A merely live child should not suppress the fresh-cycle proof when the previous cycle is closed and the prompt-bearing diff is still unresolved.
 - [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

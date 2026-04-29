@@ -58,7 +58,7 @@ Current state:
 If you want, I can switch to fixing this `agent-doc` commit-boundary bug directly in `src/agent-doc` and then retry the tsift compact cycle.
 
 ❯ #code-review
-<!-- agent:boundary:8f41272b -->
+<!-- agent:boundary:e6a7baec -->
 <!-- /agent:exchange -->
 
 <!--
@@ -70,7 +70,6 @@ If you want, I can switch to fixing this `agent-doc` commit-boundary bug directl
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [x] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)

@@ -70,7 +70,24 @@ Verification:
 - `tsift --version` -> `tsift 0.1.21`
 
 Remaining backlog is unchanged apart from closing `#scope1`; `#cache1` and `#locks1` are still pending.
-<!-- agent:boundary:ac991a65 -->
+❯ do #cache1. spec-test-build-install-commit-push
+### Re: cache1 summarize diff cleanup — gpt-5
+
+Implemented `#cache1` in `src/tsift` and pushed `52022aa` (`fix: clean stale summaries during diff extract`).
+
+What changed:
+- `summarize::git_changed_files()` now separates existing and deleted diff paths, so `cmd_summarize(... --extract --diff ...)` removes cached rows for tracked files deleted inside the requested scope before any re-extraction run.
+- `status` now computes summary coverage from live indexed files still present on disk, intersected with cached summary paths, so stale summary rows no longer inflate `cached_files` or coverage.
+- Added regression coverage for deleted diff paths, deletion-only cleanup, cached summary path enumeration, and stale-row coverage accounting; updated `SPEC.md` to document the cleanup and live-file coverage behavior.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.21`
+
+Backlog is now down to `#locks1`.
+<!-- agent:boundary:c869e876 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -79,7 +96,6 @@ Remaining backlog is unchanged apart from closing `#scope1`; `#cache1` and `#loc
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cache1] [recommended] Delete removed files from summaries.db during summarize diff extraction, and compute summary coverage from live indexed files only.
 - [ ] [#locks1] [recommended] Route graph, explain, path, and communities through the same snapshot-fallback read-only index path used by lock-tolerant search and status helpers.
 <!-- /agent:backlog -->
 

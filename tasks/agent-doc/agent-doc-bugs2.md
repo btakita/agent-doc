@@ -537,7 +537,55 @@ There are no additional actionable follow-up items to capture in this cycle beyo
 ### Re: #vzpc follow-up capture note — gpt-5
 
 There are no additional actionable follow-up items to capture in this cycle beyond the existing `#qey0` backlog entry.
-<!-- agent:boundary:938a45f6 -->
+
+❯ Do we need work on #prst?
+### Re: #prst scope — gpt-5
+
+Yes. `#prst` still looks like real work.
+
+What is already fixed is the downstream backlog-required contract once a normal cycle has prompt-bearing document diff: preflight/plan/finalize now expand `prompt_presets` recursively and enforce backlog capture or an explicit "no follow-up" proof.
+
+What still looks uncovered is the narrower Codex/Claude harness-entry case described in `#prst`: when the user invokes `agent-doc <file>` directly and the document itself has no new edits, `preflight` still reports `no_changes`, `plan` returns the `No changes detected since the last snapshot.` blocker, and the prompt-contract path never sees the harness message or its preset-driven intent. The relevant logic is still diff-derived rather than chat-derived.
+
+So I would keep `#prst` open, but narrow its wording to that exact entry-point gap instead of the broader backlog-capture problem that `#fuback` already fixed.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#prst` backlog entry.
+### Re: #prst scope — gpt-5
+
+Yes. `#prst` still looks like real work.
+
+What is already fixed is the downstream backlog-required contract once a normal cycle has prompt-bearing document diff: preflight/plan/finalize now expand `prompt_presets` recursively and enforce backlog capture or an explicit "no follow-up" proof.
+
+What still looks uncovered is the narrower Codex/Claude harness-entry case described in `#prst`: when the user invokes `agent-doc <file>` directly and the document itself has no new edits, `preflight` still reports `no_changes`, `plan` returns the `No changes detected since the last snapshot.` blocker, and the prompt-contract path never sees the harness message or its preset-driven intent. The relevant logic is still diff-derived rather than chat-derived.
+
+So I would keep `#prst` open, but narrow its wording to that exact entry-point gap instead of the broader backlog-capture problem that `#fuback` already fixed.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#prst` backlog entry.
+### Re: #prst scope — gpt-5
+
+Yes. `#prst` still looks like real work.
+
+What is already fixed is the downstream backlog-required contract once a normal cycle has prompt-bearing document diff: preflight/plan/finalize now expand `prompt_presets` recursively and enforce backlog capture or an explicit "no follow-up" proof.
+
+What still looks uncovered is the narrower Codex/Claude harness-entry case described in `#prst`: when the user invokes `agent-doc <file>` directly and the document itself has no new edits, `preflight` still reports `no_changes`, `plan` returns the `No changes detected since the last snapshot.` blocker, and the prompt-contract path never sees the harness message or its preset-driven intent. The relevant logic is still diff-derived rather than chat-derived.
+
+So I would keep `#prst` open, but narrow its wording to that exact entry-point gap instead of the broader backlog-capture problem that `#fuback` already fixed.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#prst` backlog entry.
+
+### Re: #prst scope — gpt-5
+
+Yes. `#prst` still looks like real work.
+
+What is already fixed is the downstream backlog-required contract once a normal cycle has prompt-bearing document diff: preflight/plan/finalize now expand `prompt_presets` recursively and enforce backlog capture or an explicit "no follow-up" proof.
+
+What still looks uncovered is the narrower Codex/Claude harness-entry case described in `#prst`: when the user invokes `agent-doc <file>` directly and the document itself has no new edits, `preflight` still reports `no_changes`, `plan` returns the `No changes detected since the last snapshot.` blocker, and the prompt-contract path never sees the harness message or its preset-driven intent. The relevant logic is still diff-derived rather than chat-derived.
+
+So I would keep `#prst` open, but narrow its wording to that exact entry-point gap instead of the broader backlog-capture problem that `#fuback` already fixed.
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#prst` backlog entry.
+
+<!-- agent:boundary:73e231ea -->
 <!-- /agent:exchange -->
 
 <!--
@@ -546,7 +594,8 @@ There are no additional actionable follow-up items to capture in this cycle beyo
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#prst] Make preset-driven intent like `#agent-doc-bug` explicit when a user references a session doc from the harness. The workflow should clearly surface that the referenced document's `prompt_presets` require creating a plan and adding a backlog item, even when `preflight` reports `no_changes`.
+- [ ] [#hpbd] Fix historical patchback drift that left `tasks/software/tsift.md` showing `❯ #code-review` without the captured response. See `tasks/agent-doc/plan-tsift-historical-patchback-drift.md`.
+- [ ] [#prst] When a user invokes agent-doc <file> directly from the harness and the document itself still has no_changes, make preset-driven intent like #agent-doc-bug explicit instead of stopping at the diff-based no-changes path. The workflow should surface that the referenced document prompt_presets still imply plan and backlog handling even though the prompt came from chat rather than document edits.
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->

@@ -198,12 +198,32 @@ Verification:
 Commit / push: `2c6b284` (`fix: surface startup miss diagnostics visibly`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#smdq` is done.
-<!-- agent:boundary:d1e346e0 -->
+❯ do #xfrr. spec-test-build-install-commit-push
+### Re: #xfrr complete bug-transfer inventory gate — gpt-5
+
+Implemented `#xfrr` in `src/agent-doc`.
+
+- `#agent-doc-bug` prompt contracts now record how many distinct bug reports were raised from the prompt-bearing changes when they target an explicit backlog document.
+- `finalize` and `session-check` now fail closed if the response inventories fewer transferred `[#id]` items than that recorded bug count, even if the target backlog itself changed.
+- Added regressions for the prompt-contract counting path plus both pre-commit and post-commit partial-transfer failures.
+- Updated `specs/07-commands.md`, `runbooks/transfer-extract.md`, and `VERSIONS.md` to document the stricter transfer inventory contract.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `4482ea2` (`fix: require complete bug transfer inventories`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog items came out of this change.
+
+`#xfrr` is done.
+<!-- agent:boundary:db53d760 -->
 <!-- /agent:exchange -->
 
 <!--
-Rename ``
-
+Add `agent-doc fix`. `agent-doc resync --fix` is an alias to `agent-doc fix`. Support an optional file-path to agent doc that I want to fix `agent-doc fix <path-to-file.md>`.
+---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
@@ -214,7 +234,8 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
+- [ ] [#tmuxcrash] Stabilize repeated tmux-pane crash / stranded-session reports. Repro from Apr 29, 2026: `tasks/software/tsift.md` hit `route_cycle_start_missing ... pane=%411` while `.agent-doc/logs/tsift-v0.1.log` shows `session_start` for `%411` with no matching `codex_exit` or `session_end`, and `tasks/agent-doc/agent-doc-bugs2.md` likewise has a later `session_start` with no closeout plus a persisted startup-miss marker. The fix should distinguish true pane death from startup-miss / stranded-supervisor states, emit exact provenance, and stop reruns from surfacing as a generic "tmux pane crashed" failure. Plan: `tasks/agent-doc/plan-tmux-pane-crash-stability.md`
+- [ ] [#oobabs] Preflight step 2 absorbs user prompt-preset additions as "out-of-band status mutations" before step 4 diffs, swallowing prompts. Repro from src/session-share/tasks/claudescore-3.md on Apr 29, 2026: user added #next-steps to agent:status after a compact exchange, preflight step 2 committed it as an OOB mutation and refreshed the snapshot, then step 4 reported no_changes:true. The fix should detect prompt-preset references in OOB mutations and either defer their commit or re-inject them as synthetic diff entries so the response cycle fires.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.

@@ -665,7 +665,29 @@ Commit / push:
 - `a4b198f` `feat: require review for shared doc access`
 
 No new backlog item came out of this change.
-<!-- agent:boundary:da3aa114 -->
+❯ do #zpc0. spec-test-build-install-commit-push
+### Re: #zpc0 zero-body strict closeout — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `1e998a3` (`fix: reject zero-body strict closeouts`) to `origin/20260422/codex-agent-backend`.
+
+The closeout path now fails before IPC / commit when a template or CRDT response has no real response body. I added a shared proof helper in `write.rs` that accepts either:
+- at least one non-empty non-backlog / non-frontmatter patch, or
+- non-empty unmatched response text that the IPC/template path can synthesize into `exchange` / `output`.
+
+That blocks empty `patch:exchange` shells and frontmatter-only / normalization-only payloads from reaching `ipc_write_consumed` / commit as a zero-body turn, while preserving the explicit escape-hatch paths for `replace:pending` / legacy `patch:pending` maintenance writes.
+
+I updated `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage for the proof helper plus a strict `finalize --stream` integration case that rejects an empty exchange shell without committing an assistant response.
+
+Verification:
+- `cargo fmt --manifest-path Cargo.toml`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Notes:
+- The suite still emits the pre-existing `module-harness` missing-lib warning plus a few existing unused/deprecated test warnings; the full suite passed cleanly.
+- No new backlog item came out of this fix. `#lvak` is now the top remaining backlog item.
+<!-- agent:boundary:5c1cffd1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -674,8 +696,11 @@ No new backlog item came out of this change.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#zpc0] Fail closed when a template/CRDT closeout reaches IPC with zero real response patches. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `write.rs` logged `zero_patches_warning`, then `ipc_write_consumed ... patches=0`, then `commit_success`, which stranded `do #asch1. spec-tests-commit-push` after the committed `#dbglog` response. The fix should prove at least one response patch or equivalent response-body write landed before commit, otherwise keep the cycle open or interrupt it instead of consuming the turn.
 - [ ] [#lvak] Tighten routed-cycle acknowledgment when a committed cycle already has prompt drift. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: rerouting to live pane `%393` logged `route_cycle_ack_skipped_live_child ... prompt_target: do #asch1. spec-tests-commit-push` even though `session-check` still reported `no new agent-doc cycle started`. A merely live child should not suppress the fresh-cycle proof when the previous cycle is closed and the prompt-bearing diff is still unresolved.
+- [ ] [#ppct] Fail closed when a user prompt tagged with `#agent-doc-bug` is answered without executing its frontmatter `prompt_presets` contract. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the session frontmatter says `#agent-doc-bug` must "create a plan for agent-doc to fix this issue" and "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md", but the response answered the questions directly and left the newly reported bugs untransferred. The fix should make preset-required side effects binary-owned during plan/closeout, not dependent on the responder remembering them.
+- [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
+- [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
+- [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.
 <!-- /agent:backlog -->
 

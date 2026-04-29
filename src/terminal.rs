@@ -152,7 +152,9 @@ fn find_active_project_session(tmux: &Tmux) -> Result<Option<String>> {
 
 /// Get the tmux session name that a pane belongs to.
 fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    tmux.pane_session(pane_id).ok().filter(|name| !name.is_empty())
+    tmux.pane_session(pane_id)
+        .ok()
+        .filter(|name| !name.is_empty())
 }
 
 // ---------------------------------------------------------------------------

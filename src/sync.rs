@@ -1822,10 +1822,16 @@ pub(crate) fn find_associated_panes(
                 candidate.sources.insert(AssociatedPaneSource::ProcessTree);
             }
             if supervisor_match.as_deref() == Some(candidate.pane_id.as_str()) {
-                candidate.sources.insert(AssociatedPaneSource::SupervisorPid);
+                candidate
+                    .sources
+                    .insert(AssociatedPaneSource::SupervisorPid);
             }
-            let proves_live_ownership = candidate.sources.contains(&AssociatedPaneSource::ProcessTree)
-                || candidate.sources.contains(&AssociatedPaneSource::SupervisorPid);
+            let proves_live_ownership = candidate
+                .sources
+                .contains(&AssociatedPaneSource::ProcessTree)
+                || candidate
+                    .sources
+                    .contains(&AssociatedPaneSource::SupervisorPid);
             if candidate.sources.is_empty() || !proves_live_ownership {
                 return None;
             }
@@ -1863,7 +1869,8 @@ pub(crate) fn resolve_associated_panes(
             .filter(|candidate| candidate.window_id != window_id)
             .cloned()
             .collect::<Vec<_>>();
-        if preferred_matches.len() == 1 && non_preferred.iter().all(AssociatedPaneCandidate::is_stash)
+        if preferred_matches.len() == 1
+            && non_preferred.iter().all(AssociatedPaneCandidate::is_stash)
         {
             let winner = preferred_matches.remove(0);
             let redundant = candidates
@@ -2217,7 +2224,10 @@ mod tests {
                 "%419",
                 "@3",
                 "agent-doc",
-                &[AssociatedPaneSource::Registered, AssociatedPaneSource::SupervisorPid],
+                &[
+                    AssociatedPaneSource::Registered,
+                    AssociatedPaneSource::SupervisorPid,
+                ],
             ),
         ];
 
@@ -2255,8 +2265,18 @@ mod tests {
     fn resolve_associated_panes_reports_ambiguity_when_multiple_candidates_remain() {
         let candidates = vec![
             candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
-            candidate("%419", "@3", "agent-doc", &[AssociatedPaneSource::Registered]),
-            candidate("%420", "@5", "agent-doc", &[AssociatedPaneSource::SupervisorPid]),
+            candidate(
+                "%419",
+                "@3",
+                "agent-doc",
+                &[AssociatedPaneSource::Registered],
+            ),
+            candidate(
+                "%420",
+                "@5",
+                "agent-doc",
+                &[AssociatedPaneSource::SupervisorPid],
+            ),
         ];
 
         let resolution = resolve_associated_panes(candidates, Some("@7"));

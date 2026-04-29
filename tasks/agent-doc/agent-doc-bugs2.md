@@ -342,10 +342,11 @@ So the verified state from history is:
 - no other lost backlog or icebox items found in the interrupted edit sequence
 
 I did not change code or run build/test/install here because this turn was a git-history verification request rather than an implementation cycle.
-### Re: backlog capture clarification — gpt-5
+### Re: backlog capture clarification — gpt-5 (HEAD)
 
+<!-- no-pending-capture -->
 I verified the interrupted edit against git history only. There are no additional actionable follow-up items to capture in this cycle beyond the already-preserved `#x6e9` icebox entry, so no backlog or icebox mutation is warranted.
-<!-- agent:boundary:36696531 -->
+<!-- agent:boundary:41fdec5d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -354,6 +355,8 @@ Create an agent:icebox element to stash items that may be put into the backlog l
 Support headers in the backlog and icebox to organize + categorize long lists.
 ---
 [#multi-user] Research how we can make agent-doc safe for multi-user usage
+---
+I typed in `[#multi-user] Research how we can make agent-doc safe for multi-user usage`. It should use [#multi-user] as the id instead of creating a surrogate [#x6e9]. spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built

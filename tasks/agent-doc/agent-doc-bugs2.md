@@ -718,12 +718,38 @@ The `(HEAD)` suffixes in the exchange diff are boundary artifacts from earlier c
 
 No `src/agent-doc` code changed here and no test/build/install run happened in this closeout. This turn only records the document response and commits it.
 
-<!-- agent:boundary:3db7b6c4 -->
+❯ Please reconcile tmux related logic in agent-doc and tmux-router. tmux-router is a dependency of agent-doc. Which logic belongs in tmux-router? Move the logic that belongs in tmux-router from agent-doc into tmux-router. Codex needs to recognize that tmux-router is a development target so please update agent harness files accordingly.
+
+❯ spec-test-build-install-commit-push
+### Re: tmux-router development-target reconciliation — gpt-5
+
+Implemented.
+
+- Moved the generic tmux session/key helpers into `src/tmux-router`: `Tmux::send_key()` and `Tmux::ensure_pane_in_session()` now own that reusable behavior.
+- Switched `src/agent-doc/src/sessions.rs` to delegate pane capture, single-key dispatch, and session-guarded joins to `tmux-router` instead of carrying local shell wrappers.
+- Added the workspace cargo patch at `.cargo/config.toml` so local `src/agent-doc` builds use the sibling `src/tmux-router` checkout.
+- Updated the harness instruction surfaces so Codex/Claude treat `src/tmux-router` as a live development target in this workspace: root `AGENTS.md`, installed `.codex/AGENTS.md`, installed `.claude/skills/agent-doc/SKILL.md`, plus `src/agent-doc/SKILL.md` and `src/agent-doc/CLAUDE.md`.
+
+Verification:
+- `cargo test` in `src/tmux-router`
+- `cargo build` in `src/tmux-router`
+- `cargo install --path . --force` in `src/tmux-router`
+- `cargo test` in `src/agent-doc` against the local patched `tmux-router`
+- `cargo build` in `src/agent-doc`
+- `cargo install --path . --force` in `src/agent-doc`
+- `agent-doc skill install --harness codex --reload restart`
+- `agent-doc skill install --harness claude --reload compact`
+
+Commit / push:
+- `src/tmux-router`: `e52f78e` (`feat: extract tmux session helpers`) pushed to `origin/main`
+- `src/agent-doc`: `3afd3bd` (`feat: patch local tmux-router workspace`) pushed to `origin/20260422/codex-agent-backend`
+- `agent-loop`: `afadb8b01` (`feat: wire local tmux-router development`) pushed to `origin/main`
+
+No new backlog item came out of this change.
+<!-- agent:boundary:7b232ac6 -->
 <!-- /agent:exchange -->
 
 <!--
-Please reconcile tmux related logic in agent-doc and tmux-router. tmux-router is a dependency of agent-doc. Which logic belongs in tmux-router? Move the logic that belongs in tmux-router from agent-doc into tmux-router. Codex needs to recognize that tmux-router is a development target so please update agent harness files accordingly.
----
 I'm getting many tmux crashes and `agent-doc route` errors. Please investigate my recent work to understand root causes.
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 1120613) in pane %412 for tasks/agent-doc/agent-doc-bugs2.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] cleaning up orphaned pane %418 (created during failed route) Error: registered pane %412 for tasks/agent-doc/agent-doc-bugs2.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%412 pane_pid=1119220 pane_session=14 current_command=agent-doc)

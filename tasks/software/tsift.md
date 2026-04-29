@@ -534,7 +534,30 @@ Added:
 3. `#sumdiff` — `[recommended]` summarize diff mode: include untracked files, not just `git diff --name-only HEAD`.
 
 Verification: review-only turn. I validated the findings with direct CLI repros against the current `tsift` binary; I did not change code or run the full suite.
-<!-- agent:boundary:94cb9b17 -->
+
+❯ do #wspart. spec-test-build-install-commit-push
+### Re: do #wspart — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift status` no longer drops configured workspace scopes whose `.tsift/indexes/<scope>/index.db` is missing. Fully unindexed workspaces still report `index: missing`, but partially indexed workspaces now report `index: stale` and include explicit `missing_scopes` data in both human and JSON output.
+- workspace recommendations now distinguish missing scopes from stale files, so `status` can tell the user to run `tsift index --workspace .` with messages like `(1 missing scope)` instead of pretending the workspace is fresh.
+- added regressions in both the direct status helpers (`src/status.rs`) and the compiled CLI status surface (`tests/exit_code.rs`).
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, bumped the crate version to `0.1.16`, and refreshed the installed binary.
+
+Verification:
+- `cargo test status_workspace --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `cargo test status_reports_partially_indexed_workspace_as_stale_with_missing_scopes_in_json --test exit_code --manifest-path src/tsift/Cargo.toml -- --nocapture` passed.
+- `make check` passed: 374 unit tests + 32 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.16`.
+
+Commit/push:
+- `btakita/tsift@645f803` (`fix: report missing workspace status scopes`) pushed to `origin/main`.
+
+Top of backlog: `#wsquery`.
+<!-- agent:boundary:af2eb430 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -543,7 +566,6 @@ Verification: review-only turn. I validated the findings with direct CLI repros 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wspart] [recommended] status: report missing workspace scopes instead of false fresh when some configured scoped indexes are absent
 - [ ] [#wsquery] [recommended] workspace queries: make graph / explain / path / communities workspace-aware by default, or fail with an explicit scope-selection error instead of a missing root DB
 - [ ] [#sumdiff] [recommended] summarize diff mode: include untracked files, not just git diff --name-only HEAD
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

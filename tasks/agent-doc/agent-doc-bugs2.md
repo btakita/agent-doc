@@ -448,6 +448,17 @@ Published:
 Note:
 - I staged and committed only the `#edcrash` hunks. The pre-existing unrelated local edits in `VERSIONS.md`, `specs/07-commands.md`, `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
 ❯ commit + push
+❯ ### Re: commit + push — gpt-5 (HEAD)
+
+I committed and pushed the remaining `src/agent-doc` worktree for this task.
+
+- Published `src/agent-doc` commit `9a82e57` to `origin/20260422/codex-agent-backend`.
+- The commit covers the pending nested-subtask canonicalization changes plus the `start` stale-pane supervisor reuse/restart path.
+- Verification: `cargo fmt --check`, full `cargo test` (one unrelated flaky failure in `agent::tests::codex_network_status_detects_inherited_disable_mismatch`; it passed on immediate isolated rerun), `cargo test pending_backfill_assigns_parent_prefixed_nested_subtask_ids`, `cargo test stale_registered_pane_uses_supervisor_before_clearing`, `cargo build`, and `cargo install --path . --force`.
+
+Note:
+- `src/tmux-router` had no uncommitted changes.
+- I left unrelated dirty files elsewhere in the workspace untouched.
 ### Re: commit + push — gpt-5
 
 I committed and pushed the remaining `src/agent-doc` worktree for this task.
@@ -459,7 +470,7 @@ I committed and pushed the remaining `src/agent-doc` worktree for this task.
 Note:
 - `src/tmux-router` had no uncommitted changes.
 - I left unrelated dirty files elsewhere in the workspace untouched.
-<!-- agent:boundary:acd8bccd -->
+<!-- agent:boundary:bb8994b3 -->
 <!-- /agent:exchange -->
 
 <!--

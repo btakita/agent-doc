@@ -514,7 +514,24 @@ Verification:
 - `cargo install --path . --force`
 
 No new backlog item came out of this change. `#vzpc` remains the top accepted active item.
-<!-- agent:boundary:546987d8 -->
+
+❯ do #vzpc. spec-test-build-install-commit-push
+### Re: #vzpc optional numeric backlog lists — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `d6ba935` (`fix: support ordered backlog parent items`) to `origin/20260422/codex-agent-backend`.
+
+Backlog and icebox tracked parents now accept flush-left ordered markers like `1. ...` as first-class items alongside `- ...`. Once a tracked surface uses ordered style, binary-owned mutations renumber the whole tracked list sequentially in current item order, so add/reorder/done/reap/transfer paths keep numeric priority lists valid instead of treating numbered parents as inert prose.
+
+I updated the pending parser/renderer, added ordered-list coverage in `pending.rs` and `pending_cmd.rs`, and updated the pending/transfer specs and runbooks to make the renumbering contract explicit. Legacy `backlog remove` / `prune` now also understand ordered parents.
+
+Verification:
+- `cargo fmt`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+I committed only the `#vzpc` staged work as `d6ba935`; unrelated local edits in `src/git.rs` and a separate unstaged `src/pending.rs` hunk remain outside this commit. `#qey0` is now the top remaining backlog item.
+<!-- agent:boundary:3c09b13c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -523,9 +540,9 @@ No new backlog item came out of this change. `#vzpc` remains the top accepted ac
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#vzpc] Support optional numeric lists in the backlog to enforce order
+- [ ] [#prst] Make preset-driven `#agent-doc-bug` intent explicit when a user references a session doc from the harness. The workflow should clearly surface that the referenced document's `prompt_presets` require creating a plan and adding a backlog item, even when `preflight` reports `no_changes`.
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
-- [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage (requested alias/tag: [#multi-user])
+- [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

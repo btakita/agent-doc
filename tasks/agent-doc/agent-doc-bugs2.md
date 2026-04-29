@@ -367,7 +367,27 @@ Why `agent-doc` did not already create that subtask sublist:
 ### Re: `#tmuxcrash` subtasks closeout — gpt-5
 
 The `#tmuxcrash` backlog item now has the requested indented subtask sublist. The earlier miss was workflow-level: I answered the next steps in exchange prose before persisting the matching backlog mutation in the same cycle.
-<!-- agent:boundary:5c960e0c -->
+### Re: nested `#tmuxcrash` subtask ids — gpt-5
+
+There were two separate misses behind the earlier behavior.
+
+- The prior turn should have recorded the `#tmuxcrash` sublist in the backlog at the same time it answered the next-steps prose. That was a workflow miss in the responder path.
+- Separately, the binary did not yet canonicalize indented child bullets into tracked child task lines, and it also rejected hyphenated ids. So even when a sublist existed, `agent-doc` could not synthesize ids in the `[#tmuxcrash-abcd]` shape.
+
+I fixed that child-task canonicalization gap in this turn. The parent `#tmuxcrash` backlog item remains open; this only changes how its child subtasks are tracked.
+
+- `src/pending.rs` now canonicalizes nested child task lines under a tracked parent, adds missing checkboxes, and assigns ids shaped like `[#parentid-abcd]`.
+- `src/pending_cmd.rs` now reruns that canonicalization after granular pending edits/adds/state changes, so the ids appear immediately instead of waiting for a later backfill/preflight.
+- Hyphenated pending ids are now valid, and the pending specs/runbooks plus integration coverage were updated to match.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+No new backlog item was added because this `#agent-doc-bug` was fixed directly in this turn.
+<!-- agent:boundary:13e589bb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -382,9 +402,9 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 
 <!-- agent:backlog -->
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
-  - Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
-  - If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
-  - Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
+  - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
+  - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
+  - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

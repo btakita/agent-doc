@@ -147,16 +147,17 @@
 //! - check_build_stamp_clears_locks: new build timestamp → stale `.lock` files removed,
 //!   stamp file updated.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use crate::sessions::{PaneMoveOp, Tmux};
-use crate::{frontmatter, resync, route, sessions};
+use crate::{component, frontmatter, resync, route, sessions, snapshot};
 
 use tmux_router::FileResolution;
 
 const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
+const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
 
 fn parse_frontmatter_for_sync<'a>(
     content: &'a str,
@@ -165,6 +166,116 @@ fn parse_frontmatter_for_sync<'a>(
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
     frontmatter::parse_for_file(content, file)
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
+}
+
+fn sync_frontmatter_status_message(phase: &str, err: &anyhow::Error) -> String {
+    format!(
+        "{} during {}.\n\n{}",
+        SYNC_FRONTMATTER_STATUS_PREFIX, phase, err
+    )
+}
+
+fn write_sync_status(file: &Path, text: &str) -> Result<bool> {
+    let doc = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for sync status update", file.display()))?;
+    let components = component::parse(&doc)
+        .with_context(|| format!("failed to parse components in {}", file.display()))?;
+    let Some(status) = components
+        .iter()
+        .find(|comp| comp.name.as_str() == "status")
+        .cloned()
+    else {
+        return Ok(false);
+    };
+    if status.content(&doc).trim() == text.trim() {
+        return Ok(false);
+    }
+
+    let payload = if text.is_empty() {
+        String::new()
+    } else {
+        format!("{text}\n")
+    };
+    let updated = status.replace_content(&doc, &payload);
+    std::fs::write(file, &updated)
+        .with_context(|| format!("failed to write {} for sync status update", file.display()))?;
+    snapshot::save(file, &updated).with_context(|| {
+        format!(
+            "failed to update snapshot for {} after sync status update",
+            file.display()
+        )
+    })?;
+    Ok(true)
+}
+
+fn surface_frontmatter_status(file: &Path, phase: &str, err: &anyhow::Error) {
+    let text = sync_frontmatter_status_message(phase, err);
+    match write_sync_status(file, &text) {
+        Ok(true) => {
+            let log = format!(
+                "[sync] status: surfaced malformed frontmatter warning for {}",
+                file.display()
+            );
+            eprintln!("{}", log);
+            sync_log(&log);
+        }
+        Ok(false) => {}
+        Err(status_err) => {
+            let warning = format!(
+                "[sync] warning: failed to surface malformed frontmatter status for {}: {}",
+                file.display(),
+                status_err
+            );
+            eprintln!("{}", warning);
+            sync_log(&warning);
+        }
+    }
+}
+
+fn clear_frontmatter_status(file: &Path) {
+    let doc = match std::fs::read_to_string(file) {
+        Ok(doc) => doc,
+        Err(_) => return,
+    };
+    let components = match component::parse(&doc) {
+        Ok(components) => components,
+        Err(_) => return,
+    };
+    let Some(status) = components
+        .iter()
+        .find(|comp| comp.name.as_str() == "status")
+        .cloned()
+    else {
+        return;
+    };
+    if !status
+        .content(&doc)
+        .trim_start()
+        .starts_with(SYNC_FRONTMATTER_STATUS_PREFIX)
+    {
+        return;
+    }
+
+    match write_sync_status(file, "") {
+        Ok(true) => {
+            let log = format!(
+                "[sync] status: cleared malformed frontmatter warning for {}",
+                file.display()
+            );
+            eprintln!("{}", log);
+            sync_log(&log);
+        }
+        Ok(false) => {}
+        Err(status_err) => {
+            let warning = format!(
+                "[sync] warning: failed to clear malformed frontmatter status for {}: {}",
+                file.display(),
+                status_err
+            );
+            eprintln!("{}", warning);
+            sync_log(&warning);
+        }
+    }
 }
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
@@ -834,9 +945,11 @@ fn run_with_options(
                 let warning = format!("[sync] warning: {}", e);
                 eprintln!("{}", warning);
                 sync_log(&warning);
+                surface_frontmatter_status(path, "resolve_file", &e);
                 return None;
             }
         };
+        clear_frontmatter_status(path);
 
         match fm.session {
             Some(ref key) => {
@@ -958,9 +1071,11 @@ fn run_with_options(
                     let warning = format!("[sync] warning: {}", e);
                     eprintln!("{}", warning);
                     sync_log(&warning);
+                    surface_frontmatter_status(file_path, "auto-start", &e);
                     continue;
                 }
             };
+            clear_frontmatter_status(file_path);
             let session_id = match fm.session {
                 Some(ref id) => id.clone(),
                 None => continue,
@@ -1893,6 +2008,85 @@ mod tests {
         assert!(
             message.contains("Fix the frontmatter between the opening and closing --- markers")
         );
+    }
+
+    #[test]
+    fn sync_frontmatter_status_round_trips_through_snapshot() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("bad.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nprompt_presets:\n  key: [oops\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\nold status\n<!-- /agent:status -->\n",
+        )
+        .unwrap();
+
+        let err = parse_frontmatter_for_sync(
+            "---\nprompt_presets:\n  key: [oops\n---\n",
+            &doc,
+            "auto-start",
+        )
+        .unwrap_err();
+
+        surface_frontmatter_status(&doc, "auto-start", &err);
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains(SYNC_FRONTMATTER_STATUS_PREFIX));
+        assert!(updated.contains("sync auto-start frontmatter"));
+
+        let snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snapshot.contains(SYNC_FRONTMATTER_STATUS_PREFIX));
+
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
+        )
+        .unwrap();
+        snapshot::save(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
+        )
+        .unwrap();
+
+        clear_frontmatter_status(&doc);
+
+        let cleared = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !cleared.contains(SYNC_FRONTMATTER_STATUS_PREFIX),
+            "managed sync warning should be removed once parsing succeeds"
+        );
+        let cleared_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !cleared_snapshot.contains(SYNC_FRONTMATTER_STATUS_PREFIX),
+            "snapshot should track the cleared status too"
+        );
+
+        std::env::set_current_dir(old_dir).unwrap();
+    }
+
+    #[test]
+    fn clear_frontmatter_status_preserves_non_sync_status() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("ok.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let original = "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\nuser-owned status\n<!-- /agent:status -->\n";
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+
+        clear_frontmatter_status(&doc);
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), original);
+
+        std::env::set_current_dir(old_dir).unwrap();
     }
 
     #[test]

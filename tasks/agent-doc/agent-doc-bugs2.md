@@ -600,7 +600,30 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 No new backlog item came out of this fix. `#prst` is now the top remaining backlog item.
-<!-- agent:boundary:fe6a38ea -->
+
+❯ do #prst. spec-test-build-install-commit-push
+### Re: #prst harness no-diff prompt intent — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `9105b22` (`fix: honor harness prompts on no-diff entry`) to `origin/20260422/codex-agent-backend`.
+
+The fix closes the exact no-diff entry-point gap behind `#prst`. Codex hook session state now retains the last harness prompt text for the tracked document, and `preflight` / `plan` now consume that prompt body when the file itself has no diff. The binary strips the leading `agent-doc <file>` invocation, synthesizes an in-memory added-lines diff from the remaining chat text, and feeds that through the normal diff-owned classifiers. That means direct harness prompts such as `#agent-doc-bug`, `#code-review`, or `do #id ...` now still drive prompt-preset expansion, backlog-capture requirements, and existing-item resolution instead of collapsing to `no_changes` / `No changes detected since the last snapshot.` just because the request came from chat instead of a document edit.
+
+I also added `AGENT_DOC_HARNESS_PROMPT` as an explicit override for non-Codex harnesses/tests, updated `SPEC.md`, `specs/07-commands.md`, the Codex harness runbook, and added regressions for prompt parsing, Codex-thread prompt lookup, preflight cycle opening, and plan behavior for both preset-expanded backlog capture and `do #id` resolution.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests::wait_for_agent_ready_detects_prompt -- --exact --nocapture`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Note on verification: the full serial suite hit one existing prompt-readiness flake in `route::tests::wait_for_agent_ready_detects_prompt`; it passed immediately on isolated rerun after the full run finished.
+
+Commit / push:
+- `9105b22` `fix: honor harness prompts on no-diff entry`
+
+No new backlog item came out of this fix. `#qey0` is now the top remaining backlog item.
+<!-- agent:boundary:97418738 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -609,8 +632,7 @@ No new backlog item came out of this fix. `#prst` is now the top remaining backl
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#prst] When a user invokes agent-doc <file> directly from the harness and the document itself still has no_changes, make preset-driven intent like #agent-doc-bug explicit instead of stopping at the diff-based no-changes path. The workflow should surface that the referenced document prompt_presets still imply plan and backlog handling even though the prompt came from chat rather than document edits.
-- [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.
+- [ ] [#qey0] Create a configuration for JB and VSCode that supports visually distinguishing agent-doc elements. Include html-style comments which I use for a scratch area.
 - [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
 <!-- /agent:backlog -->
 

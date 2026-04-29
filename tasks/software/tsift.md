@@ -73,7 +73,24 @@ If you want, I can switch to fixing this `agent-doc` commit-boundary bug directl
 - I do not see a regression test that proves federated lexical search excludes isolated/private scopes.
 - I do not see nested-path coverage for `summarize` root resolution.
 - I did not run the full test suite for this review; the findings above are from code inspection.
-<!-- agent:boundary:da7d6362 -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: `tsift index` still bypasses project-root discovery and treats the provided path as the literal indexing root. `cmd_index` canonicalizes `path` directly instead of using `resolve_project_root_or_canonical_path` ([src/tsift/src/main.rs:1537](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1537)). I verified the behavior with the built binary: `tsift index <tmp>/src/nested` created `<tmp>/src/nested/.tsift/index.db` and did not touch `<tmp>/.tsift/index.db`; `tsift index --workspace <tmp>/docs/nested` failed with `no submodules found in .../docs/nested` even though the workspace root had `.gitmodules`. That leaves `index` inconsistent with `search`, `status`, `lint`, `summarize`, `graph`, and `explain`, all of which already promote nested paths back to the ancestor `.tsift` root. Root cause: raw `canonicalize()` is still wired into the indexing entrypoint.
+
+2. Medium: `tsift locks` has the same root-resolution bug, which makes the diagnostic surface point at the wrong lock files from nested directories. `cmd_locks` canonicalizes the provided path directly ([src/tsift/src/main.rs:2854](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2854)), and `status::resolve_lock_target` then builds lock paths relative to that literal directory when `--scope` is absent ([src/tsift/src/status.rs:425](/home/brian/work/btakita/agent-loop/src/tsift/src/status.rs:425)). I verified this with the built binary too: `tsift locks <tmp>/src/nested --json` reported `db_path=/tmp/.../src/nested/.tsift/index.db` and `index.lock` under that nested directory, ignoring the real ancestor `.tsift/index.lock`. In practice that can hide the live writer/rollback-journal state you are trying to debug.
+
+#### What Changed Since The Last Review
+
+The earlier federated lexical search, lint entity leakage, summarize root-resolution, and edit atomicity findings are fixed in the current tree. I confirmed current coverage for federated lexical isolation ([src/tsift/src/main.rs:4527](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:4527)), workspace entity filtering ([src/tsift/src/lint.rs:554](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:554)), summarize ancestor-root resolution ([src/tsift/src/main.rs:2595](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2595), [src/tsift/src/lint.rs:495](/home/brian/work/btakita/agent-loop/src/tsift/src/lint.rs:495)), and edit rollback/temp-file staging ([src/tsift/src/main.rs:1311](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:1311)).
+
+#### Verification
+
+- Ran `cargo test -p tsift locks -- --nocapture`
+- Ran `cargo test -p tsift search_cmd_uses_ancestor_project_root_for_nested_paths -- --nocapture`
+- Reproduced nested-path behavior with `cargo run --manifest-path src/tsift/Cargo.toml -- index ...` and `... -- locks ...` against temporary directories
+<!-- agent:boundary:2e6df4d2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -82,6 +99,8 @@ If you want, I can switch to fixing this `agent-doc` commit-boundary bug directl
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#idxr] [recommended] Normalize cmd_index path resolution to use project/workspace root discovery; nested invocations currently create a new nested .tsift/index.db instead of reusing the ancestor root index.
+- [ ] [#lokr] [recommended] Normalize cmd_locks path resolution to use project/workspace root discovery and add nested-path coverage; nested invocations currently inspect a synthetic nested lock path instead of the real ancestor index lock.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

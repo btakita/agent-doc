@@ -147,15 +147,36 @@ Verification:
 Commit / push: `96763d5` (`fix: enforce prompt preset backlog contracts`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#ppct` is done.
-<!-- agent:boundary:65ecd75c -->
+### Re: #agent-doc-bug route cross-file pane mismatch — opus-4-6
+
+**Bug:** `route` dispatched a command for `claudescore-3.md` to pane %401, which was running `monsterrodholders.md` in a different submodule.
+
+**Root cause:** `find_registered_pane_in_session` (route.rs ~line 1268) iterates all registry entries and returns the first alive pane in the target tmux session — it does not filter by file path. When `auto_start_in_session` uses this as a dispatch target (not just a split anchor), the command goes to an unrelated file's pane.
+
+**Secondary issue:** Three stale panes (%398, %404, %405) accumulated from prior failed starts. `resync` logged them as "unregistered — skipping kill (may be rescuable)" but never cleaned them, allowing orphan buildup across retries.
+
+**Plan:** `tasks/agent-doc/plan-route-cross-file-pane-mismatch.md`
+
+Key fixes:
+1. Separate split-target (layout anchor — any pane in session is fine) from dispatch-target (must be file-verified)
+2. Add a file-match guard before any `send-keys` dispatch
+3. Make `resync --fix` kill stashed unregistered panes instead of logging indefinitely
+4. Regression tests for cross-file dispatch rejection
+<!-- agent:boundary:774eeb1e -->
 <!-- /agent:exchange -->
 
 <!--
+I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
+```
+› echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
+  #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'
+```
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rtxf] Route cross-file pane mismatch: route dispatches to a pane registered for a different file when no pane exists for the target file. find_registered_pane_in_session returns any alive pane in the tmux session regardless of file ownership. Plan: tasks/agent-doc/plan-route-cross-file-pane-mismatch.md
 - [ ] [#smdq] Fix startup-miss diagnostics that are queued into the harness input buffer instead of being surfaced visibly. Repro from `tasks/agent-doc/agent-doc-bugs2.md` on April 29, 2026: `ops.log` recorded `route_cycle_start_missing` for Codex pane `%399` on `do #ppct. spec-test-build-install-commit-push`, but the live pane stayed open and showed a drafted `echo '[agent-doc] startup-miss: ...'` line with Codex UI text `tab to queue message`. `route.rs` currently sends the diagnostic text with `tmux.send_keys_raw(...)`, so the recovery hint can sit as unsent input and make the pane look crashed. Plan: `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

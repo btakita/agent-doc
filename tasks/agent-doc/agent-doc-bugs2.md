@@ -8,7 +8,7 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. Any follow-up items to place in the backlog?
   '#commit-push': commit + push all uncommitted files
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
@@ -209,7 +209,24 @@ The backlog, queue, and icebox are already the canonical state surfaces. Presets
 Presets still have value, but as policy knobs: for example, "include the top 3 backlog items" or "always mention the active queue head". I would not use them as the source of substantive context. State should come from the live document components; presets should shape how that state is summarized.
 
 I added that as a recommended backlog follow-up so it is tracked without treating it as accepted work yet. `#fuback` remains the top accepted active item.
-<!-- agent:boundary:11cdfdb8 -->
+
+❯ If the document markdown frontmatter has syntax errors, auto-start does not start and there is no feedback. spec-test-build-install-commit-push
+❯ `'#follow-up-backlog': Any follow-up items to place in the backlog?`
+```
+~/work/btakita/agent-loop main ⇡9 !6 ?2                                                        8s  agent-loop 21:07:41
+❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
+Error: did not find expected key at line 13 column 39, while parsing a block mapping at line 9 column 3
+```
+### Re: frontmatter syntax startup feedback — gpt-5
+
+Implemented in `src/agent-doc` and pushed `4dd9c47` on `20260422/codex-agent-backend`.
+
+The failure mode is now explicit across the startup paths. `frontmatter.rs` adds a shared wrapper that turns YAML parse failures into `invalid YAML frontmatter in <file>` with a repair hint for the `--- ... ---` block. `start.rs` and `route.rs` now fail closed through that path instead of surfacing raw parser noise or defaulting past the parse. `sync.rs` now logs the same contextual warning during file resolution and auto-start, then skips the malformed file for that pass instead of silently dropping it.
+
+I updated `specs/07-commands.md`, `docs/guide/commands.md`, and `VERSIONS.md`, added regression coverage for the shared parse wrapper plus `start` and sync-phase error context, then ran `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`.
+
+No new backlog item came out of this fix. `#fuback` remains the top accepted active item.
+<!-- agent:boundary:bf187b80 -->
 <!-- /agent:exchange -->
 
 <!--

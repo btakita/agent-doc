@@ -644,7 +644,28 @@ Commit / push:
 - `6a733ef` `feat: highlight agent-doc markdown structures`
 
 No new backlog item came out of this fix. `#1eet` is now the top remaining backlog item.
-<!-- agent:boundary:08586fb3 -->
+❯ do #1eet. spec-test-build-install-commit-push
+### Re: #1eet shared-doc security review gate — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-29 as `a4b198f` (`feat: require review for shared doc access`) to `origin/20260422/codex-agent-backend`.
+
+The multi-user safety work now has a binary-owned fail-closed gate instead of relying on operator memory. I added `agent_doc_collaboration: shared` plus `agent_doc_security_review: <review-id>` in frontmatter, then used them in the risky cross-document paths:
+- `extract` / `transfer` now reject cross-document reads or moves when a shared source or target lacks the review marker, and auto-created transfer targets inherit the source review metadata.
+- `plan` now blocks shared `do #id` work when the referenced backlog/icebox item points at another `.md` plan without that review proof.
+
+That means the answer to your question is yes: in shared mode, reading another plan/backlog/icebox item now requires an explicit security-review marker in the document itself. I also updated the security spec, README, pending-ops runbook, and release notes, and added regression coverage for the new frontmatter, transfer guard, and plan blocker.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `a4b198f` `feat: require review for shared doc access`
+
+No new backlog item came out of this change.
+<!-- agent:boundary:da3aa114 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -653,7 +674,9 @@ No new backlog item came out of this fix. `#1eet` is now the top remaining backl
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#1eet] Research how we can make agent-doc safe for multi-user usage. I want users to transfer backlog/icebox items and plans. Should reading another plan + backlog/icebox item involve a security review? (requested alias/tag: [#multi-user])
+- [ ] [#zpc0] Fail closed when a template/CRDT closeout reaches IPC with zero real response patches. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `write.rs` logged `zero_patches_warning`, then `ipc_write_consumed ... patches=0`, then `commit_success`, which stranded `do #asch1. spec-tests-commit-push` after the committed `#dbglog` response. The fix should prove at least one response patch or equivalent response-body write landed before commit, otherwise keep the cycle open or interrupt it instead of consuming the turn.
+- [ ] [#lvak] Tighten routed-cycle acknowledgment when a committed cycle already has prompt drift. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: rerouting to live pane `%393` logged `route_cycle_ack_skipped_live_child ... prompt_target: do #asch1. spec-tests-commit-push` even though `session-check` still reported `no new agent-doc cycle started`. A merely live child should not suppress the fresh-cycle proof when the previous cycle is closed and the prompt-bearing diff is still unresolved.
+- [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

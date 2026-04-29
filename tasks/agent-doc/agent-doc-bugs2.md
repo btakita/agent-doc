@@ -387,7 +387,28 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 No new backlog item was added because this `#agent-doc-bug` was fixed directly in this turn.
-<!-- agent:boundary:13e589bb -->
+❯ do #smst. spec-test-build-install-commit-push
+### Re: `#smst` — gpt-5
+
+I fixed the stale startup-miss supersession path.
+
+- `startup_miss.rs` now detects when the persisted marker still points at an older pane but the session log plus `sessions.json` already prove a newer open registered owner for the same document.
+- `route.rs` clears that stale marker before it makes reuse/restart decisions, so reroute stops carrying historical pane-failure state into the current owner.
+- `session_check.rs` now heals the same stale-marker shape instead of warning about a fake current crash, and regression coverage was added for both the shared classifier and the post-commit cleanup path.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the cross-pane supersession rule.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `674e568` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I staged and committed only the `#smst` hunks from `VERSIONS.md` and `specs/07-commands.md`; the pre-existing unrelated local edits in `runbooks/pending-ops.md`, `specs/pending-system.md`, `src/pending.rs`, `src/pending_cmd.rs`, `src/start.rs`, and `tests/pending_integration.rs` are still left in the worktree.
+<!-- agent:boundary:2dc6e7af -->
 <!-- /agent:exchange -->
 
 <!--
@@ -401,12 +422,12 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#edcrash] Claimed pane crashes when editor navigates to the document. tmux-router sync kills/replaces the pane running `agent-doc start` without notifying the supervisor — the supervisor dies without logging `claude_exit` or `session_end`, leaving orphaned cycle state. 9+ orphaned sessions observed for `tasks/claudescore.md` (panes %416→%510) on Apr 29 2026. Fix: signal handler in supervisor, tmux-router claim awareness, crash-recovery logging on `session_start`. Plan: tasks/agent-doc/plan-editor-navigate-claim-crash.md
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
   - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
-- [ ] [#smst] Clear or supersede stale startup-miss markers when a later session start takes ownership of the same document. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: `agent-doc session-check tasks/monsterrodholders.md` warned that startup-miss marker `%401` still existed, but `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` later recorded `session_start ... pane=%408` and `src/boost-client/.agent-doc/sessions.json` already registered `%408` as the live owner. The fix should prevent an older routed-trigger marker from surviving past a newer ownership start, or make `session-check`/`route` clear it as stale before surfacing a fake current crash.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.

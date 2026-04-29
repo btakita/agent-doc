@@ -531,7 +531,10 @@ Verification:
 - `cargo install --path . --force`
 
 I committed only the `#vzpc` staged work as `d6ba935`; unrelated local edits in `src/git.rs` and a separate unstaged `src/pending.rs` hunk remain outside this commit. `#qey0` is now the top remaining backlog item.
-<!-- agent:boundary:3c09b13c -->
+### Re: #vzpc follow-up capture note — gpt-5
+
+There are no additional actionable follow-up items to capture in this cycle beyond the existing `#qey0` backlog entry.
+<!-- agent:boundary:1cd1943f -->
 <!-- /agent:exchange -->
 
 <!--

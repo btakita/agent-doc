@@ -487,6 +487,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - respect safe manual removal of an escaped template conversation tail
    - repair a stale `preflight_started` cycle when the persisted snapshot/file hashes still match exactly
    - fail closed for that missing-commit-boundary recovery when the historical bypass mutates typed components (`status`, backlog, pending, etc.) or when the repaired tail still contains a bare prompt target
+   - narrow historical replay exception: when there is no active pending/capture artifact, `repair` may replay the newest committed durable capture only if the current exchange still contains a matching orphan prompt target for that response topic and the response heading itself is absent. Generic committed captures without that prompt match stay inert.
    - when replaying a historical template capture that still contains a single list-shaped `replace:pending` / `patch:pending` block, normalize that pending/backlog patch through the granular pending primitives before applying the assistant response; unsupported shapes still fail closed
    - fail closed before replay when a template-mode pending/captured payload looks like a transcript or full document dump rather than one assistant closeout; save the blocked payload under `.agent-doc/repair-blocked/` for diagnostics instead of appending it into `agent:exchange`
 2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`

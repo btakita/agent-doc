@@ -152,6 +152,46 @@ pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>
     Ok(Some(record))
 }
 
+pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
+    let canonical = file.canonicalize()?;
+    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let project_root = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = project_root.join(".agent-doc/captures").join(hash);
+    if !dir.exists() {
+        return Ok(None);
+    }
+
+    let mut latest: Option<CaptureRecord> = None;
+    for entry in std::fs::read_dir(&dir)
+        .with_context(|| format!("failed to read capture directory {}", dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let content = std::fs::read_to_string(entry.path())
+            .with_context(|| format!("failed to read capture {}", entry.path().display()))?;
+        let record: CaptureRecord = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse capture {}", entry.path().display()))?;
+        if record.state != CaptureState::Committed {
+            continue;
+        }
+        let is_newer = latest.as_ref().is_none_or(|current| {
+            record.committed_at.unwrap_or(record.updated_at)
+                > current.committed_at.unwrap_or(current.updated_at)
+        });
+        if is_newer {
+            latest = Some(record);
+        }
+    }
+
+    Ok(latest)
+}
+
 pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;

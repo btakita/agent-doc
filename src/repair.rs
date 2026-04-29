@@ -82,6 +82,136 @@ fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
     )
 }
 
+fn first_response_heading_line(response: &str) -> Option<&str> {
+    response
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("### Re:"))
+}
+
+fn normalize_replay_topic(text: &str) -> String {
+    let trimmed = text.trim();
+    let trimmed = trimmed
+        .strip_prefix("❯ ")
+        .unwrap_or(trimmed)
+        .strip_prefix("### Re:")
+        .unwrap_or(trimmed)
+        .trim();
+    let trimmed = trimmed
+        .split_once(" — ")
+        .map(|(topic, _)| topic)
+        .unwrap_or(trimmed)
+        .trim();
+    let trimmed = trimmed
+        .strip_prefix("do ")
+        .unwrap_or(trimmed)
+        .trim_start_matches('#')
+        .trim();
+
+    let mut normalized = String::new();
+    let mut last_was_space = false;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch.to_ascii_lowercase());
+            last_was_space = false;
+        } else if !last_was_space {
+            normalized.push(' ');
+            last_was_space = true;
+        }
+    }
+    normalized.trim().to_string()
+}
+
+fn line_matches_historical_prompt(line: &str, topic: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("## Assistant")
+        || trimmed.starts_with("<!--")
+    {
+        return false;
+    }
+    if !(trimmed.starts_with("❯ ")
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("do #")
+        || trimmed.starts_with("preset #"))
+    {
+        return false;
+    }
+
+    let normalized_line = normalize_replay_topic(trimmed);
+    !normalized_line.is_empty()
+        && (normalized_line == topic
+            || normalized_line.contains(topic)
+            || topic.contains(&normalized_line))
+}
+
+fn has_matching_orphan_prompt_for_committed_capture(
+    doc_content: &str,
+    response_heading: &str,
+) -> bool {
+    let topic = normalize_replay_topic(response_heading);
+    if topic.is_empty() {
+        return false;
+    }
+
+    let body = frontmatter::parse(doc_content)
+        .map(|(_, body)| body)
+        .unwrap_or(doc_content);
+    let exchange = if let Ok(components) = crate::component::parse(body) {
+        components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .map(|component| component.content(body).to_string())
+            .unwrap_or_else(|| body.to_string())
+    } else {
+        body.to_string()
+    };
+
+    let mut saw_match = false;
+    for line in exchange.lines() {
+        let trimmed = line.trim();
+        if trimmed == response_heading.trim() {
+            return false;
+        }
+        if saw_match && trimmed.starts_with("### Re:") {
+            return false;
+        }
+        if line_matches_historical_prompt(trimmed, &topic) {
+            saw_match = true;
+        }
+    }
+
+    saw_match
+}
+
+fn historical_committed_capture_replay(
+    file: &Path,
+    doc_content: &str,
+) -> Result<Option<crate::capture::CaptureRecord>> {
+    let Some(capture) = crate::capture::latest_committed(file)? else {
+        return Ok(None);
+    };
+    if is_already_applied(doc_content, &capture.response_body) {
+        return Ok(None);
+    }
+    let Some(response_heading) = first_response_heading_line(&capture.response_body) else {
+        return Ok(None);
+    };
+    if !has_matching_orphan_prompt_for_committed_capture(doc_content, response_heading) {
+        return Ok(None);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_replay_committed_capture file={} capture_id={}",
+            file.display(),
+            capture.capture_id
+        ),
+    );
+    Ok(Some(capture))
+}
+
 pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
     "ambiguous preflight_started patchback";
 
@@ -547,7 +677,14 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
 
     let pending_path = snapshot::pending_path_for(&canonical)?;
     let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
-    if !pending_path.exists() && capture.is_none() {
+    let doc_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read document for repair {}", file.display()))?;
+    let historical_capture = if !pending_path.exists() && capture.is_none() {
+        historical_committed_capture_replay(&canonical, &doc_content)?
+    } else {
+        None
+    };
+    if !pending_path.exists() && capture.is_none() && historical_capture.is_none() {
         let outcome = repair_stale_preflight_started_cycle(file)?;
         if outcome != RepairOutcome::Noop {
             return Ok(outcome);
@@ -568,6 +705,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let response = capture
         .as_ref()
         .map(|r| r.response_body.clone())
+        .or_else(|| historical_capture.as_ref().map(|r| r.response_body.clone()))
         .or(pending_response.clone())
         .unwrap_or_default();
 
@@ -582,8 +720,6 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     // This prevents double-apply when the pending file was left behind after a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
-    let doc_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read document for dedup check {}", file.display()))?;
     if is_already_applied(&doc_content, &response) {
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
@@ -669,7 +805,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     ) {
         eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
     }
-    if let Err(e) = crate::capture::mark_replayed(&canonical) {
+    if historical_capture.is_none()
+        && let Err(e) = crate::capture::mark_replayed(&canonical)
+    {
         eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
     }
     Ok(RepairOutcome::ReplayedResponse)
@@ -1527,6 +1665,40 @@ mod tests {
             RepairOutcome::Noop,
             "committed captures should not trigger replay/dedup on later preflights"
         );
+    }
+
+    #[test]
+    fn recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: code review — gpt-5\n\n",
+            "Recovered body.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        crate::capture::capture_response(&doc, response).unwrap();
+        crate::capture::mark_committed(&doc).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("❯ #code-review"));
+        assert!(result.contains("### Re: code review — gpt-5"));
+        assert!(result.contains("Recovered body."));
     }
 
     #[test]

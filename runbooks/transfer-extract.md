@@ -15,28 +15,33 @@ agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim] [--items ID1,I
 agent-doc transfer tasks/briantakita.me.md tasks/software/corky.md exchange --bypass-claim
 ```
 
-**Example:** Move specific pending items by ID:
+**Example:** Move specific backlog items by ID:
 ```bash
 agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md pending --bypass-claim --items "#ast4,#0m97"
 ```
 
+**Example:** Move specific icebox items by ID:
+```bash
+agent-doc transfer tasks/software/tsift.md tasks/software/tagpath.md icebox --bypass-claim --items "#cold1,#cold2"
+```
+
 **`--bypass-claim`:** Required when the target document is owned by a different tmux pane. Without it, transfer checks pane ownership and refuses to write to another pane's document. Always use `--bypass-claim` for cross-session transfers — it signals deliberate intent.
 
-**`--items`:** Selective pending transfer. Only moves lines containing `[#id]` for each specified ID. Remaining items stay in the source. Only valid with `component=pending`. IDs can include or omit the `#` prefix.
+**`--items`:** Selective backlog or icebox transfer. Only moves lines containing `[#id]` for each specified ID. Remaining items stay in the source. Valid with `component=pending`, `component=backlog`, or `component=icebox`. IDs can include or omit the `#` prefix.
 
 **What happens (full transfer):**
 1. Checks pane ownership of target (unless `--bypass-claim`)
 2. Reads the component content from the source
 3. Clears the source component
 4. Appends to the target component with a `*Transfer from <source>*` annotation
-5. Also merges pending items if the transferred component is not `pending`
+5. If the transferred component is not backlog/pending or icebox, also merges both backlog and icebox items from source to target
 6. Commits the target to prevent `(HEAD)` marking on next cycle
 7. Saves snapshots for both files
 
 **What happens (--items selective):**
 1. Checks pane ownership (unless `--bypass-claim`)
-2. Scans source pending for lines matching `[#id]` patterns
-3. Moves matched lines to target pending; leaves unmatched in source
+2. Scans the source backlog or icebox for lines matching `[#id]` patterns
+3. Moves matched lines to the same target component; leaves unmatched in source
 4. Commits target; saves both snapshots
 5. Warns about any IDs that didn't match
 

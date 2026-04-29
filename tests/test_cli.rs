@@ -52,6 +52,12 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     fs::write(snapshot, content).unwrap();
 }
 
+fn template_doc(title: &str, exchange: &str, backlog: &str, icebox: &str) -> String {
+    format!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {title}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n{backlog}<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n{icebox}<!-- /agent:icebox -->\n"
+    )
+}
+
 #[test]
 fn test_binary_exists() {
     let _cmd = agent_doc_cmd();
@@ -966,5 +972,116 @@ fn test_compact_message_dash_reads_stdin() {
     assert!(
         !result.contains("### Re: topic"),
         "original content should be archived"
+    );
+}
+
+#[test]
+fn test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let source = root.join("source.md");
+    let target = root.join("target.md");
+
+    let source_doc = template_doc(
+        "Source",
+        "### Re: topic — gpt-5\n\nTransferred exchange body.\n",
+        "- [ ] [#back1] Keep this backlog item with the transfer\n",
+        "- [ ] [#cold1] Parked context that should transfer too\n",
+    );
+    fs::write(&source, &source_doc).unwrap();
+    init_git_repo(root, &source);
+    seed_snapshot(root, &source, &source_doc);
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args([
+        "transfer",
+        "source.md",
+        "target.md",
+        "exchange",
+        "--bypass-claim",
+    ]);
+    cmd.assert().success();
+
+    let source_after = fs::read_to_string(&source).unwrap();
+    assert!(
+        !source_after.contains("Transferred exchange body."),
+        "source exchange should be cleared after transfer:\n{source_after}"
+    );
+    assert!(
+        !source_after.contains("[#back1]"),
+        "source backlog should be cleared after transfer:\n{source_after}"
+    );
+    assert!(
+        !source_after.contains("[#cold1]"),
+        "source icebox should be cleared after transfer:\n{source_after}"
+    );
+
+    let target_after = fs::read_to_string(&target).unwrap();
+    assert!(target_after.contains("## Status"));
+    assert!(target_after.contains("## Queue"));
+    assert!(target_after.contains("<!-- agent:backlog -->"));
+    assert!(target_after.contains("<!-- agent:icebox -->"));
+    assert!(target_after.contains("Transferred exchange body."));
+    assert!(target_after.contains("[#back1]"));
+    assert!(target_after.contains("[#cold1]"));
+}
+
+#[test]
+fn test_transfer_items_supports_icebox_component() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let source = root.join("source.md");
+    let target = root.join("target.md");
+
+    let source_doc = template_doc(
+        "Source",
+        "",
+        "",
+        "- [ ] [#cold1] First parked item\n- [ ] [#cold2] Second parked item\n",
+    );
+    let target_doc = template_doc("Target", "", "", "- [ ] [#keep1] Existing target item\n");
+    fs::write(&source, &source_doc).unwrap();
+    fs::write(&target, &target_doc).unwrap();
+    init_git_repo(root, &source);
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["add", "target.md"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "add target", "--no-verify"])
+        .status()
+        .unwrap();
+    seed_snapshot(root, &source, &source_doc);
+    seed_snapshot(root, &target, &target_doc);
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args([
+        "transfer",
+        "source.md",
+        "target.md",
+        "icebox",
+        "--items",
+        "#cold1",
+        "--bypass-claim",
+    ]);
+    cmd.assert().success();
+
+    let source_after = fs::read_to_string(&source).unwrap();
+    assert!(
+        !source_after.contains("[#cold1]"),
+        "matched icebox item should leave source:\n{source_after}"
+    );
+    assert!(source_after.contains("[#cold2]"));
+
+    let target_after = fs::read_to_string(&target).unwrap();
+    assert!(target_after.contains("[#keep1]"));
+    assert!(target_after.contains("[#cold1]"));
+    assert!(
+        !target_after.contains("[#cold2]"),
+        "unmatched icebox item should stay in source:\n{target_after}"
     );
 }

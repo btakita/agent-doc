@@ -738,7 +738,7 @@ enum Commands {
         /// Bypass pane ownership check on target (for cross-session transfers)
         #[arg(long)]
         bypass_claim: bool,
-        /// Transfer only specific pending items by ID (comma-separated, e.g., "#id1,#id2")
+        /// Transfer only specific backlog/pending or icebox items by ID (comma-separated, e.g., "#id1,#id2")
         #[arg(long)]
         items: Option<String>,
         /// Insert a referral pointer instead of moving content (target reads source on demand)

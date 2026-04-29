@@ -8,9 +8,11 @@
 //! - `transfer(source, target, component_name, bypass_claim)`: moves the entire named component
 //!   content from `source` to `target`, clearing the source component and appending to the target
 //!   component (or end of file if the target has no matching component).  If `target` does not exist,
-//!   it is auto-created matching the source format (template or inline).  When `bypass_claim` is
-//!   false and the target is owned by a different tmux pane, transfer is rejected with an error.
-//!   Pass `bypass_claim=true` (CLI: `--bypass-claim`) for cross-pane transfers.
+//!   it is auto-created as a template document with the standard status/exchange/queue/backlog/icebox
+//!   scaffold.  Backlog transfers accept both the canonical `backlog` name and the legacy `pending`
+//!   alias. When `bypass_claim` is false and the target is owned by a different tmux pane, transfer
+//!   is rejected with an error. Pass `bypass_claim=true` (CLI: `--bypass-claim`) for cross-pane
+//!   transfers.
 //! - Both operations write atomically via `write::atomic_write_pub` and persist a snapshot after
 //!   each file mutation.
 //! - `split_last_entry` is private; it splits on the last `### Re:` header position.
@@ -33,7 +35,11 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{component, component::is_backlog_component, frontmatter, snapshot, write};
+use crate::{
+    component,
+    component::{is_backlog_component, is_icebox_component},
+    frontmatter, snapshot, write,
+};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim
@@ -102,6 +108,62 @@ fn format_source_annotation(source: &Path, action: &str) -> String {
         source.display(),
         timestamp,
     )
+}
+
+fn matches_requested_component(component_name: &str, candidate_name: &str) -> bool {
+    if is_backlog_component(component_name) {
+        return is_backlog_component(candidate_name);
+    }
+    if is_icebox_component(component_name) {
+        return is_icebox_component(candidate_name);
+    }
+    candidate_name == component_name
+}
+
+fn allow_selective_item_transfer(component_name: &str) -> bool {
+    is_backlog_component(component_name) || is_icebox_component(component_name)
+}
+
+fn render_target_scaffold(title: &str, agent: &str, session_id: uuid::Uuid) -> String {
+    format!(
+        "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
+        session_id, agent, title
+    )
+}
+
+fn merge_list_component(
+    component_name: &str,
+    source_content: &str,
+    target_content: &str,
+) -> Result<Option<(String, String)>> {
+    let source_components =
+        component::parse(source_content).context("failed to parse components in source")?;
+    let target_components =
+        component::parse(target_content).context("failed to parse components in target")?;
+
+    let Some(source_component) = source_components
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name))
+    else {
+        return Ok(None);
+    };
+    let Some(target_component) = target_components
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name))
+    else {
+        return Ok(None);
+    };
+
+    let source_items = source_component.content(source_content);
+    if source_items.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let target_items = target_component.content(target_content);
+    let merged_items = format!("{}{}\n", target_items, source_items.trim_end());
+    let new_target = target_component.replace_content(target_content, &merged_items);
+    let new_source = source_component.replace_content(source_content, "\n");
+    Ok(Some((new_source, new_target)))
 }
 
 /// Extract the last exchange entry from source and append to target.
@@ -235,8 +297,10 @@ pub fn transfer(
     referral: bool,
 ) -> Result<()> {
     // Validate --items usage before any filesystem operations
-    if items.is_some() && !is_backlog_component(component_name) {
-        anyhow::bail!("--items flag is only supported for the 'pending'/'backlog' component");
+    if items.is_some() && !allow_selective_item_transfer(component_name) {
+        anyhow::bail!(
+            "--items flag is only supported for the 'pending'/'backlog' or 'icebox' component"
+        );
     }
     if referral && items.is_some() {
         anyhow::bail!("--referral and --items cannot be used together");
@@ -259,7 +323,7 @@ pub fn transfer(
 
     // Selective pending transfer via --items
     if let Some(ids) = items {
-        return transfer_pending_items(source, target, ids, bypass_claim);
+        return transfer_pending_items(source, target, component_name, ids, bypass_claim);
     }
 
     // Auto-init target if it doesn't exist (always template mode)
@@ -276,11 +340,7 @@ pub fn transfer(
             .ok()
             .and_then(|(fm, _)| fm.agent.clone())
             .unwrap_or_else(|| "claude".to_string());
-
-        let target_content = format!(
-            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {}\n\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
-            session_id, agent, title
-        );
+        let target_content = render_target_scaffold(title, &agent, session_id);
 
         if let Some(parent) = target.parent()
             && !parent.exists()
@@ -300,7 +360,9 @@ pub fn transfer(
     let components =
         component::parse(&source_content).context("failed to parse components in source")?;
 
-    let comp = components.iter().find(|c| c.name == component_name);
+    let comp = components
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name));
     let Some(comp) = comp else {
         anyhow::bail!(
             "component '{}' not found in {}",
@@ -330,7 +392,9 @@ pub fn transfer(
     let target_components =
         component::parse(&target_content).context("failed to parse components in target")?;
 
-    let target_comp = target_components.iter().find(|c| c.name == component_name);
+    let target_comp = target_components
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name));
     let new_target = if let Some(tc) = target_comp {
         let existing = tc.content(&target_content);
         tc.replace_content(
@@ -348,35 +412,24 @@ pub fn transfer(
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
-    // Also transfer the backlog component if it exists in both source and target
-    // and the transferred component is not the backlog itself.
-    if !is_backlog_component(component_name) {
+    // Also transfer tracked list surfaces that belong with the moved context.
+    if !is_backlog_component(component_name) && !is_icebox_component(component_name) {
         let source_refreshed = std::fs::read_to_string(source)?;
         let target_refreshed = std::fs::read_to_string(target)?;
+        let mut latest_source = source_refreshed;
+        let mut latest_target = target_refreshed;
 
-        let source_comps = component::parse(&source_refreshed).unwrap_or_default();
-        let target_comps = component::parse(&target_refreshed).unwrap_or_default();
-
-        if let Some(source_pending) = source_comps.iter().find(|c| is_backlog_component(&c.name))
-            && let Some(target_pending) =
-                target_comps.iter().find(|c| is_backlog_component(&c.name))
-        {
-            let pending_content = source_pending.content(&source_refreshed);
-            if !pending_content.trim().is_empty() {
-                // Merge: append source pending items to target pending
-                let existing = target_pending.content(&target_refreshed);
-                let merged = format!("{}{}\n", existing, pending_content.trim_end());
-                let new_target_with_pending =
-                    target_pending.replace_content(&target_refreshed, &merged);
-                write::atomic_write_pub(target, &new_target_with_pending)?;
-                snapshot::save(target, &new_target_with_pending)?;
-
-                // Clear source pending
-                let new_source_cleared = source_pending.replace_content(&source_refreshed, "\n");
-                write::atomic_write_pub(source, &new_source_cleared)?;
-                snapshot::save(source, &new_source_cleared)?;
-
-                eprintln!("[transfer] Also transferred 'pending' component");
+        for surface in ["backlog", "icebox"] {
+            if let Some((new_source_surface, new_target_surface)) =
+                merge_list_component(surface, &latest_source, &latest_target)?
+            {
+                write::atomic_write_pub(target, &new_target_surface)?;
+                snapshot::save(target, &new_target_surface)?;
+                write::atomic_write_pub(source, &new_source_surface)?;
+                snapshot::save(source, &new_source_surface)?;
+                latest_source = new_source_surface;
+                latest_target = new_target_surface;
+                eprintln!("[transfer] Also transferred '{}' component", surface);
             }
         }
     }
@@ -396,12 +449,13 @@ pub fn transfer(
     Ok(())
 }
 
-/// Transfer specific pending items by ID from source to target.
-/// Items are identified by `[#id]` patterns in pending lines.
-/// Matching items are removed from source and appended to target's pending.
+/// Transfer specific backlog or icebox items by ID from source to target.
+/// Items are identified by `[#id]` patterns in list lines.
+/// Matching items are removed from source and appended to the same target component.
 fn transfer_pending_items(
     source: &Path,
     target: &Path,
+    component_name: &str,
     ids: &[String],
     _bypass_claim: bool,
 ) -> Result<()> {
@@ -422,17 +476,24 @@ fn transfer_pending_items(
     let target_comps =
         component::parse(&target_content).context("failed to parse components in target")?;
 
-    let source_pending = source_comps.iter().find(|c| is_backlog_component(&c.name));
+    let source_pending = source_comps
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name));
     let Some(source_pending) = source_pending else {
         anyhow::bail!(
-            "component 'pending'/'backlog' not found in {}",
+            "component '{}' not found in {}",
+            component_name,
             source.display()
         );
     };
 
     let pending_content = source_pending.content(&source_content);
     if pending_content.trim().is_empty() {
-        anyhow::bail!("pending component is empty in {}", source.display());
+        anyhow::bail!(
+            "component '{}' is empty in {}",
+            component_name,
+            source.display()
+        );
     }
 
     let mut matched_lines: Vec<String> = Vec::new();
@@ -458,7 +519,11 @@ fn transfer_pending_items(
 
     if matched_lines.is_empty() {
         let id_list: Vec<String> = ids.iter().map(|id| format!("#{}", id)).collect();
-        anyhow::bail!("no pending items matched: {}", id_list.join(", "));
+        anyhow::bail!(
+            "no {} items matched: {}",
+            component_name,
+            id_list.join(", ")
+        );
     }
 
     // Update source: keep only remaining lines
@@ -471,8 +536,10 @@ fn transfer_pending_items(
     write::atomic_write_pub(source, &new_source)?;
     snapshot::save(source, &new_source)?;
 
-    // Append matched items to target pending
-    let target_pending = target_comps.iter().find(|c| is_backlog_component(&c.name));
+    // Append matched items to target component
+    let target_pending = target_comps
+        .iter()
+        .find(|c| matches_requested_component(component_name, &c.name));
     let new_target = if let Some(tp) = target_pending {
         let existing = tp.content(&target_content);
         let appended = format!("{}{}\n", existing, matched_lines.join("\n"));
@@ -491,8 +558,9 @@ fn transfer_pending_items(
     crate::git::commit(target)?;
 
     eprintln!(
-        "[transfer] Moved {} pending item(s) ({}) from {} → {}",
+        "[transfer] Moved {} {} item(s) ({}) from {} → {}",
         matched_lines.len(),
+        component_name,
         matched_ids
             .iter()
             .map(|id| format!("#{}", id))
@@ -722,7 +790,7 @@ mod tests {
         assert!(remaining[0].contains("[#def2]"));
     }
 
-    /// Items flag only works with pending component.
+    /// Items flag only works with backlog/pending or icebox components.
     #[test]
     fn items_flag_rejects_non_pending_component() {
         let source = Path::new("/tmp/nonexistent-source.md");
@@ -734,8 +802,25 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("only supported for the 'pending'/'backlog' component")
+                .contains("only supported for the 'pending'/'backlog' or 'icebox' component")
         );
+    }
+
+    #[test]
+    fn matches_requested_component_accepts_backlog_alias() {
+        assert!(matches_requested_component("pending", "backlog"));
+        assert!(matches_requested_component("backlog", "pending"));
+        assert!(matches_requested_component("icebox", "icebox"));
+        assert!(!matches_requested_component("icebox", "backlog"));
+    }
+
+    #[test]
+    fn render_target_scaffold_includes_backlog_and_icebox_components() {
+        let scaffold = render_target_scaffold("Title", "codex", uuid::Uuid::nil());
+        assert!(scaffold.contains("<!-- agent:backlog -->"));
+        assert!(scaffold.contains("<!-- /agent:backlog -->"));
+        assert!(scaffold.contains("<!-- agent:icebox -->"));
+        assert!(scaffold.contains("<!-- /agent:icebox -->"));
     }
 
     /// --referral and --items are mutually exclusive.

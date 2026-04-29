@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Route lazy-claim no longer commandeers the tmux session's current active pane.** `route.rs` now requires explicit pane provenance for Strategy 2 recovery after a dead registered pane: `find_target_pane()` only accepts an explicit pane override, still rejects already-claimed panes, and keeps the existing non-agent-process guard. When no explicit safe candidate exists, route falls through to auto-start instead of silently adopting an unrelated Codex/Claude pane from the same tmux session, repo, or nested registry. Updated the session-routing spec and added regression coverage for the explicit-only gate.
+
 - **`claim` now rejects live cross-session tmux mismatches unless `--force` is explicit.** `claim::run()` no longer logs and proceeds when `cross_session_decision()` resolves to `Reject`. A pane in another healthy tmux session now aborts the claim with a concrete error telling the operator to switch sessions or pass `--force`; only stale configured sessions still auto-accept. Updated the claim/session-routing specs and added regression coverage for the fail-closed enforcement helper.
 
 - **Legacy done backlog items now get ids before reap instead of disappearing silently.** `pending::reap_with_items()` no longer tolerates completed items with empty ids; it fails closed unless callers backfill first. `backlog reap` and stale-completed-item `repair` now canonicalize missing ids/checklists before removal, so legacy/manual `- [x]` lines are reaped and archived with stable references instead of being dropped without a trace. Added regression coverage for the pure helper, CLI backlog reap, and repair path.

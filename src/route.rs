@@ -26,9 +26,11 @@
 //!      left in place. When the document already has prompt-bearing user drift after a
 //!      closed cycle, the routed trigger must also produce a new per-document cycle
 //!      acknowledgment before route returns success; otherwise route fails closed.
-//!   7. If pane is dead and was previously registered: lazy-claims to an active pane via
-//!      `find_target_pane` (skipped if the candidate is running a non-agent process), sends
-//!      the command, then calls `sync_after_claim` to re-sync layout.
+//!   7. If pane is dead and was previously registered: lazy-claims only to an explicit
+//!      pane override via `find_target_pane` (skipped if the candidate is already claimed
+//!      or is running a non-agent process), sends the command, then calls
+//!      `sync_after_claim` to re-sync layout. Route never adopts the tmux session's
+//!      current active pane implicitly.
 //!   8. If no registered pane or no claimable pane: auto-starts a new agent session.
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
@@ -77,9 +79,12 @@
 //!   its own. Route first scans tmux for a live process tree that still mentions the
 //!   document path. If that owner is another pane, route re-registers there. If no live
 //!   owner exists, route fails closed instead of dispatching into an ambiguous pane.
+//! - **Explicit provenance guard (lazy-claim only)**: `find_target_pane()` only accepts
+//!   an explicit pane override for lazy-claim. Route will not infer ownership from the
+//!   tmux session's current active pane when the registered pane is dead.
 //! - **Non-agent process guard (lazy-claim only)**: `is_agent_process()` gates the
-//!   lazy-claim path — `find_target_pane` will not adopt a pane running corky/shell
-//!   when the registered pane is dead.
+//!   lazy-claim path — even an explicit candidate pane will not be adopted when it is
+//!   running corky/shell instead of an agent process.
 //! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
 //!   automatically rejoined into the `agent-doc` window before routing, without
 //!   swapping another visible pane back into stash.
@@ -107,7 +112,8 @@
 //! - `rejects_non_prompt_lines`: status text, empty lines, markdown headers → not matched as prompt
 //! - `handles_ansi_prompt`: ANSI-colored `❯`/`>` → detected after strip_ansi
 //! - `unregistered_file_skips_lazy_claim`: `registered = None` → lazy-claim step is skipped
-//! - `dead_registered_pane_allows_lazy_claim`: `registered = Some(pane)` with dead pane → lazy-claim attempted
+//! - `dead_registered_pane_allows_lazy_claim`: `registered = Some(pane)` with dead pane → explicit-pane lazy-claim remains eligible
+//! - `lazy_claim_requires_explicit_pane_provenance`: active pane in target session with no explicit `--pane` override → lazy-claim skipped
 //! - (aspirational) `stash_rescue`: pane in stash window → rescued to agent-doc window before send
 //! - `wrong_session_pane_still_receives_send`: alive pane in a session different from
 //!   `target_session` → trigger command is sent to that pane (no new pane created)
@@ -1161,17 +1167,15 @@ fn normalize_context_session(context_session: Option<&str>) -> Option<&str> {
     })
 }
 
-/// Find an active target pane for lazy claiming.
+/// Find an explicit target pane for lazy claiming.
 /// Skips panes already claimed by another document in the session registry.
 fn find_target_pane(
     tmux: &Tmux,
     explicit_pane: Option<&str>,
-    session_name: &str,
+    _session_name: &str,
     claimed_panes: &std::collections::HashSet<String>,
 ) -> Option<String> {
-    let target = explicit_pane
-        .map(|p| p.to_string())
-        .or_else(|| tmux.active_pane(session_name));
+    let target = explicit_pane.map(|p| p.to_string());
     target.filter(|p| tmux.pane_alive(p) && !claimed_panes.contains(p))
 }
 
@@ -2191,6 +2195,25 @@ mod tests {
         assert!(
             registered.is_some(),
             "dead registered pane should attempt lazy claim"
+        );
+    }
+
+    #[test]
+    fn lazy_claim_requires_explicit_pane_provenance() {
+        let iso = IsolatedTmux::new("route-test-lazy-claim-explicit-only");
+        let cwd = std::env::current_dir().unwrap();
+        let pane = iso.auto_start("claim", &cwd).unwrap();
+        let claimed_panes = std::collections::HashSet::new();
+
+        assert_eq!(
+            find_target_pane(&iso, None, "claim", &claimed_panes),
+            None,
+            "route must not adopt the session's active pane implicitly"
+        );
+        assert_eq!(
+            find_target_pane(&iso, Some(&pane), "claim", &claimed_panes),
+            Some(pane),
+            "explicit pane override remains valid lazy-claim provenance"
         );
     }
 

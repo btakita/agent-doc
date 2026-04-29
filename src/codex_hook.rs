@@ -65,6 +65,8 @@ struct SessionState {
     session_id: String,
     doc_path: String,
     last_turn_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    last_prompt: String,
     updated_at: u64,
 }
 
@@ -155,6 +157,7 @@ fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         session_id: input.session_id.clone(),
         doc_path: doc_path.display().to_string(),
         last_turn_id: input.turn_id.clone(),
+        last_prompt: input.prompt.clone(),
         updated_at: now_secs(),
     };
     for root in roots {
@@ -462,6 +465,24 @@ fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
     Ok(Some(state))
 }
 
+pub(crate) fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
+    let Some(session_id) = current_session_id() else {
+        return Ok(None);
+    };
+    let roots = project_roots_for(file);
+    let Some((_, state)) = load_state_any(&roots, &session_id)? else {
+        return Ok(None);
+    };
+    let state_file = PathBuf::from(&state.doc_path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
+    let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if state_file != current_file || state.last_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(state.last_prompt))
+}
+
 fn save_state(root: &Path, state: &SessionState) -> Result<()> {
     let path = state_path(root, &state.session_id);
     if let Some(parent) = path.parent() {
@@ -484,6 +505,17 @@ fn state_path(root: &Path, session_id: &str) -> PathBuf {
     let hash = crate::ops_log::content_hash(session_id);
     root.join(".agent-doc/codex-hooks/sessions")
         .join(format!("{hash}.json"))
+}
+
+fn current_session_id() -> Option<String> {
+    std::env::var("CODEX_THREAD_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("CODEX_SESSION_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 fn now_secs() -> u64 {
@@ -582,6 +614,26 @@ mod tests {
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
+        assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn load_prompt_for_current_session_uses_codex_thread_id() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+
+        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CODEX_THREAD_ID").ok();
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+        let loaded = load_prompt_for_current_session(&doc).unwrap();
+        if let Some(value) = prev {
+            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
+        } else {
+            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+        }
+
+        assert_eq!(loaded, Some(format!("agent-doc {}", doc.display())));
     }
 
     #[test]

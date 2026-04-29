@@ -101,7 +101,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let (fm, _body) = frontmatter::parse(&content)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
-    let Some(diff_text) = diff::compute(file)? else {
+    let Some(diff_text) =
+        diff::compute(file)?.or(crate::harness_prompt::synthetic_diff_for_file(file)?)
+    else {
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
             repo_actions: Vec::new(),
@@ -293,6 +295,35 @@ mod tests {
     use super::*;
     use crate::snapshot;
     use tempfile::TempDir;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
 
     #[test]
     fn build_plan_detects_orchestration_handoff_and_existing_pending_item() {
@@ -800,6 +831,109 @@ How does the CRDT merge work?
         assert!(
             expect_add.is_none(),
             "should not emit ExpectAdd for a plain question, got: {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_uses_harness_prompt_when_snapshot_matches_document() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#code-review': Please review the codebase. '#follow-up-backlog'
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _prompt = EnvGuard::set(
+            "AGENT_DOC_HARNESS_PROMPT",
+            &format!("agent-doc {} #code-review", doc.display()),
+        );
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.blockers.is_empty(),
+            "unexpected blockers: {:?}",
+            plan.blockers
+        );
+        assert!(
+            plan.pending_mutations
+                .iter()
+                .any(|m| m.kind == PendingMutationKind::ExpectAdd),
+            "expected ExpectAdd from harness prompt preset expansion, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_resolves_existing_pending_item_from_harness_prompt() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#1g42] Add the post-preflight dispatch phase
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _prompt = EnvGuard::set(
+            "AGENT_DOC_HARNESS_PROMPT",
+            &format!(
+                "agent-doc {}\ndo #1g42. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.blockers.is_empty(),
+            "unexpected blockers: {:?}",
+            plan.blockers
+        );
+        assert!(
+            plan.pending_mutations
+                .iter()
+                .any(|m| { m.kind == PendingMutationKind::ResolveExisting && m.id == "1g42" }),
+            "expected ResolveExisting for harness prompt do-directive, got {:?}",
             plan.pending_mutations
         );
     }

@@ -265,6 +265,25 @@ fn is_zero_usize(n: &usize) -> bool {
     *n == 0
 }
 
+fn push_unique_strings(target: &mut Vec<String>, extras: Vec<String>) {
+    for value in extras {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
+    }
+}
+
+fn push_unique_prompt_bearing_changes(
+    target: &mut Vec<crate::diff::PromptBearingChange>,
+    extras: Vec<crate::diff::PromptBearingChange>,
+) {
+    for value in extras {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
+    }
+}
+
 /// Extract a human-readable short model name from a full model ID.
 ///
 /// Strips well-known provider prefixes so the response header stays compact:
@@ -1002,20 +1021,22 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     let raw_diff = diff::compute(file)?;
+    let harness_diff = crate::harness_prompt::synthetic_diff_for_file(file)?;
+    let initial_diff = raw_diff.clone().or(harness_diff.clone());
 
     // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
     // line(s) before downstream classification. The strip prevents `/model` from
     // double-emitting in `builtin_commands`.
     let global_config = config::load().unwrap_or_default();
     let harness = agent_doc::model_tier::detect_harness();
-    let model_scan = raw_diff
+    let model_scan = initial_diff
         .as_ref()
         .map(|d| agent_doc::model_tier::scan_model_switch(d, &harness, &global_config.model));
     let mut diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
         // Use the stripped diff for downstream consumers.
         Some(scan.stripped_diff.clone())
     } else {
-        raw_diff.clone()
+        initial_diff.clone()
     };
 
     // Step 4b: Classify the diff for skill routing.
@@ -1024,8 +1045,13 @@ pub fn run(file: &Path) -> Result<()> {
         .as_ref()
         .is_some_and(|c| c.diff_type == diff::DiffType::BoundaryArtifact);
     if boundary_artifact_only {
-        diff_result = None;
-        classification = None;
+        if raw_diff.is_some() {
+            diff_result = harness_diff.clone();
+            classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+        } else {
+            diff_result = None;
+            classification = None;
+        }
     }
 
     let no_changes = diff_result.is_none();
@@ -1051,19 +1077,35 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 4c2: Classify user-authored prompt-bearing changes across prompts, edits,
     // and response/boundary artifacts.
-    let prompt_bearing_changes = diff_result
+    let mut prompt_bearing_changes = diff_result
         .as_ref()
         .map(|d| diff::classify_prompt_bearing_changes(d))
         .unwrap_or_default();
+    if raw_diff.is_some() {
+        if let Some(harness_only_diff) = harness_diff.as_ref() {
+            push_unique_prompt_bearing_changes(
+                &mut prompt_bearing_changes,
+                diff::classify_prompt_bearing_changes(harness_only_diff),
+            );
+        }
+    }
     let prompt_targets = prompt_bearing_changes
         .iter()
         .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
         .map(|change| change.text.clone())
         .collect::<Vec<_>>();
-    let added_diff_lines = diff_result
+    let mut added_diff_lines = diff_result
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
         .unwrap_or_default();
+    if raw_diff.is_some() {
+        if let Some(harness_only_diff) = harness_diff.as_ref() {
+            push_unique_strings(
+                &mut added_diff_lines,
+                crate::prompt_contract::collect_added_diff_lines(harness_only_diff),
+            );
+        }
+    }
 
     // Legacy compatibility surface for older skill consumers.
     let inline_annotations = annotated_diff
@@ -1072,18 +1114,37 @@ pub fn run(file: &Path) -> Result<()> {
         .unwrap_or_default();
 
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
-    let parsed_commands = diff_result
+    let mut parsed_commands = diff_result
         .as_ref()
         .map(|d| diff::parse_slash_commands_classified(d))
         .unwrap_or_else(|| diff::ParsedSlashCommands {
             skill_commands: vec![],
             builtin_commands: vec![],
         });
+    if raw_diff.is_some() {
+        if let Some(harness_only_diff) = harness_diff.as_ref() {
+            let harness_commands = diff::parse_slash_commands_classified(harness_only_diff);
+            push_unique_strings(
+                &mut parsed_commands.skill_commands,
+                harness_commands.skill_commands,
+            );
+            push_unique_strings(
+                &mut parsed_commands.builtin_commands,
+                harness_commands.builtin_commands,
+            );
+        }
+    }
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
     let orchestration_request = diff_result
         .as_ref()
-        .and_then(|d| diff::detect_orchestration_request(d));
+        .and_then(|d| diff::detect_orchestration_request(d))
+        .or_else(|| {
+            raw_diff
+                .as_ref()
+                .and(harness_diff.as_ref())
+                .and_then(|d| diff::detect_orchestration_request(d))
+        });
 
     // Step 4e: Resolve model tier sources and compose effective_tier.
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
@@ -1112,10 +1173,18 @@ pub fn run(file: &Path) -> Result<()> {
         agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
 
-    let prompt_presets_requested = diff_result
+    let mut prompt_presets_requested = diff_result
         .as_ref()
         .map(|d| diff::detect_prompt_preset_requests(d))
         .unwrap_or_default();
+    if raw_diff.is_some() {
+        if let Some(harness_only_diff) = harness_diff.as_ref() {
+            push_unique_strings(
+                &mut prompt_presets_requested,
+                diff::detect_prompt_preset_requests(harness_only_diff),
+            );
+        }
+    }
     let missing_prompt_presets = prompt_presets_requested
         .iter()
         .filter(|name| !frontmatter_prompt_presets.contains_key(name.as_str()))
@@ -2213,6 +2282,35 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
     /// Set up a minimal project directory with .agent-doc/ structure and a git repo.
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
@@ -2278,6 +2376,49 @@ mod tests {
         // diff::compute should detect changes → no_changes = false.
         let diff_result = diff::compute(&doc).unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
+    }
+
+    #[test]
+    fn preflight_opens_cycle_from_harness_prompt_when_document_has_no_diff() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "prompt_presets:\n",
+            "  '#code-review': Please review the codebase. '#follow-up-backlog'\n",
+            "  '#follow-up-backlog': Any follow-up items to place in the backlog?\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _prompt = EnvGuard::set(
+            "AGENT_DOC_HARNESS_PROMPT",
+            &format!("agent-doc {} #code-review", doc.display()),
+        );
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert!(
+            state.requires_backlog_capture,
+            "harness prompt preset expansion should record backlog capture requirement"
+        );
     }
 
     #[test]

@@ -654,6 +654,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`
 4. Compute diff between snapshot and current document
    - If the diff classifies as `boundary_artifact` only (transient `(HEAD)` / boundary churn with no real user-authored prompt drift), preflight reports `no_changes: true` and does **not** open a new cycle
+   - If the file diff is empty but the active harness prompt for this exact document still has a non-empty body after stripping the leading `agent-doc <file>` invocation, preflight synthesizes an in-memory added-lines diff from that body and continues through the normal prompt classifiers instead of stopping at `no_changes`
 5. Read document HEAD from disk
 
 **Steps (in order, pre-step 1):**
@@ -679,12 +680,17 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
 ```
 
 - `layout_issues` — array of tmux health warnings (empty = healthy); always present
-- `no_changes` is `true` when the diff is `None` (snapshot == document)
+- `no_changes` is `true` only when there is neither a real snapshot/file diff nor a synthesized harness-prompt diff for the current document
 - `diff` is `null` when `no_changes` is `true`
 - `document` always contains the current HEAD content
 - `slash_commands` — slash commands extracted from user-added lines in the diff via `parse_slash_commands()`; omitted when empty. Guards: code fences (``` / ~~~), blockquotes (`>`), non-added lines, and removed lines are excluded. Pattern: `/` followed immediately by an ASCII letter.
 - `linked_changes` lists changes in linked docs/URLs since last cycle (omitted when empty)
 - Progress/diagnostic messages go to stderr
+
+Harness prompt source for the synthesized no-diff path:
+- Codex: the `UserPromptSubmit` hook stores the last prompt text keyed by `CODEX_THREAD_ID` / session id, and preflight/plan load it only when the tracked doc path matches the current file exactly
+- Other harnesses/tests: `AGENT_DOC_HARNESS_PROMPT` can provide the same prompt text explicitly
+- Only the body after `agent-doc <file>` counts as prompt content; bare invocation with no trailing body is not actionable
 
 ## session-check
 

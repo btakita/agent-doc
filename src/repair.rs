@@ -219,7 +219,7 @@ fn normalized_content_hash(content: &str) -> String {
     crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
 }
 
-fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
+pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(RepairOutcome::Noop);
     };

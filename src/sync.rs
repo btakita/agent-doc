@@ -279,6 +279,35 @@ fn clear_frontmatter_status(file: &Path) {
     }
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct MissingRegisteredPaneRepair {
+    recorded_session_loss: bool,
+    repaired_stale_preflight: bool,
+}
+
+fn repair_missing_registered_pane(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    last_known_window: Option<&str>,
+) -> Result<MissingRegisteredPaneRepair> {
+    let recorded_session_loss = crate::startup_miss::record_session_loss(
+        file,
+        session_id,
+        pane_id,
+        "registered_pane_missing",
+        last_known_window,
+    )?;
+    let repaired_stale_preflight = matches!(
+        crate::repair::repair_stale_preflight_started_cycle(file)?,
+        crate::repair::RepairOutcome::StalePreflightLockRepaired
+    );
+    Ok(MissingRegisteredPaneRepair {
+        recorded_session_loss,
+        repaired_stale_preflight,
+    })
+}
+
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
     run_with_options(col_args, window, focus, true, &Tmux::default_server())
@@ -1082,7 +1111,8 @@ fn run_with_options(
                 None => continue,
             };
 
-            let registered_pane = sessions::lookup(&session_id).ok().flatten();
+            let registered_entry = sessions::lookup_entry(&session_id).ok().flatten();
+            let registered_pane = registered_entry.as_ref().map(|entry| entry.pane.clone());
 
             // Files with session UUIDs but no registry entry are auto-started.
             // The registry was likely pruned when the pane died. The user's intent
@@ -1211,7 +1241,7 @@ fn run_with_options(
                 // no longer exists but the session ID matches). If so, update the
                 // registry to the new path and reuse the existing pane.
                 if let Some(ref pane) = registered_pane
-                    && let Ok(Some(entry)) = sessions::lookup_entry(&session_id)
+                    && let Some(ref entry) = registered_entry
                 {
                     let current_file = file_path.to_string_lossy();
                     if is_file_rename(&entry.file, &current_file) {
@@ -1340,6 +1370,61 @@ fn run_with_options(
                     }
                 }
                 continue;
+            }
+
+            if let Some(ref pane) = registered_pane {
+                match repair_missing_registered_pane(
+                    file_path,
+                    &session_id,
+                    pane,
+                    registered_entry.as_ref().map(|entry| entry.window.as_str()),
+                ) {
+                    Ok(repair) => {
+                        if repair.recorded_session_loss {
+                            let detail = registered_entry
+                                .as_ref()
+                                .map(|entry| format!(" (last known window {})", entry.window))
+                                .unwrap_or_default();
+                            eprintln!(
+                                "[sync] recorded session loss for missing pane {} on {}{}",
+                                pane,
+                                file_path.display(),
+                                detail
+                            );
+                            sync_log(&format!(
+                                "recorded missing-pane session loss file={} pane={}{}",
+                                file_path.display(),
+                                pane,
+                                registered_entry
+                                    .as_ref()
+                                    .map(|entry| format!(" window={}", entry.window))
+                                    .unwrap_or_default()
+                            ));
+                        }
+                        if repair.repaired_stale_preflight {
+                            eprintln!(
+                                "[sync] closed stale preflight_started cycle for {} before auto-start",
+                                file_path.display()
+                            );
+                            sync_log(&format!(
+                                "repaired stale preflight_started cycle before auto-start for {}",
+                                file_path.display()
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[sync] warning: failed to repair missing pane state for {}: {}",
+                            file_path.display(),
+                            e
+                        );
+                        sync_log(&format!(
+                            "warning: missing-pane repair failed for {}: {}",
+                            file_path.display(),
+                            e
+                        ));
+                    }
+                }
             }
 
             if has_rename_debounce(file_path) {
@@ -2405,6 +2490,46 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), original);
+
+        std::env::set_current_dir(old_dir).unwrap();
+    }
+
+    #[test]
+    fn repair_missing_registered_pane_records_loss_and_closes_stale_preflight() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let old_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("lost-pane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = "---\nagent_doc_session: session-lost-pane\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(
+            log_dir.join("session-lost-pane.log"),
+            "[1] session_start file=tasks/lost-pane.md pane=%422 session=session-lost-pane\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let repair =
+            repair_missing_registered_pane(&doc, "session-lost-pane", "%422", Some("@17")).unwrap();
+        assert!(repair.recorded_session_loss);
+        assert!(repair.repaired_stale_preflight);
+
+        let state = crate::cycle_state::load(&doc)
+            .unwrap()
+            .expect("cycle state should exist");
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+
+        let status = crate::startup_miss::session_log_status(&doc, "session-lost-pane")
+            .unwrap()
+            .expect("session log should be readable");
+        assert!(status.latest_session_closed());
 
         std::env::set_current_dir(old_dir).unwrap();
     }

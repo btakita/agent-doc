@@ -22,6 +22,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +93,25 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         root.join(".agent-doc/logs")
             .join(format!("{session_id}.log")),
     ))
+}
+
+pub fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> Result<bool> {
+    let Some(path) = log_path(file, session_id)? else {
+        return Ok(false);
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    writeln!(log, "[{timestamp}] {event}")?;
+    Ok(true)
 }
 
 pub fn record(
@@ -244,6 +264,30 @@ pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<St
     Ok(Some(detail))
 }
 
+pub fn record_session_loss(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    reason: &str,
+    last_known_window: Option<&str>,
+) -> Result<bool> {
+    let Some(status) = session_log_status(file, session_id)? else {
+        return Ok(false);
+    };
+    if status.latest_session_closed() {
+        return Ok(false);
+    }
+
+    let mut exit_event =
+        format!("supervisor_exit code=missing_pane pane={pane_id} reason={reason}");
+    if let Some(window_id) = last_known_window.filter(|window_id| !window_id.is_empty()) {
+        exit_event.push_str(&format!(" last_known_window={window_id}"));
+    }
+    append_session_log_event(file, session_id, &exit_event)?;
+    append_session_log_event(file, session_id, "session_end origin=sync_missing_pane")?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,5 +409,39 @@ mod tests {
         assert_eq!(status.latest_start_pane.as_deref(), Some("%52"));
         assert!(!status.latest_session_open());
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn record_session_loss_closes_open_latest_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_project(tmp.path());
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        let log_path = log_dir.join("session-loss.log");
+        std::fs::write(
+            &log_path,
+            "[1] session_start file=test.md pane=%61 session=session-loss\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let recorded = record_session_loss(
+            &doc,
+            "session-loss",
+            "%61",
+            "registered_pane_missing",
+            Some("@9"),
+        )
+        .unwrap();
+        assert!(recorded, "open sessions should record a loss event");
+
+        let status = session_log_status(&doc, "session-loss")
+            .unwrap()
+            .expect("status should remain readable");
+        assert!(status.latest_session_closed());
+
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(log.contains("supervisor_exit code=missing_pane"));
+        assert!(log.contains("reason=registered_pane_missing"));
+        assert!(log.contains("last_known_window=@9"));
     }
 }

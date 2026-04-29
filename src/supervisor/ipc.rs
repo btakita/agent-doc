@@ -90,6 +90,43 @@ pub fn socket_path(project_root: &Path, session_uuid: &str) -> PathBuf {
         .join(format!("{short_hash}-{short_uuid}.sock"))
 }
 
+pub fn active_supervisor_pids(project_root: &Path) -> Vec<(String, u32)> {
+    let supervisor_dir = project_root.join(".agent-doc").join(SUPERVISOR_DIR);
+    let entries = match std::fs::read_dir(&supervisor_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut active = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
+            continue;
+        }
+        let Some(session_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let response = match send_command(&path, &IpcMethod::Pid) {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        let Some(pid) = response
+            .data
+            .as_ref()
+            .and_then(|data| data.get("pid"))
+            .and_then(|value| value.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+        else {
+            continue;
+        };
+        if response.ok && pid > 0 {
+            active.push((session_id.to_string(), pid));
+        }
+    }
+
+    active
+}
+
 /// IPC command sent by a client to the supervisor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case")]

@@ -28,8 +28,9 @@
 //!   `purge_stash_windows` kills entire stash windows where all panes are idle
 //!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
 //!   kills individual unregistered idle shell panes in stash windows. Unregistered
-//!   agent panes in stash are preserved only when they still prove ownership of
-//!   some registered document; otherwise they are purged as orphaned. `purge_orphaned_agent_panes`
+//!   agent panes in stash are preserved when they still prove ownership of
+//!   some registered document or still host a live supervisor session; otherwise
+//!   they are purged as orphaned. `purge_orphaned_agent_panes`
 //!   removes unregistered agent-doc/claude/node panes from any window, but only when
 //!   the window has at least one other pane (never orphans the last pane).
 //! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `codex`, `node`) are
@@ -75,6 +76,8 @@
 //! - `purge_unregistered_stash_panes_leaves_user_processes`: stash window with an
 //!   unregistered `corky` pane and an unregistered idle shell → idle shell killed,
 //!   `corky` pane untouched.
+//! - `purge_preserves_unregistered_agent_with_live_supervisor`: stash window with an
+//!   unregistered agent pane that still hosts a live supervisor socket → pane survives purge.
 //! - `purge_orphaned_agent_panes_skips_last_pane`: window with a single unregistered
 //!   `claude` pane → pane not killed (would orphan the window).
 //! - `wrong_window_detected_by_majority_vote`: three registered panes in session A,
@@ -534,6 +537,16 @@ fn purge_unregistered_stash_panes(tmux: &Tmux) {
 
 /// Testable inner function that accepts a registry parameter.
 fn purge_unregistered_stash_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) {
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    purge_unregistered_stash_panes_with_registry_and_supervisors(tmux, registry, &live_supervisors);
+}
+
+fn purge_unregistered_stash_panes_with_registry_and_supervisors(
+    tmux: &Tmux,
+    registry: &sessions::SessionRegistry,
+    live_supervisors: &[(String, u32)],
+) {
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
@@ -582,6 +595,15 @@ fn purge_unregistered_stash_panes_with_registry(tmux: &Tmux, registry: &sessions
                 eprintln!(
                     "resync: stash pane {} ({}) is unregistered but still owns {} — skipping kill",
                     pane_id, session_name, owner_file
+                );
+                continue;
+            }
+            if let Some(supervisor_session) =
+                pane_hosts_live_supervisor_session(tmux, pane_id, live_supervisors)
+            {
+                eprintln!(
+                    "resync: stash pane {} ({}) is unregistered but still hosts live supervisor {} — skipping kill",
+                    pane_id, session_name, supervisor_session
                 );
                 continue;
             }
@@ -636,6 +658,62 @@ fn live_owned_registered_file_for_pane(
         (crate::sync::find_live_owner_pane(tmux, file, session_id).as_deref() == Some(pane_id))
             .then(|| entry.file.clone())
     })
+}
+
+fn pane_hosts_live_supervisor_session(
+    tmux: &Tmux,
+    pane_id: &str,
+    live_supervisors: &[(String, u32)],
+) -> Option<String> {
+    live_supervisors.iter().find_map(|(session_id, pid)| {
+        pane_process_tree_contains_pid(tmux, pane_id, *pid).then(|| session_id.clone())
+    })
+}
+
+fn pane_process_tree_contains_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> bool {
+    let output = match tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return false,
+    };
+    let pane_pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if pane_pid.is_empty() {
+        return false;
+    }
+    process_tree_contains_pid(&pane_pid, target_pid)
+}
+
+fn process_tree_contains_pid(root_pid: &str, target_pid: u32) -> bool {
+    let mut frontier = vec![root_pid.to_string()];
+    let target_pid = target_pid.to_string();
+
+    while let Some(pid) = frontier.pop() {
+        if pid == target_pid {
+            return true;
+        }
+        let output = match std::process::Command::new("pgrep")
+            .args(["-P", &pid])
+            .output()
+        {
+            Ok(output) if output.status.success() => output,
+            _ => continue,
+        };
+        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
+            let child_pid = child_pid.trim();
+            if child_pid.is_empty() {
+                continue;
+            }
+            if child_pid == target_pid {
+                return true;
+            }
+            frontier.push(child_pid.to_string());
+        }
+    }
+
+    false
 }
 
 /// Return active (non-idle) panes from stash windows back to their original sessions.
@@ -880,6 +958,17 @@ fn purge_stash_windows_bulk(tmux: &Tmux, windows: &WindowMeta, panes: &PaneMeta)
 
 /// Bulk variant of `purge_unregistered_stash_panes` — uses pre-fetched metadata.
 fn purge_unregistered_stash_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes: &PaneMeta) {
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    purge_unregistered_stash_panes_bulk_with_supervisors(tmux, windows, panes, &live_supervisors);
+}
+
+fn purge_unregistered_stash_panes_bulk_with_supervisors(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+    live_supervisors: &[(String, u32)],
+) {
     let registry = sessions::load().unwrap_or_default();
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
@@ -908,6 +997,15 @@ fn purge_unregistered_stash_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes:
             eprintln!(
                 "resync: stash pane {} is unregistered but still owns {} — skipping kill",
                 pane_id, owner_file
+            );
+            continue;
+        }
+        if let Some(supervisor_session) =
+            pane_hosts_live_supervisor_session(tmux, pane_id, live_supervisors)
+        {
+            eprintln!(
+                "resync: stash pane {} is unregistered but still hosts live supervisor {} — skipping kill",
+                pane_id, supervisor_session
             );
             continue;
         }
@@ -1875,6 +1973,14 @@ mod tests {
     use super::*;
     use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
 
+    static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
+        TMUX_START_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn test_cwd() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     }
@@ -1968,6 +2074,35 @@ mod tests {
         last
     }
 
+    fn wait_for_pane_in_stash_window(
+        tmux: &IsolatedTmux,
+        session: &str,
+        pane: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if let Some(stash_window) = tmux.find_stash_window(session)
+                && tmux.pane_window(pane).ok().as_deref() == Some(stash_window.as_str())
+            {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+
+    fn wait_for_pane_dead(tmux: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if !tmux.pane_alive(pane) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+
     fn send_keys_with_retry(tmux: &IsolatedTmux, pane: &str, text: &str) {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(3);
@@ -1996,16 +2131,19 @@ mod tests {
         script: &std::path::Path,
         file: &std::path::Path,
     ) {
-        assert!(
-            wait_for_shell(tmux, pane, 5000),
-            "shell did not become ready before mock agent launch in {}",
-            pane
-        );
-        send_keys_with_retry(
-            tmux,
-            pane,
-            &format!("exec {} {}", script.display(), file.display()),
-        );
+        {
+            let _tmux_guard = tmux_start_lock();
+            assert!(
+                wait_for_shell(tmux, pane, 5000),
+                "shell did not become ready before mock agent launch in {}",
+                pane
+            );
+            send_keys_with_retry(
+                tmux,
+                pane,
+                &format!("exec {} {}", script.display(), file.display()),
+            );
+        }
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(3);
         let poll = std::time::Duration::from_millis(300);
@@ -2676,16 +2814,137 @@ mod tests {
             .unwrap();
         let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         iso.stash_pane(&pane2, "test").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            wait_for_pane_in_stash_window(&iso, "test", &pane2, std::time::Duration::from_secs(3)),
+            "pane should move into stash before purge"
+        );
 
         let windows = fetch_all_window_metadata(&iso);
         let panes = fetch_all_pane_metadata(&iso);
         purge_unregistered_stash_panes_bulk(&iso, &windows, &panes);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            wait_for_pane_dead(&iso, &pane2, std::time::Duration::from_secs(3)),
+            "bulk stash purge should kill unregistered agent panes with no live owner"
+        );
         assert!(
             !iso.pane_alive(&pane2),
             "bulk stash purge should kill unregistered agent panes with no live owner"
         );
+    }
+
+    #[test]
+    fn purge_preserves_unregistered_agent_in_stash_with_live_supervisor() {
+        let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.send_keys(&pane2, &format!("exec {}", script.display()))
+            .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
+        let live_pid = wait_for_process_pid(
+            &script.display().to_string(),
+            std::time::Duration::from_secs(3),
+        );
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "super-live", move |method| {
+                match method {
+                    crate::supervisor::ipc::IpcMethod::Pid => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "pid": live_pid }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::State => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "running": true }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                        crate::supervisor::ipc::IpcResponse::ok(
+                            serde_json::json!({ "n": bytes.len() }),
+                        )
+                    }
+                    crate::supervisor::ipc::IpcMethod::Restart { .. }
+                    | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                        crate::supervisor::ipc::IpcResponse::ok_empty()
+                    }
+                }
+            })
+            .unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(dir.path());
+        purge_unregistered_stash_panes_with_registry_and_supervisors(
+            &iso,
+            &SessionRegistry::new(),
+            &live_supervisors,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            iso.pane_alive(&pane2),
+            "unregistered stash pane with a live supervisor should survive purge"
+        );
+        ipc.stop();
+    }
+
+    #[test]
+    fn purge_unregistered_stash_panes_bulk_preserves_live_supervisor() {
+        let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor-bulk");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.send_keys(&pane2, &format!("exec {}", script.display()))
+            .unwrap();
+        let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
+        let live_pid = wait_for_process_pid(
+            &script.display().to_string(),
+            std::time::Duration::from_secs(3),
+        );
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            dir.path(),
+            "super-live-bulk",
+            move |method| match method {
+                crate::supervisor::ipc::IpcMethod::Pid => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "pid": live_pid }))
+                }
+                crate::supervisor::ipc::IpcMethod::State => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "running": true }))
+                }
+                crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                crate::supervisor::ipc::IpcMethod::Restart { .. }
+                | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                }
+            },
+        )
+        .unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+        assert!(
+            wait_for_pane_in_stash_window(&iso, "test", &pane2, std::time::Duration::from_secs(3)),
+            "pane should move into stash before bulk purge"
+        );
+
+        let windows = fetch_all_window_metadata(&iso);
+        let panes = fetch_all_pane_metadata(&iso);
+        let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(dir.path());
+        purge_unregistered_stash_panes_bulk_with_supervisors(
+            &iso,
+            &windows,
+            &panes,
+            &live_supervisors,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            iso.pane_alive(&pane2),
+            "bulk purge should preserve stash panes with a live supervisor"
+        );
+        ipc.stop();
     }
 
     #[test]

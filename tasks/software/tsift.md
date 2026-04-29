@@ -557,7 +557,29 @@ Commit/push:
 - `btakita/tsift@645f803` (`fix: report missing workspace status scopes`) pushed to `origin/main`.
 
 Top of backlog: `#wsquery`.
-<!-- agent:boundary:af2eb430 -->
+
+❯ do #wsquery. spec-test-build-install-commit-push
+### Re: do #wsquery — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- `tsift graph`, `tsift communities`, `tsift path`, and `tsift explain` now fail closed on workspace roots that only have scoped `.tsift/indexes/<scope>/index.db` files. Instead of blaming a missing root `.tsift/index.db`, the shared query resolver now requires `--scope <scope>` and lists both the available and currently indexed scope ids.
+- `cmd_graph` now shares the same read-only query opener as `communities`, `path`, and `explain`, so all four commands enforce the same workspace-scope contract.
+- added regressions in both the direct command path (`src/main.rs`) and the compiled CLI surface (`tests/exit_code.rs`), updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the crate version to `0.1.17`.
+
+Verification:
+- `cargo test graph_cmd_requires_scope_for_workspace_root_without_shared_index -- --nocapture` passed.
+- `cargo test workspace_graph_queries_require_scope_without_shared_root_index --test exit_code -- --nocapture` passed.
+- `make check` passed: 378 unit tests + 33 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.17`.
+
+Commit/push:
+- `btakita/tsift@c58a465` (`fix: require scope for workspace graph queries`) pushed to `origin/main`.
+
+Top of backlog: `#sumdiff`.
+<!-- agent:boundary:516d96cf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -566,7 +588,6 @@ Top of backlog: `#wsquery`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wsquery] [recommended] workspace queries: make graph / explain / path / communities workspace-aware by default, or fail with an explicit scope-selection error instead of a missing root DB
 - [ ] [#sumdiff] [recommended] summarize diff mode: include untracked files, not just git diff --name-only HEAD
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST

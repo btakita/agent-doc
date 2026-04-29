@@ -611,7 +611,25 @@ Top of backlog: `#tmv7`.
 3. Medium: default search on a workspace that only has scoped indexes silently creates a second shared-root index layout. [`resolve_search_index_targets()`](../../src/tsift/src/main.rs) lines 2928-2934 always falls back to `<root>/.tsift/index.db` when neither `--scope` nor `--federated` is set, and [`precheck_search_indexes()`](../../src/tsift/src/main.rs) lines 2975-2980 autoindexes any missing target. The result is that `tsift search ... --path <workspace-root>` mutates a workspace that was intentionally indexed via `.tsift/indexes/*/index.db`, instead of failing closed like `graph`/`path`/`communities` now do. I reproduced it in a temp workspace: after `tsift index --workspace <root>`, `<root>/.tsift/index.db` did not exist; one plain `tsift search alpha_fn --path <root> --json` created it.
 
 Verification: review-only turn. I validated the findings with direct CLI repros in temporary repos; I did not change code or run the full suite.
-<!-- agent:boundary:eab852f3 -->
+
+❯ The code review suggestions were not added to the backlog. #agent-doc-bug
+### Re: backlog miss / `#agent-doc-bug` — gpt-5
+
+That was a real miss.
+
+I repaired the `tsift` backlog in this cycle by adding the three review follow-ups as recommended items, in priority order:
+1. `#subroot` — nested-path commands should resolve to the ancestor project root that already owns `.tsift/`.
+2. `#wsmix` — workspace `status` should not hide missing scoped indexes just because a shared root index exists.
+3. `#wssearch` — plain workspace `search` should stop auto-creating a shared root index layout when the workspace is intentionally scoped-only.
+
+I also logged this as an `agent-doc` workflow bug:
+- added `#fuback` to `tasks/agent-doc/agent-doc-bugs2.md`
+- created `tasks/agent-doc/plan-follow-up-backlog-capture.md`
+
+Root cause: the review turn committed findings-only prose, but the closeout guards key mostly off recommendation-shaped response text. That let a `#code-review` flow with implied `#follow-up-backlog` intent commit without any backlog mutation.
+
+Verification: planning/bookkeeping only for the `agent-doc` side. I did not change `src/agent-doc` code or run tests in this turn.
+<!-- agent:boundary:ae3ccad4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -620,6 +638,9 @@ Verification: review-only turn. I validated the findings with direct CLI repros 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#subroot] [recommended] Resolve commands against ancestor project roots that already own .tsift/, so nested-path status/search/graph do not create stray nested indexes
+- [ ] [#wsmix] [recommended] Make workspace status account for scoped indexes even when .tsift/index.db also exists, so missing scoped DBs cannot masquerade as fresh
+- [ ] [#wssearch] [recommended] Make default workspace search fail closed or require explicit --scope/--federated instead of auto-creating a shared root index
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs

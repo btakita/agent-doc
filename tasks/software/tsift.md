@@ -112,7 +112,28 @@ Verification:
 - `cargo build`
 - `cargo install --path .`
 - installed binary reports `tsift 0.1.21`
-<!-- agent:boundary:1c5e6e88 -->
+
+❯ do #tmv7. spec-test-build-install-commit-push
+### Re: #tmv7 — gpt-5
+
+Implemented the tagged GitHub release pipeline in `src/tsift` and pushed it as `0ffc428` (`build: add tagged release workflow`).
+
+What changed:
+- Added `.github/workflows/release.yml` to build checked release binaries for Linux x86_64, macOS x86_64/aarch64, and Windows x86_64 on `v*` tags, then attach archives plus `.sha256` files to the GitHub Release.
+- Added a tag/version guard so `vX.Y.Z` must match `Cargo.toml` before the release jobs continue.
+- Added the missing `tagpath` crates.io version requirement and documented the release contract plus packaging blocker in `SPEC.md` and `CLAUDE.md`.
+- Fixed a pre-existing Clippy failure in the CLI autoindex flag test so the release verification gate can actually pass.
+
+Current blocker:
+- I did not enable live crates.io publishing. `tsift` still depends on `github.com/rupurt/sift`, and that library is not published on crates.io under a compatible package name. The existing crates.io `sift` crate is a different project, so enabling `cargo publish` today would be incorrect. The workflow keeps that job explicitly gated behind `TSIFT_ENABLE_CRATES_PUBLISH=true` until the upstream package exists and `Cargo.toml` can be retargeted safely.
+
+Verification:
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- installed binary reports `tsift 0.1.21`
+<!-- agent:boundary:c745290d -->
 <!-- /agent:exchange -->
 
 <!--

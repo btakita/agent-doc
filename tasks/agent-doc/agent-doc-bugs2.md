@@ -179,10 +179,31 @@ Verification:
 Commit / push: `53a3c5c` (`fix: guard route dispatch ownership`) pushed to `origin/20260422/codex-agent-backend`.
 
 `#rtxf` is done.
-<!-- agent:boundary:a7cf5348 -->
+❯ do #smdq. spec-test-build-install-commit-push
+### Re: #smdq startup-miss diagnostic dispatch — gpt-5
+
+Implemented `#smdq` in `src/agent-doc`.
+
+- Startup-miss diagnostics now use a tmux-owned `display-message` overlay for 10 seconds instead of drafting `echo '...'` into the pane input buffer.
+- Added route coverage for the retry-command rendering and for the regression that proves no drafted shell `echo` is left behind in the pane.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the new startup-miss overlay contract.
+
+That line appeared in the Codex pane because `route.rs` previously called `tmux.send_keys_raw("echo '...'")`, which typed literal shell text into the pane without a shell-owned execution boundary. It was not Entered because the diagnostic path never submitted it, and submitting it would still have been the wrong primitive for an agent pane.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push: `2c6b284` (`fix: surface startup miss diagnostics visibly`) pushed to `origin/20260422/codex-agent-backend`.
+
+`#smdq` is done.
+<!-- agent:boundary:d1e346e0 -->
 <!-- /agent:exchange -->
 
 <!--
+Rename ``
+
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
@@ -193,7 +214,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#smdq] Fix startup-miss diagnostics that are queued into the harness input buffer instead of being surfaced visibly. Repro from `tasks/agent-doc/agent-doc-bugs2.md` on April 29, 2026: `ops.log` recorded `route_cycle_start_missing` for Codex pane `%399` on `do #ppct. spec-test-build-install-commit-push`, but the live pane stayed open and showed a drafted `echo '[agent-doc] startup-miss: ...'` line with Codex UI text `tab to queue message`. `route.rs` currently sends the diagnostic text with `tmux.send_keys_raw(...)`, so the recovery hint can sit as unsent input and make the pane look crashed. Plan: `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`
 - [ ] [#xfrr] Fail closed when an `#agent-doc-bug` response identifies multiple bug reports but transfers only a subset to `agent-doc-bugs2.md`. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: only `#zpc0` and `#lvak` were added, while the additional user-reported bugs about the uncommitted repair, missing backlog transfer, and ignored list-shape requirement were left out. The fix should compare the prompt contract against the response/body mutations and interrupt when the promised bug-transfer set is incomplete.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

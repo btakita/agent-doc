@@ -519,6 +519,14 @@ fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
     if response_text.trim().is_empty() {
         return Ok(GuardResult::None);
     }
+    if state.requires_backlog_capture
+        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    {
+        return Ok(GuardResult::Error(
+            "[session-check] error: committed response came from a prompt that required backlog capture, but this cycle recorded no backlog mutations and did not explicitly state that there were no actionable follow-up items"
+                .to_string(),
+        ));
+    }
 
     let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
     let skip = match signal.estimated_count {
@@ -1999,6 +2007,42 @@ mod tests {
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(!report.warnings.is_empty());
         assert!(report.warnings[0].contains("recommendation-like items"));
+    }
+
+    #[test]
+    fn session_check_blocks_backlog_required_review_without_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n"),
+            "### Re: code review — gpt-5\n\n1. High: Queue closeout can drift.\n2. Medium: Snapshot repair is too permissive.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("required backlog capture"));
+            }
+            other => panic!("expected backlog-required failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_allows_backlog_required_review_with_explicit_no_followups() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n"),
+            "### Re: code review — gpt-5\n\nNo actionable follow-up items remained after this pass.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
     }
 
     #[test]

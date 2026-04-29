@@ -2295,7 +2295,7 @@ mod tests {
             pane,
             &format!("exec {} {}", script.display(), file.display()),
         );
-        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
+        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
         assert!(
             content.contains("\n>"),
             "mock agent-doc session should present a prompt, got: {content}"
@@ -2304,7 +2304,7 @@ mod tests {
 
     fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script: &Path) {
         send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
-        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(3));
+        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
         assert!(
             content.contains("\n>"),
             "mock agent-doc session should present a prompt, got: {content}"

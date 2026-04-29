@@ -607,11 +607,6 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
 }
 
 fn precommit_pending_capture_check(file: &Path) -> Result<()> {
-    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
-    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
-        return Ok(());
-    }
-
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(());
     };
@@ -631,6 +626,23 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
 
     let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
+        return Ok(());
+    }
+    if state.requires_backlog_capture
+        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: active prompt requested backlog capture \
+             but no backlog mutations were recorded this cycle\n\
+             [finalize] hint: re-run finalize with --pending-add flags, \
+             explicitly state that there were no actionable follow-up items, \
+             add <!-- no-pending-capture --> to suppress, \
+             or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures"
+        );
+    }
+
+    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
+    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
 
@@ -7066,6 +7078,37 @@ mod precommit_pending_capture_tests {
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(err.to_string().contains("[finalize] pre-commit gate"));
         assert!(err.to_string().contains("--pending-add"));
+    }
+
+    #[test]
+    fn precommit_blocks_backlog_required_review_without_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: code review — opus-4-6\n\n1. High: Queue closeout can drift.\n2. Medium: Snapshot repair is too permissive.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("requested backlog capture"));
+        assert!(err.to_string().contains("--pending-add"));
+    }
+
+    #[test]
+    fn precommit_allows_backlog_required_review_with_explicit_no_followups() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: code review — opus-4-6\n\nNo new backlog item came out of this change.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("explicit no-follow-up proof should satisfy backlog-required closeout");
     }
 
     #[test]

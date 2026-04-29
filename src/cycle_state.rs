@@ -65,6 +65,8 @@ pub struct CycleState {
     pub response_sha256: Option<String>,
     #[serde(default)]
     pub had_pending_mutations: bool,
+    #[serde(default)]
+    pub requires_backlog_capture: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
 }
@@ -108,6 +110,7 @@ pub fn start_preflight(
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
+        requires_backlog_capture: false,
         pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
@@ -197,6 +200,21 @@ pub fn record_pending_done_ids(file: &Path, ids: &[String]) -> Result<Option<Cyc
     Ok(Some(state))
 }
 
+pub fn record_backlog_capture_requirement(
+    file: &Path,
+    required: bool,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.requires_backlog_capture != required {
+        state.requires_backlog_capture = required;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -272,6 +290,7 @@ fn synthetic_state_with_id(
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
+        requires_backlog_capture: false,
         pending_done_ids: Vec::new(),
     }
 }
@@ -392,6 +411,20 @@ mod tests {
             load(&doc).unwrap().unwrap().pending_done_ids,
             vec!["abc1".to_string(), "z9".to_string()]
         );
+    }
+
+    #[test]
+    fn record_backlog_capture_requirement_sets_flag() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_backlog_capture_requirement(&doc, true)
+            .unwrap()
+            .unwrap();
+        assert!(state.requires_backlog_capture);
+        assert!(load(&doc).unwrap().unwrap().requires_backlog_capture);
     }
 
     #[test]

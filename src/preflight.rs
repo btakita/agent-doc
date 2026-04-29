@@ -1055,6 +1055,15 @@ pub fn run(file: &Path) -> Result<()> {
         .as_ref()
         .map(|d| diff::classify_prompt_bearing_changes(d))
         .unwrap_or_default();
+    let prompt_targets = prompt_bearing_changes
+        .iter()
+        .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
+        .map(|change| change.text.clone())
+        .collect::<Vec<_>>();
+    let added_diff_lines = diff_result
+        .as_ref()
+        .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
+        .unwrap_or_default();
 
     // Legacy compatibility surface for older skill consumers.
     let inline_annotations = annotated_diff
@@ -1117,6 +1126,14 @@ pub fn run(file: &Path) -> Result<()> {
             "document references missing prompt preset(s): {}",
             missing_prompt_presets.join(", ")
         );
+    }
+    let backlog_capture_required = crate::prompt_contract::prompt_requests_backlog_work(
+        &prompt_targets,
+        &added_diff_lines,
+        &frontmatter_prompt_presets,
+    );
+    if !no_changes {
+        crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
     }
 
     // Diff heuristic — counts user-added lines (excluding +++ headers).

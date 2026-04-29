@@ -28,6 +28,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 ## Core Principles
 
 - **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
+- **Local tmux stack work spans sibling repos** — in this `agent-loop` workspace, `src/tmux-router` is a first-class development target for `src/agent-doc`. When a task moves generic tmux pane/session behavior out of `agent-doc`, update the sibling crate too and rely on the workspace cargo patch at `.cargo/config.toml` so local builds exercise the moved code.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
 - **Show progress** — stream your response in the console so the user sees real-time feedback.
 

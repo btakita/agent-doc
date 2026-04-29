@@ -437,7 +437,16 @@ Commit / push:
 - `49499a6` `fix: transfer icebox alongside backlog`
 
 `#rfbj` remains the top backlog item.
-<!-- agent:boundary:14f62b64 -->
+
+❯ do #rfbj. spec-test-build-install-commit-push
+### Re: #rfbj backlog/icebox headers — gpt-5
+
+Implemented in `src/agent-doc` and pushed on 2026-04-28 as `7db6070` (`fix: preserve backlog and icebox headers`) to `origin/20260422/codex-agent-backend`.
+
+Backlog and icebox headings, separators, and other non-item lines are now preserved through the granular pending ops path and through replace-pending normalization/repair. I updated the command/spec docs and `VERSIONS.md` alongside the code change.
+
+Verification completed with `cargo fmt`, `cargo build`, `cargo install --path . --force`, and focused coverage for pending normalization and repair. The full serial suite `cargo test -- --test-threads=1` still hit one existing flaky route prompt-readiness test (`route::tests::resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts`), but an isolated rerun of that exact test passed after the implementation landed.
+<!-- agent:boundary:2e1e7751 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -446,7 +455,7 @@ Commit / push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rfbj] Support headers in the backlog and icebox to organize + categorize long lists.
+- [ ] [#idbx] Fix `do #id` closeout for icebox-only items; treat `agent:icebox` as tracked work for pending-done detection and `--pending-done` mutation. Plan: `tasks/agent-doc/plan-icebox-done-closeout.md`
 - [ ] [#w4va] Support nested lists in the backlog and icebox for subtasks and dependencies
 - [ ] [#vzpc] Support optional numeric lists in the backlog to enforce order
 - [ ] [#qey0] Create a grammar for JB and VSCode that supports visually distinguishing agent-doc elements.

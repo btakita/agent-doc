@@ -89,7 +89,7 @@ use anyhow::Result;
 use fs2::FileExt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -188,6 +188,36 @@ fn absolute_git_dir_at(git_root: &Path) -> Option<PathBuf> {
     path.canonicalize().ok().or(Some(path))
 }
 
+fn is_git_dir(path: &Path) -> bool {
+    path.join("HEAD").is_file() && path.join("config").is_file()
+}
+
+fn collect_nested_git_dirs(root: &Path, dirs: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if is_git_dir(&path) {
+            dirs.push(path);
+            continue;
+        }
+        collect_nested_git_dirs(&path, dirs);
+    }
+}
+
+fn nested_git_dirs_under(git_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    collect_nested_git_dirs(&git_dir.join("modules"), &mut dirs);
+    dirs
+}
+
 fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
     absolute_git_dir_at(git_root)
 }
@@ -240,16 +270,21 @@ pub(crate) fn workspace_access_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
 /// Return external git metadata directories a workspace-scoped harness must be
 /// allowed to write when operating on `file`.
 ///
-/// Ordinary repos return an empty list because `.git/` lives under the repo
-/// root. Submodules return the external `.git/modules/...` gitdir plus the
-/// superproject `.git` used by parent-pointer updates.
+/// Plain repos expose any nested submodule gitdirs under `.git/modules/...`.
+/// Submodules additionally expose their own external `.git/modules/...` gitdir
+/// plus the superproject `.git` used by parent-pointer updates.
 pub(crate) fn external_git_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
     let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
         return Vec::new();
     };
     let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
     let mut dirs = Vec::new();
-    push_workspace_access_dir(&mut dirs, &git_root, absolute_git_dir_at(&git_root));
+    if let Some(git_dir) = absolute_git_dir_at(&git_root) {
+        push_workspace_access_dir(&mut dirs, &git_root, Some(git_dir.clone()));
+        for nested in nested_git_dirs_under(&git_dir) {
+            push_workspace_access_dir(&mut dirs, &git_root, Some(nested));
+        }
+    }
     if in_submodule {
         push_workspace_access_dir(&mut dirs, &git_root, absolute_git_dir_at(&super_root));
     }
@@ -2346,6 +2381,73 @@ fn chrono_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn init_repo(repo: &Path) {
+        Command::new("git")
+            .current_dir(repo)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+    }
+
+    fn commit_file(repo: &Path, rel: &str, content: &str, msg: &str) {
+        let path = repo.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, content).unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["add", "--", rel])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
+
+    fn add_submodule(repo: &Path, origin: &Path, target: &str, msg: &str) {
+        let url = format!("file://{}", origin.display());
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &url,
+                target,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
 
     #[test]
     fn strip_head_markers_from_headings() {
@@ -4947,6 +5049,52 @@ mod tests {
         assert!(
             dirs.contains(&outer.join(".git")),
             "superproject gitdir should be exposed for pointer updates: {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn external_git_dirs_for_submodule_include_nested_submodule_gitdirs() {
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        init_repo(outer);
+        commit_file(outer, "README.md", "# outer\n", "init outer");
+
+        let sub_origin_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_origin_dir.path();
+        init_repo(sub_origin);
+        commit_file(sub_origin, "README.md", "# sub\n", "init sub");
+
+        let nested_origin_dir = tempfile::TempDir::new().unwrap();
+        let nested_origin = nested_origin_dir.path();
+        init_repo(nested_origin);
+        commit_file(nested_origin, "README.md", "# nested\n", "init nested");
+
+        add_submodule(outer, sub_origin, "src/sub", "add submodule");
+
+        let submodule_root = outer.join("src/sub");
+        add_submodule(
+            &submodule_root,
+            nested_origin,
+            "src/nested",
+            "add nested submodule",
+        );
+
+        let doc = submodule_root.join("tasks/session.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, "test\n").unwrap();
+
+        let dirs = external_git_dirs_for_doc(&doc);
+        assert!(
+            dirs.contains(&outer.join(".git/modules/src/sub")),
+            "submodule gitdir should be exposed: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&outer.join(".git/modules/src/sub/modules/src/nested")),
+            "nested submodule gitdir should be exposed: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&outer.join(".git")),
+            "superproject gitdir should still be exposed: {dirs:?}"
         );
     }
 

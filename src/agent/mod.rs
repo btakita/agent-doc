@@ -382,6 +382,73 @@ mod tests {
             .any(|w| w[0] == "--add-dir" && w[1] == dir.as_ref())
     }
 
+    fn init_repo(repo: &Path) {
+        Command::new("git")
+            .current_dir(repo)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["config", "protocol.file.allow", "always"])
+            .output()
+            .unwrap();
+    }
+
+    fn commit_file(repo: &Path, rel: &str, content: &str, msg: &str) {
+        let path = repo.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, content).unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["add", "--", rel])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
+
+    fn add_submodule(repo: &Path, origin: &Path, target: &str, msg: &str) {
+        let url = format!("file://{}", origin.display());
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &url,
+                target,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
+
     #[test]
     fn resolve_claude() {
         let agent = resolve("claude", None, vec![]);
@@ -550,6 +617,54 @@ mod tests {
 
         assert!(has_add_dir(&args, outer));
         assert!(has_add_dir(&args, &outer.join(".git/modules/src/sub")));
+        assert!(has_add_dir(&args, &outer.join(".git")));
+    }
+
+    #[test]
+    fn append_workspace_access_args_adds_nested_submodule_gitdirs() {
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        init_repo(outer);
+        commit_file(outer, "README.md", "# outer\n", "init outer");
+
+        let sub_origin_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_origin_dir.path();
+        init_repo(sub_origin);
+        commit_file(sub_origin, "README.md", "# sub\n", "init sub");
+
+        let nested_origin_dir = tempfile::TempDir::new().unwrap();
+        let nested_origin = nested_origin_dir.path();
+        init_repo(nested_origin);
+        commit_file(nested_origin, "README.md", "# nested\n", "init nested");
+
+        add_submodule(outer, sub_origin, "src/sub", "add submodule");
+
+        let submodule_root = outer.join("src/sub");
+        add_submodule(
+            &submodule_root,
+            nested_origin,
+            "src/nested",
+            "add nested submodule",
+        );
+
+        let doc = submodule_root.join("tasks/session.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, "test\n").unwrap();
+
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "-s".to_string(),
+            "workspace-write".to_string(),
+        ];
+        append_workspace_access_args("codex", &mut args, &doc);
+
+        assert!(has_add_dir(&args, outer));
+        assert!(has_add_dir(&args, &outer.join(".git/modules/src/sub")));
+        assert!(has_add_dir(
+            &args,
+            &outer.join(".git/modules/src/sub/modules/src/nested")
+        ));
         assert!(has_add_dir(&args, &outer.join(".git")));
     }
 

@@ -278,16 +278,37 @@ Commit / push:
 - `c49040d` `fix: show frontmatter parse excerpt`
 
 No new backlog item came out of this change. `#fuback` remains the top accepted active item.
-<!-- agent:boundary:46870908 -->
+
+❯ do #rpaj. spec-test-build-install-commit-push
+### Re: #rpaj compact exchange context — gpt-5
+
+Implemented in `src/agent-doc` and pushed `157bc64` on `2026-04-28`.
+
+Full `agent-doc compact` on the `exchange` component now keeps a default `### Session Summary` instead of only an archive pointer when no custom `--message` is supplied. That summary carries forward live context from `agent:backlog` / `agent:pending`, `agent:queue`, and `agent:icebox`, so unresolved work survives even when the old exchange prose is removed. I also updated the bundled compact-exchange runbook and command spec to make those components the canonical compaction inputs and keep `prompt_presets` limited to summary-policy tuning.
+
+I added regression coverage for the default summary path and the bundled compact-exchange runbook assertions.
+
+Verification:
+- `cargo fmt`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `157bc64` `fix: preserve live state in exchange compaction`
+
+No new backlog item came out of this change. `#fuback` remains the top accepted active item.
+<!-- agent:boundary:09da4f15 -->
 <!-- /agent:exchange -->
 
 <!--
-compact exchange should peek into the backlog to provide more context
+Create an agent:icebox element to stash items that may be put into the backlog later. The transfer command and other mechanisms that use the backlog should also support the icebox.
+---
+Support headers in the backlog and icebox to organize + categorize long lists.
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rpaj] [recommended] Make compact exchange synthesize backlog-aware context from live backlog/queue/icebox state; use presets only to tune summary policy
 - [ ] [#fuback] Enforce follow-up backlog capture for review flows that request or imply backlog output
 <!-- /agent:backlog -->

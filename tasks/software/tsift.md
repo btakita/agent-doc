@@ -600,7 +600,18 @@ Commit/push:
 - `btakita/tsift@595b195` (`fix: include untracked summarize diff files`) pushed to `origin/main`.
 
 Top of backlog: `#tmv7`.
-<!-- agent:boundary:5b6de1da -->
+
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: most query/status commands still treat the caller's current subdirectory as a brand-new project root instead of resolving the ancestor that already owns `.tsift/`. [`cmd_search()`](../../src/tsift/src/main.rs) canonicalizes `--path` directly at lines 3048-3052, [`cmd_status()`](../../src/tsift/src/main.rs) does the same at lines 2666-2670, and [`cmd_graph()`](../../src/tsift/src/main.rs) plus [`open_index_db()`](../../src/tsift/src/main.rs) repeat the pattern at lines 1658-1662 and 1981-1985. That means running from `repo/src/` ignores `repo/.tsift` and can synthesize `repo/src/.tsift/index.db` instead. I reproduced it in a temp repo: after indexing the repo root, `tsift status <root>/src --json` reported `{"index":{"state":"missing"}...}` and `tsift search alpha_helper --path <root>/src --json` created `<root>/src/.tsift/index.db`. [`lint::find_project_root_for_path()`](../../src/tsift/src/lint.rs) lines 162-177 already has the ancestor-walk logic the rest of the CLI is missing.
+
+2. High: workspace status hides missing scoped indexes whenever a shared root index happens to exist. In [`status::check_index()`](../../src/tsift/src/status.rs) lines 138-175, the presence of `.tsift/index.db` short-circuits all workspace inspection, so [`check_workspace_index()`](../../src/tsift/src/status.rs) lines 177-240 never runs. I reproduced this with a workspace containing `alpha` and `beta`: after `tsift index <root>` and then `tsift index --submodule alpha <root>`, `tsift status <root> --json` still returned `{"index":{"state":"fresh","total_files":2,...}}` with no `workspace_scopes` or `missing_scopes`, even though the `beta` scoped index had never been built.
+
+3. Medium: default search on a workspace that only has scoped indexes silently creates a second shared-root index layout. [`resolve_search_index_targets()`](../../src/tsift/src/main.rs) lines 2928-2934 always falls back to `<root>/.tsift/index.db` when neither `--scope` nor `--federated` is set, and [`precheck_search_indexes()`](../../src/tsift/src/main.rs) lines 2975-2980 autoindexes any missing target. The result is that `tsift search ... --path <workspace-root>` mutates a workspace that was intentionally indexed via `.tsift/indexes/*/index.db`, instead of failing closed like `graph`/`path`/`communities` now do. I reproduced it in a temp workspace: after `tsift index --workspace <root>`, `<root>/.tsift/index.db` did not exist; one plain `tsift search alpha_fn --path <root> --json` created it.
+
+Verification: review-only turn. I validated the findings with direct CLI repros in temporary repos; I did not change code or run the full suite.
+<!-- agent:boundary:eab852f3 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -335,7 +335,22 @@ Note:
 - I cleaned up the disposable tmux pane/window after the repro.
 - I did not let the second recovery leg run all the way through a second response write-back; I stopped after the fresh-pane recovery path was proven live.
 - I left the ignored temp worktree at `tmp/live-tmux-repro` if you want to inspect the repro doc/logs.
-<!-- agent:boundary:82b611aa -->
+❯ #tmuxcrash #next-steps
+### Re: `#tmuxcrash` next steps — gpt-5
+
+The backlog does not need reordering from the live repro follow-up. The top item is still `#tmuxcrash`.
+
+What the live repro proved:
+- stale/dead pane recovery is working in the exercised path
+- route prunes a dead registration and starts a fresh pane instead of misreporting that specific case as a pane crash
+
+What remains inside `#tmuxcrash`:
+1. Narrow the item from broad "verify recovery" to the remaining provenance gap: distinguish true child death / missing-exit / commit-boundary failures from false crash reports.
+2. Run one more live repro where the restarted second leg is allowed to finish its full write/commit path, so we can separate "fresh pane recovery succeeded" from "the recovered cycle fully closed".
+3. If that second-leg closeout is clean, split any remaining stale-marker or startup-miss cleanup into `#smst` and shrink `#tmuxcrash` to true crash provenance only.
+
+No new backlog item is needed from this turn; the existing `#tmuxcrash` item is still the right bucket, just with a narrower remaining scope after the live repro.
+<!-- agent:boundary:1a356e98 -->
 <!-- /agent:exchange -->
 
 <!--

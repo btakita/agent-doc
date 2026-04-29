@@ -78,7 +78,22 @@ Verification:
 
 Push:
 - `origin/main` -> `ca6e490`
-<!-- agent:boundary:ac937ff5 -->
+❯ do #rttp. spec-test-commit-push
+### Re: #rttp spec-test-commit-push — gpt-5
+
+Implemented nested lint index discovery for duplicate-leaf workspace scopes and pushed `src/tsift` `main` to `19f0e48` (`fix: recurse lint index discovery for nested scopes`).
+
+Changes:
+- `src/lint.rs` now recursively walks explicit `indexes/` trees, so exported aggregate dirs still find `index.db` files under nested scope ids like `pkg/app/foo` and `vendor/foo`.
+- Added unit coverage for nested explicit index discovery and a CLI regression that lints against an exported `indexes/` tree with duplicate-leaf scopes.
+- Updated `SPEC.md` to document recursive `indexes/**/index.db` discovery for lint.
+
+Verification:
+- `cargo test` (405 unit tests, 41 integration tests)
+
+Push:
+- `origin/main` -> `19f0e48`
+<!-- agent:boundary:bad38312 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -87,7 +102,6 @@ Push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rttp] [recommended] Make lint index discovery recurse through nested  paths for duplicate-leaf workspace scopes
 - [ ] [#98pz] [recommended] Remove the repo-root  fallback from lint workspace entity discovery unless it is an intentional compatibility surface
 <!-- /agent:backlog -->
 

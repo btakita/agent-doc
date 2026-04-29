@@ -629,7 +629,29 @@ I also logged this as an `agent-doc` workflow bug:
 Root cause: the review turn committed findings-only prose, but the closeout guards key mostly off recommendation-shaped response text. That let a `#code-review` flow with implied `#follow-up-backlog` intent commit without any backlog mutation.
 
 Verification: planning/bookkeeping only for the `agent-doc` side. I did not change `src/agent-doc` code or run tests in this turn.
-<!-- agent:boundary:ae3ccad4 -->
+
+❯ do #subroot. spec-test-build-install-commit-push
+### Re: do #subroot — gpt-5
+
+Implemented in `tsift`.
+
+What changed:
+- added a shared path resolver that canonicalizes the input and then promotes nested query/status paths to the nearest ancestor that already owns `.tsift/`
+- routed `tsift status`, `tsift search`, and the shared read-only query path (`graph` / `communities` / `path` / `explain`) through that resolver, so subdirectory calls reuse the owning project/workspace indexes instead of synthesizing nested `.tsift/index.db`
+- added regressions in `src/lint.rs`, the direct command path in `src/main.rs`, and the compiled CLI surface in `tests/exit_code.rs`
+- updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and bumped the crate version to `0.1.19`
+
+Verification:
+- `cargo test nested -- --nocapture` passed.
+- `make check` passed: 382 unit tests + 35 exit-code/integration tests.
+- `cargo build` passed.
+- `cargo install --path .` passed, and `tsift --version` now reports `0.1.19`.
+
+Commit/push:
+- `btakita/tsift@bea2991` (`fix: resolve nested query paths to tsift root`) pushed to `origin/main`.
+
+Top of backlog: `#wsmix`.
+<!-- agent:boundary:020de715 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -638,7 +660,6 @@ Verification: planning/bookkeeping only for the `agent-doc` side. I did not chan
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#subroot] [recommended] Resolve commands against ancestor project roots that already own .tsift/, so nested-path status/search/graph do not create stray nested indexes
 - [ ] [#wsmix] [recommended] Make workspace status account for scoped indexes even when .tsift/index.db also exists, so missing scoped DBs cannot masquerade as fresh
 - [ ] [#wssearch] [recommended] Make default workspace search fail closed or require explicit --scope/--federated instead of auto-creating a shared root index
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

@@ -294,6 +294,36 @@ fn startup_miss_requires_fresh_start(
     )
 }
 
+fn startup_miss_superseded_by_later_open_start(
+    miss: &crate::startup_miss::StartupMiss,
+    registered_pane: &str,
+    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> bool {
+    log_status.is_some_and(|status| {
+        status.latest_session_open()
+            && status.latest_start_pane.as_deref() == Some(registered_pane)
+            && status
+                .latest_start_timestamp
+                .is_some_and(|ts| ts > miss.timestamp)
+    })
+}
+
+fn startup_miss_should_restart_live_owner(
+    miss: &crate::startup_miss::StartupMiss,
+    registered_pane: &str,
+    live_owner: Option<&str>,
+    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> bool {
+    live_owner == Some(registered_pane)
+        && log_status.is_some_and(|status| {
+            status.latest_session_closed()
+                && status.latest_start_pane.as_deref() == Some(registered_pane)
+                && status
+                    .latest_start_timestamp
+                    .is_some_and(|ts| ts <= miss.timestamp)
+        })
+}
+
 fn startup_miss_should_fail_closed(
     pane_alive: bool,
     registered_pane: &str,
@@ -612,6 +642,7 @@ fn resolve_or_create_pane(
         let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
             .ok()
             .flatten();
+        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
         let provenance = startup_miss_route_provenance(
             tmux,
             registered_pane,
@@ -622,8 +653,8 @@ fn resolve_or_create_pane(
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_startup_miss_detected file={} origin={:?} {}",
-                file_path, miss.origin, provenance
+                "route_startup_miss_detected file={} origin={:?} miss_timestamp={} {}",
+                file_path, miss.origin, miss_ts, provenance
             ),
         );
         if startup_miss_should_fail_closed(
@@ -655,16 +686,21 @@ fn resolve_or_create_pane(
             registered_pane,
             live_owner.as_deref(),
             supervisor_health,
+        ) || startup_miss_should_restart_live_owner(
+            &miss,
+            registered_pane,
+            live_owner.as_deref(),
+            log_status.as_ref(),
         ) {
             eprintln!(
-                "[route] registered pane {} has a startup-miss marker for {} — deregistering and starting fresh",
-                registered_pane, file_path
+                "[route] registered pane {} has an unresolved startup-miss marker from {} for {} — deregistering and starting fresh",
+                registered_pane, miss_ts, file_path
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_startup_miss_deregistered file={} pane={}",
-                    file_path, registered_pane
+                    "route_startup_miss_deregistered file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
                 ),
             );
             let _ = sessions::deregister(session_id)?;
@@ -689,18 +725,33 @@ fn resolve_or_create_pane(
             );
         }
 
-        eprintln!(
-            "[route] registered pane {} still proves live ownership for {} — clearing stale startup-miss marker",
-            registered_pane, file_path
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_startup_miss_cleared_live_owner file={} pane={}",
-                file_path, registered_pane
-            ),
-        );
-        let _ = crate::startup_miss::clear(file);
+        if startup_miss_superseded_by_later_open_start(&miss, registered_pane, log_status.as_ref())
+        {
+            eprintln!(
+                "[route] registered pane {} proves a newer open session_start after startup-miss {} for {} — clearing stale marker",
+                registered_pane, miss_ts, file_path
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_cleared_live_owner file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
+                ),
+            );
+            let _ = crate::startup_miss::clear(file);
+        } else {
+            eprintln!(
+                "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open session_start — keeping marker until dispatch proves recovery",
+                registered_pane, file_path, miss_ts
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_retained_live_owner file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
+                ),
+            );
+        }
     }
 
     // Strategy 1: Alive registered pane — reuse only when a live process tree
@@ -1108,6 +1159,15 @@ fn canonical_registered_file(entry: &sessions::SessionEntry) -> std::path::PathB
     std::fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
+fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    crate::snapshot::find_project_root(&requested)
+        .or_else(|| requested.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
+}
+
 fn pane_registration_matches_file(
     registry: &sessions::SessionRegistry,
     pane: &str,
@@ -1122,8 +1182,13 @@ fn pane_registration_matches_file(
 }
 
 fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()> {
-    let registry =
-        sessions::load().context("failed to load route registry before dispatch validation")?;
+    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
+    let registry = sessions::load_in(&registry_base_dir).with_context(|| {
+        format!(
+            "failed to load route registry before dispatch validation from {}",
+            registry_base_dir.display()
+        )
+    })?;
     if pane_registration_matches_file(&registry, pane, file_path) {
         return Ok(());
     }
@@ -1426,29 +1491,31 @@ fn require_routed_cycle_ack(
                 ),
             );
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
-            let _ = crate::startup_miss::record(
+            let miss = crate::startup_miss::record(
                 file,
                 pane,
                 session_id,
                 &harness.binary,
                 crate::startup_miss::StartupMissOrigin::RoutedTrigger,
                 baseline_id,
-            );
+            )?;
+            let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
             emit_startup_miss_diagnostic(
                 tmux,
                 pane,
                 file,
                 &format!(
-                    "routed trigger accepted but no document cycle started for pending {}",
-                    marker
+                    "routed trigger accepted but no document cycle started for pending {} (startup-miss {})",
+                    marker, miss_ts
                 ),
             );
             anyhow::bail!(
-                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {}",
+                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {} (startup_miss_timestamp={})",
                 harness.binary,
                 file.display(),
                 pane,
-                marker
+                marker,
+                miss_ts
             );
         }
     }
@@ -1934,10 +2001,7 @@ fn auto_start_in_session(
     let cwd = crate::git::resolve_pane_cwd(file);
 
     // Resolve the agent-doc binary path (same binary that's currently running)
-    let agent_doc_bin = std::env::current_exe()
-        .unwrap_or_else(|_| "agent-doc".into())
-        .to_string_lossy()
-        .to_string();
+    let agent_doc_bin = agent_doc_start_bin();
 
     // Try to split directly in an existing pane.
     // When skip_wait=true (sync path), prefer panes in the target window (agent-doc window)
@@ -2183,6 +2247,19 @@ fn auto_start_in_session(
     Ok(new_pane)
 }
 
+fn agent_doc_start_bin() -> String {
+    if let Ok(override_bin) = std::env::var("AGENT_DOC_ROUTE_BIN")
+        && !override_bin.trim().is_empty()
+    {
+        return override_bin;
+    }
+
+    std::env::current_exe()
+        .unwrap_or_else(|_| "agent-doc".into())
+        .to_string_lossy()
+        .to_string()
+}
+
 /// Poll a tmux pane until the agent is ready to accept input.
 ///
 /// Uses the harness's prompt patterns for detection.
@@ -2349,6 +2426,12 @@ mod tests {
     // A smaller lock for startup-sensitive isolated tmux tests that inject the
     // first command immediately after pane creation.
     static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Serialize mock agent launches without contending with tests that already
+    // hold TMUX_START_MUTEX for broader prompt-readiness coverage.
+    static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Serialize mutations of the route-specific binary override without
+    // contending with current-dir guards that already hold ENV_MUTEX.
+    static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         ENV_MUTEX
@@ -2358,6 +2441,18 @@ mod tests {
 
     fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
         TMUX_START_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn tmux_inject_lock() -> std::sync::MutexGuard<'static, ()> {
+        TMUX_INJECT_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn route_bin_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ROUTE_BIN_ENV_MUTEX
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -2805,17 +2900,41 @@ mod tests {
         script
     }
 
+    fn write_mock_start_agent_doc(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-start");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '❯ \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn launch_mock_registered_agent_doc(
         iso: &IsolatedTmux,
         pane: &str,
         script: &Path,
         file: &Path,
     ) {
-        send_keys_with_retry(
-            iso,
-            pane,
-            &format!("exec {} {}", script.display(), file.display()),
-        );
+        {
+            let _tmux_guard = tmux_inject_lock();
+            assert!(
+                wait_for_shell(iso, pane, std::time::Duration::from_secs(5)),
+                "shell did not become ready before mock agent launch"
+            );
+            send_keys_with_retry(
+                iso,
+                pane,
+                &format!("exec {} {}", script.display(), file.display()),
+            );
+        }
         let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
         assert!(
             content.contains("\n>"),
@@ -2824,7 +2943,14 @@ mod tests {
     }
 
     fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script: &Path) {
-        send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
+        {
+            let _tmux_guard = tmux_inject_lock();
+            assert!(
+                wait_for_shell(iso, pane, std::time::Duration::from_secs(5)),
+                "shell did not become ready before mock agent launch"
+            );
+            send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
+        }
         let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
         assert!(
             content.contains("\n>"),
@@ -3175,7 +3301,7 @@ history line
     fn wait_for_start_ack_detects_new_preflight_cycle() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-child-skip.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
         let doc_for_thread = doc.clone();
@@ -3200,7 +3326,7 @@ history line
     fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-pane-busy.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
         crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
@@ -3237,7 +3363,7 @@ history line
     fn wait_for_start_ack_times_out_without_cycle_change() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-same-cycle.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
         crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
@@ -3261,7 +3387,7 @@ history line
     fn wait_for_start_ack_ignores_same_committed_cycle_mutation() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-ack-ok.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
         crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
@@ -3299,7 +3425,7 @@ history line
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-owner-missing.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
@@ -3332,7 +3458,7 @@ history line
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-owner-reregister.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
@@ -3362,6 +3488,10 @@ history line
                 .contains("no new document cycle started for pending prompt_target"),
             "unexpected error: {err:#}"
         );
+        assert!(
+            err.to_string().contains("startup_miss_timestamp="),
+            "routed startup-miss errors should surface the recorded timestamp: {err:#}"
+        );
 
         let content = wait_for_pane_contains(
             &iso,
@@ -3385,7 +3515,7 @@ history line
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-live-owner-supervisor-pid.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
@@ -3444,7 +3574,7 @@ history line
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("session.md");
+        let doc = dir.path().join("route-supervisor-restart.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
@@ -3590,6 +3720,7 @@ history line
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-owner-missing", &stale_pane, &file_path).unwrap();
+        let mock_start = write_mock_start_agent_doc(dir.path());
 
         let doc_for_thread = doc.clone();
         let current_for_thread = format!("# Session\n❯ follow-up question\n");
@@ -3610,17 +3741,27 @@ history line
             .unwrap();
         });
 
-        let resolved = resolve_or_create_pane(
-            &iso,
-            &doc,
-            None,
-            &[],
-            "route-live-owner-missing",
-            &file_path,
-            session,
-            &HarnessConfig::codex(),
-            &mut Vec::new(),
-        )
+        let resolved = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-live-owner-missing",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut Vec::new(),
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
         .expect("route should continue recovery after clearing the stale registration");
         assert_ne!(resolved, stale_pane);
 
@@ -5287,6 +5428,58 @@ history line
             "%42",
             None,
             SupervisorHealth::Healthy
+        ));
+    }
+
+    #[test]
+    fn startup_miss_live_owner_restart_requires_closed_unsuperseded_start() {
+        let miss = crate::startup_miss::StartupMiss {
+            file: "test.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 10,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: Some("cycle-abc".to_string()),
+        };
+        let closed_same_start = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(10),
+            last_event: Some(
+                "auto_trigger_timeout harness=codex reason=no_prompt_after_30s".to_string(),
+            ),
+            saw_process_exit_after_latest_start: true,
+            saw_session_end_after_latest_start: false,
+        };
+        let newer_open_start = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(11),
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+        };
+
+        assert!(startup_miss_should_restart_live_owner(
+            &miss,
+            "%42",
+            Some("%42"),
+            Some(&closed_same_start)
+        ));
+        assert!(!startup_miss_should_restart_live_owner(
+            &miss,
+            "%42",
+            Some("%42"),
+            Some(&newer_open_start)
+        ));
+        assert!(startup_miss_superseded_by_later_open_start(
+            &miss,
+            "%42",
+            Some(&newer_open_start)
+        ));
+        assert!(!startup_miss_superseded_by_later_open_start(
+            &miss,
+            "%42",
+            Some(&closed_same_start)
         ));
     }
 

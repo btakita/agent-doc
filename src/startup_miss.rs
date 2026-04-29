@@ -121,9 +121,20 @@ pub fn record(
     harness: &str,
     origin: StartupMissOrigin,
     cycle_baseline_id: Option<&str>,
-) -> Result<()> {
+) -> Result<StartupMiss> {
     let Some(path) = state_path(file)? else {
-        return Ok(());
+        return Ok(StartupMiss {
+            file: file.display().to_string(),
+            pane_id: pane_id.to_string(),
+            session_id: session_id.to_string(),
+            harness: harness.to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            origin,
+            cycle_baseline_id: cycle_baseline_id.map(|s| s.to_string()),
+        });
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -143,7 +154,7 @@ pub fn record(
     };
     let json = serde_json::to_string_pretty(&marker)?;
     std::fs::write(&path, json)?;
-    Ok(())
+    Ok(marker)
 }
 
 pub fn load(file: &Path) -> Result<Option<StartupMiss>> {
@@ -166,6 +177,34 @@ pub fn clear(file: &Path) -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+pub fn format_timestamp(epoch_secs: u64) -> String {
+    let epoch: libc::time_t = match epoch_secs.try_into() {
+        Ok(value) => value,
+        Err(_) => return epoch_secs.to_string(),
+    };
+    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+    let mut buf = [0u8; 21];
+    let format = b"%Y-%m-%dT%H:%M:%SZ\0";
+
+    // Format persisted startup-miss timestamps without depending on shell `date`
+    // flags, which differ across Linux/macOS.
+    unsafe {
+        if libc::gmtime_r(&epoch, tm.as_mut_ptr()).is_null() {
+            return epoch_secs.to_string();
+        }
+        let written = libc::strftime(
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            format.as_ptr().cast(),
+            tm.as_ptr(),
+        );
+        if written == 0 {
+            return epoch_secs.to_string();
+        }
+        String::from_utf8_lossy(&buf[..written]).into_owned()
+    }
 }
 
 #[allow(dead_code)]
@@ -345,6 +384,11 @@ mod tests {
         assert!(load(&doc).unwrap().is_some());
         clear(&doc).unwrap();
         assert!(load(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn format_timestamp_renders_utc_iso8601() {
+        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
     }
 
     #[test]

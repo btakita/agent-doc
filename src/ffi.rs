@@ -7,6 +7,8 @@
 //! - `agent_doc_parse_components(doc)`: parses all `<!-- agent:name -->` components and returns a
 //!   JSON-encoded array with fields `name`, `attrs`, `open_start`, `open_end`, `close_start`,
 //!   `close_end`, `content`.
+//! - `agent_doc_visual_tokens_json(doc)`: returns a JSON-encoded array of visual token ranges used
+//!   by editor plugins to highlight agent-doc-specific markdown structures consistently.
 //! - `agent_doc_apply_patch(doc, component_name, content, mode)`: applies a patch to a named
 //!   component using `replace`, `append`, or `prepend` mode.
 //! - `agent_doc_apply_patch_with_caret(…, caret_offset)`: caret-aware append — inserts content at
@@ -165,6 +167,31 @@ pub unsafe extern "C" fn agent_doc_parse_components(doc: *const c_char) -> FfiCo
     FfiComponentList {
         json: c_json.into_raw(),
         count,
+    }
+}
+
+/// Collect editor-facing visual token ranges from a markdown document.
+///
+/// The returned JSON array contains `{ kind, start, end }` objects, where byte
+/// offsets refer to UTF-8 positions in the original document.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_visual_tokens_json(doc: *const c_char) -> *mut c_char {
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+    let tokens = crate::syntax::collect_visual_tokens(doc_str);
+    let json = match serde_json::to_string(&tokens) {
+        Ok(json) => json,
+        Err(_) => return ptr::null_mut(),
+    };
+    match CString::new(json) {
+        Ok(value) => value.into_raw(),
+        Err(_) => ptr::null_mut(),
     }
 }
 

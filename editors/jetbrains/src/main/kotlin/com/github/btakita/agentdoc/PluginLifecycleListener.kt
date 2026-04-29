@@ -19,6 +19,8 @@ class PluginLifecycleListener : ProjectManagerListener {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
+        // Highlight agent-doc-specific markdown structures in the editor.
+        VisualHighlighterManager.getInstance(project)
         // Detect editor layout changes (tab drags, new splits) and sync tmux
         LayoutChangeDetector.getInstance(project)
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
@@ -94,5 +96,6 @@ class PluginLifecycleListener : ProjectManagerListener {
         PromptPoller.disposeProject(project)
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)
+        VisualHighlighterManager.disposeProject(project)
     }
 }

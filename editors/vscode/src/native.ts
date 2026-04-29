@@ -27,6 +27,12 @@ interface FfiComponentList {
     count: number;
 }
 
+export interface VisualToken {
+    kind: string;
+    start: number;
+    end: number;
+}
+
 let lib: any = null;
 let koffi: any = null;
 let loaded = false;
@@ -70,6 +76,7 @@ function resetBindings(): void {
     _reposition_boundary_to_end = null;
     _reposition_boundary_to_end_preserve_head = null;
     _reposition_boundary_to_end_preserve_head_with_id = null;
+    _visual_tokens_json = null;
     _is_idle = null;
     _await_idle = null;
     _document_changed = null;
@@ -164,6 +171,7 @@ let _reposition_boundary_to_end: any = null;
 let _reposition_boundary_to_end_with_id: any = null;
 let _reposition_boundary_to_end_preserve_head: any = null;
 let _reposition_boundary_to_end_preserve_head_with_id: any = null;
+let _visual_tokens_json: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
 let _document_changed: any = null;
@@ -202,6 +210,7 @@ function bindFunctions(): void {
         FfiPatchResultType,
         ['str', 'str'],
     );
+    _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
@@ -276,6 +285,27 @@ export function repositionBoundaryToEndPreserveHead(doc: string, projectRoot?: s
         return text;
     } finally {
         if (result.text) _free_string(result.text);
+    }
+}
+
+/**
+ * Collect visual token ranges for agent-doc-specific markdown constructs.
+ */
+export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
+    if (!ensureLoaded(projectRoot)) return [];
+    bindFunctions();
+
+    const ptr = _visual_tokens_json(doc);
+    try {
+        if (!ptr) return [];
+        const raw = koffi.decode(ptr, 'char', -1);
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed as VisualToken[] : [];
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] visual_tokens_json error: ${err.message}`);
+        return [];
+    } finally {
+        if (ptr) _free_string(ptr);
     }
 }
 

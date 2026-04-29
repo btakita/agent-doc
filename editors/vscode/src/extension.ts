@@ -176,6 +176,179 @@ function showError(message: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Visual highlighting
+// ---------------------------------------------------------------------------
+
+class SyntaxDecorationController implements vscode.Disposable {
+    private readonly disposables: vscode.Disposable[] = [];
+    private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly componentDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiCyan'),
+        fontWeight: '600',
+    });
+    private readonly patchDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiYellow'),
+        fontWeight: '600',
+    });
+    private readonly boundaryDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('editorInfo.foreground'),
+        fontStyle: 'italic',
+    });
+    private readonly scratchDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('descriptionForeground'),
+        fontStyle: 'italic',
+    });
+    private readonly promptDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiGreen'),
+        fontWeight: '600',
+    });
+    private readonly responseHeadingDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiBlue'),
+        fontWeight: '600',
+    });
+    private readonly trackedIdDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiYellow'),
+        border: '1px solid',
+        borderColor: new vscode.ThemeColor('terminal.ansiYellow'),
+        borderRadius: '3px',
+    });
+
+    constructor() {
+        this.disposables.push(
+            this.componentDecoration,
+            this.patchDecoration,
+            this.boundaryDecoration,
+            this.scratchDecoration,
+            this.promptDecoration,
+            this.responseHeadingDecoration,
+            this.trackedIdDecoration,
+        );
+        this.disposables.push(
+            vscode.window.onDidChangeVisibleTextEditors((editors) => {
+                for (const editor of editors) this.refreshEditor(editor);
+            }),
+            vscode.window.onDidChangeActiveTextEditor((editor) => {
+                if (editor) this.refreshEditor(editor);
+            }),
+            vscode.workspace.onDidOpenTextDocument((document) => this.scheduleRefresh(document)),
+            vscode.workspace.onDidChangeTextDocument((event) => this.scheduleRefresh(event.document)),
+            vscode.workspace.onDidCloseTextDocument((document) => {
+                const timer = this.refreshTimers.get(document.uri.toString());
+                if (timer) {
+                    clearTimeout(timer);
+                    this.refreshTimers.delete(document.uri.toString());
+                }
+            }),
+        );
+        this.refreshAll();
+    }
+
+    private scheduleRefresh(document: vscode.TextDocument): void {
+        if (document.languageId !== 'markdown') return;
+        const key = document.uri.toString();
+        const existing = this.refreshTimers.get(key);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+            this.refreshTimers.delete(key);
+            for (const editor of vscode.window.visibleTextEditors) {
+                if (editor.document.uri.toString() === key) {
+                    this.refreshEditor(editor);
+                }
+            }
+        }, 120);
+        this.refreshTimers.set(key, timer);
+    }
+
+    private refreshAll(): void {
+        for (const editor of vscode.window.visibleTextEditors) {
+            this.refreshEditor(editor);
+        }
+    }
+
+    private refreshEditor(editor: vscode.TextEditor): void {
+        if (!isMarkdown(editor)) {
+            this.clearEditor(editor);
+            return;
+        }
+
+        const root = getWorkspaceRoot(editor.document.uri);
+        const tokens = native.visualTokens(editor.document.getText(), root);
+        const ranges = {
+            component: [] as vscode.Range[],
+            patch: [] as vscode.Range[],
+            boundary: [] as vscode.Range[],
+            scratch: [] as vscode.Range[],
+            prompt: [] as vscode.Range[],
+            responseHeading: [] as vscode.Range[],
+            trackedId: [] as vscode.Range[],
+        };
+
+        for (const token of tokens) {
+            const range = new vscode.Range(
+                editor.document.positionAt(token.start),
+                editor.document.positionAt(token.end),
+            );
+            switch (token.kind) {
+                case 'component_open':
+                case 'component_close':
+                    ranges.component.push(range);
+                    break;
+                case 'patch_open':
+                case 'patch_close':
+                    ranges.patch.push(range);
+                    break;
+                case 'boundary':
+                    ranges.boundary.push(range);
+                    break;
+                case 'scratch_comment':
+                    ranges.scratch.push(range);
+                    break;
+                case 'prompt':
+                    ranges.prompt.push(range);
+                    break;
+                case 'response_heading':
+                    ranges.responseHeading.push(range);
+                    break;
+                case 'tracked_id':
+                    ranges.trackedId.push(range);
+                    break;
+            }
+        }
+
+        editor.setDecorations(this.componentDecoration, ranges.component);
+        editor.setDecorations(this.patchDecoration, ranges.patch);
+        editor.setDecorations(this.boundaryDecoration, ranges.boundary);
+        editor.setDecorations(this.scratchDecoration, ranges.scratch);
+        editor.setDecorations(this.promptDecoration, ranges.prompt);
+        editor.setDecorations(this.responseHeadingDecoration, ranges.responseHeading);
+        editor.setDecorations(this.trackedIdDecoration, ranges.trackedId);
+    }
+
+    private clearEditor(editor: vscode.TextEditor): void {
+        editor.setDecorations(this.componentDecoration, []);
+        editor.setDecorations(this.patchDecoration, []);
+        editor.setDecorations(this.boundaryDecoration, []);
+        editor.setDecorations(this.scratchDecoration, []);
+        editor.setDecorations(this.promptDecoration, []);
+        editor.setDecorations(this.responseHeadingDecoration, []);
+        editor.setDecorations(this.trackedIdDecoration, []);
+    }
+
+    dispose(): void {
+        for (const timer of this.refreshTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.refreshTimers.clear();
+        for (const editor of vscode.window.visibleTextEditors) {
+            this.clearEditor(editor);
+        }
+        for (const disposable of this.disposables) {
+            disposable.dispose();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Concurrency guard
 // ---------------------------------------------------------------------------
 
@@ -1145,6 +1318,7 @@ class PatchWatcher implements vscode.Disposable {
 }
 
 let patchWatcher: PatchWatcher | undefined;
+let syntaxDecorationController: SyntaxDecorationController | undefined;
 
 // ---------------------------------------------------------------------------
 // Activation / Deactivation
@@ -1204,6 +1378,9 @@ export function activate(context: vscode.ExtensionContext): void {
         )
     );
 
+    syntaxDecorationController = new SyntaxDecorationController();
+    context.subscriptions.push(syntaxDecorationController);
+
     // IPC Patch Watcher
     patchWatcher = new PatchWatcher();
     patchWatcher.start();
@@ -1232,6 +1409,9 @@ export function deactivate(): void {
     // Clean up patch watcher
     patchWatcher?.dispose();
     patchWatcher = undefined;
+
+    syntaxDecorationController?.dispose();
+    syntaxDecorationController = undefined;
 
     // Reset state
     lastTabSyncSignature = '';

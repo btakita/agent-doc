@@ -92,3 +92,9 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 - Plugins resolve `agent-doc` from: `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/`, `/usr/local/bin/`, or `$PATH`.
 - All commands run from the project root directory.
 - Plugins are thin wrappers — business logic lives in the CLI.
+
+## 11. Visual Distinction
+
+- Markdown editor integrations should visually distinguish agent-doc structures without requiring the user to switch document formats or install a separate grammar pack.
+- Both JetBrains and VS Code must source their highlight ranges from the shared FFI surface (`agent_doc_visual_tokens_json`) so component markers, patch markers, boundary markers, `### Re:` headings, `❯` prompts, tracked `[#id]` tags, and ordinary HTML scratch comments stay in sync across editors.
+- Matches inside fenced code blocks or inline code are excluded from this highlighting contract; example markup in code samples must remain untouched.

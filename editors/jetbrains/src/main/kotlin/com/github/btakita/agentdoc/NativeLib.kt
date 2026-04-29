@@ -132,6 +132,9 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_parse_components(doc: String): FfiComponentList.ByValue
 
+    /** Collect editor-facing visual token ranges as JSON. Caller must free result. */
+    fun agent_doc_visual_tokens_json(doc: String): Pointer?
+
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)
 
@@ -386,6 +389,12 @@ interface AgentDocLib : Library {
 object NativePatching {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(NativePatching::class.java)
 
+    data class VisualToken(
+        val kind: String,
+        val start: Int,
+        val end: Int,
+    )
+
     /**
      * Apply a component patch using the native library.
      * Returns the patched document, or null if FFI is unavailable/errors.
@@ -550,6 +559,30 @@ object NativePatching {
         } finally {
             lib.agent_doc_free_string(result.project_root)
             lib.agent_doc_free_string(result.relative_path)
+        }
+    }
+
+    /**
+     * Collect visual token ranges for agent-doc-specific markdown structures.
+     */
+    fun visualTokens(doc: String): List<VisualToken> {
+        val lib = AgentDocLib.get() ?: return emptyList()
+        val ptr = lib.agent_doc_visual_tokens_json(doc) ?: return emptyList()
+        try {
+            val raw = ptr.getString(0)
+            val root = com.google.gson.JsonParser.parseString(raw).asJsonArray
+            return root.mapNotNull { element ->
+                val obj = element.asJsonObject
+                val kind = obj.get("kind")?.asString ?: return@mapNotNull null
+                val start = obj.get("start")?.asInt ?: return@mapNotNull null
+                val end = obj.get("end")?.asInt ?: return@mapNotNull null
+                VisualToken(kind, start, end)
+            }
+        } catch (e: Exception) {
+            LOG.warn("[native] visual_tokens_json error: ${e.message}")
+            return emptyList()
+        } finally {
+            lib.agent_doc_free_string(ptr)
         }
     }
 

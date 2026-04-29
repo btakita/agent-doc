@@ -38,6 +38,7 @@ pub mod ipc_socket;
 pub mod merge;
 pub mod model_tier;
 pub mod project_config;
+pub mod syntax;
 pub mod template;
 
 /// Default number of hex characters for boundary IDs.

@@ -209,12 +209,17 @@ So the duplicate was not a second user answer. It was a closeout-recovery bug: c
 Plan: [plan-session-check-prefix-duplication.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-session-check-prefix-duplication.md)
 
 I added the bug back to backlog with that existing plan instead of creating a second plan file for the same root cause.
-<!-- agent:boundary:2c1259a3 -->
+do #stshcr. spec-test-build-install-commit-push
+The `agent-doc` binary is newer than the pinned session instructions (`0.33.16` vs `0.33.12`), so I ran the required reload step and it returned `SKILL_RELOAD=compact`.
+
+Run `/compact`, then re-run:
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+
+Preflight already confirmed there is a pending user edit in the document (`do #stshcr. spec-test-build-install-commit-push`), so after reload I can continue from that diff.
+<!-- agent:boundary:87d32ff2 -->
 <!-- /agent:exchange -->
 
 <!--
-do #stshcr. spec-test-build-install-commit-push
----
 Mid-run on the agent-doc turn on this document...the JB plugin surfaced an error:
 ```
 agent-doc route failed (exit 1): [route] configured tmux_session '0' is not alive, ignoring stale pin [route] target tmux session: 14 [sync] found alive agent-doc child (pid 326697) in pane %422 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %422 for session b26b9957 via supervisor pid 2607602 [route] codex ready after 0.0s (0 polls) [route] Pane %422 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %422 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %422 for tasks/agent-doc/agent-doc-bugs2.md — waiting for a new cycle ack for pending prompt_target: do #nbla. spec-test-build-install-commit-push Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %422, but no new document cycle started for pending prompt_target: do #nbla. spec-test-build-install-commit-push

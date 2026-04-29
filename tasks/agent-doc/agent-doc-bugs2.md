@@ -158,7 +158,30 @@ Verification I ran for this policy change:
 - `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
 
 All of those passed.
-<!-- agent:boundary:82a1b7fb -->
+### Re: parallel tmux verification policy — gpt-5
+
+I added the rule to the shared agent-doc harness surfaces instead of only patching this live Codex copy.
+
+Updated instruction surfaces:
+- `.codex/AGENTS.md`
+- `src/agent-doc/SKILL.md`
+- `.claude/skills/agent-doc/SKILL.md`
+- `src/agent-doc/CLAUDE.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/SPEC.md`
+
+The new rule is explicit:
+- tmux-heavy changes must include the parallel tmux suites in their parallel form
+- a failing parallel tmux suite still means verification failed, even if the same test passes in isolation or under a synchronous rerun
+
+Verification I ran for this policy change:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+
+All of those passed.
+<!-- agent:boundary:701b9570 -->
 <!-- /agent:exchange -->
 
 <!--

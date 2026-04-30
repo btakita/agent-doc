@@ -121,7 +121,35 @@ Added concrete next-step backlog items for both issue families:
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 
 The top backlog id is `#smliveplan`.
-<!-- agent:boundary:c35a6223 -->
+❯ do #smliveplan + #smlive. spec-test-build-install-commit-push
+### Re: #smliveplan + #smlive — gpt-5
+
+Implemented the live-owner startup-miss fix in `src/agent-doc` and traced the two requested incidents.
+
+#### `#smliveplan`
+- `%412`: `ops.log` shows `route_cycle_start_missing` on `%412`, then a reroute still classified `%412` as the healthy live owner (`route_startup_miss_detected ... live_owner=%412 ... session_log=open ... last_event=codex_start mode=fresh`) even though no newer harness run or document cycle had appeared before the second routed send. That is the earlier repeated-live-owner miss shape.
+- `%493`: the stronger proof is on April 30, 2026. `route_cycle_start_missing` was recorded for pane `%493` at `2026-04-30T10:55:40Z`, then the same routed prompt finally produced `route_cycle_start_acknowledged` at `2026-04-30T10:55:54Z`. That means the routed send was real, but the live-owner ack window expired too early and created a false startup-miss on a healthy pane.
+
+#### `#smlive`
+- `route.rs` now uses a longer bounded cycle-ack wait when routing into an already-live owner pane: 30s in production, 2s under tests, while fresh/non-live paths keep the existing shorter window.
+- Routed ack/miss logs and surfaced startup-miss errors now include the timeout used, so the next live-owner miss is easier to classify from ops evidence.
+- Added a regression that proves a delayed live-child cycle start is accepted instead of being misclassified as `route_cycle_start_missing`, while the existing fail-closed test for truly missing acks still passes.
+- Updated `specs/07-commands.md` to document the extended live-owner acknowledgment window.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `7b4fa43` (`fix: wait longer for live routed cycle ack`) pushed to `origin/20260422/codex-agent-backend`.
+
+Note:
+- I intentionally left the pre-existing unrelated `src/agent-doc` worktree edits in `VERSIONS.md`, editor files, `src/start.rs`, and `src/syntax.rs` untouched.
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:27a7d020 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -138,8 +166,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#smliveplan] Reconstruct the `%412`/`%493` alive-owner startup-miss episodes from ops.log and session logs, then add a regression proving routed triggers either open a new cycle or fail with durable provenance on a live pane.
-- [ ] [#smlive] Prove and fix routed startup-miss false negatives on alive owner panes so accepted triggers always open a new cycle or fail with durable provenance instead of repeating on a healthy live pane.
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 - [ ] [#rtxfreg] Add a regression/verification pass for cross-file tmux dispatch so split-anchor selection can never again target a pane owned by another document in the same session.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.

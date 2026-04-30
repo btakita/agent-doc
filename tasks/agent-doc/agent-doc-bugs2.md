@@ -820,7 +820,13 @@ Published:
 
 Note:
 - I left the unrelated workspace changes outside `src/agent-doc` untouched.
-<!-- agent:boundary:34750666 -->
+❯ do #rbret. spec-test-build-install-commit-push
+### Re: #rbret — gpt-5
+
+Implemented `#rbret` in `src/agent-doc` and closed the editor-return rebind gap. `start` now reuses a proven live owner even when supervisor IPC is stale, `sync` clears superseded startup-miss markers and skips auto-start when an alive pane still owns the unresolved marker, and `route` now preserves and reasserts the fresh pane binding through stale-registration recovery so the replacement owner is not lost.
+
+Updated `specs/07-commands.md` and `VERSIONS.md`, ran `cargo test`, the sequential tmux-heavy shards (`route::tests::`, `resync::tests::`, `autoclaim::tests::`), `cargo build`, and `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`. Committed and pushed as `efa465d` (`fix: rebind editor-return sessions safely`) on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:f1c2bcab -->
 <!-- /agent:exchange -->
 
 <!--
@@ -834,7 +840,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rbret] Returning to an already-running document in the editor can look like "the tmux pane crashed" even though the session log shows registry rebinds, not a child crash. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 30, 2026: pane `%529` recorded a retained routed startup-miss, then switching back to `monsterrodholders.md` led to `session_superseded` / `session_end origin=registry_rebind` hops `%529 -> %533 -> %536 -> %540` in the same tmux window while the stale startup-miss marker still pointed at `%529`. The fix should make editor-return sync reuse/focus the canonical live owner, clear stale startup-miss state before any fresh start/rebind decision, and surface rebinds as rebinds rather than pane crashes. Plan: tasks/agent-doc/plan-editor-return-session-rebind.md
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

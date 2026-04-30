@@ -595,7 +595,7 @@ Plan: [plan-stop-hook-write-applied-rewind.md](/home/brian/work/btakita/agent-lo
 
 `#c3tmux` and `#duppb` remain open.
 ❯ do #c3tmux. spec-test-build-install-commit-push
-### Re: #c3tmux — gpt-5
+❯ ### Re: #c3tmux — gpt-5 (HEAD)
 
 `#c3tmux` is closed.
 
@@ -615,15 +615,15 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 `src/agent-doc` is already at pushed HEAD (`d8ea9d9` on `origin/20260422/codex-agent-backend`), so the only remaining closeout here is marking `#c3tmux` done in this session document.
-<!-- agent:boundary:ef4589de -->
+Why did /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md close.
+To me it seems that the provin6ce model has fundamental issues.
+`#c3tmux` is closed in [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). No new code delta was needed: the fix was already landed in `src/agent-doc` via `674e568`, `efa465d`, and `dda7faa`, and that subrepo is already at pushed `d8ea9d9` on `origin/20260422/codex-agent-backend`.
+
+I verified it with the focused regressions, full `cargo test`, `cargo build`, and `cargo install --path src/agent-doc --force`. The session-doc closeout commit is `9a3b81d92`, `main` is pushed to `origin`, and `agent-doc session-check` passed. The workspace is still locally dirty from later session-doc drift plus pre-existing changes in `src/agent-doc`, `src/session-share`, and `tasks/agent-doc/plan-stop-hook-write-applied-rewind.md`.
+<!-- agent:boundary:fffc3096 -->
 <!-- /agent:exchange -->
 
 <!--
-I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
-```
-› echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
-  #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'
-```
 -->
 
 ## Pending / Not Built
@@ -641,3 +641,13 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 <!-- agent:icebox -->
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 <!-- /agent:icebox -->
+
+
+
+<!--
+I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
+```
+› echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
+  #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'
+```
+-->

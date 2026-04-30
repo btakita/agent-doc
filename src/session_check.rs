@@ -364,6 +364,25 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             }
             return Ok(SessionCheckStatus::Interrupted(open_cycle_message(&state)));
         }
+        if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+            if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                    state.cycle_id,
+                    phase_name(state.phase),
+                    state.last_event,
+                    reason,
+                    prompt_marker
+                )));
+            }
+            return Ok(SessionCheckStatus::Ok(format!(
+                "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
+                state.cycle_id,
+                phase_name(state.phase),
+                state.last_event,
+                reason
+            )));
+        }
         if let Some(marker) = detect_bypassed_response_write(file)? {
             if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -408,6 +427,18 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
 
     match last_ops_event(file)? {
         None => {
+            if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+                if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                    return Ok(SessionCheckStatus::Interrupted(format!(
+                        "[session-check] INTERRUPTED: repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
+                        reason, prompt_marker
+                    )));
+                }
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — repaired committed historical {} snapshot drift",
+                    reason
+                )));
+            }
             if let Some(marker) = detect_bypassed_response_write(file)? {
                 if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
                 {
@@ -474,6 +505,18 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             )))
         }
         Some(event) => {
+            if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+                if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
+                    return Ok(SessionCheckStatus::Interrupted(format!(
+                        "[session-check] INTERRUPTED: last ops.log event is terminal, repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
+                        reason, prompt_marker
+                    )));
+                }
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — last event: {}; repaired committed historical {} snapshot drift",
+                    event, reason
+                )));
+            }
             if let Some(marker) = detect_bypassed_response_write(file)? {
                 if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
                 {
@@ -1035,7 +1078,7 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
         Err(_) => return Ok(None),
     };
 
-    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
     let snap_norm = norm(&snapshot);
     let cur_norm = norm(&current);
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
@@ -1901,6 +1944,98 @@ mod tests {
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(!repaired_snapshot.contains("### Re: do `#sgzy` — codex"));
         assert!(!repaired_snapshot.contains("What are the next steps?"));
+    }
+
+    #[test]
+    fn session_check_repairs_committed_historical_answered_prompt_prefix_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #wdiv. spec-test-news-commit-push\n",
+            "### Re: #wdiv — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do #wdiv. spec-test-news-commit-push\n",
+            "### Re: #wdiv — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "normalize prompt", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "repair_preflight_committed_historical",
+            Some(snapshot),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, committed).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("repaired committed historical exchange snapshot drift"));
+            }
+            other => panic!("expected ok status, got {other:?}"),
+        }
+
+        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            repaired_snapshot, committed,
+            "snapshot should follow the committed prompt-prefix normalization"
+        );
     }
 
     #[test]

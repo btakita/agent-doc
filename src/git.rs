@@ -550,6 +550,148 @@ pub(crate) fn normalize_transient_agent_doc_markers(content: &str) -> String {
     strip_guard_markers(&strip_head_markers(&strip_boundary_markers(content)))
 }
 
+fn is_response_heading_line(trimmed: &str) -> bool {
+    trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+}
+
+fn strip_answered_prompt_prefixes(exchange_content: &str) -> String {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    fn strip_answered_prompt_prefix(line: &str) -> Option<String> {
+        let trimmed = line.trim_start();
+        let rest = trimmed.strip_prefix('❯')?.trim_start();
+        if rest.is_empty() || !crate::diff::text_line_looks_like_prompt_target(rest) {
+            return None;
+        }
+        let indent_len = line.len() - trimmed.len();
+        Some(format!("{}{}", &line[..indent_len], rest))
+    }
+
+    let lines: Vec<&str> = exchange_content.split_inclusive('\n').collect();
+    if lines.is_empty() {
+        return exchange_content.to_string();
+    }
+
+    let mut response_after = vec![false; lines.len()];
+    let mut in_fence = false;
+    let mut fence_char = '\0';
+    let mut fence_len = 0usize;
+    let mut seen_response = false;
+    for idx in (0..lines.len()).rev() {
+        let line = lines[idx].trim_end_matches('\n');
+        let trimmed = line.trim();
+        response_after[idx] = seen_response;
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                continue;
+            }
+        } else {
+            if fence_close(trimmed, fence_char, fence_len) {
+                in_fence = false;
+            }
+            continue;
+        }
+        if is_response_heading_line(trimmed) {
+            seen_response = true;
+        }
+    }
+
+    let mut normalized = String::with_capacity(exchange_content.len());
+    let mut changed = false;
+    in_fence = false;
+    fence_char = '\0';
+    fence_len = 0;
+    for (idx, segment) in lines.iter().enumerate() {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+        }
+
+        if !in_fence && response_after[idx] {
+            if let Some(stripped) = strip_answered_prompt_prefix(line) {
+                normalized.push_str(&stripped);
+                changed |= stripped != line;
+            } else {
+                normalized.push_str(line);
+            }
+        } else {
+            normalized.push_str(line);
+        }
+        if segment.ends_with('\n') {
+            normalized.push('\n');
+        }
+    }
+
+    if changed {
+        normalized
+    } else {
+        exchange_content.to_string()
+    }
+}
+
+pub(crate) fn normalize_committed_exchange_artifacts(content: &str) -> String {
+    let transient = normalize_transient_agent_doc_markers(content);
+    let body = match crate::frontmatter::parse(&transient) {
+        Ok((_, body)) => body,
+        Err(_) => return transient,
+    };
+    let prefix_len = transient.len().saturating_sub(body.len());
+    let Ok(components) = crate::component::parse(body) else {
+        return transient;
+    };
+
+    let mut rebuilt = String::with_capacity(transient.len());
+    rebuilt.push_str(&transient[..prefix_len]);
+    let mut last = 0usize;
+    let mut changed = false;
+    for comp in components {
+        if comp.open_end < last {
+            continue;
+        }
+        rebuilt.push_str(&body[last..comp.open_end]);
+        if comp.name == "exchange" {
+            let normalized = strip_answered_prompt_prefixes(comp.content(body));
+            changed |= normalized != comp.content(body);
+            rebuilt.push_str(&normalized);
+        } else {
+            rebuilt.push_str(comp.content(body));
+        }
+        rebuilt.push_str(&body[comp.close_start..comp.close_end]);
+        last = comp.close_end;
+    }
+    rebuilt.push_str(&body[last..]);
+
+    if changed { rebuilt } else { transient }
+}
+
 fn strip_re_heading_attribution(content: &str) -> String {
     let code_ranges = code_block_byte_ranges(content);
     let mut result_lines: Vec<String> = Vec::new();
@@ -1093,18 +1235,23 @@ pub(crate) fn repair_committed_historical_snapshot_drift(
     let non_exchange_component_drift = has_non_exchange_component_drift(&snapshot_doc, &head_doc);
     let historical_response_marker =
         crate::session_check::detect_bypassed_response_write_between(&snapshot_doc, &head_doc);
+    let historical_prompt_prefix_artifact = snapshot_doc != head_doc
+        && !non_exchange_component_drift
+        && normalize_committed_exchange_artifacts(&snapshot_doc)
+            == normalize_committed_exchange_artifacts(&head_doc);
     let Some(reason) = (match historical_mutation {
         Some("exchange") => Some("exchange"),
         None if !non_exchange_component_drift && historical_response_marker.is_some() => {
             Some("exchange")
         }
+        None if historical_prompt_prefix_artifact => Some("exchange"),
         _ => None,
     }) else {
         return Ok(None);
     };
 
-    if normalize_transient_agent_doc_markers(&current_doc)
-        == normalize_transient_agent_doc_markers(&head_doc)
+    if normalize_committed_exchange_artifacts(&current_doc)
+        == normalize_committed_exchange_artifacts(&head_doc)
     {
         crate::snapshot::save(file, &current_doc)?;
         crate::ops_log::log_op(

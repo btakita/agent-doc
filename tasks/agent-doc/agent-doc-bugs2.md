@@ -932,7 +932,19 @@ So the operator rule here is:
 - then rerun `agent-doc start <file>`
 
 No new backlog item came out of this recovery.
-<!-- agent:boundary:e516b75e -->
+❯ Now the same problem has been reversed. Please fix. spec-test-build-install-commit-push
+❯ - When the left editor is selected, the tmux panes are reversed.
+❯ - When the right editor is selected, the tmux panes are correct.
+
+❯ Autostart also had an error. Please move into the backlog.
+```
+❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
+Error: registered pane %68 for tasks/agent-doc/agent-doc-bugs2.md is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance
+```
+### Re: autostart fail-closed backlog capture — gpt-5
+
+Captured the autostart failure as a separate backlog item. I kept it distinct from the current pane-reversal work because this is a different fail-closed ownership/provenance path.
+<!-- agent:boundary:9f4d832a -->
 <!-- /agent:exchange -->
 
 <!--

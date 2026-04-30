@@ -555,7 +555,18 @@ Published:
 - `src/agent-doc` commit `d8ea9d9` (`fix: preserve unmatched exchange prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog item came out of this fix.
-<!-- agent:boundary:e51ddf8d -->
+❯ 2 issue happened:
+❯ - In this document, the response patchback was duplicated. Please add an entry to the backlog.
+❯ - In /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md, agent-doc started a new tmux session. Please add an entry to the backlog.
+### Re: backlog capture for duplicated patchback + `claudescore-3.md` tmux session — gpt-5
+
+Added both backlog items.
+
+- `#duppb`: duplicate response patchback in this document, including the second appended assistant block with the `(HEAD)` suffix.
+- `#c3tmux`: unexpected new tmux session start for `src/session-share/tasks/claudescore-3.md` instead of staying on the existing session.
+
+The top backlog id is `#duppb`.
+<!-- agent:boundary:9bfa1b15 -->
 <!-- /agent:exchange -->
 
 <!--

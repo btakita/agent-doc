@@ -359,7 +359,12 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
         crate::sync::AssociatedPaneResolution::None => Ok(()),
         crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
             if sessions::lookup(&session_id)?.as_deref() != Some(winner.pane_id.as_str()) {
-                sessions::register(&session_id, &winner.pane_id, &target.to_string_lossy())?;
+                crate::sync::reregister_recovered_owner(
+                    tmux,
+                    target,
+                    &session_id,
+                    &winner.pane_id,
+                )?;
                 eprintln!(
                     "resync: re-registered {} to pane {}",
                     target.display(),

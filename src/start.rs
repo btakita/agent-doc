@@ -1537,7 +1537,12 @@ pub fn run(file: &Path) -> Result<()> {
         match action {
             ExistingSessionPaneAction::Reuse(existing_pane) => {
                 if sessions::lookup(&session_id)?.as_deref() != Some(existing_pane.as_str()) {
-                    sessions::register(&session_id, &existing_pane, &file.to_string_lossy())?;
+                    crate::sync::reregister_recovered_owner(
+                        &tmux,
+                        file,
+                        &session_id,
+                        &existing_pane,
+                    )?;
                     eprintln!(
                         "[start] recovered live owner for {} in pane {}",
                         file.display(),

@@ -339,6 +339,40 @@ fn last_visible_excerpt(capture: &str) -> Option<String> {
         .and_then(sanitize_excerpt)
 }
 
+fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
+    let candidate = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(file)
+    };
+    Some(candidate.canonicalize().unwrap_or(candidate))
+}
+
+fn registry_location_for_file(file: &Path) -> Option<(PathBuf, PathBuf, String)> {
+    let canonical = canonicalize_sync_file(file)?;
+    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let registry_key =
+        sessions::canonical_registry_key_in(&project_root, canonical.to_string_lossy().as_ref());
+    Some((canonical, project_root, registry_key))
+}
+
+fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -> String {
+    canonical_file
+        .strip_prefix(project_root)
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| canonical_file.to_string_lossy().to_string())
+}
+
+fn lookup_registry_entry_for_file_session(
+    file: &Path,
+    session_id: &str,
+) -> Option<sessions::SessionEntry> {
+    let (_, project_root, registry_key) = registry_location_for_file(file)?;
+    let registry = sessions::load_in(&project_root).ok()?;
+    let entry = registry.get(&registry_key)?.clone();
+    (entry.session_id == session_id).then_some(entry)
+}
+
 fn persist_dead_pane_capture(
     file: &Path,
     session_id: &str,
@@ -1170,7 +1204,7 @@ fn run_with_options(
 
         match fm.session {
             Some(ref key) => {
-                let has_registry = sessions::lookup(key).ok().flatten().is_some();
+                let has_registry = lookup_registry_entry_for_file_session(path, key).is_some();
                 let registry_str = if has_registry {
                     "yes"
                 } else {
@@ -1222,18 +1256,18 @@ fn run_with_options(
                 if let Ok(content) = std::fs::read_to_string(file_path)
                     && let Ok((fm, _)) = frontmatter::parse(&content)
                     && let Some(ref sid) = fm.session
-                    && let Ok(Some(pane)) = sessions::lookup(sid)
-                    && tmux.pane_alive(&pane)
+                    && let Some(entry) = lookup_registry_entry_for_file_session(file_path, sid)
+                    && tmux.pane_alive(&entry.pane)
                 {
                     eprintln!(
                         "[sync] rescuing pane {} for {} from stash",
-                        pane,
+                        entry.pane,
                         file_path.display()
                     );
                     // break-pane creates a new window with this pane
-                    if tmux.break_pane(&pane).is_ok() {
+                    if tmux.break_pane(&entry.pane).is_ok() {
                         // Rename the new window to "agent-doc"
-                        if let Ok(new_win) = tmux.pane_window(&pane) {
+                        if let Ok(new_win) = tmux.pane_window(&entry.pane) {
                             let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, "agent-doc"]);
                             eprintln!("[sync] recreated window {} as agent-doc", new_win);
                         }
@@ -1298,7 +1332,7 @@ fn run_with_options(
                 None => continue,
             };
 
-            let registered_entry = sessions::lookup_entry(&session_id).ok().flatten();
+            let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = registered_entry.as_ref().map(|entry| entry.pane.clone());
             if let Some((miss, supersession)) =
                 crate::startup_miss::take_superseded_startup_miss(file_path)?
@@ -1460,7 +1494,9 @@ fn run_with_options(
                             pane,
                             session_id
                         );
-                        if let Err(e) = sessions::register(&session_id, pane, &current_file) {
+                        if let Err(e) =
+                            reregister_recovered_owner(tmux, file_path, &session_id, pane)
+                        {
                             eprintln!("[sync] warning: re-register failed: {}", e);
                         }
                     }
@@ -1498,12 +1534,10 @@ fn run_with_options(
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
-            let file_str = file_path.to_string_lossy().to_string();
             match recover_existing_associated_pane(
                 tmux,
                 file_path,
                 &session_id,
-                &file_str,
                 context_session.as_deref(),
                 window,
                 col_args,
@@ -1621,6 +1655,7 @@ fn run_with_options(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
             );
+            let file_str = file_path.to_string_lossy().to_string();
             match route::provision_pane(
                 tmux,
                 file_path,
@@ -1767,7 +1802,7 @@ fn run_with_options(
     // Post-sync: register/update claims for all synced files using the
     // file→pane assignments from tmux-router. This ensures autoclaim works
     // for files arranged by sync, even if they were never individually claimed.
-    register_synced_files(&session_files.borrow(), &result.file_panes);
+    register_synced_files(tmux, &session_files.borrow(), &result.file_panes);
 
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
@@ -1784,7 +1819,11 @@ fn run_with_options(
 /// Uses the file→pane assignments from `SyncResult::file_panes` to create
 /// registry entries for files that don't have one yet, and update file paths
 /// for existing entries.
-fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(PathBuf, String)]) {
+fn register_synced_files(
+    tmux: &Tmux,
+    session_files: &[(String, PathBuf)],
+    file_panes: &[(PathBuf, String)],
+) {
     if session_files.is_empty() || file_panes.is_empty() {
         return;
     }
@@ -1795,37 +1834,56 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
         .map(|(p, id)| (p.as_path(), id.as_str()))
         .collect();
 
-    let registry_path = sessions::registry_path();
-    let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
-        return;
-    };
-    let Ok(mut registry) = sessions::load() else {
-        return;
-    };
-
-    let mut changed = false;
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-
     for (session_id, file_path) in session_files {
-        let file_str = file_path.to_string_lossy().to_string();
+        let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
+            continue;
+        };
+        let Some((canonical_file, project_root, registry_key)) =
+            registry_location_for_file(file_path)
+        else {
+            continue;
+        };
+        let registry_path = sessions::registry_path_in(&project_root);
+        let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
+            continue;
+        };
+        let Ok(mut registry) = sessions::load_in(&project_root) else {
+            continue;
+        };
 
-        if let Some(entry) = registry.get_mut(session_id) {
-            // Existing entry — update file path if needed
+        let file_str = registry_relative_file_path(&project_root, &canonical_file);
+        let pane_pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
+        let window = tmux.pane_window(pane_id).unwrap_or_default();
+        let cwd = project_root.to_string_lossy().to_string();
+        let mut changed = false;
+
+        let stale_keys: Vec<String> = registry
+            .iter()
+            .filter(|(key, entry)| {
+                *key != &registry_key && (entry.session_id == *session_id || entry.pane == pane_id)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in stale_keys {
+            registry.remove(&key);
+            changed = true;
+        }
+
+        if let Some(entry) = registry.get_mut(&registry_key) {
+            if entry.session_id != *session_id {
+                entry.session_id = session_id.clone();
+                changed = true;
+            }
             if entry.file != file_str {
                 eprintln!(
                     "[sync] updating file path for session {} → {}",
                     &session_id[..8.min(session_id.len())],
                     file_path.display()
                 );
-                entry.file = file_str;
+                entry.file = file_str.clone();
                 changed = true;
             }
-            // Also update pane if sync assigned a different one
-            if let Some(&pane_id) = pane_lookup.get(file_path.as_path())
-                && entry.pane != pane_id
-            {
+            if entry.pane != pane_id {
                 eprintln!(
                     "[sync] updating pane for {} → {}",
                     file_path.display(),
@@ -1834,11 +1892,19 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
                 entry.pane = pane_id.to_string();
                 changed = true;
             }
-        } else if let Some(&pane_id) = pane_lookup.get(file_path.as_path()) {
-            // New entry — file was synced but never claimed
-            let pane_pid = sessions::pane_pid(pane_id).unwrap_or(std::process::id());
-            let window = sessions::pane_window(pane_id).unwrap_or_default();
-            let project_root = std::env::current_dir().unwrap_or_default();
+            if entry.pid != pane_pid {
+                entry.pid = pane_pid;
+                changed = true;
+            }
+            if entry.cwd != cwd {
+                entry.cwd = cwd.clone();
+                changed = true;
+            }
+            if entry.window != window {
+                entry.window = window.clone();
+                changed = true;
+            }
+        } else {
             eprintln!(
                 "[sync] registering {} → pane {} (session {})",
                 file_path.display(),
@@ -1846,11 +1912,11 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
                 &session_id[..8.min(session_id.len())]
             );
             registry.insert(
-                sessions::canonical_registry_key_in(&project_root, &file_str),
+                registry_key,
                 sessions::SessionEntry {
                     pane: pane_id.to_string(),
                     pid: pane_pid,
-                    cwd: cwd.clone(),
+                    cwd,
                     started: String::new(),
                     session_id: session_id.clone(),
                     file: file_str,
@@ -1860,10 +1926,10 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
             );
             changed = true;
         }
-    }
 
-    if changed {
-        let _ = sessions::save(&registry);
+        if changed {
+            let _ = sessions::save_in(&project_root, &registry);
+        }
     }
 }
 
@@ -2072,7 +2138,8 @@ pub(crate) fn find_associated_panes(
     let file_path = file.to_string_lossy().to_string();
     let inventory = list_associated_pane_inventory(tmux);
     let process_tree_matches = collect_process_tree_matches(&inventory, &file_path);
-    let registered = sessions::lookup(session_id).ok().flatten();
+    let registered =
+        lookup_registry_entry_for_file_session(file, session_id).map(|entry| entry.pane);
     let supervisor_match = find_alive_pane_via_supervisor_pid(tmux, file, session_id);
 
     let mut associated: Vec<AssociatedPaneCandidate> = inventory
@@ -2266,7 +2333,6 @@ fn recover_existing_associated_pane(
     tmux: &Tmux,
     file_path: &Path,
     session_id: &str,
-    file_str: &str,
     context_session: Option<&str>,
     window: Option<&str>,
     col_args: &[String],
@@ -2292,7 +2358,8 @@ fn recover_existing_associated_pane(
                 winner.source_summary(),
                 redundant.len()
             ));
-            if let Err(e) = sessions::register(session_id, &winner.pane_id, file_str) {
+            if let Err(e) = reregister_recovered_owner(tmux, file_path, session_id, &winner.pane_id)
+            {
                 eprintln!(
                     "[sync] warning: re-register failed for {} via associated pane {}: {}",
                     file_path.display(),
@@ -2414,6 +2481,82 @@ fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<Supervisor
     Some(SupervisorIdentity { pid, instance_id })
 }
 
+fn pane_pid_from_tmux(tmux: &Tmux, pane_id: &str) -> Option<u32> {
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+fn pane_contains_supervisor_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> bool {
+    let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
+        return false;
+    };
+    pane_process_tree_contains_pid(&pane_pid.to_string(), target_pid)
+}
+
+pub(crate) fn reregister_recovered_owner(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> anyhow::Result<()> {
+    let Some((canonical_file, project_root, _registry_key)) = registry_location_for_file(file)
+    else {
+        return sessions::register(session_id, pane_id, &file.to_string_lossy());
+    };
+    let file_str = registry_relative_file_path(&project_root, &canonical_file);
+
+    if let Some(entry) = lookup_registry_entry_for_file_session(file, session_id)
+        && entry.pane == pane_id
+        && entry.pid != 0
+        && !entry.supervisor_instance_id.is_empty()
+        && pane_contains_supervisor_pid(tmux, pane_id, entry.pid)
+    {
+        return sessions::register_supervisor_in(
+            &project_root,
+            session_id,
+            pane_id,
+            &file_str,
+            entry.pid,
+            &entry.supervisor_instance_id,
+        );
+    }
+
+    if let Some(identity) = query_supervisor_identity(file, session_id)
+        && pane_contains_supervisor_pid(tmux, pane_id, identity.pid)
+    {
+        return sessions::register_supervisor_in(
+            &project_root,
+            session_id,
+            pane_id,
+            &file_str,
+            identity.pid,
+            &identity.instance_id,
+        );
+    }
+
+    let pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
+    let window = tmux.pane_window(pane_id).unwrap_or_default();
+    sessions::register_full_with_cwd_in(
+        &project_root,
+        session_id,
+        pane_id,
+        &file_str,
+        pid,
+        &window,
+        &project_root.to_string_lossy(),
+    )
+}
+
 fn find_registered_pane_via_path_provenance(
     tmux: &Tmux,
     file: &Path,
@@ -2421,9 +2564,8 @@ fn find_registered_pane_via_path_provenance(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let (_, project_root, registry_key) = registry_location_for_file(file)?;
     let registry = sessions::load_in(&project_root).ok()?;
-    let registry_key = sessions::canonical_registry_key_in(&project_root, &file.to_string_lossy());
     let entry = registry.get(&registry_key)?;
     if entry.session_id != session_id
         || entry.pid == 0
@@ -2945,27 +3087,32 @@ mod tests {
             .trim()
             .parse::<u32>()
             .unwrap();
+        let supervisor_instance_id = "instance-1".to_string();
 
-        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(
-            tmp.path(),
-            "associated-supervisor",
-            move |method| match method {
-                crate::supervisor::ipc::IpcMethod::Pid => {
-                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                        "pid": pane_pid
-                    }))
+        let _ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "associated-supervisor", {
+                let supervisor_instance_id = supervisor_instance_id.clone();
+                move |method| match method {
+                    crate::supervisor::ipc::IpcMethod::Pid => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "pid": pane_pid
+                        }))
+                    }
+                    crate::supervisor::ipc::IpcMethod::State => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "supervisor_pid": pane_pid,
+                            "supervisor_instance_id": supervisor_instance_id,
+                        }))
+                    }
+                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
                 }
-                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
 
-        let file_str = doc.to_string_lossy().to_string();
         let recovery = recover_existing_associated_pane(
             &iso,
             &doc,
             "associated-supervisor",
-            &file_str,
             Some("test"),
             None,
             &["tasks/owned.md".to_string()],
@@ -2979,6 +3126,51 @@ mod tests {
             sessions::lookup("associated-supervisor").unwrap(),
             Some(pane.clone())
         );
+        let entry = lookup_registry_entry_for_file_session(&doc, "associated-supervisor")
+            .expect("recovered pane should be registered in the document registry");
+        assert_eq!(entry.pane, pane);
+        assert_eq!(entry.pid, pane_pid);
+        assert_eq!(entry.supervisor_instance_id, supervisor_instance_id);
+    }
+
+    #[test]
+    fn reregister_recovered_owner_preserves_existing_supervisor_identity_without_socket() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: preserved-supervisor\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-preserve-supervisor-entry");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let pane_pid = pane_pid_from_tmux(&iso, &pane).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+
+        sessions::register_full_with_cwd_in(
+            tmp.path(),
+            "preserved-supervisor",
+            &pane,
+            "tasks/owned.md",
+            pane_pid,
+            &window,
+            &tmp.path().to_string_lossy(),
+        )
+        .unwrap();
+        let mut registry = sessions::load_in(tmp.path()).unwrap();
+        let key = sessions::canonical_registry_key_in(tmp.path(), doc.to_string_lossy().as_ref());
+        let entry = registry.get_mut(&key).expect("seeded entry should exist");
+        entry.supervisor_instance_id = "instance-preserved".to_string();
+        sessions::save_in(tmp.path(), &registry).unwrap();
+
+        reregister_recovered_owner(&iso, &doc, "preserved-supervisor", &pane).unwrap();
+
+        let entry = lookup_registry_entry_for_file_session(&doc, "preserved-supervisor")
+            .expect("recovered owner should keep its registry entry");
+        assert_eq!(entry.pane, pane);
+        assert_eq!(entry.pid, pane_pid);
+        assert_eq!(entry.supervisor_instance_id, "instance-preserved");
     }
 
     #[test]
@@ -4236,5 +4428,145 @@ mod tests {
             "rescued pane should be visible after rescue, got: {:?}",
             visible_panes
         );
+    }
+
+    #[test]
+    fn lookup_registry_entry_for_file_session_uses_document_project_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+
+        let doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let mut registry = sessions::SessionRegistry::new();
+        let canonical = doc.canonicalize().unwrap();
+        let key =
+            sessions::canonical_registry_key_in(&subroot, canonical.to_string_lossy().as_ref());
+        registry.insert(
+            key,
+            sessions::SessionEntry {
+                pane: "%44".to_string(),
+                pid: 2374580,
+                cwd: subroot.to_string_lossy().to_string(),
+                started: "2026-04-30T21:04:50Z".to_string(),
+                session_id: "child-session".to_string(),
+                file: "tasks/claudescore-3.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: "instance-1".to_string(),
+            },
+        );
+        sessions::save_in(&subroot, &registry).unwrap();
+
+        let _cwd = ScopedCurrentDir::set(root);
+        let entry = lookup_registry_entry_for_file_session(
+            Path::new("src/session-share/tasks/claudescore-3.md"),
+            "child-session",
+        )
+        .expect("cross-root registry entry should resolve through child project root");
+        assert_eq!(entry.pane, "%44");
+        assert_eq!(entry.file, "tasks/claudescore-3.md");
+    }
+
+    #[test]
+    fn register_synced_files_updates_each_project_registry_by_path_key() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\n---\n\n# Root\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-cross-root-register");
+        let root_pane = iso.new_session("test", root).unwrap();
+        let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
+
+        let mut child_registry = sessions::SessionRegistry::new();
+        let bad_key = sessions::canonical_registry_key_in(
+            &subroot,
+            "src/session-share/tasks/claudescore-3.md",
+        );
+        child_registry.insert(
+            bad_key,
+            sessions::SessionEntry {
+                pane: child_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+                cwd: root.to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: "child-session".to_string(),
+                file: "src/session-share/tasks/claudescore-3.md".to_string(),
+                window: iso.pane_window(&child_pane).unwrap(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(&subroot, &child_registry).unwrap();
+
+        let _cwd = ScopedCurrentDir::set(root);
+        register_synced_files(
+            &iso,
+            &[
+                (
+                    "root-session".to_string(),
+                    PathBuf::from("tasks/agent-doc-bugs2.md"),
+                ),
+                (
+                    "child-session".to_string(),
+                    PathBuf::from("src/session-share/tasks/claudescore-3.md"),
+                ),
+            ],
+            &[
+                (PathBuf::from("tasks/agent-doc-bugs2.md"), root_pane.clone()),
+                (
+                    PathBuf::from("src/session-share/tasks/claudescore-3.md"),
+                    child_pane.clone(),
+                ),
+            ],
+        );
+
+        let root_registry = sessions::load_in(root).unwrap();
+        let root_key = sessions::canonical_registry_key_in(
+            root,
+            root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        let root_entry = root_registry
+            .get(&root_key)
+            .expect("root document should be registered in root registry");
+        assert_eq!(root_entry.pane, root_pane);
+        assert_eq!(root_entry.file, "tasks/agent-doc-bugs2.md");
+        assert_eq!(root_registry.len(), 1);
+
+        let child_registry = sessions::load_in(&subroot).unwrap();
+        let child_key = sessions::canonical_registry_key_in(
+            &subroot,
+            child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        let child_entry = child_registry
+            .get(&child_key)
+            .expect("child document should be registered in child registry");
+        assert_eq!(child_entry.pane, child_pane);
+        assert_eq!(child_entry.file, "tasks/claudescore-3.md");
+        assert_eq!(child_entry.cwd, subroot.to_string_lossy());
+        assert_eq!(child_registry.len(), 1);
     }
 }

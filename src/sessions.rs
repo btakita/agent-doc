@@ -322,6 +322,27 @@ pub fn register_supervisor(
     )
 }
 
+pub fn register_supervisor_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    supervisor_pid: u32,
+    supervisor_instance_id: &str,
+) -> Result<()> {
+    let window = pane_window(pane_id).unwrap_or_default();
+    register_full_with_cwd_and_instance_in(
+        base_dir,
+        session_id,
+        pane_id,
+        file,
+        supervisor_pid,
+        &window,
+        &base_dir.to_string_lossy(),
+        supervisor_instance_id,
+    )
+}
+
 pub fn register_full(
     session_id: &str,
     pane_id: &str,
@@ -393,6 +414,31 @@ pub fn register_full_with_cwd_in(
         window,
         cwd,
         None,
+    )
+}
+
+fn register_full_with_cwd_and_instance_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+    supervisor_instance_id: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
+    let mut registry = load_in(base_dir)?;
+    register_full_internal(
+        base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        cwd,
+        Some(supervisor_instance_id),
     )
 }
 

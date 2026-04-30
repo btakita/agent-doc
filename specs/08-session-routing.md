@@ -114,7 +114,7 @@ When the user navigates to a document in the editor:
    - If file is empty (no frontmatter, no content) → auto-scaffold as template with frontmatter + exchange component
    - If file has `agent_doc_format` but no `agent_doc_session` → assigns a UUID
    - If no snapshot exists → creates snapshot + `git add` + `git commit`
-3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`.
+3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`. For mixed-root editor layouts, resolution and later registry write-back must canonicalize each file path and consult the nearest `.agent-doc` ancestor for that file, not the caller's current working directory, so sibling repos in the same IDE window cannot borrow or overwrite each other's pane bindings.
 4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
    - Pane exists for this session → **focus it** (Binding found)
    - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane)

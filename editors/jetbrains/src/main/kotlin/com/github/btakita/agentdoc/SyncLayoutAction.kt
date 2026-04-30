@@ -6,8 +6,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.ui.Splitter
-import java.awt.Component
+import javax.swing.SwingUtilities
 
 /**
  * Manually re-syncs the tmux pane layout to match the current IDE editor split.
@@ -116,15 +115,22 @@ data class LayoutColumn(val files: List<String>)
 data class EditorLayout(val columns: List<LayoutColumn>)
 
 /**
- * Detects the 2D columnar layout of .md files in the editor by walking
- * the Swing Splitter tree recursively.
+ * Detects the 2D columnar layout of .md files in the editor by grouping
+ * visible editor windows by on-screen position.
  *
- * - Horizontal Splitter (isVertical=false) → separate columns (left + right)
- * - Vertical Splitter (isVertical=true) → merge files into same column (stacked)
- * - Leaf → maps to an EditorWindow by order (splitter tree leaves correspond 1:1
- *   with EditorWindow instances in left-to-right, top-to-bottom order)
+ * JetBrains does not guarantee `FileEditorManagerEx.windows` is returned in
+ * left-to-right screen order; when the right split is focused it can surface
+ * that window first. Grouping by actual component bounds keeps the tmux
+ * layout stable regardless of focus.
  */
 object LayoutDetector {
+    private const val COLUMN_X_TOLERANCE_PX = 8
+
+    internal data class LayoutWindowSnapshot(
+        val x: Int,
+        val y: Int,
+        val file: String?,
+    )
 
     /**
      * Detect the editor layout as a list of columns, each containing stacked files.
@@ -136,34 +142,26 @@ object LayoutDetector {
             val windows = managerEx.windows
             if (windows.size < 2) return null
 
-            // Collect selected files from each window, in window order.
-            // Each window represents one leaf in the splitter tree.
-            // Non-.md files map to null (preserving index alignment).
-            val windowFiles = windows.map { window ->
-                val file = window.selectedFile
-                if (file != null && file.name.endsWith(".md")) {
-                    TerminalUtil.relativePath(project, file)
-                } else null
-            }
-            // Need at least one .md file to do anything useful
-            if (windowFiles.filterNotNull().isEmpty()) return null
-
-            // Walk the splitter tree to get the column structure as leaf indices.
             val splitters = managerEx.splitters
-            val root = (splitters as? java.awt.Container) ?: return null
-            val leafCounter = intArrayOf(0) // mutable counter for leaf assignment
-            val indexColumns = walkSplitterTree(root, leafCounter)
-            if (indexColumns.isEmpty()) return null
+            val splittersComponent = splitters as? java.awt.Component ?: return null
 
-            // Map leaf indices to file paths.
-            // Columns with only non-.md files become empty (filtered out below).
-            // This preserves the columnar structure so sync doesn't collapse the layout.
-            val columns = indexColumns.map { indices ->
-                val files = indices.mapNotNull { idx ->
-                    if (idx < windowFiles.size) windowFiles[idx] else null
+            val snapshots = windows.map { window ->
+                val file = window.selectedFile?.takeIf { it.name.endsWith(".md") }?.let {
+                    TerminalUtil.relativePath(project, it)
                 }
-                LayoutColumn(files)
+                val component = window.tabbedPane.component
+                val bounds = component.parent?.let { parent ->
+                    SwingUtilities.convertRectangle(parent, component.bounds, splittersComponent)
+                } ?: component.bounds
+                LayoutWindowSnapshot(
+                    x = bounds.x,
+                    y = bounds.y,
+                    file = file,
+                )
             }
+            if (snapshots.none { it.file != null }) return null
+
+            val columns = buildColumnsFromSnapshots(snapshots)
 
             // Return layout if at least 2 columns exist (even if some are empty).
             // Empty columns tell sync to leave that tmux pane position alone.
@@ -173,59 +171,30 @@ object LayoutDetector {
         }
     }
 
-    /**
-     * Recursively walk the Swing component tree and return column structure
-     * as lists of leaf indices.
-     *
-     * A horizontal splitter (isVertical=false) means left/right → separate columns.
-     * A vertical splitter (isVertical=true) means top/bottom → same column, merged indices.
-     * A leaf → assigns the next leaf index from the counter.
-     */
-    private fun walkSplitterTree(
-        component: Component,
-        leafCounter: IntArray
-    ): List<List<Int>> {
-        if (component is Splitter) {
-            val first = component.firstComponent
-            val second = component.secondComponent
-            val leftCols = if (first != null) walkSplitterTree(first, leafCounter) else emptyList()
-            val rightCols = if (second != null) walkSplitterTree(second, leafCounter) else emptyList()
+    internal fun buildColumnsFromSnapshots(
+        snapshots: List<LayoutWindowSnapshot>,
+        columnTolerancePx: Int = COLUMN_X_TOLERANCE_PX,
+    ): List<LayoutColumn> {
+        if (snapshots.isEmpty()) return emptyList()
 
-            return if (!component.isVertical) {
-                // Horizontal split → separate columns
-                leftCols + rightCols
+        val sorted = snapshots.sortedWith(compareBy<LayoutWindowSnapshot>({ it.x }, { it.y }))
+        val grouped = mutableListOf<MutableList<LayoutWindowSnapshot>>()
+
+        for (snapshot in sorted) {
+            val existingColumn = grouped.lastOrNull()?.takeIf { column ->
+                kotlin.math.abs(column.first().x - snapshot.x) <= columnTolerancePx
+            }
+            if (existingColumn != null) {
+                existingColumn += snapshot
             } else {
-                // Vertical split → merge all indices into one column
-                val merged = (leftCols + rightCols).flatten()
-                if (merged.isEmpty()) emptyList() else listOf(merged)
+                grouped += mutableListOf(snapshot)
             }
         }
 
-        // Delegate only to children that contain Splitters.
-        // Non-splitter children (decorations, overlays, status bars) are skipped
-        // to avoid assigning bogus leaf indices that offset the real editor panes.
-        if (component is java.awt.Container) {
-            val splitterChildren = component.components.filter { containsSplitter(it) }
-            if (splitterChildren.size == 1) {
-                // Wrapper around a single splitter subtree — delegate directly
-                return walkSplitterTree(splitterChildren[0], leafCounter)
-            } else if (splitterChildren.size > 1) {
-                // Multiple splitter subtrees — process all
-                return splitterChildren.flatMap { walkSplitterTree(it, leafCounter) }
-            }
+        return grouped.map { column ->
+            LayoutColumn(
+                column.sortedBy { it.y }.mapNotNull { it.file }
+            )
         }
-
-        // Leaf: assign current index and increment
-        val idx = leafCounter[0]
-        leafCounter[0] = idx + 1
-        return listOf(listOf(idx))
-    }
-
-    private fun containsSplitter(component: Component): Boolean {
-        if (component is Splitter) return true
-        if (component is java.awt.Container) {
-            return component.components.any { containsSplitter(it) }
-        }
-        return false
     }
 }

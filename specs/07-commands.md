@@ -109,7 +109,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 7. Register session → pane in `sessions.json`. If the same session UUID was previously bound to a different pane, the registry write must first append `session_superseded ...` plus `session_end origin=registry_rebind ...` to that session log before the new pane binding lands, so pane replacement leaves explicit provenance instead of two apparently open pane eras in one log. Any later session-log parser that decides whether the previous pane era is still open must treat `session_end` as the closing event by first token, not by exact whole-line match, so recovery metadata after `session_end` still counts as a real closeout.
 8. **Validate snapshot integrity** — call `ensure_initialized` before the IPC listener starts. If the file was moved (e.g., JB plugin respawn after rename), migrates orphaned state files from the old path hash to the new one, or bootstraps a fresh snapshot. Prevents CRDT corruption from stale state.
 9. Resolve harness args from `agent_args` / harness-specific aliases, then auto-append `--add-dir` entries for any extra writable roots needed by submodule documents: the superproject working tree for parent-repo patchback targets plus any external git metadata directories (including nested child submodule gitdirs under `.git/modules/...` and the superproject `.git` when applicable). Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not, so the Codex backend strips `--add-dir` entries from resume args (the resumed session inherits writable roots from the original `exec`)
-10. Exec the configured harness (replaces process)
+10. Exec the configured harness (replaces process). For Codex clean exits, the supervisor still auto-restarts in resume mode by default, but if a forwarded `Ctrl-D`/stdin-EOF prompt fires immediately after a fresh start (within the early-start grace window) and the follow-up prompt itself sees EOF, treat that as a fresh restart instead of an intentional quit so transient pane-move/input races do not close the claimed tmux pane.
 
 ## route
 
@@ -730,6 +730,7 @@ Harness prompt source for the synthesized no-diff path:
   - `response_captured`: the response was captured but no write/commit followed
   - `write_applied` / `ipc_write_consumed` / `snapshot_saved_file_ipc`: the response write landed but no commit followed
 - Exit `1` when the snapshot→file diff contains a likely direct assistant patchback marker such as `### Re:` or `## Assistant` without a corresponding `agent-doc` cycle
+- If an open `preflight_started` cycle already has a visible `### Re:` patchback in the working tree but `HEAD` still does not prove it, `session-check` must fail with an explicit manual-repair / commit-boundary message instead of a generic open-cycle note. The closeout is still incomplete at that point: the operator must either re-run the response through `agent-doc write --commit <FILE>` or manually commit the repaired document once the visible response is confirmed correct.
 - When that bypassed patchback leaves bare `prompt_target` lines in the same changed exchange tail, report the missing-`❯ ` prompt target in the failure marker so repair can route through the binary path instead of silently accepting transcript drift
 - Narrow self-heal: if that marker is only exchange-only historical drift already committed in `HEAD`, and the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers or adds only a newer local user follow-up, `session-check` repairs the stale snapshot or missing commit boundary first and exits `0`
 - Historical exchange repair must treat already-committed prompt+response pairs as safe drift too, not only bare `### Re:` insertions. If `HEAD` contains a committed user directive or question immediately followed by its `### Re:` block, snapshot repair advances to that committed pair before classifying any newer working-tree prompt as the unresolved tail.
@@ -872,6 +873,7 @@ After removing duplicates and updating the snapshot, `dedupe` also deletes the c
 The command computes the current diff against the saved snapshot and emits JSON with:
 
 - `prompt_targets`
+- `execution_scope`
 - `repo_actions`
 - `required_commands`
 - `pending_mutations`
@@ -884,6 +886,11 @@ The intent is to give the skill/orchestrator an explicit, binary-owned execution
 
 - `resolve_existing` — emitted when a `do #id` directive in `repo_actions` matches an open tracked-work item in backlog or icebox. Tells the skill the finalize command must include `--pending-done <id>` if the work completes.
 - `expect_add` — emitted when prompt targets contain signals that the response will likely generate recommendations (e.g., user asks for "tasks", "todo", "backlog", "what's next", "recommendations", "next steps", "action items"). Tells the skill the finalize command should include `--pending-add` flags for any actionable items in the response.
+
+`execution_scope` is binary-owned dispatch policy:
+
+- `normal` — execute `repo_actions` normally before response persistence.
+- `plan_backlog_only` — the active prompt is a report/planning contract such as `#agent-doc-bug`. In this scope the planning record must suppress repo actions for the current cycle even if the raw prompt included imperative wording, because the contract requires creating plan/backlog artifacts first and defers implementation to a later explicit `do #id ...` turn.
 
 ## orchestrate
 

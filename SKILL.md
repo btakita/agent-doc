@@ -79,6 +79,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 After `preflight`, run `agent-doc plan <FILE>` and use the emitted planning record as the execution contract for the cycle. The planning record is binary-owned and includes:
 
 - `prompt_targets` — ordered prompts that still require a response
+- `execution_scope` — whether this cycle may execute repo work normally or must stay in plan/backlog capture only mode
 - `repo_actions` — concrete repo work to finish before persistence
 - `required_commands` — binary/harness commands the cycle must run
 - `pending_mutations` — pending items that must be resolved this cycle
@@ -92,7 +93,7 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, prompt-bearing inline edits (blockquotes, comments, edits to previous responses), and structural changes.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; the turn is incomplete until each unresolved prompt in that tail is answered or explicitly grouped into one response. Concretely, each `prompt_target` must be answered or grouped, while `content_edit` items are user corrections to incorporate and `recovery_artifact` / `boundary_artifact` items are normalization signals instead of ordinary conversation.
-- Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
+- Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode for this cycle even if the raw prompt sounds imperative; do not start repo implementation until a later explicit `do #id ...` turn. Otherwise, if the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 
@@ -103,6 +104,7 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 **Prefer wrapping exchange responses in `<!-- patch:exchange -->`** for clarity. Raw (unwrapped) content also works via boundary synthesis.
 
 **`#agent-doc-bug` plan proof:** when the prompt contract says to create a plan, create the plan file before closeout and cite each plan path explicitly in the response (for example `Plan: tasks/agent-doc/plan-foo.md`). `finalize` / `session-check` now fail closed if the response covers multiple bug reports but cites fewer existing plan files than the contract requires.
+**`#agent-doc-bug` scope:** when `agent-doc plan` returns `execution_scope=plan_backlog_only`, the prompt is a report/planning contract. Create the plan file(s), capture the backlog item(s), and explain the deferred implementation boundary instead of editing code in that same cycle.
 
 ### 1b. Update pending (template mode)
 

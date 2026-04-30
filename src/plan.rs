@@ -5,9 +5,9 @@
 //!   session document and prints it as pretty JSON.
 //! - Reads the current document and computes the current diff against the saved
 //!   snapshot via `diff::compute(file)`.
-//! - Produces an ordered record with prompt targets, repo actions, required
-//!   binary commands, pending mutations that must be resolved this cycle,
-//!   a handoff target, and concrete blockers.
+//! - Produces an ordered record with prompt targets, execution scope, repo
+//!   actions, required binary commands, pending mutations that must be
+//!   resolved this cycle, a handoff target, and concrete blockers.
 //! - Uses the same deterministic diff classifiers as preflight (`prompt_bearing_changes`,
 //!   imperative-directive extraction, slash-command parsing, orchestration detection)
 //!   so the planning record is binary-owned rather than free-form skill prose.
@@ -20,6 +20,9 @@
 //!   `agent-doc orchestrate ...` command before attempting a manual response.
 //! - `pending_mutations` captures pre-response pending work that must be
 //!   explicitly resolved before persistence; it does not silently complete items.
+//! - `execution_scope=plan_backlog_only` means the prompt contract is a
+//!   report/planning turn such as `#agent-doc-bug`, so repo work must wait
+//!   for a later explicit implementation directive.
 //! - `required_commands` may include placeholder arguments such as
 //!   `<preflight.baseline_file>` because the planning phase does not own the
 //!   preflight baseline path.
@@ -46,6 +49,7 @@ use crate::{
 pub struct DispatchPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_targets: Vec<String>,
+    pub execution_scope: ExecutionScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repo_actions: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -82,6 +86,13 @@ pub enum HandoffTarget {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionScope {
+    Normal,
+    PlanBacklogOnly,
+}
+
 pub fn run(file: &Path) -> Result<()> {
     let plan = build(file)?;
     println!(
@@ -101,11 +112,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let (fm, _body) = frontmatter::parse(&content)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
-    let Some(diff_text) =
-        diff::compute(file)?.or(crate::harness_prompt::synthetic_diff_for_file(file)?)
-    else {
+    let doc_diff = diff::compute(file)?;
+    let harness_diff = if doc_diff.is_none() {
+        crate::harness_prompt::synthetic_diff_for_file(file)?
+    } else {
+        None
+    };
+
+    let Some(diff_text) = doc_diff.or(harness_diff.clone()) else {
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
+            execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
             required_commands: finalize_placeholder_commands(file, &fm),
             pending_mutations: Vec::new(),
@@ -121,7 +138,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         .collect::<Vec<_>>();
     let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&diff_text);
 
-    let repo_actions = diff::extract_imperative_directives(&diff_text);
+    let execution_scope = execution_scope_for_prompt_targets(
+        &prompt_targets,
+        &added_diff_lines,
+        harness_diff.is_some(),
+        &fm.prompt_presets,
+    );
+    let repo_actions = if execution_scope == ExecutionScope::PlanBacklogOnly {
+        Vec::new()
+    } else {
+        diff::extract_imperative_directives(&diff_text)
+    };
     let orchestration_request = diff::detect_orchestration_request(&diff_text);
     let exchange_compaction_requested = diff::detect_exchange_compaction_request(&diff_text);
     let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
@@ -186,6 +213,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     Ok(DispatchPlan {
         prompt_targets,
+        execution_scope,
         repo_actions,
         required_commands,
         pending_mutations,
@@ -199,6 +227,31 @@ fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str 
         diff::OrchestrationRequestMode::Sequential => "sequential",
         diff::OrchestrationRequestMode::Parallel => "parallel",
         diff::OrchestrationRequestMode::Dag => "dag",
+    }
+}
+
+fn execution_scope_for_prompt_targets(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    harness_prompt_only: bool,
+    prompt_presets: &indexmap::IndexMap<String, String>,
+) -> ExecutionScope {
+    if crate::prompt_contract::prompt_targets_reference_preset(
+        prompt_targets,
+        prompt_presets,
+        "#agent-doc-bug",
+    ) {
+        ExecutionScope::PlanBacklogOnly
+    } else if harness_prompt_only
+        && crate::prompt_contract::prompt_targets_reference_preset(
+            added_diff_lines,
+            prompt_presets,
+            "#agent-doc-bug",
+        )
+    {
+        ExecutionScope::PlanBacklogOnly
+    } else {
+        ExecutionScope::Normal
     }
 }
 
@@ -1083,6 +1136,114 @@ Done.
                 .any(|m| { m.kind == PendingMutationKind::ResolveExisting && m.id == "1g42" }),
             "expected ResolveExisting for harness prompt do-directive, got {:?}",
             plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_marks_agent_doc_bug_prompt_as_plan_backlog_only() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _prompt = EnvGuard::set("AGENT_DOC_HARNESS_PROMPT", "#agent-doc-bug");
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.execution_scope, ExecutionScope::PlanBacklogOnly);
+        assert!(plan.repo_actions.is_empty(), "{:?}", plan.repo_actions);
+        assert!(
+            plan.pending_mutations
+                .iter()
+                .any(|m| m.kind == PendingMutationKind::ExpectAdd),
+            "expected ExpectAdd from #agent-doc-bug preset expansion, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_does_not_treat_backlog_text_as_agent_doc_bug_prompt_scope() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+do #pbct. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#pbct] Respect `#agent-doc-bug` preset scope and fail closed before implementation.
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.execution_scope, ExecutionScope::Normal);
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do #pbct. spec-test-build-install-commit-push".to_string()]
         );
     }
 }

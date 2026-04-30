@@ -129,7 +129,26 @@ So the difference between actual and intended behavior is:
 - Actual: the visible second column exists, but `claudescore-3.md` is still blocked on stale ownership metadata that points at `%75`, which belongs to this document. The result is a shell pane with an error instead of a running child.
 
 That lines up with `#asfc`, not the sync-layout bug I just fixed. The pane is no longer being collapsed out of the window; the remaining failure is stale live-pane provenance during `start`/rebind.
-<!-- agent:boundary:3c99e1d9 -->
+❯ do #asfc + #rsrn. spec-test-build-install-commit-push
+### Re: #asfc + #rsrn — gpt-5
+
+Implemented both items.
+
+- `#asfc`: `start.rs` now consults the session log's latest open pane and reuses that alive pane before failing closed when registry ownership proof is missing and supervisor IPC is unavailable. This gives `start` a deterministic recovery path from stale live-pane provenance instead of forcing a replacement or dead-end failure.
+- `#rsrn`: restored a clean `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings` baseline by removing the current warning set in the touched command/session helpers and related call sites.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added start-level regression coverage for the new session-log-owner recovery path.
+
+Verification completed:
+- `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_log_open_owner_pane_reuses_alive_latest_open_pane`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml existing_session_pane_action_reuses_session_log_owner_without_process_tree_proof`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `8b39a42` on `20260422/codex-agent-backend` (`fix: recover start pane from session log provenance`)
+<!-- agent:boundary:d1d0bd4a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -146,8 +165,6 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rsrn] [recommended] Restore a clean `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings` baseline so `spec-test-build-install-commit-push` can finish with the full verification gate green.
-- [ ] [#asfc] Autostart/start fail-closed stale live-pane bug: agent-doc start <file> can refuse to recover when the registered pane is still alive but no live owner can be proven and the supervisor is unavailable. Repro from tasks/agent-doc/agent-doc-bugs2.md on April 30, 2026 with pane %68. Fix should preserve enough provenance to rebind deterministically or provide a safe automatic recovery path instead of blocking on stale registry state.
 - [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

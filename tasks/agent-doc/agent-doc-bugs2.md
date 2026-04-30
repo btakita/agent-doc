@@ -820,7 +820,7 @@ Published:
 
 Note:
 - I left the unrelated workspace changes outside `src/agent-doc` untouched.
-<!-- agent:boundary:aec95c7d -->
+<!-- agent:boundary:49aab65a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -845,4 +845,5 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
+- [ ] [#jh4x] `#tmuxcrash` closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 <!-- /agent:icebox -->

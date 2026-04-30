@@ -678,7 +678,38 @@ Published:
 - `src/agent-doc` commit `30c7d96` (`fix: fail closed on active-session drift`) pushed to `origin/20260422/codex-agent-backend`.
 
 No new backlog item came out of this fix.
-<!-- agent:boundary:0ff54c42 -->
+❯ The provenance model seems fundamentally brittle. Can we have a simpler model that is guaranteed to find the supervisor process?
+❯ In .agent-doc/sessions.json, can we have a simple key/value pair. Where the key is the absolute path to the document, and the value contain the PID of either the supervisor or the tmux pane id.
+
+❯ If the PID of the supervisor is running or the tmux pane id is found, then provenance is found. If the PID of the supervisor is not running nor the tmux pane id is found, then provenance is not found.
+
+❯ Please analyze + critique the design. Will this be a "guarantee" to find the correct pane + supervisor process?
+### Re: provenance model + sessions.json simplification — gpt-5
+
+Short answer: the absolute-path key is a good simplification; the proposed proof rule is not a guarantee.
+
+What is good in your proposal:
+- Keying `.agent-doc/sessions.json` by canonical absolute document path matches how operators reason about ownership and would eliminate the current "same file, different session UUID" duplicate-claim shape. The current registry is keyed by session UUID even though duplicate-claim detection already has to reason by `entry.file`; see [sessions.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sessions.rs:317) and [preflight.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/preflight.rs:558).
+- The value already wants to carry pane-local routing state. The current registry stores `pane`, `pid`, `file`, and `window` already, so structurally it is not far from what you are asking for; see [registry.rs](/home/brian/work/btakita/agent-loop/src/tmux-router/src/registry.rs:121) and the live [.agent-doc/sessions.json](/home/brian/work/btakita/agent-loop/.agent-doc/sessions.json:1).
+
+Where the guarantee fails:
+- `supervisor PID is running` is not sufficient. PID alone is not a stable identity because it can be recycled after exit. Without a birth-time or instance-id check, a live PID can be the wrong process.
+- `tmux pane id exists` is not sufficient. A pane can stay alive after the supervisor exits, can be sitting at a shell prompt, or can later host the wrong document. Current `route` and `start` intentionally refuse "alive pane only" and require stronger proof before reuse; see [route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs:810) and [start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1567).
+- `PID OR pane` is especially unsafe because each side can go stale independently. That rule would accept exactly the ambiguous states the recent fixes were trying to fail closed on.
+
+What the current code is already doing that is materially safer:
+- Live-owner proof is not just the registry. `sync` first tries a process-tree match on the document path, then falls back to recovering the pane via supervisor PID; see [sync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sync.rs:2341) and [sync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sync.rs:2413).
+- `route` fails closed when an alive registered pane no longer has a provable live owner, instead of blindly trusting the registry entry; see [route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs:81).
+- `start` also treats open session-log provenance as authoritative and refuses to replace an alive pane when ownership proof is unresolved; see [start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:23) and [start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs:1609).
+
+My recommendation:
+1. Yes: simplify `.agent-doc/sessions.json` so the key is the canonical absolute document path.
+2. Keep the value as an object, not a scalar. Minimum fields: `session_id`, `pane_id`, `supervisor_pid`, and either `supervisor_start_time` or a generated `supervisor_instance_id`. Keep `window` only if layout/sync still needs it.
+3. Treat that file as a hint index, not final proof. Ownership should be considered proven only if the pane exists and its process tree still contains the exact supervisor identity, or the supervisor IPC for `session_id` responds and resolves back to exactly one pane.
+4. If neither proof holds, fail closed. Do not treat "pane exists" as provenance found.
+
+So the answer is: yes, the path-keyed registry is a good simplification; no, the proposed `pid running || pane found` rule is not a guarantee to find the correct supervisor or pane. It is simpler, but it would weaken correctness.
+<!-- agent:boundary:2484f994 -->
 <!-- /agent:exchange -->
 
 <!--

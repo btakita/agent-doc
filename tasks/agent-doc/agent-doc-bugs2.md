@@ -611,7 +611,31 @@ Published:
 
 Note:
 - I did not mark `#tmuxcrash` done. The live second-leg closeout proof in `#tmuxcrash-9rh5` is still open.
-<!-- agent:boundary:ae281a7e -->
+❯ Please investigate recent tmux crashes in agent-doc turns for. spec-test-build-install-commit-push:
+❯ - /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+❯ - /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+### Re: recent tmux crash reports on `claudescore-3.md` and `monsterrodholders.md` — gpt-5
+
+I investigated both sessions from their repo-local `.agent-doc` logs. The recent failures do not look like true pane crashes.
+
+`src/session-share/tasks/claudescore-3.md`:
+- At April 29, 2026 9:21:50 PM EDT, `route_cycle_start_missing` fired for pane `%516` on `do #ccarules. spec-test-news-commit-push`.
+- At April 29, 2026 9:22:46 PM EDT, `route_startup_miss_detected` logged that same pane `%516` as `live_owner=%516`, `supervisor_health=Healthy`, `session_log=open`, with latest run `claude_start mode=fresh restart_count=0`.
+- At April 29, 2026 9:37:01 PM EDT, route finally logged `route_startup_miss_cleared_superseded_owner stale_pane=%516 registered_pane=%530`, then `interrupted_cycle_detected ... phase=PreflightStarted`.
+- So this was a stale startup-miss / superseded-owner recovery path, not evidence that pane `%516` actually died.
+
+`src/boost-client/tasks/monsterrodholders.md`:
+- At April 29, 2026 3:48:54 PM EDT, `route_cycle_start_missing` fired for pane `%408` on the Gmail API follow-up prompt.
+- At April 29, 2026 3:52:12 PM EDT, `route_startup_miss_detected` again showed `live_owner=%408`, `supervisor_health=Healthy`, `session_log=open`, with latest run `codex_start mode=fresh restart_count=0`.
+- The repo-local log for this file has no matching `missing_pane`, `supervisor_exit`, or retained-dead-pane evidence around `%408`; the next durable handoff is a normal new `session_start` on `%434`.
+- So the JB-plugin error here was also a routed startup-miss on a still-live owner, not a confirmed pane crash.
+
+About the `echo '[agent-doc] startup-miss ...'` text that appeared in the bound Codex prompt:
+- That was the pre-`#smdq` diagnostic path. Route used to draft the startup-miss notice as literal shell input in the pane, which left the `echo ...` text visible and un-entered.
+- `#smdq` already changed that path to a tmux display overlay, so that diagnostic is no longer supposed to land as pending pane input.
+
+I did not add a new backlog item. Both reports fit the existing `#tmuxcrash` / `#smst` family: false crash surfacing caused by startup-miss/live-owner state, not true child-death provenance.
+<!-- agent:boundary:1f204817 -->
 <!-- /agent:exchange -->
 
 <!--

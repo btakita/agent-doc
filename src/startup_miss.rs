@@ -348,7 +348,11 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
                 saw_process_exit_after_latest_run = true;
             }
         }
-        if event == "session_end" {
+        if event
+            .split_whitespace()
+            .next()
+            .is_some_and(|token| token == "session_end")
+        {
             saw_session_end_after_latest_start = true;
             if latest_run_timestamp.is_some() {
                 saw_session_end_after_latest_run = true;
@@ -730,6 +734,34 @@ mod tests {
         assert_eq!(status.latest_run_timestamp, None);
         assert!(!status.latest_session_open());
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn session_log_status_treats_session_end_with_origin_metadata_as_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-rebind.log"),
+            concat!(
+                "[1] session_start file=test.md pane=%52 session=session-rebind\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[3] session_superseded old_pane=%52 new_pane=%84 old_window=@1 new_window=@2\n",
+                "[4] session_end origin=registry_rebind pane=%52 next_pane=%84\n",
+            ),
+        )
+        .unwrap();
+
+        let status = session_log_status(&doc, "session-rebind")
+            .unwrap()
+            .expect("session log status");
+        assert!(!status.latest_session_open());
+        assert!(status.latest_session_closed());
+        assert_eq!(
+            status.last_event.as_deref(),
+            Some("session_end origin=registry_rebind pane=%52 next_pane=%84")
+        );
     }
 
     #[test]

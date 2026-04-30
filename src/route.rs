@@ -868,6 +868,7 @@ fn resolve_or_create_pane(
                         is_first_column(file, col_args),
                     );
                     ensure_existing_pane_ready_for_dispatch(tmux, file, owner, harness)?;
+                    register_dispatch_target(session_id, owner, file_path)?;
                     send_command(
                         tmux,
                         owner,
@@ -1004,6 +1005,7 @@ fn resolve_or_create_pane(
                 );
                 register_dispatch_target(session_id, registered_pane, file_path)?;
                 ensure_existing_pane_ready_for_dispatch(tmux, file, registered_pane, harness)?;
+                register_dispatch_target(session_id, registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 send_command(
                     tmux,
@@ -1078,6 +1080,7 @@ fn resolve_or_create_pane(
         );
         register_dispatch_target(session_id, &existing, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &existing, harness)?;
+        register_dispatch_target(session_id, &existing, file_path)?;
         send_command(
             tmux,
             &existing,
@@ -1108,6 +1111,7 @@ fn resolve_or_create_pane(
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         register_dispatch_target(session_id, &new_pane, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &new_pane, harness)?;
+        register_dispatch_target(session_id, &new_pane, file_path)?;
         send_command(
             tmux,
             &new_pane,
@@ -1220,6 +1224,67 @@ fn send_command(
     Ok(())
 }
 
+fn send_command_unchecked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    routed_prompt_body: Option<&str>,
+) -> Result<CommandDispatchStatus> {
+    let short_name = std::path::Path::new(file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+    let trigger = harness.trigger_command(file_path);
+    let payload = routed_trigger_payload(harness, &trigger, routed_prompt_body);
+    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
+    if let Err(e) = tmux
+        .cmd()
+        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
+        .status()
+    {
+        eprintln!("[route] warning: display-message failed: {}", e);
+    }
+
+    tmux.send_keys(pane, &payload)?;
+    if let Err(e) = tmux.select_pane(pane) {
+        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
+    }
+    eprintln!("[route] Sent {} → pane {}", trigger, pane);
+
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(5);
+    let poll_interval = std::time::Duration::from_millis(300);
+    let mut enter_retries = 0u32;
+
+    while start.elapsed() < timeout {
+        std::thread::sleep(poll_interval);
+        if let Ok(content) = sessions::capture_pane(tmux, pane) {
+            let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
+
+            if !cmd_still_in_input {
+                eprintln!(
+                    "[route] Command accepted ({:.1}s, {} Enter retries)",
+                    start.elapsed().as_secs_f64(),
+                    enter_retries
+                );
+                return Ok(CommandDispatchStatus::Accepted);
+            }
+
+            enter_retries += 1;
+            if let Err(e) = tmux.send_keys_raw(pane, "Enter") {
+                eprintln!("[route] warning: retry Enter failed: {}", e);
+            }
+        }
+    }
+    eprintln!(
+        "[route] warning: command may not have been accepted after {:.1}s ({} Enter retries)",
+        start.elapsed().as_secs_f64(),
+        enter_retries
+    );
+    Ok(CommandDispatchStatus::TimedOut)
+}
+
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
     let resolved = crate::git::resolve_absolute_file_path(path);
     std::fs::canonicalize(&resolved).unwrap_or(resolved)
@@ -1309,65 +1374,7 @@ fn send_command_checked(
     routed_prompt_body: Option<&str>,
 ) -> Result<CommandDispatchStatus> {
     ensure_dispatch_target_matches_file(pane, file_path)?;
-    let short_name = std::path::Path::new(file_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| file_path.to_string());
-    let trigger = harness.trigger_command(file_path);
-    let payload = routed_trigger_payload(harness, &trigger, routed_prompt_body);
-    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
-    if let Err(e) = tmux
-        .cmd()
-        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
-        .status()
-    {
-        eprintln!("[route] warning: display-message failed: {}", e);
-    }
-
-    tmux.send_keys(pane, &payload)?;
-    if let Err(e) = tmux.select_pane(pane) {
-        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
-    }
-    eprintln!("[route] Sent {} → pane {}", trigger, pane);
-
-    // Poll-based Enter confirmation: check if the command text is still visible
-    // in the pane. Prompts vary by harness, so instead of watching for prompt
-    // disappearance we check whether the exact trigger command is still in the
-    // last few lines (meaning it is still sitting in the input, not submitted).
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(5);
-    let poll_interval = std::time::Duration::from_millis(300);
-    let mut enter_retries = 0u32;
-
-    while start.elapsed() < timeout {
-        std::thread::sleep(poll_interval);
-        if let Ok(content) = sessions::capture_pane(tmux, pane) {
-            // Check if the command text is still in the last 5 lines
-            // (i.e., still sitting in the input prompt, not yet submitted)
-            let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
-
-            if !cmd_still_in_input {
-                eprintln!(
-                    "[route] Command accepted ({:.1}s, {} Enter retries)",
-                    start.elapsed().as_secs_f64(),
-                    enter_retries
-                );
-                return Ok(CommandDispatchStatus::Accepted);
-            }
-
-            // Command text still in input — retry Enter
-            enter_retries += 1;
-            if let Err(e) = tmux.send_keys_raw(pane, "Enter") {
-                eprintln!("[route] warning: retry Enter failed: {}", e);
-            }
-        }
-    }
-    eprintln!(
-        "[route] warning: command may not have been accepted after {:.1}s ({} Enter retries)",
-        start.elapsed().as_secs_f64(),
-        enter_retries
-    );
-    Ok(CommandDispatchStatus::TimedOut)
+    send_command_unchecked(tmux, pane, file_path, harness, routed_prompt_body)
 }
 
 fn routed_trigger_payload(
@@ -2215,6 +2222,11 @@ fn auto_start_in_session(
         );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
+        // Reassert the fresh pane binding immediately before the first guarded
+        // dispatch. Recovery paths can clear or rewrite the registry between
+        // early registration and the later ready-to-send moment, and the
+        // guarded send must validate against the current registry state.
+        register_dispatch_target(session_id, &new_pane, file_path)?;
         let dispatch = if wait_for_agent_ready(
             tmux,
             &new_pane,
@@ -2222,13 +2234,13 @@ fn auto_start_in_session(
             harness,
         ) {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_checked(tmux, &new_pane, file_path, harness, None)?
+            send_command_unchecked(tmux, &new_pane, file_path, harness, None)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_checked(tmux, &new_pane, file_path, harness, None)? {
+            match send_command_unchecked(tmux, &new_pane, file_path, harness, None)? {
                 CommandDispatchStatus::Accepted => {
                     crate::ops_log::log_op(
                         file,

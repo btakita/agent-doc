@@ -271,6 +271,8 @@ At minimum, harness exit lines must preserve:
 
 The final supervisor-owned closeout must append `supervisor_exit reason=...` before `session_end` so later crash analysis can distinguish deliberate quits, IPC stops, and flapping halts from missing-pane recovery written by other components.
 
+Session-log consumers must treat any event whose first token is `session_end` as a closeout boundary, even when origin metadata follows on the same line (for example `session_end origin=registry_rebind ...` or `session_end origin=sync_missing_pane`). Provenance analysis must not require the whole line to equal the bare literal `session_end`.
+
 Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 - each restart spawns at most one auto-trigger thread
 - when the child exits, that thread is explicitly cancelled and joined before

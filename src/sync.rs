@@ -462,6 +462,34 @@ fn repair_missing_registered_pane(
     })
 }
 
+fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Result<bool> {
+    let Some(window) = crate::startup_miss::recent_session_loss_window(file, session_id)? else {
+        return Ok(false);
+    };
+
+    let first = crate::startup_miss::format_timestamp(window.first_timestamp);
+    let last = crate::startup_miss::format_timestamp(window.last_timestamp);
+    let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
+    eprintln!(
+        "[sync] repeated pane-loss window for {} ({} events since {}, latest reason={} at {}) — skipping auto-start until manual recovery",
+        file.display(),
+        window.count,
+        first,
+        latest_reason,
+        last
+    );
+    sync_log(&format!(
+        "repeated pane-loss window file={} session={} count={} first={} last={} latest_reason={} action=skip_auto_start",
+        file.display(),
+        session_id,
+        window.count,
+        first,
+        last,
+        latest_reason
+    ));
+    Ok(true)
+}
+
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
     run_with_options(col_args, window, focus, true, &Tmux::default_server())
@@ -1526,6 +1554,10 @@ fn run_with_options(
                     "rename-debounce: skipped auto-start for {}",
                     file_path.display()
                 ));
+                continue;
+            }
+
+            if skip_auto_start_for_recent_session_loss(file_path, &session_id)? {
                 continue;
             }
 
@@ -3915,6 +3947,34 @@ mod tests {
             "different files should have different hashes"
         );
         assert!(!marker_b.exists(), "no marker should exist for file_b");
+    }
+
+    #[test]
+    fn skip_auto_start_for_recent_session_loss_detects_repeated_window() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+        let doc = tmp.path().join("tasks").join("repeat-loss.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: repeat-loss\n---\n").unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/repeat-loss.log"),
+            format!(
+                "[{}] supervisor_exit code=missing_pane pane=%41 reason=registered_pane_missing\n[{}] supervisor_exit code=missing_pane pane=%42 reason=registered_pane_dead\n",
+                now.saturating_sub(30),
+                now.saturating_sub(5)
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            skip_auto_start_for_recent_session_loss(&doc, "repeat-loss").unwrap(),
+            "two recent session-loss events should suppress sync auto-start"
+        );
     }
 
     #[test]

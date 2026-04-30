@@ -25,6 +25,9 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+const RECENT_SESSION_LOSS_WINDOW_SECS: u64 = 600;
+const RECENT_SESSION_LOSS_THRESHOLD: usize = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StartupMiss {
     pub file: String,
@@ -64,6 +67,14 @@ pub struct StartupMissSupersession {
     pub latest_open_timestamp: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentSessionLossWindow {
+    pub count: usize,
+    pub first_timestamp: u64,
+    pub last_timestamp: u64,
+    pub latest_reason: Option<String>,
+}
+
 impl SessionLogStatus {
     fn latest_anchor_timestamp(&self) -> Option<u64> {
         self.latest_run_timestamp.or(self.latest_start_timestamp)
@@ -91,6 +102,23 @@ fn is_harness_run_start_event(event: &str) -> bool {
         event.split_whitespace().next(),
         Some(token) if token.ends_with("_start") || token.ends_with("_restart")
     )
+}
+
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn is_session_loss_event(event: &str) -> bool {
+    event.starts_with("supervisor_exit code=missing_pane ")
+}
+
+fn event_reason(event: &str) -> Option<String> {
+    event
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("reason=").map(ToOwned::to_owned))
 }
 
 fn state_path(file: &Path) -> Result<Option<PathBuf>> {
@@ -453,6 +481,72 @@ pub fn latest_log_last_event(status: &SessionLogStatus) -> &str {
     status.last_event.as_deref().unwrap_or("?")
 }
 
+pub fn recent_session_loss_window(
+    file: &Path,
+    session_id: &str,
+) -> Result<Option<RecentSessionLossWindow>> {
+    recent_session_loss_window_at(file, session_id, current_epoch_secs())
+}
+
+fn recent_session_loss_window_at(
+    file: &Path,
+    session_id: &str,
+    now_epoch_secs: u64,
+) -> Result<Option<RecentSessionLossWindow>> {
+    let Some(path) = log_path(file, session_id)? else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&path)?;
+    let cutoff = now_epoch_secs.saturating_sub(RECENT_SESSION_LOSS_WINDOW_SECS);
+    let mut count = 0usize;
+    let mut first_timestamp = None;
+    let mut last_timestamp = None;
+    let mut latest_reason = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let event = line
+            .split_once("] ")
+            .map(|(_, event)| event)
+            .unwrap_or(line)
+            .trim();
+        let Some(timestamp) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once(']'))
+            .and_then(|(ts, _)| ts.parse::<u64>().ok())
+        else {
+            continue;
+        };
+
+        if timestamp < cutoff || timestamp > now_epoch_secs || !is_session_loss_event(event) {
+            continue;
+        }
+
+        count += 1;
+        first_timestamp.get_or_insert(timestamp);
+        last_timestamp = Some(timestamp);
+        latest_reason = event_reason(event);
+    }
+
+    if count < RECENT_SESSION_LOSS_THRESHOLD {
+        return Ok(None);
+    }
+
+    Ok(Some(RecentSessionLossWindow {
+        count,
+        first_timestamp: first_timestamp.unwrap_or(now_epoch_secs),
+        last_timestamp: last_timestamp.unwrap_or(now_epoch_secs),
+        latest_reason,
+    }))
+}
+
 pub fn record_session_loss(
     file: &Path,
     session_id: &str,
@@ -716,5 +810,41 @@ mod tests {
         assert_eq!(supersession.registered_pane, "%408");
         assert_eq!(supersession.latest_start_pane, "%408");
         assert_eq!(supersession.latest_open_timestamp, 11);
+    }
+
+    #[test]
+    fn recent_session_loss_window_requires_multiple_recent_losses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-loss-window.log"),
+            concat!(
+                "[100] supervisor_exit code=missing_pane pane=%41 reason=registered_pane_missing\n",
+                "[200] supervisor_exit code=missing_pane pane=%42 reason=registered_pane_dead\n",
+                "[250] pane_death_detected pane=%42 status=9 cycle_phase=preflight_started\n",
+                "[900] supervisor_exit code=missing_pane pane=%43 reason=registered_pane_missing\n",
+            ),
+        )
+        .unwrap();
+
+        let recent = recent_session_loss_window_at(&doc, "session-loss-window", 260)
+            .unwrap()
+            .expect("two recent session losses should trip the guard");
+        assert_eq!(recent.count, 2);
+        assert_eq!(recent.first_timestamp, 100);
+        assert_eq!(recent.last_timestamp, 200);
+        assert_eq!(
+            recent.latest_reason.as_deref(),
+            Some("registered_pane_dead")
+        );
+
+        assert!(
+            recent_session_loss_window_at(&doc, "session-loss-window", 1000)
+                .unwrap()
+                .is_none(),
+            "old session-loss events outside the guard window should not trip it"
+        );
     }
 }

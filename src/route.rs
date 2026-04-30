@@ -382,6 +382,37 @@ fn startup_miss_diagnostic_message(file: &Path, reason: &str) -> String {
     )
 }
 
+fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<()> {
+    let Some(window) = crate::startup_miss::recent_session_loss_window(file, session_id)? else {
+        return Ok(());
+    };
+
+    let first = crate::startup_miss::format_timestamp(window.first_timestamp);
+    let last = crate::startup_miss::format_timestamp(window.last_timestamp);
+    let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_repeated_session_loss_fail_closed file={} session={} count={} first={} last={} latest_reason={}",
+            file.display(),
+            session_id,
+            window.count,
+            first,
+            last,
+            latest_reason
+        ),
+    );
+    anyhow::bail!(
+        "refusing to auto-start {} after {} unexpected pane-loss events since {} (latest reason={} at {}). Route will not keep spawning replacements over a repeated crash window; inspect the last dead-pane/session-loss diagnostics, then run `agent-doc start {}` manually to recover",
+        file.display(),
+        window.count,
+        first,
+        latest_reason,
+        last,
+        file.display()
+    );
+}
+
 fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
     let msg = startup_miss_diagnostic_message(file, reason);
     if let Err(e) = tmux
@@ -731,6 +762,7 @@ fn resolve_or_create_pane(
             if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
                 anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
             }
+            fail_if_recent_session_loss_window(file, session_id)?;
             let split_before = is_first_column(file, col_args);
             ensure_auto_start_target_session(tmux, None, target_session, harness)?;
             return auto_start_in_session(
@@ -826,7 +858,7 @@ fn resolve_or_create_pane(
                             pane_route_provenance(tmux, registered_pane)
                         ),
                     );
-                    sessions::register(session_id, owner, file_path)?;
+                    register_dispatch_target(session_id, owner, file_path)?;
                     rescue_from_stash(
                         tmux,
                         owner,
@@ -970,6 +1002,7 @@ fn resolve_or_create_pane(
                     target_session,
                     is_first_column(file, col_args),
                 );
+                register_dispatch_target(session_id, registered_pane, file_path)?;
                 ensure_existing_pane_ready_for_dispatch(tmux, file, registered_pane, harness)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 send_command(
@@ -1043,7 +1076,7 @@ fn resolve_or_create_pane(
             "[route] found existing running pane {} for {}, re-registering",
             existing, file_path
         );
-        sessions::register(session_id, &existing, file_path)?;
+        register_dispatch_target(session_id, &existing, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &existing, harness)?;
         send_command(
             tmux,
@@ -1073,7 +1106,7 @@ fn resolve_or_create_pane(
         && is_agent_process(tmux, &new_pane, harness)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
-        sessions::register(session_id, &new_pane, file_path)?;
+        register_dispatch_target(session_id, &new_pane, file_path)?;
         ensure_existing_pane_ready_for_dispatch(tmux, file, &new_pane, harness)?;
         send_command(
             tmux,
@@ -1104,6 +1137,7 @@ fn resolve_or_create_pane(
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
     }
+    fail_if_recent_session_loss_window(file, session_id)?;
     let split_before = is_first_column(file, col_args);
     ensure_auto_start_target_session(tmux, None, target_session, harness)?;
     auto_start_in_session(
@@ -1167,7 +1201,7 @@ fn rescue_from_stash(
                 Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
             }
         }
-        if let Err(e) = sessions::register(session_id, pane_id, file_path) {
+        if let Err(e) = register_dispatch_target(session_id, pane_id, file_path) {
             eprintln!("[route] warning: re-register failed: {}", e);
         }
     }
@@ -1208,6 +1242,21 @@ fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
         .unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         })
+}
+
+fn register_dispatch_target(session_id: &str, pane_id: &str, file_path: &str) -> Result<()> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    let window = sessions::pane_window(pane_id).unwrap_or_default();
+    let cwd = base_dir.to_string_lossy().to_string();
+    sessions::register_full_with_cwd_in(
+        &base_dir,
+        session_id,
+        pane_id,
+        file_path,
+        std::process::id(),
+        &window,
+        &cwd,
+    )
 }
 
 fn pane_registration_matches_file(
@@ -2129,7 +2178,7 @@ fn auto_start_in_session(
     evict_previous_stash_pane(tmux, session_id, &new_pane, session_name, harness);
 
     // Register immediately so subsequent route calls find this pane
-    sessions::register(session_id, &new_pane, file_path)?;
+    register_dispatch_target(session_id, &new_pane, file_path)?;
     drop(startup_locks);
 
     // Focus the new pane immediately so the user sees Claude starting
@@ -2173,13 +2222,13 @@ fn auto_start_in_session(
             harness,
         ) {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_checked(tmux, &new_pane, &start_path, harness, None)?
+            send_command_checked(tmux, &new_pane, file_path, harness, None)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_checked(tmux, &new_pane, &start_path, harness, None)? {
+            match send_command_checked(tmux, &new_pane, file_path, harness, None)? {
                 CommandDispatchStatus::Accepted => {
                     crate::ops_log::log_op(
                         file,
@@ -5714,5 +5763,70 @@ history line
         );
 
         ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_fails_closed_after_repeated_recent_session_losses() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-recent-session-loss");
+        let session = "codex";
+        let cwd = test_cwd();
+        let anchor = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-recent-session-loss";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        std::fs::write(
+            dir.path()
+                .join(".agent-doc/logs")
+                .join(format!("{session_id}.log")),
+            format!(
+                "[{}] supervisor_exit code=missing_pane pane=%41 reason=registered_pane_missing\n[{}] supervisor_exit code=missing_pane pane=%42 reason=registered_pane_dead\n",
+                now.saturating_sub(30),
+                now.saturating_sub(5)
+            ),
+        )
+        .unwrap();
+
+        let panes_before = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed after repeated recent pane losses");
+        let panes_after = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
+
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route should not spawn a replacement pane once the repeated-loss guard trips"
+        );
+        assert_eq!(panes_after.first(), Some(&anchor));
+        assert!(
+            err.to_string().contains("refusing to auto-start"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("unexpected pane-loss events"),
+            "unexpected error: {err:#}"
+        );
     }
 }

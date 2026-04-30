@@ -61,7 +61,22 @@ Verification completed:
 - `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
 
 I did not commit or push. The full `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings` gate is still failing in pre-existing unrelated files (`start.rs`, `sessions.rs`, `autoclaim.rs`, `plan.rs`, `route.rs`, `snapshot.rs`, `write.rs`), so `spec-test-build-install-commit-push` is blocked on that repo-wide warning debt rather than this dead-pane fix.
-<!-- agent:boundary:6a5f8c18 -->
+❯ Please look in the ops.log and inspect the current tmux pane configuration. Try to debug why `agent-doc sync` does not result in matching tmux window layout. spec-test-build-install-commit-push
+### Re: sync layout mismatch — gpt-5
+
+Root cause was a same-run pane alias, not tmux layout math. `ops.log`, `/tmp/agent-doc-sync.log`, and the live registries showed `%75` was simultaneously treated as the owner of `tasks/agent-doc/agent-doc-bugs2.md` and `src/session-share/tasks/claudescore-3.md`. Once `sync` accepted that duplicate ownership, the tmux-router stage deduplicated to a single visible pane, so later syncs fast-pathed the one-pane layout instead of rehydrating the missing column.
+
+I fixed `src/sync.rs` so a pane reserved earlier in the same sync run cannot satisfy a later file. Duplicate claimants are now forced down recovery/auto-start, and reserved panes are filtered out of associated-pane recovery. I also documented the change in `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage for same-run pane reservation plus reserved associated-pane filtering.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml claimed_sync_pane_owner_ignores_same_file_and_reports_other_owner` passed.
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recover_existing_associated_pane_skips_reserved_candidates` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
+
+I did not commit or push. The worktree already has unrelated in-flight changes, including `src/agent-doc/src/resync.rs`, multiple sibling submodules, and session documents, so an automatic commit would not have been isolated or safe.
+<!-- agent:boundary:0566c854 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -768,7 +768,10 @@ Implemented `#pathprov` with PID, pane, and supervisor instance identity.
 ### Re: follow-up — gpt-5
 
 No additional document changes to respond to beyond the `fg` reopen prompt. `#pathprov` is implemented, verified, built, installed, committed, and pushed.
-<!-- agent:boundary:3ee7b579 -->
+### Re: follow-up — gpt-5
+
+No additional document changes to respond to beyond the `fg` reopen prompt. `#pathprov` is implemented, verified, built, installed, committed, and pushed.
+<!-- agent:boundary:faa4f531 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -776,7 +779,10 @@ The claudescore-3.md pane kept on being swapped out of the `agent-doc` tmux wind
 If I quickly switched back to claudescore-3.md, I retrieved the running pane.
 If I waited too long, I lost the running pane.
 
-Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov fix 
+Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov incidently fix this issue?
+Even if #pathprov would incidently fix this case, I'm still concerned that it's possible for a tmux pane to be swapped out while the editor has the document open. Why is this even possible?
+
+spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built

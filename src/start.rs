@@ -145,6 +145,17 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     }
 }
 
+fn exit_provenance_fields(status: &portable_pty::ExitStatus) -> String {
+    let rendered = status.to_string();
+    if let Some(signal) = rendered.strip_prefix("Terminated by ") {
+        format!("exit_kind=signal exit_signal={signal:?} exit_status={rendered:?}")
+    } else if status.success() {
+        format!("exit_kind=success exit_status={rendered:?}")
+    } else {
+        format!("exit_kind=exit_code exit_status={rendered:?}")
+    }
+}
+
 const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
 const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
@@ -1742,6 +1753,7 @@ pub fn run(file: &Path) -> Result<()> {
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
+    let mut supervisor_exit_reason = "loop_exhausted";
     loop {
         // Build args for this iteration
         let auto_trigger;
@@ -1911,6 +1923,7 @@ pub fn run(file: &Path) -> Result<()> {
         // Check IPC-requested stop
         if shared.stop_requested.load(Ordering::Relaxed) {
             log_event(&mut session_log, "ipc_stop");
+            supervisor_exit_reason = "ipc_stop";
             break;
         }
 
@@ -1928,11 +1941,12 @@ pub fn run(file: &Path) -> Result<()> {
 
         // Normal exit classification via CrashPolicy
         let code = status.exit_code() as i32;
+        let exit_provenance = exit_provenance_fields(&status);
         log_event(
             &mut session_log,
             &format!(
-                "{}_exit code={} restart_count={}",
-                harness.binary, code, restart_count
+                "{}_exit code={} restart_count={} {}",
+                harness.binary, code, restart_count, exit_provenance
             ),
         );
         let auto_trigger_outcome =
@@ -1959,10 +1973,11 @@ pub fn run(file: &Path) -> Result<()> {
         log_event(
             &mut session_log,
             &format!(
-                "restart_eval pane={} harness={} exit_code={} auto_trigger_outcome={} ctrl_d={} state={} action={}",
+                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} state={} action={}",
                 pane_id,
                 harness.binary,
                 code,
+                exit_provenance,
                 auto_trigger_outcome.as_str(),
                 ctrl_d_forwarded,
                 policy.state.as_str(),
@@ -1984,7 +1999,10 @@ pub fn run(file: &Path) -> Result<()> {
                             "Press Enter to restart, or 'q' to exit.",
                             "user_quit",
                         ) {
-                            PromptOutcome::Quit => break,
+                            PromptOutcome::Quit => {
+                                supervisor_exit_reason = "user_quit_clean_exit";
+                                break;
+                            }
                             PromptOutcome::RestartFresh => {
                                 raw_mode.resume();
                                 first_run = true;
@@ -2056,7 +2074,14 @@ pub fn run(file: &Path) -> Result<()> {
                                     "Press Enter to restart fresh, or 'q' to exit.",
                                     quit_event,
                                 ) {
-                                    PromptOutcome::Quit => break,
+                                    PromptOutcome::Quit => {
+                                        supervisor_exit_reason = match prompt_kind {
+                                            "ctrl_d" => "user_quit_after_ctrl_d",
+                                            "resume_failure" => "user_quit_after_resume_failure",
+                                            _ => "user_quit",
+                                        };
+                                        break;
+                                    }
                                     PromptOutcome::RestartFresh => {
                                         raw_mode.resume();
                                         first_run = true;
@@ -2129,6 +2154,7 @@ pub fn run(file: &Path) -> Result<()> {
                     restart_count
                 );
                 log_event(&mut session_log, "supervisor_halted");
+                supervisor_exit_reason = "supervisor_halted";
                 break;
             }
         }
@@ -2142,6 +2168,13 @@ pub fn run(file: &Path) -> Result<()> {
         rw.stop();
     }
     ipc.stop();
+    log_event(
+        &mut session_log,
+        &format!(
+            "supervisor_exit reason={} pane={} restart_count={}",
+            supervisor_exit_reason, pane_id, restart_count
+        ),
+    );
     log_event(&mut session_log, "session_end");
     eprintln!("Session ended for {}", file.display());
     Ok(())
@@ -3388,6 +3421,32 @@ mod tests {
         let health = query_supervisor_health(&file, session_id);
         assert!(matches!(health, SupervisorHealth::Restartable));
         drop(ipc);
+    }
+
+    #[test]
+    fn exit_provenance_fields_capture_signal_termination() {
+        let status = portable_pty::ExitStatus::with_signal("Hangup");
+        let rendered = exit_provenance_fields(&status);
+        assert!(rendered.contains("exit_kind=signal"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_signal=\"Hangup\""),
+            "got: {rendered}"
+        );
+        assert!(
+            rendered.contains("exit_status=\"Terminated by Hangup\""),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn exit_provenance_fields_capture_nonzero_exit_code() {
+        let status = portable_pty::ExitStatus::with_exit_code(7);
+        let rendered = exit_provenance_fields(&status);
+        assert!(rendered.contains("exit_kind=exit_code"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_status=\"Exited with code 7\""),
+            "got: {rendered}"
+        );
     }
 
     #[test]

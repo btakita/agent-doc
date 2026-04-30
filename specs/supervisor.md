@@ -238,15 +238,26 @@ Example:
 [1713041234] [supervisor] pty_allocated rows=40 cols=120
 [1713041234] [supervisor] cwd_resolved path=/home/brian/work/agent-loop source=project_root
 [1713041234] [supervisor] claude_spawn pid=54321 mode=fresh
-[1713041290] [supervisor] claude_exit code=0
+[1713041290] [supervisor] claude_exit code=0 exit_kind=success exit_status="Success"
 [1713041291] [supervisor] user_action=restart
 [1713041291] [supervisor] claude_spawn pid=54398 mode=continue
-[1713041390] [supervisor] codex_exit code=0
-[1713041390] [supervisor] auto_restart_clean with_continue=true
+[1713041390] [supervisor] codex_exit code=129 exit_kind=signal exit_signal="Hangup" exit_status="Terminated by Hangup"
+[1713041390] [supervisor] restart_eval pane=%12 harness=codex exit_code=129 exit_kind=signal exit_signal="Hangup" exit_status="Terminated by Hangup" auto_trigger_outcome=sent ctrl_d=false state=healthy action=restart_after
+[1713041390] [supervisor] auto_restart delay=2s with_continue=true restart_count=1
 [1713041391] [supervisor] codex_spawn pid=54444 mode=continue
 [1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_30s
 [1713041425] [supervisor] resume_restart_failed pane=%12 harness=codex outcome=timeout recent_failures=1 window_secs=900 restart_count=1
+[1713041450] [supervisor] supervisor_exit reason=user_quit_clean_exit pane=%12 restart_count=1
+[1713041450] session_end
 ```
+
+At minimum, harness exit lines must preserve:
+- exit code
+- exit kind (`success`, `exit_code`, or `signal`)
+- signal name when the child died from a signal
+- the rendered child status text used for operator forensics
+
+The final supervisor-owned closeout must append `supervisor_exit reason=...` before `session_end` so later crash analysis can distinguish deliberate quits, IPC stops, and flapping halts from missing-pane recovery written by other components.
 
 Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 - each restart spawns at most one auto-trigger thread

@@ -947,7 +947,14 @@ Captured the autostart failure as a separate backlog item. I kept it distinct fr
 ### Re: autostart fail-closed backlog capture — gpt-5
 
 Captured the autostart failure as a separate backlog item. I kept it distinct from the current pane-reversal work because this is a different fail-closed ownership/provenance path.
-<!-- agent:boundary:508c723f -->
+❯ compact exchange
+### Re: compact exchange request — gpt-5
+
+The only new edit this cycle was the literal `compact exchange` line appended inside `agent:exchange`. Preflight treated it as plain document content rather than a parsed built-in command, so I did not execute compaction from this response cycle.
+
+To compact this document, run `agent-doc compact exchange /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` at the terminal, then re-run `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+
+<!-- agent:boundary:1f16262c -->
 <!-- /agent:exchange -->
 
 <!--

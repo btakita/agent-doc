@@ -863,7 +863,38 @@ Status:
 
 No new backlog item came out of this fix. I did not have a live retained-dead-pane repro after the provenance repair, so there is no accepted follow-up task to add yet.
 
-<!-- agent:boundary:4e9c02cd -->
+❯ When I select the right side editor document, the tmux panes are reversed and incorrect. The left editor pane is on the right side and the right editor pane is on the left side.
+
+❯ When I select the left side editor document, the tmux pane are in correct alignment.
+
+❯ spec-test-build-install-commit-push
+### Re: right-side editor pane reversal — gpt-5
+
+Root cause:
+- The JetBrains plugin's `LayoutDetector` assumed `FileEditorManagerEx.windows` was already left-to-right.
+- When the right split was focused, JetBrains could return the focused window first, so the plugin reported reversed `--col` order and tmux mirrored the wrong side.
+
+What I changed:
+- `LayoutDetector` now groups editor windows by actual on-screen `x/y` bounds instead of window iteration order.
+- Empty columns are still preserved when a split shows a non-markdown tab, so tmux layout does not collapse.
+- Added `LayoutDetectorTest` coverage for reversed input order, vertical stacking, and empty-column preservation.
+- Updated the JetBrains plugin version to `0.2.80` and documented the screen-order contract in the spec/version notes.
+
+Verification and install:
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew signPlugin`
+- local JetBrains plugin install to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `f00dd2c` pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item came out of this fix.
+
+Restart IntelliJ to load the `0.2.80` plugin, then re-check the left/right split switch. If the pane order still flips after restart, that would point to a tmux-side reorder path rather than the IDE reporter.
+<!-- agent:boundary:61fa83e0 -->
 <!-- /agent:exchange -->
 
 <!--

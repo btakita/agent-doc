@@ -721,7 +721,24 @@ Published:
 - `src/agent-doc` commit `23f7f5e` pushed to `origin/20260422/codex-agent-backend`
 
 I did not mark `#tmuxcrash` done and I did not mutate backlog state in this turn.
-<!-- agent:boundary:eff26ddc -->
+❯ re #tmuxcrash: Can we show some plan + progress?
+### Re: `#tmuxcrash` plan + progress — gpt-5
+
+Yes. I should have made the current state explicit in the exchange, not only in the backlog child list.
+
+#### Progress
+- Done: `#tmuxcrash-rebindlog`, `#tmuxcrash-routebind`, `#tmuxcrash-lossguard`, `#tmuxcrash-9rh5`, and `#tmuxcrash-hmrz`.
+- Those close the false-crash family that was mixing rebinds, route-owner drift, repeated missing-pane recovery, restarted second-leg closeout proof, and stale startup-miss cleanup.
+- Remaining: `#tmuxcrash-rn2d` is the only open child. That keeps the parent narrowed to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
+
+#### Plan
+1. Keep `#tmuxcrash` scoped to real crash evidence only, not startup-miss or ownership-noise cases that now belong elsewhere.
+2. Use the newer supervisor/session provenance to capture one remaining real-crash-class example end to end.
+3. Close `#tmuxcrash-rn2d` only when the logs clearly distinguish child exit, supervisor state, and document closeout boundary without relying on inference.
+
+#### Going Forward
+For future `continue #tmuxcrash` turns, I’ll keep the response structured as `Progress`, `Plan`, and `Remaining`, and I’ll keep the backlog child list aligned in the same cycle when the state changes.
+<!-- agent:boundary:85588e05 -->
 <!-- /agent:exchange -->
 
 <!--

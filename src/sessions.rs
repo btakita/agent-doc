@@ -20,6 +20,10 @@
 //! - `register_with_pid` queries the pane's window and delegates to `register_full`.
 //! - `register_full` enforces single-session-per-pane by evicting stale entries that
 //!   share the same pane before inserting the new `SessionEntry`.
+//! - When the same session UUID is rebound to a different pane, `register_full`
+//!   best-effort appends `session_superseded ...` plus
+//!   `session_end origin=registry_rebind ...` to the prior session log before the
+//!   new pane registration lands.
 //! - `lookup(session_id)` returns the pane ID for a session, or `None` if not found.
 //! - `lookup_entry(session_id)` returns the full `SessionEntry`, or `None`.
 //! - `current_pane()` reads `TMUX_PANE` env var; falls back to querying tmux for the
@@ -246,34 +250,16 @@ pub fn register_full_in(
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let started = chrono_now();
-
-    // Enforce single session per pane: remove stale entries pointing to same pane
-    let stale_keys: Vec<String> = registry
-        .iter()
-        .filter(|(k, e)| e.pane == pane_id && k.as_str() != session_id)
-        .map(|(k, _)| k.clone())
-        .collect();
-    for key in &stale_keys {
-        eprintln!(
-            "[registry] removing stale session {} (was pane {})",
-            key, pane_id
-        );
-        registry.remove(key);
-    }
-
-    registry.insert(
-        session_id.to_string(),
-        SessionEntry {
-            pane: pane_id.to_string(),
-            pid,
-            cwd,
-            started,
-            file: file.to_string(),
-            window: window.to_string(),
-        },
-    );
-    save_in(base_dir, &registry)
+    register_full_internal(
+        base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        &cwd,
+    )
 }
 
 /// Like `register_full` but uses the provided `cwd` instead of querying the process cwd.
@@ -301,6 +287,28 @@ pub fn register_full_with_cwd_in(
 ) -> Result<()> {
     let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
     let mut registry = load_in(base_dir)?;
+    register_full_internal(
+        base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        cwd,
+    )
+}
+
+fn register_full_internal(
+    base_dir: &Path,
+    registry: &mut SessionRegistry,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+) -> Result<()> {
     let started = chrono_now();
 
     // Enforce single session per pane: remove stale entries pointing to same pane
@@ -317,6 +325,10 @@ pub fn register_full_with_cwd_in(
         registry.remove(key);
     }
 
+    if let Some(previous) = registry.get(session_id).cloned() {
+        log_session_rebind(base_dir, session_id, &previous, pane_id, window);
+    }
+
     registry.insert(
         session_id.to_string(),
         SessionEntry {
@@ -329,6 +341,66 @@ pub fn register_full_with_cwd_in(
         },
     );
     save_in(base_dir, &registry)
+}
+
+fn log_session_rebind(
+    base_dir: &Path,
+    session_id: &str,
+    previous: &SessionEntry,
+    new_pane: &str,
+    new_window: &str,
+) {
+    if previous.pane == new_pane {
+        return;
+    }
+
+    let log_file = resolve_log_file_path(base_dir, &previous.file);
+    let old_window = if previous.window.is_empty() {
+        "unknown"
+    } else {
+        previous.window.as_str()
+    };
+    let new_window = if new_window.is_empty() {
+        "unknown"
+    } else {
+        new_window
+    };
+
+    let superseded = format!(
+        "session_superseded old_pane={} new_pane={} old_window={} new_window={}",
+        previous.pane, new_pane, old_window, new_window
+    );
+    if let Err(err) =
+        crate::startup_miss::append_session_log_event(&log_file, session_id, &superseded)
+    {
+        eprintln!(
+            "[registry] warning: failed to append session superseded event for {}: {}",
+            session_id, err
+        );
+        return;
+    }
+    if let Err(err) = crate::startup_miss::append_session_log_event(
+        &log_file,
+        session_id,
+        &format!(
+            "session_end origin=registry_rebind pane={} next_pane={}",
+            previous.pane, new_pane
+        ),
+    ) {
+        eprintln!(
+            "[registry] warning: failed to append registry-rebind session_end for {}: {}",
+            session_id, err
+        );
+    }
+}
+
+fn resolve_log_file_path(base_dir: &Path, file: &str) -> PathBuf {
+    let file_path = Path::new(file);
+    if file_path.is_absolute() {
+        file_path.to_path_buf()
+    } else {
+        base_dir.join(file_path)
+    }
 }
 
 /// Query the tmux window ID for a pane.
@@ -865,5 +937,52 @@ mod tests {
         );
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["session-c"].file, "new-file.md");
+    }
+
+    #[test]
+    fn register_full_logs_session_rebind_before_overwriting_pane() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("tasks/rebind.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# rebind\n").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/logs/session-rebind.log"),
+            "[1] session_start file=tasks/rebind.md pane=%42 session=session-rebind\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let mut reg = SessionRegistry::new();
+        reg.insert(
+            "session-rebind".to_string(),
+            SessionEntry {
+                pane: "%42".to_string(),
+                pid: 100,
+                cwd: dir.path().display().to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                file: "tasks/rebind.md".to_string(),
+                window: "@7".to_string(),
+            },
+        );
+        save_in(dir.path(), &reg).unwrap();
+
+        register_full_in(
+            dir.path(),
+            "session-rebind",
+            "%84",
+            "tasks/rebind.md",
+            200,
+            "@9",
+        )
+        .unwrap();
+
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/session-rebind.log")).unwrap();
+        assert!(
+            log.contains(
+                "session_superseded old_pane=%42 new_pane=%84 old_window=@7 new_window=@9"
+            )
+        );
+        assert!(log.contains("session_end origin=registry_rebind pane=%42 next_pane=%84"));
     }
 }

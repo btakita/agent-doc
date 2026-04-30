@@ -695,7 +695,7 @@ Published:
 - `src/agent-doc` commit `2460ef4` pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog item was added for this turn; this closes the duplicate-id regression without marking `#tmuxcrash` itself done.
-continue #tmuxcrash. spec-test-build-install-commit-push
+❯ continue #tmuxcrash. spec-test-build-install-commit-push
 ### Re: `#tmuxcrash` supervisor exit provenance — gpt-5
 
 I made an incremental provenance improvement under `#tmuxcrash`. The backlog item remains open and unchanged.
@@ -738,7 +738,36 @@ Yes. I should have made the current state explicit in the exchange, not only in 
 
 #### Going Forward
 For future `continue #tmuxcrash` turns, I’ll keep the response structured as `Progress`, `Plan`, and `Remaining`, and I’ll keep the backlog child list aligned in the same cycle when the state changes.
-<!-- agent:boundary:85588e05 -->
+continue #tmuxcrash. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` closeout provenance — gpt-5
+
+I continued `#tmuxcrash` and landed more provenance instrumentation, but I did not mark `#tmuxcrash` done in backlog in this turn.
+
+What changed:
+- `cycle_state.rs` now appends `document_cycle phase=... cycle=... event=...` to the owning session log whenever the document enters `preflight_started`, `response_captured`, `write_applied`, or `committed`.
+- That puts the document closeout boundary in the same `.agent-doc/logs/<session>.log` timeline as `*_start`, `*_exit`, `supervisor_exit`, and dead-pane diagnostics, so crash forensics no longer have to infer whether a turn died before or after the commit boundary from separate state files.
+- Added regression coverage for session-backed docs vs plain docs, and updated `SPEC.md`, `specs/supervisor.md`, and `VERSIONS.md`.
+
+Why the old drafted `echo '[agent-doc] startup-miss: ...'` line showed up in the Codex prompt:
+- that was the pre-`#smdq` path, where route staged a literal shell `echo ...` line into pane input
+- current code still uses `tmux display-message` for startup-miss diagnostics, and the parallel route suite still passes `startup_miss_diagnostic_does_not_queue_shell_echo_in_pane`
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `ceb4051` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left `#tmuxcrash` backlog state unchanged in this turn.
+- I left the unrelated in-progress `src/startup_miss.rs` working-tree change untouched.
+<!-- agent:boundary:94c2aba9 -->
 <!-- /agent:exchange -->
 
 <!--

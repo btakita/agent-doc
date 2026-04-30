@@ -293,7 +293,50 @@ Published:
 - `src/agent-doc` commit `5f7423d` (`fix: align editor visual token offsets`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:9864f90e -->
+❯ Please investigate why navigating the editor back to /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md resulted in agent-doc closing + replacing the existing tmux pane with a new tmux pane.
+### Re: claudescore-3 editor return pane replacement — gpt-5
+
+This does **not** look like a child crash inside the old `claudescore-3.md` pane. It looks like an **editor-return rebind / replacement**: the editor selection change triggered fresh session work, the existing `%579` owner was not reused, and `agent-doc` started a new pane era at `%583`.
+
+What the evidence shows:
+
+1. `claudescore-3.md` was still live in pane `%579` shortly before the replacement.
+   - `src/session-share/.agent-doc/logs/ops.log` shows `route_cycle_start_acknowledged` for `%579` at `2026-04-30 15:33:20 UTC` for `do #ccacal3`.
+   - Just before that, route had already classified `%579` as the retained live owner during a routed startup-miss at `2026-04-30 15:31:00 UTC` (`route_startup_miss_detected ... live_owner=%579 ... session_log=open ... last_event=document_cycle phase=committed ...`).
+
+2. A new `claudescore-3.md` pane then started at `%583`.
+   - `src/session-share/.agent-doc/logs/7b453f47-23b2-4418-85e4-378270d2345d.log` records `session_start file=tasks/claudescore-3.md pane=%583` at `2026-04-30 15:55:15 UTC`.
+   - There is **no** matching `session_superseded old_pane=%579 new_pane=%583` entry before that. That matters: this was not the normal explicit registry-rebind path that appends provenance before overwriting the session binding.
+
+3. Right after `%583` starts, `agent-doc` repairs an interrupted cycle that belonged to `%579`.
+   - At `2026-04-30 15:58:09 UTC`, `ops.log` records `interrupted_cycle_detected file=tasks/claudescore-3.md cycle_id=cycle-1777563200654 phase=PreflightStarted` followed by `repair_preflight_stale_lock`.
+   - That means the older `%579` era had not cleanly closed its cycle before the new pane era was created.
+
+4. The editor path is a credible trigger.
+   - `EditorTabSyncListener.selectionChanged` runs `agent-doc sync ... --focus <file>` on Markdown tab switches in the JetBrains plugin.
+   - That matches the user action here: navigating the editor back to `src/session-share/tasks/claudescore-3.md` can trigger fresh sync/start logic even when the previous owner is still logically recoverable.
+
+My read of the failure:
+
+- The return-to-editor event triggered the selection-change sync/start path.
+- That path failed to reuse `%579` as the existing owner.
+- Because `%579` was not proven/reused, `agent-doc` created `%583` and moved the session binding forward there.
+- The old pane then disappeared from tmux, which is why the user experience was "agent-doc closed the old pane and replaced it with a new one."
+
+What is still not proven from the current logs:
+
+- I can prove the **replacement happened**.
+- I can prove the old `%579` era still had an open cycle when `%583` was launched.
+- I cannot yet prove the exact inner branch that failed the reuse check, because there is no explicit start/sync provenance line saying whether `%579` was treated as `ClearStale`, whether live-owner proof failed, or whether the registry had already been cleared before `%583` registered.
+
+Most likely root cause:
+
+- This is the same family tracked by `tasks/agent-doc/plan-editor-return-session-rebind.md`: stale startup-miss / selection-change return churn causes editor revisit to start a fresh pane instead of focusing the canonical live owner.
+- For this specific incident, the strongest clue is the missing `session_superseded %579 -> %583` provenance plus the immediate stale-cycle repair after `%583` starts. That points to **stale-binding clearance + fresh start**, not a real in-pane crash.
+
+No new backlog item came out of this investigation. I would treat it as the existing `#rbret` / `plan-editor-return-session-rebind.md` bug family.
+
+<!-- agent:boundary:66521ff1 -->
 <!-- /agent:exchange -->
 
 <!--

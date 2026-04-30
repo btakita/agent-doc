@@ -107,6 +107,12 @@ class VisualHighlighterManager private constructor(private val project: Project)
                     editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
                 )
             }
+            "scratch_comment_body" -> baseAttrs(
+                editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.BLOCK_COMMENT)
+            ).apply {
+                backgroundColor = mutedBackground(editor, foregroundColor)
+                fontType = Font.ITALIC
+            }
             "component_open", "component_close" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)
             ).apply {
@@ -159,7 +165,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun layerFor(kind: String): Int =
         when (kind) {
-            "component_body" -> HighlighterLayer.ADDITIONAL_SYNTAX - 1
+            "component_body", "scratch_comment_body" -> HighlighterLayer.ADDITIONAL_SYNTAX - 1
             else -> HighlighterLayer.ADDITIONAL_SYNTAX
         }
 

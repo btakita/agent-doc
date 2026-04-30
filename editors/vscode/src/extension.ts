@@ -201,6 +201,11 @@ class SyntaxDecorationController implements vscode.Disposable {
         color: new vscode.ThemeColor('descriptionForeground'),
         fontStyle: 'italic',
     });
+    private readonly scratchBodyDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('descriptionForeground'),
+        backgroundColor: new vscode.ThemeColor('editor.rangeHighlightBackground'),
+        fontStyle: 'italic',
+    });
     private readonly promptDecoration = vscode.window.createTextEditorDecorationType({
         color: new vscode.ThemeColor('terminal.ansiGreen'),
         fontWeight: '600',
@@ -232,6 +237,7 @@ class SyntaxDecorationController implements vscode.Disposable {
             this.patchDecoration,
             this.boundaryDecoration,
             this.scratchDecoration,
+            this.scratchBodyDecoration,
             this.promptDecoration,
             this.responseHeadingDecoration,
             this.trackedIdDecoration,
@@ -293,6 +299,7 @@ class SyntaxDecorationController implements vscode.Disposable {
             patch: [] as vscode.Range[],
             boundary: [] as vscode.Range[],
             scratch: [] as vscode.Range[],
+            scratchBody: [] as vscode.Range[],
             prompt: [] as vscode.Range[],
             responseHeading: [] as vscode.Range[],
             trackedId: [] as vscode.Range[],
@@ -322,6 +329,9 @@ class SyntaxDecorationController implements vscode.Disposable {
                 case 'scratch_comment':
                     ranges.scratch.push(range);
                     break;
+                case 'scratch_comment_body':
+                    ranges.scratchBody.push(range);
+                    break;
                 case 'prompt':
                     ranges.prompt.push(range);
                     break;
@@ -342,6 +352,7 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.patchDecoration, ranges.patch);
         editor.setDecorations(this.boundaryDecoration, ranges.boundary);
         editor.setDecorations(this.scratchDecoration, ranges.scratch);
+        editor.setDecorations(this.scratchBodyDecoration, ranges.scratchBody);
         editor.setDecorations(this.promptDecoration, ranges.prompt);
         editor.setDecorations(this.responseHeadingDecoration, ranges.responseHeading);
         editor.setDecorations(this.trackedIdDecoration, ranges.trackedId);
@@ -354,6 +365,7 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.patchDecoration, []);
         editor.setDecorations(this.boundaryDecoration, []);
         editor.setDecorations(this.scratchDecoration, []);
+        editor.setDecorations(this.scratchBodyDecoration, []);
         editor.setDecorations(this.promptDecoration, []);
         editor.setDecorations(this.responseHeadingDecoration, []);
         editor.setDecorations(this.trackedIdDecoration, []);

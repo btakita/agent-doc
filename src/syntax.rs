@@ -10,6 +10,7 @@ pub enum VisualTokenKind {
     PatchClose,
     Boundary,
     ScratchComment,
+    ScratchCommentBody,
     Prompt,
     ResponseHeading,
     TrackedId,
@@ -29,6 +30,7 @@ pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
 
     collect_comment_tokens(doc, &code_ranges, &mut tokens);
     collect_component_body_tokens(doc, &code_ranges, &mut tokens);
+    collect_scratch_comment_body_tokens(doc, &code_ranges, &mut tokens);
     collect_line_tokens(doc, &code_ranges, &mut tokens);
     collect_label_tags(doc, &code_ranges, &mut tokens);
     collect_tracked_ids(doc, &code_ranges, &mut tokens);
@@ -139,6 +141,41 @@ fn collect_component_body_tokens(
             | CommentKind::PatchClose
             | CommentKind::Boundary
             | CommentKind::ScratchComment => {}
+        }
+    }
+}
+
+fn collect_scratch_comment_body_tokens(
+    doc: &str,
+    code_ranges: &[(usize, usize)],
+    out: &mut Vec<VisualToken>,
+) {
+    let mut search_from = 0usize;
+    while let Some(rel) = doc[search_from..].find("<!--") {
+        let start = search_from + rel;
+        let Some(close_rel) = doc[start + 4..].find("-->") else {
+            break;
+        };
+        let end = start + 4 + close_rel + 3;
+        search_from = end;
+
+        if overlaps_code(start, end, code_ranges) {
+            continue;
+        }
+
+        let inner = doc[start + 4..end - 3].trim();
+        if !matches!(classify_comment_inner(inner), CommentKind::ScratchComment) {
+            continue;
+        }
+
+        let body_start = start + 4;
+        let body_end = end - 3;
+        if body_start < body_end && !doc[body_start..body_end].trim().is_empty() {
+            out.push(VisualToken {
+                kind: VisualTokenKind::ScratchCommentBody,
+                start: body_start,
+                end: body_end,
+            });
         }
     }
 }
@@ -279,6 +316,7 @@ hello
                 VisualTokenKind::PatchClose,
                 VisualTokenKind::Boundary,
                 VisualTokenKind::ScratchComment,
+                VisualTokenKind::ScratchCommentBody,
             ]
         );
     }
@@ -347,5 +385,25 @@ hello
             &doc[label_tags[0].start..label_tags[0].end],
             "[recommended]"
         );
+    }
+
+    #[test]
+    fn collects_multiline_scratch_comment_body() {
+        let doc = "\
+<!--
+scratch note
+```md
+![img_3.png](img_3.png)
+```
+-->
+";
+        let tokens = collect_visual_tokens(doc);
+        let body = tokens
+            .iter()
+            .find(|token| token.kind == VisualTokenKind::ScratchCommentBody)
+            .expect("expected scratch comment body token");
+        let body_text = &doc[body.start..body.end];
+        assert!(body_text.contains("scratch note"));
+        assert!(body_text.contains("![img_3.png](img_3.png)"));
     }
 }

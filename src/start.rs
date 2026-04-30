@@ -38,10 +38,10 @@
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
 //!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
 //!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
-//!   Prompt decisions are logged explicitly. Prompt-time stdin EOF normally
-//!   counts as quit, except for a first-run Ctrl-D prompt inside the early
-//!   startup grace window, which restarts fresh so transient tmux stash/rescue
-//!   input races do not close the claimed pane. Non-empty non-`q` input is
+//!   Prompt decisions are logged explicitly. Prompt-time stdin EOF on that
+//!   Ctrl-D path restarts fresh instead of silently quitting, so routed or
+//!   detached Codex sessions do not lose the claimed tmux pane just because
+//!   the supervisor prompt had no readable stdin. Non-empty non-`q` input is
 //!   rejected and re-prompted instead of silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
@@ -175,6 +175,7 @@ const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
+#[cfg(test)]
 const EARLY_CTRL_D_EOF_RESTART_WINDOW: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,11 +307,8 @@ enum PromptEofPolicy {
     RestartFresh,
 }
 
-fn ctrl_d_prompt_eof_policy(run_duration: Duration, restart_count: u32) -> PromptEofPolicy {
-    if restart_count == 0 && run_duration <= EARLY_CTRL_D_EOF_RESTART_WINDOW {
-        return PromptEofPolicy::RestartFresh;
-    }
-    PromptEofPolicy::Quit
+fn ctrl_d_prompt_eof_policy(_run_duration: Duration, _restart_count: u32) -> PromptEofPolicy {
+    PromptEofPolicy::RestartFresh
 }
 
 fn classify_prompt_decision(bytes_read: usize, input: &str) -> PromptDecision {
@@ -2318,9 +2316,9 @@ fn rebind_project_tmux_session_if_expected_dead(
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::project_config;
     use crate::frontmatter::Frontmatter;
     use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
     use crate::sessions::IsolatedTmux;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -2612,7 +2610,10 @@ mod tests {
 
         rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
 
-        assert_eq!(project_config::project_tmux_session().as_deref(), Some("14"));
+        assert_eq!(
+            project_config::project_tmux_session().as_deref(),
+            Some("14")
+        );
     }
 
     #[test]
@@ -2973,14 +2974,14 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_d_prompt_eof_policy_quits_after_grace_window_or_restart() {
+    fn ctrl_d_prompt_eof_policy_restarts_fresh_after_grace_window_or_restart() {
         assert_eq!(
             ctrl_d_prompt_eof_policy(EARLY_CTRL_D_EOF_RESTART_WINDOW + Duration::from_secs(1), 0),
-            PromptEofPolicy::Quit
+            PromptEofPolicy::RestartFresh
         );
         assert_eq!(
             ctrl_d_prompt_eof_policy(Duration::from_secs(5), 1),
-            PromptEofPolicy::Quit
+            PromptEofPolicy::RestartFresh
         );
     }
 

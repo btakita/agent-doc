@@ -853,7 +853,37 @@ Published:
 Note:
 - The first full `cargo test` run hit one transient failure in `agent::tests::codex_network_status_detects_inherited_disable_mismatch`; the isolated rerun passed, and the subsequent full suite rerun passed cleanly.
 - I left the unrelated workspace changes outside `src/agent-doc` untouched.
-<!-- agent:boundary:78d57ae2 -->
+❯ do #mcrc. spec-test-build-install-commit-push
+### Re: #mcrc — gpt-5
+
+I made progress on `#mcrc`, but this turn does **not** close the backlog item and I am not creating or pushing a repo commit from it because the required parallel `resync::tests::` shard is still failing in this workspace.
+
+What changed in `src/agent-doc`:
+- `session_check.rs` now treats the open `preflight_started` + visible fresh `### Re:` patchback shape as a distinct manual-repair / commit-boundary interruption instead of collapsing it into the generic stale-cycle message.
+- That interruption now tells the operator exactly what follow-through is still required: re-run through `agent-doc write --commit <FILE>` if the response body is still available, or manually commit the repaired document once the visible response is known-good.
+- Added regression coverage for that open-cycle manual-patchback path.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification I ran:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16` (failed twice, unchanged rerun also failed)
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Blocking verification failures from the required parallel `resync::tests::` shard:
+- `resync::tests::detect_wrong_window_panes_in_different_windows`
+- `resync::tests::no_wrong_window_when_panes_in_same_window`
+- `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`
+- `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`
+- `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`
+- `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`
+
+Those failures are in existing live-tmux readiness / retained-dead-pane paths rather than in the new `#mcrc` regression test, but the shard is still required to pass. So `#mcrc` stays open after this turn.
+<!-- agent:boundary:93b919c5 -->
 <!-- /agent:exchange -->
 
 <!--

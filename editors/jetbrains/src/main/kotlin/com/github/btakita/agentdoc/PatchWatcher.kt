@@ -1272,10 +1272,50 @@ private fun stripReHeadingAttributionForCompare(content: String): String {
     return normalized.joinToString("\n")
 }
 
+private fun normalizeAnsweredPromptPrefixesForCompare(content: String): String {
+    val currentRange = findComponentRangeUtil(content, "exchange") ?: return content
+    val exchange = content.substring(currentRange.first, currentRange.second)
+    val codeRanges = findCodeBlockRangesUtil(exchange)
+    val lines = exchange.split("\n").toMutableList()
+    val lineOffsets = IntArray(lines.size)
+    var offset = 0
+
+    for (idx in lines.indices) {
+        lineOffsets[idx] = offset
+        offset += lines[idx].length + 1
+    }
+
+    fun inCodeBlock(idx: Int): Boolean =
+        codeRanges.any { range -> lineOffsets[idx] >= range.first && lineOffsets[idx] < range.second }
+
+    fun nextMeaningfulLine(afterIdx: Int): String? {
+        for (idx in (afterIdx + 1) until lines.size) {
+            if (inCodeBlock(idx)) continue
+            val trimmed = lines[idx].trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.startsWith("<!-- agent:boundary:")) return null
+            if (trimmed.startsWith("<!--")) continue
+            return lines[idx]
+        }
+        return null
+    }
+
+    for (idx in lines.indices) {
+        if (inCodeBlock(idx)) continue
+        val trimmed = lines[idx].trimStart()
+        if (!trimmed.startsWith("❯ ")) continue
+        val next = nextMeaningfulLine(idx) ?: continue
+        if (!next.trimStart().startsWith("### Re:")) continue
+        lines[idx] = lines[idx].replaceFirst(Regex("""^(\s*)❯\s"""), "$1")
+    }
+
+    return content.substring(0, currentRange.first) + lines.joinToString("\n") + content.substring(currentRange.second)
+}
+
 internal fun shouldPreferCommittedDiskContentForRepositionUtil(editorContent: String, diskContent: String): Boolean {
     fun normalize(content: String): String =
         stripReHeadingAttributionForCompare(
-            stripTransientHeadMarkers(content)
+            normalizeAnsweredPromptPrefixesForCompare(stripTransientHeadMarkers(content))
                 .lines()
                 .filterNot { it.trim().startsWith("<!-- agent:boundary:") }
                 .joinToString("\n")

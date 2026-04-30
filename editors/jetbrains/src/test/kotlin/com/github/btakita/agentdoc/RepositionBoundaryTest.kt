@@ -253,6 +253,52 @@ Response content.
     }
 
     @Test
+    fun `prefers committed disk content when only answered prompt prefix differs`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+❯ commit + push all uncommitted src/agent-doc files
+### Re: commit + push pending src/agent-doc work — gpt-5
+
+Done.
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+commit + push all uncommitted src/agent-doc files
+### Re: commit + push pending src/agent-doc work — codex (HEAD)
+
+Done.
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertTrue(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
+
+    @Test
+    fun `does not prefer disk content when prompt prefix differs on unresolved follow up`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: topic — gpt-5
+Answer.
+❯ do #qprx. spec-test-build-install-commit-push
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+### Re: topic — codex (HEAD)
+Answer.
+do #qprx. spec-test-build-install-commit-push
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertFalse(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
+
+    @Test
     fun `does not prefer disk content when user follow-up differs`() {
         val disk = """
 <!-- agent:exchange patch=append -->

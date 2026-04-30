@@ -61,7 +61,7 @@ Verification completed:
 - `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
 
 I did not commit or push. The full `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings` gate is still failing in pre-existing unrelated files (`start.rs`, `sessions.rs`, `autoclaim.rs`, `plan.rs`, `route.rs`, `snapshot.rs`, `write.rs`), so `spec-test-build-install-commit-push` is blocked on that repo-wide warning debt rather than this dead-pane fix.
-<!-- agent:boundary:1a96200e -->
+<!-- agent:boundary:915f5ab6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -78,6 +78,7 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rsrn] [recommended] Restore a clean \ baseline so \ can finish with the full verification gate green.
 - [ ] [#asfc] Autostart/start fail-closed stale live-pane bug: agent-doc start <file> can refuse to recover when the registered pane is still alive but no live owner can be proven and the supervisor is unavailable. Repro from tasks/agent-doc/agent-doc-bugs2.md on April 30, 2026 with pane %68. Fix should preserve enough provenance to rebind deterministically or provide a safe automatic recovery path instead of blocking on stale registry state.
 - [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.

@@ -741,7 +741,31 @@ So my refined answer is:
 - `PID AND pane` alone: better, but still not a guarantee.
 - `PID AND pane AND supervisor instance identity`: strong enough to make the top-down model the primary authority.
 - Session-log provenance should stay, but as a backup/forensics layer rather than the main resolver.
-<!-- agent:boundary:275c54e8 -->
+❯ do #pathprov with `PID AND pane AND supervisor instance identity`. spec-test-build-install-commit-push
+### Re: #pathprov — gpt-5
+
+Implemented `#pathprov` with PID, pane, and supervisor instance identity.
+
+#### What changed
+- `sessions.json` is now keyed by canonical absolute document path instead of session UUID.
+- Registry entries now carry `session_id` and `supervisor_instance_id` alongside the pane, supervisor PID, and file metadata.
+- `start` records the live supervisor identity into the registry and IPC state.
+- Live-owner recovery now prefers top-down path provenance: canonical path entry, matching session id, matching pane, matching supervisor PID, and matching supervisor instance id. File-path/process-tree and supervisor-PID scans remain fallback rescue layers.
+- Updated the routing/session/supervisor specs and added a release-note entry for the new proof model.
+
+#### Verification
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo fmt --manifest-path src/tmux-router/Cargo.toml`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml`
+- `cargo build --manifest-path src/tmux-router/Cargo.toml`
+
+#### Published
+- `src/agent-doc`: `44339e5` pushed to `origin/20260422/codex-agent-backend`
+- `src/tmux-router`: `0070556` pushed to `origin/main`
+<!-- agent:boundary:47251031 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -750,7 +774,6 @@ So my refined answer is:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pathprov] [recommended] Rework .agent-doc/sessions.json to key by canonical absolute document path and store session_id + pane_id + supervisor_pid + supervisor_instance_id/start_time; keep fail-closed ownership proof instead of treating pane existence alone as provenance.
 - [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

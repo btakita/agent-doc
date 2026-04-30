@@ -825,8 +825,41 @@ Verification:
 Status:
 - local fix is implemented and installed
 - I did not make a repo commit or push in this turn
+### Re: tmux pane ownership / dead-pane follow-up — gpt-5
 
-<!-- agent:boundary:fec3be24 -->
+I found a real gap in the new #pathprov model, and it matches the behavior you saw.
+
+Root cause:
+- after route / sync / resync recovered a live pane, they re-registered it through the generic sessions::register(...) path
+- that path wrote the short-lived utility process PID and an empty supervisor_instance_id back into sessions.json
+- so the very next provenance check no longer had the top-down pane + supervisor PID + supervisor instance id proof that #pathprov depends on
+- once that metadata was erased, later route/sync passes fell back to weaker heuristics and could churn pane placement again or decide the recovered pane was stale
+
+What I changed in src/agent-doc:
+- added a recovered-owner re-registration path that uses the active tmux handle and preserves authoritative supervisor identity when the registry or supervisor socket can still prove it
+- wired sync.rs, start.rs, and resync.rs through that path instead of the generic register call
+- kept the mixed-root registry fix intact so recovered panes are written back to the owning document root, not the caller's root
+- updated specs/07-commands.md and VERSIONS.md
+
+What I observed live while debugging:
+- both %44 and %66 were still alive agent-doc start panes under tmux session 0
+- for agent-doc-bugs2.md, the supervisor socket existed and the pane process tree was still alive
+- but the live sessions.json entries had empty supervisor_instance_id fields, which is exactly the broken downgraded state
+
+Dead-pane note:
+- by the time I inspected the live tmux state, there was no retained pane_dead=1 pane to reap, so I did not make a separate dead-pane-reaper change in this turn
+- this patch is specifically for the ownership/provenance downgrade that can cause the pane swapping / stale-owner churn
+
+Verification:
+- cargo fmt --manifest-path src/agent-doc/Cargo.toml
+- cargo test --manifest-path src/agent-doc/Cargo.toml
+- cargo build --manifest-path src/agent-doc/Cargo.toml
+- cargo install --path src/agent-doc --force
+
+Status:
+- local fix is implemented and installed
+- I did not make a repo commit or push in this turn
+<!-- agent:boundary:44bdb589 -->
 <!-- /agent:exchange -->
 
 <!--

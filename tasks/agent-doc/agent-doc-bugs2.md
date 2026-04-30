@@ -518,7 +518,29 @@ Published:
 
 Note:
 - I left unrelated dirty files elsewhere in the workspace untouched.
-<!-- agent:boundary:bd7c5c61 -->
+continue with #tmuxcrash. spec-test-build-install-commit-push
+### Re: tmux route owner proof under `#tmuxcrash` — gpt-5
+
+I continued the `#tmuxcrash` investigation and fixed a live tmux-backed routing bug that the manual Codex repro exposed.
+
+- `sync.rs` no longer treats a control pane running `agent-doc route <FILE>` or `agent-doc claim <FILE>` as a live owner for that document. Process-tree ownership now accepts the long-lived `agent-doc start <FILE>` supervisor path, bare `agent-doc* <FILE>` owner shims, and harness-owned matches, but excludes those control-surface utility invocations.
+- This closes the false duplicate-owner ambiguity where route could report the control pane and the real registered pane as two associated panes for the same doc during recovery.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage for the owner-command classification boundary.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `7f1103d` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I did not mark `#tmuxcrash` done in backlog. This fix came out of the live repro, but the broader crash-provenance item still has remaining scope beyond this route-owner false positive.
+<!-- agent:boundary:570b10f2 -->
 <!-- /agent:exchange -->
 
 <!--

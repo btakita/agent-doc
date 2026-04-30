@@ -16,6 +16,10 @@
 //!   session before selecting the pane. Once that live-owner proof exists,
 //!   missing or stale supervisor IPC state must not authorize a replacement
 //!   pane for the same document.
+//! - If the configured project tmux session is dead and a fresh start must
+//!   register the current pane in another live tmux session, `start` updates
+//!   `.agent-doc/config.toml` to that live session so later route/claim work
+//!   follows the new binding instead of the stale dead session.
 //! - If `sessions.json` points at an alive pane but no live owner can still be
 //!   proven for the document, `start` first consults the per-session supervisor:
 //!   healthy supervisors are reused, restartable supervisors are restarted in
@@ -1602,7 +1606,9 @@ pub fn run(file: &Path) -> Result<()> {
     // launcher pane first can rip it out of its original tmux window/session before the
     // reuse path returns.
     if let Some(expected_session) = config::project_tmux_session() {
-        relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
+        if !relocate_if_wrong_session(&tmux, &pane_id, &expected_session) {
+            rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
+        }
     }
 
     // Register session → pane (with relative file path)
@@ -2284,14 +2290,67 @@ pub(crate) fn relocate_if_wrong_session(
     }
 }
 
+fn rebind_project_tmux_session_if_expected_dead(
+    tmux: &sessions::Tmux,
+    pane_id: &str,
+    expected_session: &str,
+) {
+    let actual_session = match tmux.pane_session(pane_id) {
+        Ok(session) => session,
+        Err(_) => return,
+    };
+    if actual_session == expected_session || tmux.session_alive(expected_session) {
+        return;
+    }
+    match config::update_project_tmux_session(&actual_session) {
+        Ok(()) => eprintln!(
+            "[start] configured project session '{}' is dead — rebound tmux_session to '{}'",
+            expected_session, actual_session
+        ),
+        Err(e) => eprintln!(
+            "[start] WARNING: configured project session '{}' is dead but failed to persist tmux_session '{}': {}",
+            expected_session, actual_session, e
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::project_config;
     use crate::frontmatter::Frontmatter;
     use crate::hooks::fire_doc_hooks;
     use crate::sessions::IsolatedTmux;
     use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct ScopedCurrentDir {
+        prev_cwd: std::path::PathBuf,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &std::path::Path) -> Self {
+            let env_guard = ENV_MUTEX
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let prev_cwd = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
+    }
 
     #[test]
     fn resolve_agent_args_claude_prefers_claude_alias_chain() {
@@ -2529,6 +2588,51 @@ mod tests {
             sess, "sess-a",
             "pane should remain in original session on failure"
         );
+    }
+
+    #[test]
+    fn start_rebinds_dead_project_session_to_current_pane_session() {
+        let dir = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("start-rebind-dead-session");
+        let pane = iso.new_session("14", dir.path()).unwrap();
+
+        let relocated = relocate_if_wrong_session(&iso, &pane, "0");
+        assert!(
+            !relocated,
+            "missing anchor in dead configured session should fall back to current pane session"
+        );
+
+        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+
+        assert_eq!(project_config::project_tmux_session().as_deref(), Some("14"));
+    }
+
+    #[test]
+    fn start_does_not_rebind_live_project_session_pin() {
+        let dir = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("start-rebind-live-session");
+        let _expected_pane = iso.new_session("0", dir.path()).unwrap();
+        let pane = iso.new_session("14", dir.path()).unwrap();
+
+        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+
+        assert_eq!(project_config::project_tmux_session().as_deref(), Some("0"));
     }
 
     #[test]

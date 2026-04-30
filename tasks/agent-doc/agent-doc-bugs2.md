@@ -148,7 +148,27 @@ Verification completed:
 
 Code commit/push:
 - `src/agent-doc` `8b39a42` on `20260422/codex-agent-backend` (`fix: recover start pane from session log provenance`)
-<!-- agent:boundary:d1d0bd4a -->
+Please investigate `Sync: --col tasks/agent-doc/agent-doc-bugs2.md --col src/session-share/tasks/claudescore-3.md [focus: src/session-share/tasks/claudescore-3.md]` does not correctly perform tmux pane alignment in the tmux window? Why does it get some navigation operations backwards. This used to work but since we have moved to the new top-down provenance architecture, this does not work correctly. spec-test-build-install-commit-push
+### Re: cross-root sync pane alignment — gpt-5
+
+Root cause was registry scope, not tmux navigation math. `agent-doc sync` delegated to `tmux-router::sync` with the caller's root `.agent-doc/sessions.json`, but `src/session-share/tasks/claudescore-3.md` lives in the child repo's own registry. When tmux-router could not resolve that cross-root session id, it fell back to spare-pane assignment from current window order, so whichever file was focused could get rebound to the opposite pane and the left/right tmux layout appeared to navigate backwards.
+
+Implemented:
+- `src/sync.rs` now builds a per-run synthetic tmux-router registry keyed by session id and populated from each visible document's nearest `.agent-doc/sessions.json` before reconcile.
+- Added isolated tmux regression coverage for the exact cross-root focus-flip repro and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml register_synced_files_updates_each_project_registry_by_path_key`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `8988888` on `20260422/codex-agent-backend` (`fix: stabilize cross-root sync pane resolution`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:33e3f31a -->
 <!-- /agent:exchange -->
 
 <!--

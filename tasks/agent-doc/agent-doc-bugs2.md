@@ -894,7 +894,45 @@ Published:
 No new backlog item came out of this fix.
 
 Restart IntelliJ to load the `0.2.80` plugin, then re-check the left/right split switch. If the pane order still flips after restart, that would point to a tmux-side reorder path rather than the IDE reporter.
-<!-- agent:boundary:61fa83e0 -->
+❯ How should we recover from:
+```
+~/work/btakita/agent-loop/src/session-share main ⇡24 !3                                            agent-loop 17:55:59
+❯ /home/brian/.cargo/bin/agent-doc start tasks/claudescore-3.md
+Error: registered pane %66 for tasks/claudescore-3.md is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance
+```
+### Re: recovery for the `%66` fail-closed start — gpt-5
+
+The intended recovery is:
+
+1. `agent-doc fix tasks/claudescore-3.md`
+2. `agent-doc start tasks/claudescore-3.md`
+
+Why:
+- that error is the deliberate fail-closed path in `start.rs`
+- `start` saw a live registered pane but could not prove that pane still owned `tasks/claudescore-3.md`
+- the supervisor was also unavailable, so `start` refused to replace the pane because doing so would destroy provenance
+
+What I found live in `src/session-share`:
+- `%66` was still an alive tmux pane, but its process was just a parent `zsh`, not a provable live owner for `claudescore-3.md`
+- the registry had already drifted to `%68`, and `%68` was only a plain `zsh` pane in `src/session-share`
+- that is exactly the stale-binding shape `fix` is meant to clean up
+
+What I ran:
+- `agent-doc resync --fix tasks/claudescore-3.md`
+- `agent-doc start tasks/claudescore-3.md`
+
+Result:
+- `resync --fix` deregistered the stale `%68` binding
+- the follow-up `start` succeeded and re-registered `tasks/claudescore-3.md` onto `%66`
+- `src/session-share/.agent-doc/sessions.json` now shows a fresh supervisor-backed binding with `pane=%66`, `pid=3109294`, and non-empty `supervisor_instance_id=9c4eda1b-08a1-4732-a5c7-b2b46944c457`
+
+So the operator rule here is:
+- if `start` fails with `no live owner was proven and the supervisor is unavailable`, do not force a replacement pane first
+- run `agent-doc fix <file>` to clear the stale registry claim
+- then rerun `agent-doc start <file>`
+
+No new backlog item came out of this recovery.
+<!-- agent:boundary:e516b75e -->
 <!-- /agent:exchange -->
 
 <!--

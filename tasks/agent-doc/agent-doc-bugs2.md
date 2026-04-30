@@ -230,7 +230,27 @@ Published:
 - `src/agent-doc` commit `787a6fc` (`fix: keep head mentions prompt-bearing`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:79a07d00 -->
+❯ do #rtxfproof + #rtxfreg. spec-test-build-install-commit-push
+### Re: #rtxfproof + #rtxfreg — gpt-5
+
+Implemented the fresh auto-start dispatch proof in `src/agent-doc`.
+
+What changed:
+- fresh `auto_start_in_session` now routes its first and fallback send through the same file-bound `send_command_checked(...)` guard used for existing-pane routing, so a newly created pane still fails closed if the registry binding is wrong
+- added an isolated tmux regression proving another document's pane in the same session may be reused only as the split anchor; the routed `agent-doc` command lands in the new pane and never in the anchor
+- updated `specs/07-commands.md` to state that the route-path split target is layout-only and that fresh-pane dispatch must remain file-validated
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `4291744` (`fix: guard fresh route dispatch target`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:8ca44185 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -247,8 +267,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
-- [ ] [#rtxfreg] Add a regression/verification pass for cross-file tmux dispatch so split-anchor selection can never again target a pane owned by another document in the same session.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md

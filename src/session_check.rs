@@ -10,6 +10,10 @@
 //! - Distinguishes "cycle started but no write/commit followed" from
 //!   "response write landed but no commit followed" in both cycle-state and
 //!   ops-log fallback paths.
+//! - When an open `preflight_started` cycle already has a visible response
+//!   patchback in the working tree, reports that manual-repair / commit-boundary
+//!   state explicitly instead of collapsing it into the generic open-cycle
+//!   message.
 //! - Also fails closed when the current document diverges from its snapshot in
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
@@ -361,6 +365,9 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     state.last_event,
                     reason
                 )));
+            }
+            if let Some(message) = open_cycle_manual_patchback_message(file, &state)? {
+                return Ok(SessionCheckStatus::Interrupted(message));
             }
             return Ok(SessionCheckStatus::Interrupted(open_cycle_message(&state)));
         }
@@ -922,6 +929,29 @@ fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
         state.last_event,
         detail
     )
+}
+
+fn open_cycle_manual_patchback_message(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+) -> Result<Option<String>> {
+    if !matches!(
+        state.phase,
+        crate::cycle_state::CyclePhase::PreflightStarted
+    ) {
+        return Ok(None);
+    }
+    let Some(marker) = detect_bypassed_response_write(file)? else {
+        return Ok(None);
+    };
+    Ok(Some(format!(
+        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — found visible response patchback {} that is still outside the commit boundary. This looks like a manual repair that stopped before commit; finish it with `agent-doc write --commit {}` if you still have the response body, or commit the repaired document manually once the response is correct.",
+        state.cycle_id,
+        phase_name(state.phase),
+        state.last_event,
+        marker,
+        file.display()
+    )))
 }
 
 /// Return the message portion of the last non-empty line in `ops.log`,
@@ -1611,6 +1641,87 @@ mod tests {
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(repaired_snapshot.contains("### Re: #patchbypass — gpt-5"));
+    }
+
+    #[test]
+    fn session_check_surfaces_manual_patchback_follow_through_for_open_preflight_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #mcrc. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let manual_patchback = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #mcrc. spec-test-build-install-commit-push\n",
+            "### Re: #mcrc — gpt-5\n\n",
+            "Recovered body.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, manual_patchback).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("visible response patchback"),
+                    "unexpected session-check message: {message}"
+                );
+                assert!(
+                    message.contains("agent-doc write --commit"),
+                    "unexpected session-check message: {message}"
+                );
+                assert!(
+                    message.contains("manual repair that stopped before commit"),
+                    "unexpected session-check message: {message}"
+                );
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
     }
 
     #[test]

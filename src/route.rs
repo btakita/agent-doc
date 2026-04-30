@@ -1472,9 +1472,15 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
-fn routed_cycle_ack_timeout() -> Duration {
+fn routed_cycle_ack_timeout(live_child_for_file: bool) -> Duration {
     if cfg!(test) {
-        Duration::from_secs(1)
+        if live_child_for_file {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(1)
+        }
+    } else if live_child_for_file {
+        Duration::from_secs(30)
     } else {
         Duration::from_secs(15)
     }
@@ -1548,26 +1554,29 @@ fn require_routed_cycle_ack(
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
+    let ack_timeout = routed_cycle_ack_timeout(live_child_for_file);
     if live_child_for_file {
         eprintln!(
-            "[route] live agent-doc child active in pane {} for {} — waiting for a new cycle ack for pending {}",
+            "[route] live agent-doc child active in pane {} for {} — waiting up to {}s for a new cycle ack for pending {}",
             pane,
             file.display(),
+            ack_timeout.as_secs(),
             marker
         );
     }
-    match wait_for_start_ack(file, baseline, routed_cycle_ack_timeout()) {
+    match wait_for_start_ack(file, baseline, ack_timeout) {
         Some(state) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_cycle_start_acknowledged file={} pane={} harness={} cycle={} phase={} marker={}",
+                    "route_cycle_start_acknowledged file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
                     file.display(),
                     pane,
                     harness.binary,
                     state.cycle_id,
                     cycle_phase_name(state.phase),
-                    marker
+                    marker,
+                    ack_timeout.as_secs()
                 ),
             );
             let _ = crate::startup_miss::clear(file);
@@ -1577,11 +1586,12 @@ fn require_routed_cycle_ack(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_cycle_start_missing file={} pane={} harness={} marker={}",
+                    "route_cycle_start_missing file={} pane={} harness={} marker={} timeout_secs={}",
                     file.display(),
                     pane,
                     harness.binary,
-                    marker
+                    marker,
+                    ack_timeout.as_secs()
                 ),
             );
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
@@ -1599,16 +1609,19 @@ fn require_routed_cycle_ack(
                 pane,
                 file,
                 &format!(
-                    "routed trigger accepted but no document cycle started for pending {} (startup-miss {})",
-                    marker, miss_ts
+                    "routed trigger accepted but no document cycle started for pending {} after {}s (startup-miss {})",
+                    marker,
+                    ack_timeout.as_secs(),
+                    miss_ts
                 ),
             );
             anyhow::bail!(
-                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {} (startup_miss_timestamp={})",
+                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {} after waiting {}s (startup_miss_timestamp={})",
                 harness.binary,
                 file.display(),
                 pane,
                 marker,
+                ack_timeout.as_secs(),
                 miss_ts
             );
         }
@@ -2289,7 +2302,11 @@ fn auto_start_in_session(
             );
         }
 
-        match wait_for_start_ack(file, cycle_baseline.as_ref(), routed_cycle_ack_timeout()) {
+        match wait_for_start_ack(
+            file,
+            cycle_baseline.as_ref(),
+            routed_cycle_ack_timeout(false),
+        ) {
             Some(state) => {
                 crate::ops_log::log_op(
                     file,
@@ -3549,6 +3566,64 @@ history line
             Some(&committed_state),
             Some("prompt_target: ❯ follow-up question"),
         ));
+    }
+
+    #[test]
+    fn routed_cycle_ack_timeout_extends_for_live_children() {
+        assert_eq!(routed_cycle_ack_timeout(false), Duration::from_secs(1));
+        assert_eq!(routed_cycle_ack_timeout(true), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-child-extended-ack");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-child-extended-ack.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-child-extended-ack", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current)).unwrap();
+        });
+
+        let routed = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-child-extended-ack",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should tolerate a delayed but real live-child cycle start");
+        assert_eq!(routed, pane);
+
+        let state = crate::cycle_state::load(&doc)
+            .unwrap()
+            .expect("cycle state should exist after delayed ack");
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
     }
 
     #[test]

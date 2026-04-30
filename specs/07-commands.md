@@ -789,7 +789,7 @@ Editor-driven sync and manual `start` must apply the same supersession rule befo
 
 ### Live-child ack suppression
 
-When route detects a live agent-doc child process for the target file in the resolved pane (via `find_live_owner_pane`), it still sends the routed trigger, but prompt-bearing drift on top of a closed cycle must still produce a real per-document cycle acknowledgment. A merely live child is not proof that the new routed prompt was consumed into a fresh cycle. Route therefore waits for a newer cycle state and fails closed if none appears, even when the pane already owns the document. The only suppression remains the open-cycle case: if the baseline cycle is already in flight, route does not require another start ack for that same pending work.
+When route detects a live agent-doc child process for the target file in the resolved pane (via `find_live_owner_pane`), it still sends the routed trigger, but prompt-bearing drift on top of a closed cycle must still produce a real per-document cycle acknowledgment. A merely live child is not proof that the new routed prompt was consumed into a fresh cycle. Route therefore waits for a newer cycle state and fails closed if none appears, even when the pane already owns the document. Because a healthy live owner can take longer than a fresh pane to surface the next `preflight_started` boundary after a routed prompt, this path uses a longer bounded acknowledgment window (30s in production, 2s under tests) before it records `route_cycle_start_missing`. The only suppression remains the open-cycle case: if the baseline cycle is already in flight, route does not require another start ack for that same pending work.
 
 ## is_tracked FFI Export
 

@@ -655,7 +655,25 @@ I already ran the requested spec/test/build/install/commit/push cycle for this t
 - commit `1fc5a67` pushed to `origin/20260422/codex-agent-backend`
 
 I updated the `#tmuxcrash` backlog child list so it now shows completed `[x]` work and remaining `[ ]` work in one tracked sublist. The parent `#tmuxcrash` item stays open because the end-to-end restarted second-leg closeout proof in `#tmuxcrash-9rh5` is still the hard remaining check.
-<!-- agent:boundary:bb371fd0 -->
+continue #tmuxcrash. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` narrowed remaining scope — gpt-5
+
+I continued `#tmuxcrash`, but this turn did not need a new repo code change. The remaining gap is now evidence reduction, not another tmux recovery path.
+
+What I verified from the live state:
+- the old startup-miss marker files called out in `tasks/agent-doc/plan-tmux-pane-crash-stability.md` are no longer present under `.agent-doc/state/startup-miss/`
+- the stale startup-miss / superseded-owner cleanup work is already split into `#smst`, and the earlier `#smst` fix remains the right bucket for that class
+- the `b26b9957...` session log now contains restarted second-leg runs that reach normal closeout boundaries instead of stranding the document forever
+- the prior `agent-doc` closeout for this document reached `session-check` success, so the restarted second-leg proof in `#tmuxcrash-9rh5` is no longer the blocking item
+
+So I reduced the `#tmuxcrash` child list accordingly:
+- marked `#tmuxcrash-9rh5` done
+- marked `#tmuxcrash-hmrz` done and kept stale startup-miss cleanup under `#smst`
+- removed the duplicated child bullets from the backlog item
+- left only `#tmuxcrash-rn2d` open, because the remaining scope should now be limited to true crash provenance only
+
+This turn was document/backlog cleanup only, so there was no new `src/agent-doc` code patch, crate test run, install, or push to perform.
+<!-- agent:boundary:7c31fa9f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -669,7 +687,13 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions previously surfaced to the user as "the pane crashed" while the persisted state actually mixed startup-miss, fresh-start, orphaned-supervisor, and missing-exit cases. The false-crash family is now narrowed: stale startup-miss / superseded-owner cleanup belongs in `#smst`, and the remaining `#tmuxcrash` scope is only true crash provenance gaps such as real child death, missing-exit, orphaned-supervisor, or commit-boundary failures. Repro history includes `tasks/software/tsift.md` on Apr 29, 2026. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+  - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
+  - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
+  - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
+  - [x] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
+  - [x] [#tmuxcrash-hmrz] Move stale startup-miss and ownership cleanup out to `#smst` once the recovered closeout is clean.
+  - [ ] [#tmuxcrash-rn2d] Keep `#tmuxcrash` limited to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
   - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
   - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
   - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.

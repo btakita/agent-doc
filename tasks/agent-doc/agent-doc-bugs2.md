@@ -473,7 +473,30 @@ Note:
 `src/agent-doc` is committed and pushed at `9a82e57` on `origin/20260422/codex-agent-backend` with commit message `fix: canonicalize pending subtasks and reuse start panes`. That publish includes the pending nested-subtask canonicalization work and the stale-pane supervisor reuse/restart path. `src/tmux-router` was already clean, and I left unrelated dirty files elsewhere in the workspace untouched.
 
 Verification on the published tree: `cargo fmt --check`, `cargo build`, `cargo install --path . --force`, and targeted pending/start tests passed. Full `cargo test` hit one flaky unrelated failure in `agent::tests::codex_network_status_detects_inherited_disable_mismatch`, and that test passed immediately on isolated rerun. The `agent-doc` closeout needed a manual `write --commit` repair because of a bare prompt-prefix artifact; `agent-doc session-check` now passes. The task doc in the workspace root still shows the usual local `(HEAD)`/boundary artifact in `git diff`, but the cycle itself is committed cleanly.
-<!-- agent:boundary:e48fb4dd -->
+❯ do #snpsync. spec-test-build-install-commit-push
+### Re: #snpsync — gpt-5
+
+I fixed `#snpsync`.
+
+- `git::repair_committed_historical_snapshot_drift` now treats committed exchange-only answered-prompt prefix normalization (`❯ do ...` -> `do ...` above the same `### Re:` block) as repairable historical drift, but only when the snapshot and committed `HEAD` actually differ and no typed components changed.
+- `session-check` now proactively runs that historical snapshot repair before reporting unresolved prompt-bearing drift, so a recovered crash cycle re-saves the snapshot from committed `HEAD` instead of requiring a second empty finalize cycle.
+- Added regression coverage for the new prefix-normalization repair path and kept the transient `(HEAD)` no-op closeout test green.
+- Updated `CLAUDE.md`, `specs/07-commands.md`, and `VERSIONS.md` to document the tighter crash-recovery contract.
+
+There were no actionable follow-up items to capture.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Published:
+- `src/agent-doc` commit `d0d0b8a` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left unrelated dirty files elsewhere in the workspace untouched.
+<!-- agent:boundary:d482a11b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -487,7 +510,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snpsync] Snapshot desync after crash recovery causes session-check to flag already-responded prompts as unresolved. Repro from `src/session-share/tasks/claudescore.md` on Apr 29, 2026: tmux pane crashed at `preflight_started`, `agent-doc recover` repaired and committed the stale cycle, but the snapshot retained a `❯ ` prefix on the user prompt line that the document had already dropped. session-check then classified the already-responded-to prompt (`do #wdiv. spec-test-news-commit-push`) as "unresolved prompt-bearing user changes" even though the response was committed directly below it. Required a second full finalize cycle just to sync the snapshot. Fix: `recover` should normalize the snapshot to match the committed document state after repairing a stale cycle, so session-check doesn't see phantom diffs from prefix/whitespace divergence.
+- [ ] [#stshdie] Stashed tmux pane dies silently mid-cycle with zero diagnostic info. Repro from `src/session-share/tasks/claudescore.md` on Apr 29, 2026: pane %511 was auto-started at 19:44:25, ran preflight at 19:49:10 (`cycle-1777506550775`, `preflight_started`), was stashed at 19:50:57 when user switched to claudescore-3.md, then found dead 39 seconds later at 19:51:36 ("no alive pane"). Session log (`a1580e76`) ends abruptly mid-tool-use (Read of `news/2026-04-29/README.md`) with no error event, no graceful shutdown, no OOM/dmesg signal. `remain-on-exit` is off, so tmux destroyed the pane immediately with no exit status preservation. Fix: (1) set `remain-on-exit on` for agent-doc managed panes so dead panes preserve exit status before cleanup; (2) add a heartbeat or liveness probe to stashed panes so sync can detect and log the death cause before the pane is destroyed; (3) if the stashed process was mid-cycle, capture the cycle state and last assistant message for recovery provenance. Plan: tasks/agent-doc/plan-stashed-pane-silent-death.md
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.

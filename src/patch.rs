@@ -1,9 +1,11 @@
 //! # Module: patch
 //!
 //! ## Spec
-//! - Replaces, appends, or prepends content in a named `<!-- agent:name -->` component within a markdown document.
-//! - Patch mode resolution order: inline attribute on the component tag (`patch=`) > `[components.<name>]` entry in `.agent-doc/config.toml` > built-in default (`replace`). `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence when both are present.
-//! - `append` mode: concatenates new content after existing; `prepend` mode: inserts new content before existing.
+//! - Replaces content in a named `<!-- agent:name -->` component within a markdown document by default.
+//! - `--mode append|prepend` is an explicit override for callers that intentionally want cumulative mutation.
+//! - Component config still contributes `timestamp`, `max_entries`, `pre_patch`, and `post_patch`, but the
+//!   component's configured `patch=` mode no longer changes `agent-doc patch` default behavior.
+//! - `append` mode concatenates new content after existing; `prepend` inserts new content before existing.
 //! - Optional `timestamp: true` in component config prefixes each entry with an ISO-8601 UTC timestamp.
 //! - Optional `max_entries` in component config trims to the last N non-empty lines after append/prepend.
 //! - `pre_patch` shell hook: content piped to stdin, transformed stdout replaces the replacement string before writing. Receives `COMPONENT` and `FILE` env vars.
@@ -24,8 +26,9 @@
 //! - component_not_found: component name absent from doc → Err containing "not found"
 //! - file_not_found: missing file path → Err containing "file not found"
 //! - snapshot_updated_after_patch: after replace → snapshot file contains new content, not old
-//! - append_mode: `mode = "append"` config + second patch → both entries present in document
-//! - prepend_mode: `mode = "prepend"` config + new entry → new entry appears before existing
+//! - append_mode_requires_explicit_override: append-mode component + bare patch → old content replaced
+//! - explicit_append_mode: `--mode append` + second patch → both entries present in document
+//! - explicit_prepend_mode: `--mode prepend` + new entry → new entry appears before existing
 //! - trim_entries_limits: 5-line content trimmed to 3 → oldest 2 lines removed
 //! - pre_patch_hook_transforms: `pre_patch = "tr a-z A-Z"` → content uppercased before write
 //! - post_patch_hook_runs: `post_patch = "touch <file>"` → marker file created after write
@@ -36,7 +39,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, project_config, snapshot};
+use crate::{PatchMode, component, project_config, snapshot};
 
 /// Load component configs from `.agent-doc/config.toml` relative to the document.
 /// Walks up from the document's parent directory to find the project root.
@@ -59,11 +62,16 @@ fn load_configs(file: &Path) -> Result<HashMap<String, project_config::Component
     Ok(proj_cfg.components.into_iter().collect())
 }
 
-/// Replace content in a named component.
+/// Patch a named component.
 ///
 /// If `content` is None, reads replacement content from stdin.
-/// Applies component config (mode, timestamp, max_entries) and shell hooks.
-pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<()> {
+/// Applies timestamp/max-entry hooks plus an explicit mode override.
+pub fn run(
+    file: &Path,
+    component_name: &str,
+    mode: PatchMode,
+    content: Option<&str>,
+) -> Result<()> {
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
@@ -104,16 +112,17 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
         replacement = run_pre_hook(script, component_name, file, &replacement)?;
     }
 
-    // Apply mode: inline attr > config.toml [components.<name>] > default ("replace")
-    let mode = comp
-        .patch_mode()
-        .or_else(|| config.map(|c| c.patch.as_str()))
-        .unwrap_or("replace");
     let timestamp = config.is_some_and(|c| c.timestamp);
     let max_entries = config.map(|c| c.max_entries).unwrap_or(0);
 
+    let mode_name = match mode {
+        PatchMode::Replace => "replace",
+        PatchMode::Append => "append",
+        PatchMode::Prepend => "prepend",
+    };
+
     let final_content = match mode {
-        "append" => {
+        PatchMode::Append => {
             let existing = comp.content(&doc);
             let entry = if timestamp {
                 format!("[{}] {}", iso_now(), replacement)
@@ -126,7 +135,7 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
             }
             combined
         }
-        "prepend" => {
+        PatchMode::Prepend => {
             let existing = comp.content(&doc);
             let entry = if timestamp {
                 format!("[{}] {}", iso_now(), replacement)
@@ -139,8 +148,7 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
             }
             combined
         }
-        _ => {
-            // "replace" (default)
+        PatchMode::Replace => {
             if timestamp {
                 format!("[{}] {}", iso_now(), replacement)
             } else {
@@ -179,7 +187,7 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
         "Patched component '{}' in {} (mode: {})",
         component_name,
         file.display(),
-        mode
+        mode_name
     );
     Ok(())
 }
@@ -286,7 +294,7 @@ mod tests {
             "# Dashboard\n\n<!-- agent:status -->\nold content\n<!-- /agent:status -->\n\nFooter\n",
         );
 
-        run(&doc, "status", Some("new content\n")).unwrap();
+        run(&doc, "status", PatchMode::Replace, Some("new content\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("new content"));
@@ -305,7 +313,7 @@ mod tests {
             "BEFORE\n<!-- agent:x -->\nreplace me\n<!-- /agent:x -->\nAFTER\n",
         );
 
-        run(&doc, "x", Some("replaced\n")).unwrap();
+        run(&doc, "x", PatchMode::Replace, Some("replaced\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.starts_with("BEFORE\n"));
@@ -318,13 +326,19 @@ mod tests {
         let dir = setup_project();
         let doc = write_doc(dir.path(), "test.md", "# No components\n");
 
-        let err = run(&doc, "missing", Some("x")).unwrap_err();
+        let err = run(&doc, "missing", PatchMode::Replace, Some("x")).unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
     #[test]
     fn file_not_found_error() {
-        let err = run(Path::new("/nonexistent/file.md"), "s", Some("x")).unwrap_err();
+        let err = run(
+            Path::new("/nonexistent/file.md"),
+            "s",
+            PatchMode::Replace,
+            Some("x"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("file not found"));
     }
 
@@ -337,7 +351,7 @@ mod tests {
             "<!-- agent:s -->\nold\n<!-- /agent:s -->\n",
         );
 
-        run(&doc, "s", Some("new\n")).unwrap();
+        run(&doc, "s", PatchMode::Replace, Some("new\n")).unwrap();
 
         // Snapshot should be readable from the project's .agent-doc/snapshots/
         let snap_path = dir.path().join(snapshot::path_for(&doc).unwrap());
@@ -347,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn append_mode() {
+    fn append_mode_requires_explicit_override() {
         let dir = setup_project();
         write_config(dir.path(), "[components.log]\npatch = \"append\"\n");
 
@@ -357,7 +371,25 @@ mod tests {
             "<!-- agent:log -->\nentry1\n<!-- /agent:log -->\n",
         );
 
-        run(&doc, "log", Some("entry2\n")).unwrap();
+        run(&doc, "log", PatchMode::Replace, Some("entry2\n")).unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("entry2"));
+        assert!(!result.contains("entry1"));
+    }
+
+    #[test]
+    fn explicit_append_mode() {
+        let dir = setup_project();
+        write_config(dir.path(), "[components.log]\npatch = \"append\"\n");
+
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<!-- agent:log -->\nentry1\n<!-- /agent:log -->\n",
+        );
+
+        run(&doc, "log", PatchMode::Append, Some("entry2\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("entry1"));
@@ -365,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn prepend_mode() {
+    fn explicit_prepend_mode() {
         let dir = setup_project();
         write_config(dir.path(), "[components.log]\npatch = \"prepend\"\n");
 
@@ -375,7 +407,7 @@ mod tests {
             "<!-- agent:log -->\nold\n<!-- /agent:log -->\n",
         );
 
-        run(&doc, "log", Some("new\n")).unwrap();
+        run(&doc, "log", PatchMode::Prepend, Some("new\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let new_pos = result.find("new").unwrap();
@@ -409,7 +441,7 @@ mod tests {
             "<!-- agent:x -->\nold\n<!-- /agent:x -->\n",
         );
 
-        run(&doc, "x", Some("new\n")).unwrap();
+        run(&doc, "x", PatchMode::Replace, Some("new\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("new"));
@@ -427,7 +459,7 @@ mod tests {
             "<!-- agent:x -->\nold\n<!-- /agent:x -->\n",
         );
 
-        run(&doc, "x", Some("hello world\n")).unwrap();
+        run(&doc, "x", PatchMode::Replace, Some("hello world\n")).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("HELLO WORLD"));
@@ -451,7 +483,7 @@ mod tests {
             "<!-- agent:x -->\nold\n<!-- /agent:x -->\n",
         );
 
-        run(&doc, "x", Some("new\n")).unwrap();
+        run(&doc, "x", PatchMode::Replace, Some("new\n")).unwrap();
 
         assert!(
             marker.exists(),

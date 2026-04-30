@@ -143,6 +143,13 @@ pub enum AgentDocMode {
     Stream,
 }
 
+#[derive(Clone, Debug, ValueEnum)]
+pub enum PatchMode {
+    Replace,
+    Append,
+    Prepend,
+}
+
 #[derive(Parser)]
 #[command(
     name = "agent-doc",
@@ -480,6 +487,9 @@ enum Commands {
         file: PathBuf,
         /// Component name (e.g. "status", "log")
         component: String,
+        /// Patch mode override. Defaults to replace.
+        #[arg(long, value_enum, default_value = "replace")]
+        mode: PatchMode,
         /// Replacement content (reads from stdin if omitted)
         content: Option<String>,
     },
@@ -1303,8 +1313,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Patch {
             file,
             component,
+            mode,
             content,
-        } => patch::run(&file, &component, content.as_deref()),
+        } => patch::run(&file, &component, mode, content.as_deref()),
         Commands::Watch {
             stop,
             status,

@@ -116,7 +116,7 @@ fn all_commands() -> Vec<CommandInfo> {
     ));
     cmds.push(cmd(
         "/agent-doc patch",
-        "<FILE> <COMPONENT>",
+        "<FILE> <COMPONENT> [--mode replace|append|prepend]",
         "Replace content in a named component",
     ));
     cmds.push(cmd(

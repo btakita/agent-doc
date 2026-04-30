@@ -172,6 +172,29 @@ fn test_cli_run_requires_file() {
 }
 
 #[test]
+fn test_cli_patch_replaces_exchange_even_when_component_is_append_mode() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::write(&doc, template_doc("Session", "old exchange body\n", "", "")).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args([
+        "patch",
+        doc.to_str().unwrap(),
+        "exchange",
+        "new exchange body\n",
+    ]);
+    cmd.assert().success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("new exchange body"));
+    assert!(!content.contains("old exchange body"));
+}
+
+#[test]
 fn test_commit_explains_prior_patchback_without_new_response_body() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

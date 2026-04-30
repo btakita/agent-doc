@@ -372,16 +372,16 @@ Malformed YAML frontmatter is not silently dropped during resolution or auto-sta
 
 ## patch
 
-`agent-doc patch <FILE> <COMPONENT> [CONTENT]` — replace content in a named component.
+`agent-doc patch <FILE> <COMPONENT> [CONTENT] [--mode replace|append|prepend]` — replace content in a named component.
 
 1. Read the document and parse component markers (`<!-- agent:name -->...<!-- /agent:name -->`)
 2. Find the named component (error if not found)
 3. Read replacement content from the positional argument or stdin
 4. Load component config from `.agent-doc/components.toml` (if present)
 5. Apply `pre_patch` hook (stdin: content, stdout: transformed content; receives `COMPONENT` and `FILE` env vars)
-6. Apply mode: `replace` (default), `append` (add after existing), or `prepend` (add before existing)
+6. Apply mode: `replace` by default. `append` / `prepend` are only used when the caller passes `--mode append` / `--mode prepend`; the component's configured `patch=` mode does not silently change `agent-doc patch` into an append/prepend operation.
 7. If `timestamp` is true, prefix entry with ISO 8601 UTC timestamp
-8. If `max_entries > 0` (append/prepend only), trim to last N non-empty lines
+8. If `max_entries > 0` (explicit append/prepend only), trim to last N non-empty lines
 9. Write updated document
 10. Save snapshot relative to project root
 11. Run `post_patch` hook (fire-and-forget; receives `COMPONENT` and `FILE` env vars)

@@ -762,8 +762,10 @@ enum ExistingSessionPaneAction {
 enum SupervisorHealth {
     /// Supervisor is reachable, child is running and healthy.
     Healthy,
-    /// Supervisor is reachable but child is not running or supervisor is halted/degraded.
-    NeedsRestart,
+    /// Supervisor is reachable, and an automatic in-place restart is still allowed.
+    Restartable,
+    /// Supervisor halted itself after repeated failures; do not revive it in place.
+    Halted { restart_count: u32 },
     /// Socket exists but supervisor did not respond or errored.
     Unreachable,
     /// No supervisor socket found at all.
@@ -774,6 +776,7 @@ enum SupervisorHealth {
 enum StaleRegisteredPaneAction {
     ReuseRegistered,
     RestartRegistered,
+    ClearStaleHalted { restart_count: u32 },
     ClearStale,
 }
 
@@ -798,13 +801,20 @@ fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                let restart_count = data
+                    .get("restart_count")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|v| u32::try_from(v).ok())
+                    .unwrap_or(0);
                 if running && state == "healthy" {
                     SupervisorHealth::Healthy
+                } else if state == "halted" {
+                    SupervisorHealth::Halted { restart_count }
                 } else {
-                    SupervisorHealth::NeedsRestart
+                    SupervisorHealth::Restartable
                 }
             } else {
-                SupervisorHealth::NeedsRestart
+                SupervisorHealth::Restartable
             }
         }
         Ok(_) => SupervisorHealth::Unreachable,
@@ -834,7 +844,10 @@ fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
 fn stale_registered_pane_action(supervisor_health: SupervisorHealth) -> StaleRegisteredPaneAction {
     match supervisor_health {
         SupervisorHealth::Healthy => StaleRegisteredPaneAction::ReuseRegistered,
-        SupervisorHealth::NeedsRestart => StaleRegisteredPaneAction::RestartRegistered,
+        SupervisorHealth::Restartable => StaleRegisteredPaneAction::RestartRegistered,
+        SupervisorHealth::Halted { restart_count } => {
+            StaleRegisteredPaneAction::ClearStaleHalted { restart_count }
+        }
         SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
             StaleRegisteredPaneAction::ClearStale
         }
@@ -1439,7 +1452,7 @@ pub fn run(file: &Path) -> Result<()> {
                         }
                         return Ok(());
                     }
-                    SupervisorHealth::NeedsRestart => {
+                    SupervisorHealth::Restartable => {
                         eprintln!(
                             "session {} for {} in pane {} is not healthy — restarting via supervisor",
                             &session_id[..8.min(session_id.len())],
@@ -1459,6 +1472,16 @@ pub fn run(file: &Path) -> Result<()> {
                         }
                         eprintln!(
                             "[start] supervisor restart failed — deregistering and starting fresh"
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                    SupervisorHealth::Halted { restart_count } => {
+                        eprintln!(
+                            "session {} for {} in pane {} halted after {} restarts — deregistering the crashed session and starting fresh",
+                            &session_id[..8.min(session_id.len())],
+                            file.display(),
+                            existing_pane,
+                            restart_count
                         );
                         let _ = sessions::deregister(&session_id)?;
                     }
@@ -1518,6 +1541,15 @@ pub fn run(file: &Path) -> Result<()> {
                         eprintln!(
                             "[start] supervisor restart failed for pane {} — clearing stale entry",
                             stale_pane
+                        );
+                        let _ = sessions::deregister(&session_id)?;
+                    }
+                    StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
+                        eprintln!(
+                            "[start] registered pane {} for {} has a halted supervisor after {} restarts — clearing the stale crashed session and starting fresh",
+                            stale_pane,
+                            file.display(),
+                            restart_count
                         );
                         let _ = sessions::deregister(&session_id)?;
                     }
@@ -2640,8 +2672,12 @@ mod tests {
             StaleRegisteredPaneAction::ReuseRegistered
         );
         assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::NeedsRestart),
+            stale_registered_pane_action(SupervisorHealth::Restartable),
             StaleRegisteredPaneAction::RestartRegistered
+        );
+        assert_eq!(
+            stale_registered_pane_action(SupervisorHealth::Halted { restart_count: 5 }),
+            StaleRegisteredPaneAction::ClearStaleHalted { restart_count: 5 }
         );
         assert_eq!(
             stale_registered_pane_action(SupervisorHealth::Unreachable),
@@ -3304,7 +3340,7 @@ mod tests {
     }
 
     #[test]
-    fn supervisor_health_needs_restart_when_halted() {
+    fn supervisor_health_reports_halted_state() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
         let file = tmp.path().join("test.md");
@@ -3323,12 +3359,15 @@ mod tests {
         })
         .unwrap();
         let health = query_supervisor_health(&file, session_id);
-        assert!(matches!(health, SupervisorHealth::NeedsRestart));
+        assert!(matches!(
+            health,
+            SupervisorHealth::Halted { restart_count: 5 }
+        ));
         drop(ipc);
     }
 
     #[test]
-    fn supervisor_health_needs_restart_when_not_running() {
+    fn supervisor_health_reports_restartable_when_not_running() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
         let file = tmp.path().join("test.md");
@@ -3347,7 +3386,7 @@ mod tests {
         })
         .unwrap();
         let health = query_supervisor_health(&file, session_id);
-        assert!(matches!(health, SupervisorHealth::NeedsRestart));
+        assert!(matches!(health, SupervisorHealth::Restartable));
         drop(ipc);
     }
 

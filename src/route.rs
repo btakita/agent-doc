@@ -147,7 +147,8 @@ enum CommandDispatchStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SupervisorHealth {
     Healthy,
-    NeedsRestart,
+    Restartable,
+    Halted { restart_count: u32 },
     Unreachable,
     NoSocket,
 }
@@ -248,13 +249,20 @@ fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                let restart_count = data
+                    .get("restart_count")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|v| u32::try_from(v).ok())
+                    .unwrap_or(0);
                 if running && state == "healthy" {
                     SupervisorHealth::Healthy
+                } else if state == "halted" {
+                    SupervisorHealth::Halted { restart_count }
                 } else {
-                    SupervisorHealth::NeedsRestart
+                    SupervisorHealth::Restartable
                 }
             } else {
-                SupervisorHealth::NeedsRestart
+                SupervisorHealth::Restartable
             }
         }
         Ok(_) | Err(_) => SupervisorHealth::Unreachable,
@@ -866,7 +874,7 @@ fn resolve_or_create_pane(
                             ),
                         );
                     }
-                    SupervisorHealth::NeedsRestart => {
+                    SupervisorHealth::Restartable => {
                         eprintln!(
                             "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
                             registered_pane, file_path
@@ -913,6 +921,27 @@ fn resolve_or_create_pane(
                         );
                         let _ = sessions::deregister(session_id)?;
                         stale_registration_cleared = true;
+                    }
+                    SupervisorHealth::Halted { restart_count } => {
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        eprintln!(
+                            "[route] registered pane {} for {} has a halted supervisor after {} restarts — refusing automatic restart",
+                            registered_pane, file_path, restart_count
+                        );
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_halted file={} pane={} restart_count={} {}",
+                                file_path, registered_pane, restart_count, provenance
+                            ),
+                        );
+                        anyhow::bail!(
+                            "registered pane {} for {} has a halted supervisor after {} restarts; route will not auto-restart or replace it automatically. Inspect the pane, then run `agent-doc start {}` manually to recover",
+                            registered_pane,
+                            file.display(),
+                            restart_count,
+                            file.display()
+                        );
                     }
                     SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
                         let provenance = pane_route_provenance(tmux, registered_pane);
@@ -5436,7 +5465,7 @@ history line
         assert!(!startup_miss_requires_fresh_start(
             "%42",
             None,
-            SupervisorHealth::NeedsRestart
+            SupervisorHealth::Restartable
         ));
         assert!(!startup_miss_requires_fresh_start(
             "%42",
@@ -5607,7 +5636,7 @@ history line
     }
 
     #[test]
-    fn resolve_or_create_pane_restarts_registered_pane_with_supervisor_when_no_live_owner() {
+    fn resolve_or_create_pane_fails_closed_for_halted_supervisor_when_no_live_owner() {
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -5634,7 +5663,8 @@ history line
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": false,
-                        "state": "halted"
+                        "state": "halted",
+                        "restart_count": 5
                     })),
                     IpcMethod::Restart { .. } => {
                         restart_called_for_ipc.store(true, Ordering::Relaxed);
@@ -5652,7 +5682,7 @@ history line
         let panes_before = iso
             .list_panes_ordered(&format!("{session}:0"))
             .unwrap_or_default();
-        let resolved = resolve_or_create_pane(
+        let err = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -5663,20 +5693,24 @@ history line
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should restart the registered pane instead of autostarting a duplicate");
+        .expect_err("route should fail closed instead of reviving a halted crash loop");
         let panes_after = iso
             .list_panes_ordered(&format!("{session}:0"))
             .unwrap_or_default();
 
-        assert_eq!(resolved, pane);
         assert_eq!(
             panes_after.len(),
             panes_before.len(),
-            "route should not create a duplicate pane when the registered supervisor can restart in place"
+            "route should not create a duplicate pane when the registered supervisor is halted"
         );
         assert!(
-            restart_called.load(Ordering::Relaxed),
-            "route should restart the registered supervisor instead of auto-starting a new pane"
+            err.to_string()
+                .contains("halted supervisor after 5 restarts"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            !restart_called.load(Ordering::Relaxed),
+            "route should not restart a halted supervisor automatically"
         );
 
         ipc.stop();

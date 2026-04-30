@@ -709,7 +709,39 @@ My recommendation:
 4. If neither proof holds, fail closed. Do not treat "pane exists" as provenance found.
 
 So the answer is: yes, the path-keyed registry is a good simplification; no, the proposed `pid running || pane found` rule is not a guarantee to find the correct supervisor or pane. It is simpler, but it would weaken correctness.
-<!-- agent:boundary:353b6cf0 -->
+❯ How about `PID AND pane`? I think `PID AND pane` is a strong guarantee. Also, we could pass a uuid into the Supervisor process and save the UUID in the sessions.json file. The Supervisor can listen to a socket or some other IPC mechanism...but this solution may be overkill.
+
+❯ I mainly want a simple, understandable solution that is not brittle. The top-down approach seems less brittle than dependening on internal events for provenance.
+### Re: `PID AND pane` + top-down provenance — gpt-5
+
+`PID AND pane` is better than `PID OR pane`, but it is still not a guarantee by itself.
+
+Why it is stronger:
+- It removes the obvious false-positive cases where only the pane survived or only the PID happened to exist.
+- It gives you a concrete top-down tuple to check: "this document expects supervisor PID `X` inside pane `%Y`".
+
+Why it still is not a guarantee:
+- PID reuse still exists. If the supervisor dies and the OS later reuses that PID, `PID AND pane` can still succeed against the wrong process unless you also bind identity to process start time or another instance token.
+- A pane can be reused. `%Y` may still exist, and PID `X` may still be running, but not necessarily as the supervisor currently responsible for that document unless you prove the process tree relationship.
+- The two facts are correlated only weakly unless you check that the pane's shell/process tree actually contains that exact supervisor instance.
+
+So the clean version of your idea is:
+1. Key `sessions.json` by canonical absolute document path.
+2. Store `session_id`, `pane_id`, `supervisor_pid`, and `supervisor_instance_id` or `supervisor_start_time`.
+3. Define provenance as: the pane exists, and that pane's process tree contains the exact supervisor instance recorded for this document.
+4. Treat session-log / internal event history as secondary forensic evidence, not the primary ownership check.
+
+On the UUID idea: that is not overkill if you keep it narrow. In practice it is the missing piece that turns "a running PID" into "the exact supervisor instance I started for this document." The current `session_id` already serves part of that role, so the simplest design is probably not a brand-new mechanism, but a tighter top-down identity chain:
+
+`document path -> registry entry -> expected supervisor instance -> resolve containing pane`
+
+That is the direction I would recommend. It is simpler to explain than the current mixed provenance model, and less brittle than relying on event history to establish primary ownership. Event history is still useful, but mainly for fail-closed diagnosis when the top-down proof breaks.
+
+So my refined answer is:
+- `PID AND pane` alone: better, but still not a guarantee.
+- `PID AND pane AND supervisor instance identity`: strong enough to make the top-down model the primary authority.
+- Session-log provenance should stay, but as a backup/forensics layer rather than the main resolver.
+<!-- agent:boundary:275c54e8 -->
 <!-- /agent:exchange -->
 
 <!--

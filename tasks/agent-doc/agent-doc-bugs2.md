@@ -390,7 +390,34 @@ Published:
 - `src/agent-doc` commit `dda7faa` (`fix: fail closed on stale alive-owner rebind`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:c2df9e44 -->
+❯ Why are we getting into the "no live owner can be proven" state?
+### Re: why `no live owner can be proven` happens — gpt-5
+
+Because `agent-doc` now uses a **proof model**, not an **alive-pane model**.
+
+The exact check lives in [sync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sync.rs:2363): `find_live_owner_pane(...)` returns a pane only if at least one of these succeeds:
+- **process-tree proof**: some process in the pane tree still looks like the owning document session for that file
+- **supervisor-pid proof**: the per-session supervisor socket returns the live child PID, and that PID maps back into a tmux pane tree
+
+If both fail, `resync` classifies the registered pane as `NoLiveOwner` in [resync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/resync.rs:1440), and `start` / `route` treat the pane as ambiguous rather than trustworthy.
+
+What usually makes us fall into that state:
+- **The pane is alive, but its argv no longer proves the file.** The process-tree path only accepts real owner shapes such as `agent-doc start <file>` or the harness process for that file. Utility-side commands like `agent-doc route <file>` and `agent-doc claim <file>` are intentionally rejected as non-owners in [sync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sync.rs:2583). So once the long-lived supervisor/child path no longer exposes the file in argv, process-tree proof disappears.
+- **The supervisor fallback is missing or stale.** `find_alive_pane_via_supervisor_pid(...)` in [sync.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/sync.rs:2399) returns `None` if the socket is missing, the IPC call fails, the PID response is empty/zero, or the reported child PID no longer appears under any tmux pane's process tree.
+- **The pane still exists after a harness/supervisor transition, but provenance has collapsed.** That is the bad gap from `#staleown`: the pane can still be visually present while neither “argv says this file” nor “supervisor PID maps back to this pane” is true anymore.
+
+So the state is not mysterious in code terms. It means: **we still have a pane, but we lost both trusted answers to “which pane currently owns this document?”**
+
+For the recent `monsterrodholders.md` shape, the most likely concrete sequence is:
+1. the original pane stayed alive,
+2. later process-tree inspection no longer found an owning `agent-doc start <file>` / harness-file match for it,
+3. supervisor lookup for that session was unavailable or no longer mapped back to that pane,
+4. the old code then treated that alive pane as stale and replaced it.
+
+That is exactly why the `#staleown` fix changed `start`: once both proofs are gone, alive-by-itself is no longer enough to authorize replacement.
+
+No new backlog item came out of this explanation.
+<!-- agent:boundary:5fce00a3 -->
 <!-- /agent:exchange -->
 
 <!--

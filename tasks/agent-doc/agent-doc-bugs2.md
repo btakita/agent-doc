@@ -767,7 +767,34 @@ Published:
 Note:
 - I left `#tmuxcrash` backlog state unchanged in this turn.
 - I left the unrelated in-progress `src/startup_miss.rs` working-tree change untouched.
-<!-- agent:boundary:94c2aba9 -->
+❯ do #stshroe. spec-test-build-install-commit-push
+### Re: `#stshroe` — gpt-5
+
+I fixed `#stshroe` and closed it out.
+
+What changed:
+- `tmux-router` now sets `remain-on-exit` at pane scope (`set-option -p -t <pane>`) instead of window scope, so dead-pane retention follows a pane after `join-pane` moves it into stash.
+- Added a regression in `src/tmux-router/src/tmux.rs` that stashes a pane, exits it, and proves tmux still retains the dead pane plus `pane_dead_status`.
+- Updated `src/agent-doc/specs/07-commands.md`, `src/agent-doc/VERSIONS.md`, and `src/tmux-router/VERSIONS.md` to document the pane-local retention contract.
+
+Verification:
+- `cargo fmt --manifest-path src/tmux-router/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/tmux-router` commit `c0290f4` pushed to `origin/main`
+- `src/agent-doc` commit `63a0e12` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- No new actionable follow-up items were identified in this turn.
+- The first full `agent-doc` suite run and the first parallel `route::tests` shard each had one transient failure that passed on immediate rerun; I left code unchanged because the isolated failing tests passed and the required full + parallel suites finished green.
+<!-- agent:boundary:d0eaa7e7 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -594,7 +594,28 @@ I also logged this as a new backlog item: `#stphk`.
 Plan: [plan-stop-hook-write-applied-rewind.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-stop-hook-write-applied-rewind.md)
 
 `#c3tmux` and `#duppb` remain open.
-<!-- agent:boundary:4fcfe9b5 -->
+❯ do #c3tmux. spec-test-build-install-commit-push
+### Re: #c3tmux — gpt-5
+
+`#c3tmux` is closed.
+
+I re-checked the implementation history and the fix is already in `src/agent-doc` on `origin/20260422/codex-agent-backend`, split across:
+- `674e568` `fix: clear superseded startup-miss markers`
+- `efa465d` `fix: rebind editor-return sessions safely`
+- `dda7faa` `fix: fail closed on stale alive-owner rebind`
+
+That set is the right closure for the `claudescore-3.md` editor-return/session-rebind bug: sync clears superseded startup-miss markers, skips auto-start when the unresolved miss still belongs to a live pane, and start fails closed instead of rebinding across a still-alive stale owner. The spec text for that behavior is already in `src/agent-doc/specs/07-commands.md`, so no further code/spec delta was needed in this turn.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml start::tests::unresolved_startup_miss_blocks_cross_pane_rebind -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml startup_miss::tests::take_superseded_startup_miss_clears_marker_and_returns_supersession -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml sync::tests::recover_existing_associated_pane_reregisters_supervisor_owned_pane -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+`src/agent-doc` is already at pushed HEAD (`d8ea9d9` on `origin/20260422/codex-agent-backend`), so the only remaining closeout here is marking `#c3tmux` done in this session document.
+<!-- agent:boundary:ef4589de -->
 <!-- /agent:exchange -->
 
 <!--
@@ -609,7 +630,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 
 <!-- agent:backlog -->
 - [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
-- [ ] [#c3tmux] src/session-share/tasks/claudescore-3.md unexpectedly started a new tmux session instead of reusing the existing live session. Repro from Apr 30, 2026. Fix should preserve session ownership.
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md

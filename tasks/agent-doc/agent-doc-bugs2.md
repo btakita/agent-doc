@@ -709,7 +709,7 @@ My recommendation:
 4. If neither proof holds, fail closed. Do not treat "pane exists" as provenance found.
 
 So the answer is: yes, the path-keyed registry is a good simplification; no, the proposed `pid running || pane found` rule is not a guarantee to find the correct supervisor or pane. It is simpler, but it would weaken correctness.
-<!-- agent:boundary:2484f994 -->
+<!-- agent:boundary:353b6cf0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -718,6 +718,7 @@ So the answer is: yes, the path-keyed registry is a good simplification; no, the
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pathprov] [recommended] Rework .agent-doc/sessions.json to key by canonical absolute document path and store session_id + pane_id + supervisor_pid + supervisor_instance_id/start_time; keep fail-closed ownership proof instead of treating pane existence alone as provenance.
 - [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

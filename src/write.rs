@@ -4759,6 +4759,14 @@ fn build_ipc_patches_json(
                 break;
             }
             if let Some(bid) = find_boundary_id(&current_doc, target) {
+                let synthesized_content = match normalize_prefix_lines {
+                    Some(prefix_lines)
+                        if !prefix_lines.is_empty() && is_append_mode_component(target) =>
+                    {
+                        normalize_patch_content(&effective_unmatched, prefix_lines)
+                    }
+                    _ => effective_unmatched.clone(),
+                };
                 eprintln!(
                     "[write] synthesizing {} patch for unmatched content (boundary {})",
                     target,
@@ -4766,18 +4774,24 @@ fn build_ipc_patches_json(
                 );
                 ipc_patches.push(serde_json::json!({
                     "component": target,
-                    "content": &effective_unmatched,
+                    "content": synthesized_content,
                     "boundary_id": bid,
                 }));
                 break;
             } else if is_append_mode_component(target) {
+                let synthesized_content = match normalize_prefix_lines {
+                    Some(prefix_lines) if !prefix_lines.is_empty() => {
+                        normalize_patch_content(&effective_unmatched, prefix_lines)
+                    }
+                    _ => effective_unmatched.clone(),
+                };
                 eprintln!(
                     "[write] synthesizing {} patch for unmatched content (ensure_boundary)",
                     target
                 );
                 ipc_patches.push(serde_json::json!({
                     "component": target,
-                    "content": &effective_unmatched,
+                    "content": synthesized_content,
                     "ensure_boundary": true,
                 }));
                 break;
@@ -6018,6 +6032,42 @@ mod tests {
             result[0]["content"].as_str().unwrap(),
             new_content,
             "synthesized patch content should match unmatched"
+        );
+    }
+
+    #[test]
+    fn synthesis_normalizes_prefix_lines_for_unmatched_exchange_content() {
+        // Regression for the JB-plugin bare `do #expatch...` shape: when IPC
+        // synthesizes an exchange patch from unmatched content, it must bake the
+        // computed `normalize_prefix_lines` into that synthesized patch because
+        // the plugin normalizes before applying patches.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nPrevious response.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
+        let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
+        let result =
+            build_ipc_patches_json(&doc, &patches, unmatched, Some(prefix_lines.as_slice()))
+                .unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "synthesis should still produce one exchange patch"
+        );
+        assert_eq!(
+            result[0]["component"].as_str().unwrap(),
+            "exchange",
+            "synthesized patch should target exchange"
+        );
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            "❯ do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.",
+            "synthesized unmatched exchange content must carry the prefixed prompt line"
         );
     }
 

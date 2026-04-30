@@ -591,6 +591,10 @@ fn purge_unregistered_stash_panes_with_registry_and_supervisors(
             if registered_panes.contains(pane_id.as_str()) {
                 continue; // Registered — leave it
             }
+            if tmux.pane_dead(pane_id) {
+                panes_to_kill.push(pane_id.clone());
+                continue;
+            }
             if let Some(owner_file) = live_owned_registered_file_for_pane(tmux, pane_id, registry) {
                 eprintln!(
                     "resync: stash pane {} ({}) is unregistered but still owns {} — skipping kill",
@@ -991,6 +995,14 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
             continue;
         }
         if registered_panes.contains(pane_id.as_str()) {
+            continue;
+        }
+        if tmux.pane_dead(pane_id) {
+            if let Err(e) = tmux.kill_pane(pane_id) {
+                eprintln!("resync: failed to kill dead stash pane {}: {}", pane_id, e);
+            } else {
+                killed_count += 1;
+            }
             continue;
         }
         if let Some(owner_file) = live_owned_registered_file_for_pane(tmux, pane_id, &registry) {
@@ -2103,6 +2115,21 @@ mod tests {
         false
     }
 
+    fn wait_for_pane_removed(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if !tmux.pane_alive(pane) && !tmux.pane_dead(pane) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !tmux.pane_alive(pane) && !tmux.pane_dead(pane)
+    }
+
     fn send_keys_with_retry(tmux: &IsolatedTmux, pane: &str, text: &str) {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(3);
@@ -2829,6 +2856,36 @@ mod tests {
         assert!(
             !iso.pane_alive(&pane2),
             "bulk stash purge should kill unregistered agent panes with no live owner"
+        );
+    }
+
+    #[test]
+    fn purge_unregistered_stash_panes_kills_retained_dead_stash_pane() {
+        let iso = IsolatedTmux::new("resync-purge-dead-stash");
+        let cwd = std::env::current_dir().unwrap();
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.enable_remain_on_exit(&pane2).unwrap();
+        iso.send_keys(&pane2, "printf 'dead stash\\n'; exit 11")
+            .unwrap();
+        assert!(
+            wait_for_pane_dead(&iso, &pane2, std::time::Duration::from_secs(3)),
+            "pane should first become a retained dead pane"
+        );
+        assert!(
+            iso.pane_dead(&pane2),
+            "pane should still be retained by tmux"
+        );
+        iso.stash_pane(&pane2, "test").unwrap();
+        assert!(
+            wait_for_pane_in_stash_window(&iso, "test", &pane2, std::time::Duration::from_secs(3)),
+            "dead pane should move into stash before purge"
+        );
+
+        purge_unregistered_stash_panes_with_registry(&iso, &SessionRegistry::new());
+        assert!(
+            wait_for_pane_removed(&iso, &pane2, std::time::Duration::from_secs(3)),
+            "retained dead stash pane should be removed during purge"
         );
     }
 

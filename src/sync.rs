@@ -285,28 +285,177 @@ fn clear_frontmatter_status(file: &Path) {
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct MissingRegisteredPaneRepair {
+    dead_pane: Option<DeadPaneDiagnostics>,
     recorded_session_loss: bool,
     repaired_stale_preflight: bool,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DeadPaneDiagnostics {
+    observed_window: Option<String>,
+    dead_status: Option<String>,
+    cycle_phase: Option<String>,
+    capture_path: Option<PathBuf>,
+    last_visible_excerpt: Option<String>,
+    pane_killed: bool,
+}
+
+fn cycle_phase_label(file: &Path) -> Option<String> {
+    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let label = match state.phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+    };
+    Some(label.to_string())
+}
+
+fn sanitize_excerpt(text: &str) -> Option<String> {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    let mut excerpt = collapsed;
+    if excerpt.len() > 200 {
+        excerpt.truncate(200);
+        excerpt.push_str("...");
+    }
+    Some(excerpt)
+}
+
+fn last_visible_excerpt(capture: &str) -> Option<String> {
+    capture
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("Pane is dead"))
+        .and_then(sanitize_excerpt)
+}
+
+fn persist_dead_pane_capture(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    tail: &str,
+) -> Option<PathBuf> {
+    if tail.trim().is_empty() {
+        return None;
+    }
+    let canonical = file
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| file.to_path_buf());
+    let root = crate::snapshot::find_project_root(&canonical)?;
+    let dir = root.join(".agent-doc/logs/dead-panes");
+    std::fs::create_dir_all(&dir).ok()?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pane_token = pane_id.trim_start_matches('%');
+    let path = dir.join(format!("{session_id}-{timestamp}-pane-{pane_token}.log"));
+    std::fs::write(&path, tail).ok()?;
+    Some(path)
+}
+
+fn capture_dead_pane_diagnostics(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    last_known_window: Option<&str>,
+) -> Result<Option<DeadPaneDiagnostics>> {
+    if !tmux.pane_dead(pane_id) {
+        return Ok(None);
+    }
+
+    let dead_status = tmux.pane_dead_status(pane_id)?;
+    let observed_window = tmux
+        .pane_window(pane_id)
+        .ok()
+        .or_else(|| last_known_window.map(ToOwned::to_owned));
+    let cycle_phase = cycle_phase_label(file);
+    let tail = tmux.capture_pane(pane_id, Some(80)).unwrap_or_default();
+    let capture_path = persist_dead_pane_capture(file, session_id, pane_id, &tail);
+    let last_visible_excerpt = last_visible_excerpt(&tail);
+    let mut event = format!(
+        "pane_death_detected pane={pane_id} status={} cycle_phase={}",
+        dead_status.as_deref().unwrap_or("unknown"),
+        cycle_phase.as_deref().unwrap_or("none")
+    );
+    if let Some(window_id) = observed_window.as_deref() {
+        event.push_str(&format!(" window={window_id}"));
+    }
+    if let Some(path) = capture_path.as_ref() {
+        event.push_str(&format!(" capture={}", path.display()));
+    }
+    if let Some(excerpt) = last_visible_excerpt.as_deref() {
+        event.push_str(&format!(" last_visible_excerpt={excerpt}"));
+    }
+    let _ = crate::startup_miss::append_session_log_event(file, session_id, &event);
+
+    let pane_killed = match tmux.kill_pane(pane_id) {
+        Ok(()) => {
+            let _ = crate::startup_miss::append_session_log_event(
+                file,
+                session_id,
+                &format!("pane_death_cleanup pane={pane_id} action=kill"),
+            );
+            true
+        }
+        Err(err) => {
+            let _ = crate::startup_miss::append_session_log_event(
+                file,
+                session_id,
+                &format!(
+                    "pane_death_cleanup pane={pane_id} action=keep_dead reason={}",
+                    sanitize_excerpt(&err.to_string()).unwrap_or_else(|| "unknown".to_string())
+                ),
+            );
+            false
+        }
+    };
+
+    Ok(Some(DeadPaneDiagnostics {
+        observed_window,
+        dead_status,
+        cycle_phase,
+        capture_path,
+        last_visible_excerpt,
+        pane_killed,
+    }))
+}
+
 fn repair_missing_registered_pane(
+    tmux: &Tmux,
     file: &Path,
     session_id: &str,
     pane_id: &str,
     last_known_window: Option<&str>,
 ) -> Result<MissingRegisteredPaneRepair> {
+    let dead_pane =
+        capture_dead_pane_diagnostics(tmux, file, session_id, pane_id, last_known_window)?;
     let recorded_session_loss = crate::startup_miss::record_session_loss(
         file,
         session_id,
         pane_id,
-        "registered_pane_missing",
-        last_known_window,
+        if dead_pane.is_some() {
+            "registered_pane_dead"
+        } else {
+            "registered_pane_missing"
+        },
+        dead_pane
+            .as_ref()
+            .and_then(|diag| diag.observed_window.as_deref())
+            .or(last_known_window),
     )?;
     let repaired_stale_preflight = matches!(
         crate::repair::repair_stale_preflight_started_cycle(file)?,
         crate::repair::RepairOutcome::StalePreflightLockRepaired
     );
     Ok(MissingRegisteredPaneRepair {
+        dead_pane,
         recorded_session_loss,
         repaired_stale_preflight,
     })
@@ -1285,12 +1434,41 @@ fn run_with_options(
 
             if let Some(ref pane) = registered_pane {
                 match repair_missing_registered_pane(
+                    tmux,
                     file_path,
                     &session_id,
                     pane,
                     registered_entry.as_ref().map(|entry| entry.window.as_str()),
                 ) {
                     Ok(repair) => {
+                        if let Some(dead) = repair.dead_pane.as_ref() {
+                            let status = dead.dead_status.as_deref().unwrap_or("unknown");
+                            let phase = dead.cycle_phase.as_deref().unwrap_or("none");
+                            let capture = dead
+                                .capture_path
+                                .as_ref()
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_else(|| "<none>".to_string());
+                            let excerpt = dead.last_visible_excerpt.as_deref().unwrap_or("<none>");
+                            eprintln!(
+                                "[sync] captured dead pane {} for {} (status {}, cycle {}, capture {})",
+                                pane,
+                                file_path.display(),
+                                status,
+                                phase,
+                                capture
+                            );
+                            sync_log(&format!(
+                                "captured dead pane file={} pane={} status={} cycle={} capture={} killed={} excerpt={}",
+                                file_path.display(),
+                                pane,
+                                status,
+                                phase,
+                                capture,
+                                dead.pane_killed,
+                                excerpt
+                            ));
+                        }
                         if repair.recorded_session_loss {
                             let detail = registered_entry
                                 .as_ref()
@@ -2349,6 +2527,9 @@ pub(crate) fn is_file_rename(registered_path: &str, current_path: &str) -> bool 
 mod tests {
     use super::*;
     use crate::sessions::IsolatedTmux;
+    use std::time::Duration;
+
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Helper: list windows as vec of (index, name) pairs.
     fn list_windows(tmux: &Tmux, session: &str) -> Vec<(String, String)> {
@@ -2390,6 +2571,48 @@ mod tests {
             window_name: window_name.to_string(),
             current_command: "agent-doc".to_string(),
             sources: source_set,
+        }
+    }
+
+    fn wait_for<F>(timeout: Duration, mut predicate: F) -> bool
+    where
+        F: FnMut() -> bool,
+    {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if predicate() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        predicate()
+    }
+
+    struct ScopedCurrentDir {
+        prev_cwd: PathBuf,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let env_guard = ENV_MUTEX
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let prev_cwd = std::env::current_dir()
+                .ok()
+                .filter(|cwd| cwd.exists())
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
         }
     }
 
@@ -2468,8 +2691,7 @@ mod tests {
     #[test]
     fn recover_existing_associated_pane_reregisters_supervisor_owned_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let old_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("tasks").join("owned.md");
@@ -2518,8 +2740,6 @@ mod tests {
             sessions::lookup("associated-supervisor").unwrap(),
             Some(pane.clone())
         );
-
-        std::env::set_current_dir(old_dir).unwrap();
     }
 
     #[test]
@@ -2567,8 +2787,7 @@ mod tests {
     #[test]
     fn sync_frontmatter_status_round_trips_through_snapshot() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let old_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("tasks").join("bad.md");
@@ -2618,15 +2837,12 @@ mod tests {
             !cleared_snapshot.contains(SYNC_FRONTMATTER_STATUS_PREFIX),
             "snapshot should track the cleared status too"
         );
-
-        std::env::set_current_dir(old_dir).unwrap();
     }
 
     #[test]
     fn clear_frontmatter_status_preserves_non_sync_status() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let old_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("tasks").join("ok.md");
@@ -2639,15 +2855,12 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), original);
-
-        std::env::set_current_dir(old_dir).unwrap();
     }
 
     #[test]
     fn repair_missing_registered_pane_records_loss_and_closes_stale_preflight() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let old_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("tasks").join("lost-pane.md");
@@ -2665,10 +2878,17 @@ mod tests {
         )
         .unwrap();
 
-        let repair =
-            repair_missing_registered_pane(&doc, "session-lost-pane", "%422", Some("@17")).unwrap();
+        let repair = repair_missing_registered_pane(
+            &Tmux::default_server(),
+            &doc,
+            "session-lost-pane",
+            "%422",
+            Some("@17"),
+        )
+        .unwrap();
         assert!(repair.recorded_session_loss);
         assert!(repair.repaired_stale_preflight);
+        assert!(repair.dead_pane.is_none());
 
         let state = crate::cycle_state::load(&doc)
             .unwrap()
@@ -2679,8 +2899,67 @@ mod tests {
             .unwrap()
             .expect("session log should be readable");
         assert!(status.latest_session_closed());
+    }
 
-        std::env::set_current_dir(old_dir).unwrap();
+    #[test]
+    fn repair_missing_registered_pane_captures_retained_dead_pane_diagnostics() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("dead-pane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = "---\nagent_doc_session: dead-pane-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(
+            log_dir.join("dead-pane-session.log"),
+            "[1] session_start file=tasks/dead-pane.md pane=%501 session=dead-pane-session\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-dead-pane-diagnostics");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        iso.enable_remain_on_exit(&pane).unwrap();
+        iso.send_keys(&pane, "printf 'assistant tail\\n'; exit 9")
+            .unwrap();
+        assert!(
+            wait_for(Duration::from_secs(3), || iso.pane_dead(&pane)),
+            "pane should be retained as dead for diagnostics"
+        );
+
+        let repair =
+            repair_missing_registered_pane(&iso, &doc, "dead-pane-session", &pane, Some("@17"))
+                .unwrap();
+        let dead = repair
+            .dead_pane
+            .as_ref()
+            .expect("retained dead pane should be captured");
+        let capture_path = dead
+            .capture_path
+            .as_ref()
+            .expect("dead pane tail should be persisted for provenance");
+        assert_eq!(dead.dead_status.as_deref(), Some("9"));
+        assert_eq!(dead.cycle_phase.as_deref(), Some("preflight_started"));
+        assert!(capture_path.exists(), "dead pane tail should exist");
+        let capture = std::fs::read_to_string(capture_path).unwrap();
+        assert!(
+            capture.contains("assistant tail"),
+            "persisted dead pane tail should contain the last visible assistant output: {capture}"
+        );
+        assert!(dead.last_visible_excerpt.is_some());
+        assert!(repair.recorded_session_loss);
+        assert!(repair.repaired_stale_preflight);
+        assert!(!iso.pane_alive(&pane));
+        assert_eq!(
+            dead.pane_killed,
+            !iso.pane_dead(&pane),
+            "pane_killed should reflect whether the retained dead pane could be safely removed"
+        );
     }
 
     #[test]

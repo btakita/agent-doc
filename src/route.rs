@@ -2092,6 +2092,7 @@ fn auto_start_in_session(
             tmux.auto_start(session_name, &cwd)?
         }
     };
+    tmux.enable_remain_on_exit(&new_pane)?;
     if let Some(created) = created_panes.as_mut() {
         created.push(new_pane.clone());
     }

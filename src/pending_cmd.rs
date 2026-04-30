@@ -632,6 +632,35 @@ mod tests {
     }
 
     #[test]
+    fn edit_replaces_existing_nested_subtasks_instead_of_appending() {
+        let (_tmp, doc) = doc_with_pending(concat!(
+            "- [ ] [#tmuxcrash] parent task\n",
+            "  - [ ] [#tmuxcrash-old1] stale child\n",
+            "  - [ ] [#tmuxcrash-old2] stale child two\n"
+        ));
+        edit(
+            &doc,
+            "tmuxcrash",
+            "parent task\n  - fresh child\n  - fresh child two",
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        let pending = content
+            .split("<!-- agent:pending -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+            .unwrap();
+        assert!(!pending.contains("stale child"));
+        assert!(!pending.contains("stale child two"));
+        let child_lines: Vec<&str> = pending
+            .lines()
+            .filter(|line| line.trim_start().starts_with("- [ ] [#tmuxcrash-"))
+            .collect();
+        assert_eq!(child_lines.len(), 2, "got: {pending}");
+    }
+
+    #[test]
     fn list_prints_pending_items() {
         let (_tmp, doc) = doc_with_pending("- item one\n- item two");
         list(&doc).unwrap();

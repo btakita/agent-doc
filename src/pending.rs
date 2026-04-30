@@ -660,6 +660,28 @@ pub(crate) fn canonicalize_preserving_non_item_lines(body: &str) -> String {
     PendingLayout::parse(body).render()
 }
 
+fn parse_pending_edit_payload(new_text: &str) -> Result<(String, String)> {
+    let synthetic = format!("- [ ] [#edit] {}", new_text);
+    let layout = PendingLayout::parse(&synthetic);
+    let items = layout.items();
+    if items.len() != 1 {
+        bail!(
+            "pending edit: multiline text may only describe one parent item; use indented continuation lines for child subtasks"
+        );
+    }
+    if layout
+        .non_item_segments()
+        .into_iter()
+        .any(|segment| !segment.trim().is_empty())
+    {
+        bail!(
+            "pending edit: multiline text may only contain indented continuation lines after the first line"
+        );
+    }
+    let item = items.into_iter().next().expect("single parsed edit item");
+    Ok((item.text, item.continuation))
+}
+
 fn trim_boundary_blank_segments(mut segments: Vec<String>) -> Vec<String> {
     while matches!(segments.first(), Some(segment) if segment.trim().is_empty()) {
         segments.remove(0);
@@ -1051,7 +1073,8 @@ fn normalize_nested_subtasks(
             continue;
         };
 
-        if child.id.is_empty() {
+        let duplicate_existing_id = !child.id.is_empty() && taken.contains(&child.id);
+        if child.id.is_empty() || duplicate_existing_id {
             child.id = assign_unique_child_hash(parent_id, &child.text, doc_id, taken);
             taken.insert(child.id.clone());
             changed = true;
@@ -1376,13 +1399,15 @@ pub fn op_edit(body: &str, id: &str, new_text: &str) -> Result<String> {
     if new_text.is_empty() {
         bail!("pending edit: text must be non-empty");
     }
+    let (parsed_text, parsed_continuation) = parse_pending_edit_payload(new_text)?;
     let id = id.trim().to_lowercase();
     let mut found = false;
     let layout = PendingLayout::parse(body).replace_items(|item| {
         if item.id == id {
             found = true;
             let mut next = item.clone();
-            next.text = new_text.to_string();
+            next.text = parsed_text.clone();
+            next.continuation = parsed_continuation.clone();
             Some(next)
         } else {
             Some(item.clone())
@@ -1767,6 +1792,27 @@ mod tests {
         let (new_body, changed) = backfill(body, DOC_ID, &ids());
         assert!(!changed);
         assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn backfill_reassigns_duplicate_existing_nested_subtask_ids() {
+        let body = concat!(
+            "- [ ] [#tmuxcrash] parent task\n",
+            "  - [ ] [#tmuxcrash-abcd] child dependency\n",
+            "  - [ ] [#tmuxcrash-abcd] child subtask\n"
+        );
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert_eq!(lines.len(), 3, "got: {new_body}");
+        assert!(lines[1].contains("[#tmuxcrash-abcd]"));
+        let second_child_id = lines[2]
+            .split("[#")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("second child id");
+        assert_ne!(second_child_id, "tmuxcrash-abcd");
+        assert!(second_child_id.starts_with("tmuxcrash-"));
     }
 
     #[test]
@@ -2162,6 +2208,37 @@ mod tests {
         assert!(new_body.contains("[#a1b2]"));
         assert!(new_body.contains("updated"));
         assert!(!new_body.contains("original"));
+    }
+
+    #[test]
+    fn op_edit_multiline_replaces_existing_continuation() {
+        let body = concat!(
+            "- [ ] [#tmuxcrash] parent task\n",
+            "  - [ ] [#tmuxcrash-old1] stale child\n",
+            "  - [ ] [#tmuxcrash-old2] stale child two\n"
+        );
+        let new_body = op_edit(
+            body,
+            "tmuxcrash",
+            "parent task revised\n  - fresh child\n  - fresh child two",
+        )
+        .unwrap();
+        assert!(new_body.contains("[#tmuxcrash] parent task revised"));
+        assert!(new_body.contains("  - fresh child\n"));
+        assert!(new_body.contains("  - fresh child two"));
+        assert!(!new_body.contains("stale child"));
+        assert!(!new_body.contains("stale child two"));
+    }
+
+    #[test]
+    fn op_edit_rejects_unindented_multiline_follow_up() {
+        let body = "- [ ] [#a1b2] original\n";
+        let err = op_edit(body, "a1b2", "updated\nsecond parent").unwrap_err();
+        assert!(
+            format!("{}", err)
+                .contains("multiline text may only contain indented continuation lines"),
+            "got: {err}"
+        );
     }
 
     #[test]

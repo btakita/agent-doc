@@ -135,7 +135,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 | `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
-| `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. |
+| `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
 | `--pending-clear` | Remove all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
 

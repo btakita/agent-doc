@@ -492,11 +492,44 @@ Published:
 - `src/agent-doc` commit `50fa682` (`fix: default patch command to replace`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:8cbec4ef -->
+❯ The JB Plugin seems to still be removing the `❯ ` prefix to "do #expatch. spec-test-build-install-commit-push" in a uncommitted state.
+❯ This seems related to the uncommitted ` (HEAD)` user affordance.
+❯ spec-test-build-install-commit-push
+### Re: JB prompt prefix drift + startup-miss echo line — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What was actually wrong:
+- This was not the older `(HEAD)` diff classifier and not the older routed `startup-miss` `echo` path.
+- The remaining bare `do #expatch. spec-test-build-install-commit-push` shape came from `write.rs`: when IPC had no explicit component patches and synthesized an append-mode `exchange` patch from raw unmatched content, it did not apply `normalize_prefix_lines` to that synthesized patch body.
+- JetBrains normalizes prefixes before applying patches, so it could not recover a newly appended bare prompt line afterward. The Rust snapshot path already knew the line should be `❯ ...`, which is why this looked like a JB-only / uncommitted-state drift.
+
+What changed:
+- synthesized unmatched `exchange` IPC patches now run through the same prefix normalizer as explicit append-mode patch blocks
+- added regression coverage for the exact `do #expatch. spec-test-build-install-commit-push` shape
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+About the `echo '[agent-doc] startup-miss: ...'` line:
+- that was an older implementation detail from before the current overlay fix
+- route used to draft a shell `echo` retry notice into the pane input buffer; if the pane was on a Codex/Claude composer instead of a shell prompt, tmux accepted the keystrokes but nothing executed the shell command, so the text just sat there visibly unsubmitted
+- current `route.rs` already sends startup-miss notices through tmux `display-message` instead, and the regression `startup_miss_diagnostic_does_not_queue_shell_echo_in_pane` is still green
+
+Verification:
+- `./gradlew test --tests com.github.btakita.agentdoc.RepositionBoundaryTest`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml synthesis_normalizes_prefix_lines_for_unmatched_exchange_content -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `d8ea9d9` (`fix: preserve unmatched exchange prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item came out of this fix.
+<!-- agent:boundary:5f5f46b2 -->
 <!-- /agent:exchange -->
 
 <!--
-I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
+ I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
   #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'

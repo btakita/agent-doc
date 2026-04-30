@@ -349,19 +349,26 @@ mod tests {
     use crate::frontmatter::CodexNetworkAccess;
     use std::fs;
     use std::process::Command;
+    use std::sync::MutexGuard;
 
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
+        _lock: MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
             let prior = std::env::var(key).ok();
             unsafe {
                 std::env::set_var(key, value);
             }
-            Self { key, prior }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
         }
     }
 

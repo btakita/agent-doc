@@ -182,6 +182,9 @@ function showError(message: string): void {
 class SyntaxDecorationController implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly componentBodyDecoration = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor('editor.rangeHighlightBackground'),
+    });
     private readonly componentDecoration = vscode.window.createTextEditorDecorationType({
         color: new vscode.ThemeColor('terminal.ansiCyan'),
         fontWeight: '600',
@@ -211,10 +214,20 @@ class SyntaxDecorationController implements vscode.Disposable {
         border: '1px solid',
         borderColor: new vscode.ThemeColor('terminal.ansiYellow'),
         borderRadius: '3px',
+        backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
+    });
+    private readonly labelTagDecoration = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiYellow'),
+        border: '1px solid',
+        borderColor: new vscode.ThemeColor('terminal.ansiYellow'),
+        borderRadius: '3px',
+        backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
+        fontWeight: '600',
     });
 
     constructor() {
         this.disposables.push(
+            this.componentBodyDecoration,
             this.componentDecoration,
             this.patchDecoration,
             this.boundaryDecoration,
@@ -222,6 +235,7 @@ class SyntaxDecorationController implements vscode.Disposable {
             this.promptDecoration,
             this.responseHeadingDecoration,
             this.trackedIdDecoration,
+            this.labelTagDecoration,
         );
         this.disposables.push(
             vscode.window.onDidChangeVisibleTextEditors((editors) => {
@@ -274,6 +288,7 @@ class SyntaxDecorationController implements vscode.Disposable {
         const root = getWorkspaceRoot(editor.document.uri);
         const tokens = native.visualTokens(editor.document.getText(), root);
         const ranges = {
+            componentBody: [] as vscode.Range[],
             component: [] as vscode.Range[],
             patch: [] as vscode.Range[],
             boundary: [] as vscode.Range[],
@@ -281,6 +296,7 @@ class SyntaxDecorationController implements vscode.Disposable {
             prompt: [] as vscode.Range[],
             responseHeading: [] as vscode.Range[],
             trackedId: [] as vscode.Range[],
+            labelTag: [] as vscode.Range[],
         };
 
         for (const token of tokens) {
@@ -289,6 +305,9 @@ class SyntaxDecorationController implements vscode.Disposable {
                 editor.document.positionAt(token.end),
             );
             switch (token.kind) {
+                case 'component_body':
+                    ranges.componentBody.push(range);
+                    break;
                 case 'component_open':
                 case 'component_close':
                     ranges.component.push(range);
@@ -312,9 +331,13 @@ class SyntaxDecorationController implements vscode.Disposable {
                 case 'tracked_id':
                     ranges.trackedId.push(range);
                     break;
+                case 'label_tag':
+                    ranges.labelTag.push(range);
+                    break;
             }
         }
 
+        editor.setDecorations(this.componentBodyDecoration, ranges.componentBody);
         editor.setDecorations(this.componentDecoration, ranges.component);
         editor.setDecorations(this.patchDecoration, ranges.patch);
         editor.setDecorations(this.boundaryDecoration, ranges.boundary);
@@ -322,9 +345,11 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.promptDecoration, ranges.prompt);
         editor.setDecorations(this.responseHeadingDecoration, ranges.responseHeading);
         editor.setDecorations(this.trackedIdDecoration, ranges.trackedId);
+        editor.setDecorations(this.labelTagDecoration, ranges.labelTag);
     }
 
     private clearEditor(editor: vscode.TextEditor): void {
+        editor.setDecorations(this.componentBodyDecoration, []);
         editor.setDecorations(this.componentDecoration, []);
         editor.setDecorations(this.patchDecoration, []);
         editor.setDecorations(this.boundaryDecoration, []);
@@ -332,6 +357,7 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.promptDecoration, []);
         editor.setDecorations(this.responseHeadingDecoration, []);
         editor.setDecorations(this.trackedIdDecoration, []);
+        editor.setDecorations(this.labelTagDecoration, []);
     }
 
     dispose(): void {

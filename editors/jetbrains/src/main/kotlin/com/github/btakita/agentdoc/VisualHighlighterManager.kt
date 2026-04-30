@@ -17,6 +17,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.util.Alarm
+import java.awt.Color
 import java.awt.Font
 import java.util.concurrent.ConcurrentHashMap
 
@@ -68,7 +69,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
             val highlighter = markup.addRangeHighlighter(
                 token.start,
                 token.end,
-                HighlighterLayer.ADDITIONAL_SYNTAX,
+                layerFor(token.kind),
                 attrsFor(editor, token.kind),
                 HighlighterTargetArea.EXACT_RANGE,
             )
@@ -100,6 +101,12 @@ class VisualHighlighterManager private constructor(private val project: Project)
         }
 
         return when (kind) {
+            "component_body" -> TextAttributes().apply {
+                backgroundColor = mutedBackground(
+                    editor,
+                    editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
+                )
+            }
             "component_open", "component_close" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)
             ).apply {
@@ -136,9 +143,39 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 fontType = Font.BOLD
                 effectType = EffectType.ROUNDED_BOX
                 effectColor = foregroundColor
+                backgroundColor = mutedBackground(editor, foregroundColor)
+            }
+            "label_tag" -> baseAttrs(
+                editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.MARKUP_ATTRIBUTE)
+            ).apply {
+                fontType = Font.BOLD
+                effectType = EffectType.ROUNDED_BOX
+                effectColor = foregroundColor
+                backgroundColor = mutedBackground(editor, foregroundColor)
             }
             else -> TextAttributes()
         }
+    }
+
+    private fun layerFor(kind: String): Int =
+        when (kind) {
+            "component_body" -> HighlighterLayer.ADDITIONAL_SYNTAX - 1
+            else -> HighlighterLayer.ADDITIONAL_SYNTAX
+        }
+
+    private fun mutedBackground(editor: Editor, accent: Color?): Color {
+        val base = editor.colorsScheme.defaultBackground
+        return blend(base, accent ?: base, 0.10f)
+    }
+
+    private fun blend(base: Color, accent: Color, accentRatio: Float): Color {
+        val clamped = accentRatio.coerceIn(0f, 1f)
+        val baseRatio = 1f - clamped
+        return Color(
+            (base.red * baseRatio + accent.red * clamped).toInt().coerceIn(0, 255),
+            (base.green * baseRatio + accent.green * clamped).toInt().coerceIn(0, 255),
+            (base.blue * baseRatio + accent.blue * clamped).toInt().coerceIn(0, 255),
+        )
     }
 
     override fun dispose() {

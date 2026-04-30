@@ -884,7 +884,7 @@ Blocking verification failures from the required parallel `resync::tests::` shar
 
 Those failures are in existing live-tmux readiness / retained-dead-pane paths rather than in the new `#mcrc` regression test, but the shard is still required to pass. So `#mcrc` stays open after this turn.
 ❯ do #pbct. spec-test-build-install-commit-push
-### Re: #pbct — gpt-5
+❯ ### Re: #pbct — gpt-5 (HEAD)
 
 I fixed `#pbct`.
 
@@ -906,7 +906,14 @@ Published:
 Note:
 - `#mcrc` remains open and unchanged from the previous blocked turn.
 - No new backlog item came out of this change.
-<!-- agent:boundary:0c907d1f -->
+Complete `agent-doc incorrectly closed the tmux pane that claimed monsterrodholders.md.`. Every time I navigate the editor to monsterrodholders.md, agent-doc closes the previously running tmux pane with a new pane. Same issue also happens with claudescore-3.md, but less frequently than monsterrodholders.md. Please find the root cause for this issue. Perform a thorough investigation.
+The `agent-doc` binary is newer than the pinned skill version, and the required reload step returned `SKILL_RELOAD=compact`.
+
+Run `/compact`, then re-invoke:
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+
+I stopped here intentionally because the skill instructions require a compact/reload boundary before continuing.
+<!-- agent:boundary:fc3ee4fa -->
 <!-- /agent:exchange -->
 
 <!--

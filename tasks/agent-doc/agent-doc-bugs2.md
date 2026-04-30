@@ -168,7 +168,33 @@ Code commit/push:
 - `src/agent-doc` `8988888` on `20260422/codex-agent-backend` (`fix: stabilize cross-root sync pane resolution`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:33e3f31a -->
+❯ In JB, the first time I attempted to `Run Agent Doc` from a newly synced claudescore-3.md, an error surfaced:
+```
+agent-doc route failed (exit 1): [route] target tmux session: 0 [route] registered pane %103 is alive but no live owner for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md was proven and supervisor is unavailable — deregistering stale entry and continuing recovery [route] Pane %103 is dead [route] No active pane found, auto-starting... [route] no registered pane but 'agent-doc' window exists in session '0', creating + stashing [route] stashed new pane %114 to avoid window proliferation [route] Started claude for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md in pane %114 (session 7b453f47) [route] Waiting for claude to initialize... [route] claude ready after 2.5s (5 polls) [route] claude is ready, sending command [route] Sent /agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %114 [route] Command accepted (0.3s, 0 Enter retries) Error: fresh claude start for tasks/claudescore-3.md never acknowledged with a document cycle after trigger injection
+```
+
+❯ The second attempt to `Run Agent Doc` was successful. The first attempt should go through when in this state. spec-test-build-install-commit-push
+### Re: fresh routed startup acknowledgment — gpt-5
+
+Root cause was the fresh-start ack budget, not the trigger injection itself. The session log for `src/session-share/tasks/claudescore-3.md` shows the first routed start created pane `%114`, immediately recycled through `session_end origin=sync_missing_pane`, then restarted on `%116`; the first real `document_cycle phase=preflight_started` did not appear until about 27 seconds after the original fresh start. Route was still using the shorter fresh-start ack window (15s in production), so the first `Run Agent Doc` attempt failed closed even though the child eventually entered a real cycle on its own. The second attempt succeeded because it hit the longer already-live reroute path.
+
+Implemented:
+- `src/route.rs` now gives fresh auto-starts the same longer start-ack budget as routed live-child dispatches: 30s in production, 2s under tests.
+- Added route regression coverage for a delayed fresh-start ack that would have failed under the old shorter budget, plus a direct timeout-budget unit test.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the fresh-start restart slack and the new timeout logging.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml fresh_route_start_ack_timeout_allows_restart_slack`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `f66c085` on `20260422/codex-agent-backend` (`fix: extend fresh route start ack timeout`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:da472d1f -->
 <!-- /agent:exchange -->
 
 <!--

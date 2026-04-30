@@ -673,7 +673,29 @@ So I reduced the `#tmuxcrash` child list accordingly:
 - left only `#tmuxcrash-rn2d` open, because the remaining scope should now be limited to true crash provenance only
 
 This turn was document/backlog cleanup only, so there was no new `src/agent-doc` code patch, crate test run, install, or push to perform.
-<!-- agent:boundary:7c31fa9f -->
+❯ The subtasks under #tmuxcrash have duplicate ids. Please ensure agent-doc does not duplicate ids. Please fix the ids. spec-test-build-install-commit-push
+### Re: duplicate `#tmuxcrash` subtask ids — gpt-5
+
+I fixed the backlog-edit path that produced the duplicate `#tmuxcrash-*` child ids, and I repaired the live `#tmuxcrash` backlog entry in this document. The parent `#tmuxcrash` backlog item remains open on `#tmuxcrash-rn2d`.
+
+What changed in `src/agent-doc`:
+- `pending.rs` now treats multiline `--pending-edit` payloads as a full parent-plus-continuation replacement, so refreshing a backlog item with a child sublist no longer leaves stale child lines appended behind the new sublist.
+- Nested-child canonicalization now reassigns colliding existing child ids instead of preserving duplicate `#parent-*` ids.
+- The same edit path now preserves the trailing newline on a multiline continuation block, so the next flush-left backlog item stays on its own line instead of collapsing into the last child line.
+
+I also cleaned up the `#tmuxcrash` child list in this session document so it now has one canonical set of done/open subtasks.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `2460ef4` pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item was added for this turn; this closes the duplicate-id regression without marking `#tmuxcrash` itself done.
+<!-- agent:boundary:ce831d67 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -687,22 +709,13 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions previously surfaced to the user as "the pane crashed" while the persisted state actually mixed startup-miss, fresh-start, orphaned-supervisor, and missing-exit cases. The false-crash family is now narrowed: stale startup-miss / superseded-owner cleanup belongs in `#smst`, and the remaining `#tmuxcrash` scope is only true crash provenance gaps such as real child death, missing-exit, orphaned-supervisor, or commit-boundary failures. Repro history includes `tasks/software/tsift.md` on Apr 29, 2026. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions previously surfaced to the user as "the pane crashed" while the persisted state actually mixed startup-miss, fresh-start, orphaned-supervisor, and missing-exit cases. The false-crash family is now narrowed: stale startup-miss / superseded-owner cleanup belongs in `#smst`, and the remaining `#tmuxcrash` scope is only true crash provenance gaps such as real child death, missing-exit, orphaned-supervisor, and commit-boundary failures. Repro history includes `tasks/software/tsift.md` on Apr 29, 2026. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
   - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
   - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
   - [x] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [x] [#tmuxcrash-hmrz] Move stale startup-miss and ownership cleanup out to `#smst` once the recovered closeout is clean.
   - [ ] [#tmuxcrash-rn2d] Keep `#tmuxcrash` limited to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
-  - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
-  - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
-  - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
-  - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
-  - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
-  - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
-  - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
-  - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
-  - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

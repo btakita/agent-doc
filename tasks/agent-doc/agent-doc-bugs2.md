@@ -564,7 +564,31 @@ Published:
 
 Note:
 - I did not mark `#tmuxcrash` done. The remaining tracked work is still the end-to-end restarted second-leg live repro / closeout proof in `#tmuxcrash-9rh5`.
-<!-- agent:boundary:c5fdc822 -->
+❯ continue #tmuxcrash. spec-test-build-install-commit-push
+### Re: session rebind provenance under `#tmuxcrash` — gpt-5
+
+I continued investigating `#tmuxcrash`. This turn narrows one provenance gap, but it does not close the parent item.
+
+- `sessions.rs` now treats a same-session re-registration onto a different pane as a real session-log boundary. Before `sessions.json` overwrites the binding, it best-effort appends `session_superseded old_pane=... new_pane=...` and `session_end origin=registry_rebind ...` to the existing session log.
+- That closes the forensic hole where a replacement pane could start a fresh `session_start` while the old pane era still looked open forever in the same log, which made crash-vs-rebind analysis under `#tmuxcrash` ambiguous.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added registry coverage proving the rebind log lands before the new pane binding replaces the old one.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `e33c84a` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I did not mark `#tmuxcrash` done. The live second-leg closeout proof in `#tmuxcrash-9rh5` is still open.
+<!-- agent:boundary:b32a92bf -->
 <!-- /agent:exchange -->
 
 <!--

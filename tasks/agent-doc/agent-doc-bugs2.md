@@ -566,11 +566,7 @@ Added both backlog items.
 - `#c3tmux`: unexpected new tmux session start for `src/session-share/tasks/claudescore-3.md` instead of staying on the existing session.
 
 The top backlog id is `#duppb`.
-<!-- /agent:backlog -->
-
-<!-- agent:icebox -->
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- /agent:icebox -->
+<!-- agent:boundary:9bfa1b15 -->
 <!-- /agent:exchange -->
 
 <!--

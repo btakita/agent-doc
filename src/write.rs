@@ -2976,6 +2976,7 @@ pub fn run_template(
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
     let base = baseline.unwrap_or(&content_at_start);
+    let snapshot_doc = snapshot::load(file).ok().flatten();
 
     // Apply patches to baseline
     let content_ours =
@@ -2989,11 +2990,17 @@ pub fn run_template(
 
     let final_content = if content_current == base {
         content_ours.clone()
+    } else if crate::repair::response_already_applied(&content_current, &response) {
+        eprintln!(
+            "[write] response already present in current file; adopting normalized current content"
+        );
+        content_current.clone()
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
     };
-    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+    let final_content =
+        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -3413,7 +3420,12 @@ pub fn run_stream(
                     }
                 }
             };
-            let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+            let final_content = normalize_final_template_content(
+                file,
+                base,
+                snapshot_doc.as_deref(),
+                &final_content,
+            )?;
             let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
             let snapshot_content =
                 snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
@@ -3530,6 +3542,12 @@ pub fn run_stream(
         // No edits — build CRDT state from result
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
+    } else if crate::repair::response_already_applied(&content_current, &response) {
+        eprintln!(
+            "[write] response already present in current file; adopting normalized current content"
+        );
+        let doc = crate::crdt::CrdtDoc::from_text(&content_current);
+        (content_current.clone(), doc.encode_state())
     } else if let Some(repaired_current) = adopt_current_response_without_duplication(
         file,
         base,
@@ -3564,7 +3582,8 @@ pub fn run_stream(
             }
         }
     };
-    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+    let final_content =
+        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -3897,6 +3916,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     enforce_no_replace_pending(&patches, false)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
+    let snapshot_doc = snapshot::load(file).ok().flatten();
     let content_ours = template::apply_patches_with_overrides(
         &content,
         &patches,
@@ -3914,10 +3934,16 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     let final_content = if content_current == content {
         content_ours.clone()
+    } else if crate::repair::response_already_applied(&content_current, response) {
+        eprintln!(
+            "[write] response already present in current file; adopting normalized current content"
+        );
+        content_current.clone()
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
-    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+    let final_content =
+        normalize_final_template_content(file, &content, snapshot_doc.as_deref(), &final_content)?;
 
     atomic_write(file, &final_content)?;
     // Save snapshot as the repaired/merged final content.
@@ -4993,6 +5019,19 @@ fn adopt_current_response_without_duplication(
     }
     repaired = normalize_template_structure_or_fail(&repaired, file)?;
     Ok(Some(repaired))
+}
+
+fn normalize_final_template_content(
+    file: &Path,
+    base: &str,
+    snapshot: Option<&str>,
+    content: &str,
+) -> Result<String> {
+    let mut normalized = content.to_string();
+    if let Some(snapshot_doc) = snapshot {
+        normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
+    }
+    normalize_template_structure_or_fail(&normalized, file)
 }
 
 /// Transfer the `agent:pending` component content from `source` into `target`.
@@ -7379,6 +7418,40 @@ Implemented.
         assert!(repaired.contains("❯ do #scpd. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #scpd. spec-test-build-install-commit-push\n"));
         assert_eq!(repaired.matches("### Re: #scpd retry — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_bare_prompt_prefix_after_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #dupfx. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+do #dupfx. spec-test-build-install-commit-push
+### Re: #dupfx — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, merged).unwrap();
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), merged).unwrap();
+
+        assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
+        assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
+        assert_eq!(repaired.matches("### Re: #dupfx — gpt-5").count(), 1);
     }
 }
 

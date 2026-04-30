@@ -409,6 +409,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - Mode resolution chain applies normally: inline attribute > `components.toml` > built-in default (`replace`)
    - All components use their resolved mode (no hardcoded overrides for exchange)
 5. CRDT merge: if the file was modified during response generation, merge `content_ours` (baseline + patches) with `content_current` (file on disk) using Yrs CRDT
+6. After any template/CRDT merge or adopted-current replay, re-run exchange prompt-prefix normalization on the final merged transcript before writing so a concurrently bare `do #...` line cannot survive the merge and fail post-commit `session-check`
 6. Atomic write + snapshot save + CRDT state save
 
 **`--stream` flag:** Enables CRDT write strategy. Required for template/CRDT documents.
@@ -440,6 +441,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 **Pane ownership verification (v0.28.2):** `verify_pane_ownership()` is called at the top of `run`, `run_template`, and `run_stream`. It reads the document's `session` frontmatter field, looks up the owning pane in the session registry, and compares it to the current tmux pane. If a different pane definitively owns the session, the write is rejected. The check is lenient: it passes silently when not in tmux, when there is no session ID, or when the pane is indeterminate.
 
 **Snapshot persistence invariant:** Write paths normally persist the snapshot from the final merged on-disk content after the response write completes. Narrow exception: when the caller supplied an explicit `--baseline-file` and the live file diverged during the write merge, the snapshot and CRDT state persist from `content_ours` instead of merged `final_content`. That keeps concurrent user edits typed during `finalize` visible in the next diff rather than silently absorbing them into the new baseline. Non-baseline writes still treat the merged disk state as authoritative.
+
+**Replay dedup invariant:** If a strict retry (`finalize`, session-document `write --commit`, or template recovery) sees that the exact visible response block is already present in the live document, the binary must adopt and canonicalize that current transcript instead of merging the same response body again. This keeps prompt-prefix cleanup and replay repair from creating a duplicate `### Re:` block after an earlier write already landed.
 
 **Exchange prompt normalization:** For append-mode `agent:exchange`, the write path prefixes newly added user lines with `❯ ` based on the `snapshot -> baseline` diff, but the required prefix targets come from the canonical `prompt_bearing_changes` classifier rather than a separate prompt-shape heuristic. This normalization must ignore synthetic heading-only churn from binary-owned commit markers (for example a response heading gaining ` (HEAD)` in the committed snapshot). A heading replacement may preserve existing agent content, but it must not suppress `❯ ` prefixing for the next genuine prompt-bearing user block.
 

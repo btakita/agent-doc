@@ -192,7 +192,7 @@ fn historical_committed_capture_replay(
     let Some(capture) = crate::capture::latest_committed(file)? else {
         return Ok(None);
     };
-    if is_already_applied(doc_content, &capture.response_body) {
+    if response_already_applied(doc_content, &capture.response_body) {
         return Ok(None);
     }
     let Some(response_heading) = first_response_heading_line(&capture.response_body) else {
@@ -720,7 +720,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     // This prevents double-apply when the pending file was left behind after a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
-    if is_already_applied(&doc_content, &response) {
+    if response_already_applied(&doc_content, &response) {
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
@@ -730,7 +730,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
             .unwrap_or(true);
         let snapshot_missing_response = snapshot::load(file)?
             .as_deref()
-            .map(|snapshot_doc| !is_already_applied(snapshot_doc, &response))
+            .map(|snapshot_doc| !response_already_applied(snapshot_doc, &response))
             .unwrap_or(true);
         if state_is_open && snapshot_missing_response {
             snapshot::save(file, &repaired_doc)?;
@@ -827,7 +827,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 /// as one contiguous block. This tolerates blank-line separation and transient
 /// ` (HEAD)` suffixes on response headings without treating scattered matching
 /// phrases elsewhere in the document as an already-applied replay.
-fn is_already_applied(doc: &str, response: &str) -> bool {
+pub(crate) fn response_already_applied(doc: &str, response: &str) -> bool {
     let response_lines = normalized_response_lines(response);
     if response_lines.is_empty() {
         return false;
@@ -1477,7 +1477,7 @@ mod tests {
         );
 
         assert!(
-            !is_already_applied(doc, response),
+            !response_already_applied(doc, response),
             "scattered matching lines should not trigger dedup"
         );
     }
@@ -1488,7 +1488,7 @@ mod tests {
         let doc = "Implemented.\nOther line.\nDone.\n";
 
         assert!(
-            !is_already_applied(doc, response),
+            !response_already_applied(doc, response),
             "short responses should not dedup from non-contiguous matches"
         );
     }

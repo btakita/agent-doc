@@ -1838,6 +1838,7 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
             // New entry — file was synced but never claimed
             let pane_pid = sessions::pane_pid(pane_id).unwrap_or(std::process::id());
             let window = sessions::pane_window(pane_id).unwrap_or_default();
+            let project_root = std::env::current_dir().unwrap_or_default();
             eprintln!(
                 "[sync] registering {} → pane {} (session {})",
                 file_path.display(),
@@ -1845,14 +1846,16 @@ fn register_synced_files(session_files: &[(String, PathBuf)], file_panes: &[(Pat
                 &session_id[..8.min(session_id.len())]
             );
             registry.insert(
-                session_id.clone(),
+                sessions::canonical_registry_key_in(&project_root, &file_str),
                 sessions::SessionEntry {
                     pane: pane_id.to_string(),
                     pid: pane_pid,
                     cwd: cwd.clone(),
                     started: String::new(),
+                    session_id: session_id.clone(),
                     file: file_str,
                     window,
+                    supervisor_instance_id: String::new(),
                 },
             );
             changed = true;
@@ -2367,13 +2370,96 @@ fn find_live_owner_pane_excluding_with_logging(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    let file_path = file.to_string_lossy();
-    find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits).or_else(
-        || {
+    find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, log_hits)
+        .or_else(|| {
+            let file_path = file.to_string_lossy();
+            find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
+        })
+        .or_else(|| {
             find_alive_pane_via_supervisor_pid(tmux, file, session_id)
                 .filter(|pane| excluded_pane != Some(pane.as_str()))
-        },
-    )
+        })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SupervisorIdentity {
+    pid: u32,
+    instance_id: String,
+}
+
+fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<SupervisorIdentity> {
+    let project_root = crate::snapshot::find_project_root(file)?;
+    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    if !sock.exists() {
+        return None;
+    }
+    let response =
+        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::State)
+            .ok()?;
+    if !response.ok {
+        return None;
+    }
+    let data = response.data?;
+    let pid = data
+        .get("supervisor_pid")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())?;
+    let instance_id = data
+        .get("supervisor_instance_id")
+        .and_then(|value| value.as_str())?
+        .to_string();
+    if pid == 0 || instance_id.is_empty() {
+        return None;
+    }
+    Some(SupervisorIdentity { pid, instance_id })
+}
+
+fn find_registered_pane_via_path_provenance(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    log_hits: bool,
+) -> Option<String> {
+    let project_root = crate::snapshot::find_project_root(file)?;
+    let registry = sessions::load_in(&project_root).ok()?;
+    let registry_key = sessions::canonical_registry_key_in(&project_root, &file.to_string_lossy());
+    let entry = registry.get(&registry_key)?;
+    if entry.session_id != session_id
+        || entry.pid == 0
+        || entry.supervisor_instance_id.is_empty()
+        || excluded_pane == Some(entry.pane.as_str())
+        || !tmux.pane_alive(&entry.pane)
+    {
+        return None;
+    }
+
+    let identity = query_supervisor_identity(file, session_id)?;
+    if identity.pid != entry.pid || identity.instance_id != entry.supervisor_instance_id {
+        return None;
+    }
+
+    let pane_pid = tmux
+        .cmd()
+        .args(["display-message", "-t", &entry.pane, "-p", "#{pane_pid}"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
+    if pane_pid.is_empty() || !pane_process_tree_contains_pid(&pane_pid, identity.pid) {
+        return None;
+    }
+
+    if log_hits {
+        eprintln!(
+            "[sync] recovered live pane {} for session {} via path provenance pid={} instance={}",
+            entry.pane,
+            &session_id[..std::cmp::min(8, session_id.len())],
+            identity.pid,
+            identity.instance_id
+        );
+    }
+    Some(entry.pane.clone())
 }
 
 fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {

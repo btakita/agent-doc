@@ -88,9 +88,9 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
     }
 
     // Validate file existence — prune stale entries (renamed/deleted files)
-    let mut stale_ids: Vec<String> = Vec::new();
+    let mut stale_keys: Vec<String> = Vec::new();
     let mut claimed: Vec<(String, sessions::SessionEntry)> = Vec::new();
-    for (session_id, entry) in all_claimed {
+    for (registry_key, entry) in all_claimed {
         let file_path = std::path::Path::new(&entry.file);
         let exists = if file_path.is_absolute() {
             file_path.exists()
@@ -98,20 +98,20 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
             base_dir.join(file_path).exists()
         };
         if exists {
-            claimed.push((session_id, entry));
+            claimed.push((registry_key, entry));
         } else {
             eprintln!(
                 "[autoclaim] Pruning stale claim: {} (file no longer exists)",
                 entry.file
             );
-            stale_ids.push(session_id);
+            stale_keys.push(registry_key);
         }
     }
 
     // Remove stale entries from registry
-    if !stale_ids.is_empty() {
-        for id in &stale_ids {
-            registry.remove(id);
+    if !stale_keys.is_empty() {
+        for key in &stale_keys {
+            registry.remove(key);
         }
         if let Err(e) = sessions::save_in(base_dir, &registry) {
             eprintln!("[autoclaim] Failed to save pruned registry: {}", e);
@@ -126,12 +126,12 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
         return Ok(());
     }
 
-    for (session_id, entry) in &claimed {
+    for (_registry_key, entry) in &claimed {
         eprintln!(
             "[autoclaim] Pane {} has file {} (session {})",
             pane_id,
             entry.file,
-            &session_id[..8.min(session_id.len())]
+            &entry.session_id[..8.min(entry.session_id.len())]
         );
     }
 
@@ -237,8 +237,10 @@ mod tests {
                 pid: std::process::id(),
                 cwd: dir.to_string_lossy().to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "test-session-1234".to_string(),
                 file: "tasks/test.md".to_string(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
         let sessions_dir = dir.join(".agent-doc");
@@ -295,8 +297,10 @@ mod tests {
                     pid: std::process::id(),
                     cwd: dir.to_string_lossy().to_string(),
                     started: "2026-01-01T00:00:00Z".to_string(),
+                    session_id: session_id.to_string(),
                     file: file.to_string(),
                     window: String::new(),
+                    supervisor_instance_id: String::new(),
                 },
             );
         }

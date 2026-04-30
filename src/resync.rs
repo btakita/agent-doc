@@ -651,7 +651,7 @@ fn live_owned_registered_file_for_pane(
     pane_id: &str,
     registry: &sessions::SessionRegistry,
 ) -> Option<String> {
-    registry.iter().find_map(|(session_id, entry)| {
+    registry.values().find_map(|entry| {
         if entry.file.is_empty() {
             return None;
         }
@@ -659,8 +659,9 @@ fn live_owned_registered_file_for_pane(
         if !file.exists() {
             return None;
         }
-        (crate::sync::find_live_owner_pane(tmux, file, session_id).as_deref() == Some(pane_id))
-            .then(|| entry.file.clone())
+        (crate::sync::find_live_owner_pane(tmux, file, &entry.session_id).as_deref()
+            == Some(pane_id))
+        .then(|| entry.file.clone())
     })
 }
 
@@ -2024,8 +2025,10 @@ mod tests {
             pid: std::process::id(),
             cwd: "/tmp".to_string(),
             started: "2026-01-01T00:00:00Z".to_string(),
+            session_id: format!("sess-{pane}"),
             file: file.to_string(),
             window: String::new(),
+            supervisor_instance_id: String::new(),
         }
     }
 

@@ -607,7 +607,8 @@ fn should_preserve_failed_route_pane(
         .ok()
         .and_then(|registry| {
             registry
-                .get(session_id)
+                .values()
+                .find(|entry| entry.session_id == session_id)
                 .map(|entry| entry.pane.as_str() == pane_id)
         })
         .unwrap_or(false)
@@ -2591,8 +2592,10 @@ mod tests {
             pid: 1234,
             cwd: cwd.to_string_lossy().to_string(),
             started: "2026-01-01T00:00:00Z".to_string(),
+            session_id: "test-session".to_string(),
             file: file.to_string(),
             window: "@1".to_string(),
+            supervisor_instance_id: String::new(),
         }
     }
 
@@ -4652,8 +4655,10 @@ history line
                 pid: std::process::id(),
                 cwd: dir.path().to_string_lossy().to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-123".to_string(),
                 file: "doc.md".to_string(),
                 window: iso.pane_window(&old_pane)?,
+                supervisor_instance_id: String::new(),
             };
             evict_previous_stash_pane_entry(
                 &iso,
@@ -4737,8 +4742,10 @@ history line
                 pid: std::process::id(),
                 cwd: dir.path().to_string_lossy().to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-busy".to_string(),
                 file: "doc.md".to_string(),
                 window: iso.pane_window(&busy_pane)?,
+                supervisor_instance_id: String::new(),
             };
             evict_previous_stash_pane_entry(
                 &iso,
@@ -5456,13 +5463,16 @@ history line
             "both provisioned panes should remain visible in the shared window"
         );
 
-        let registry = sessions::load().unwrap();
         assert!(
-            registry.contains_key("route-test-concurrent-provision-session-a"),
+            sessions::lookup("route-test-concurrent-provision-session-a")
+                .unwrap()
+                .is_some(),
             "first provisioned document should be registered"
         );
         assert!(
-            registry.contains_key("route-test-concurrent-provision-session-b"),
+            sessions::lookup("route-test-concurrent-provision-session-b")
+                .unwrap()
+                .is_some(),
             "second provisioned document should be registered"
         );
     }

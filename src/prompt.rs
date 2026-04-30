@@ -123,12 +123,12 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
     let mut entries: Vec<PromptAllEntry> = Vec::new();
     let verbose = std::env::var("AGENT_DOC_PROMPT_DEBUG").is_ok();
 
-    for (session_id, entry) in &registry {
+    for entry in registry.values() {
         if !tmux.pane_alive(&entry.pane) {
             if verbose {
                 eprintln!(
                     "[prompt] pane {} dead for session {} ({})",
-                    entry.pane, session_id, entry.file
+                    entry.pane, entry.session_id, entry.file
                 );
             }
             continue;
@@ -162,12 +162,12 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
         if verbose {
             eprintln!(
                 "[prompt] session {} active={} question={:?}",
-                session_id, prompt.active, prompt.question
+                entry.session_id, prompt.active, prompt.question
             );
         }
 
         entries.push(PromptAllEntry {
-            session_id: session_id.clone(),
+            session_id: entry.session_id.clone(),
             file: entry.file.clone(),
             prompt,
         });

@@ -2531,8 +2531,10 @@ mod tests {
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
                 started: "2026-04-29T00:00:00Z".to_string(),
+                session_id: "session-123".to_string(),
                 file: doc.display().to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         crate::sessions::save_in(tmp.path(), &registry).unwrap();

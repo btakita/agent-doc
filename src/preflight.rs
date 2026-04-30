@@ -557,14 +557,23 @@ pub fn check_layout() -> Vec<String> {
 /// Entries with an empty `file` field are skipped (legacy entries).
 fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
     let mut file_sessions: HashMap<String, Vec<String>> = HashMap::new();
-    for (session_id, entry) in registry {
-        if entry.file.is_empty() {
+    for (registry_key, entry) in registry {
+        let file_identity = if std::path::Path::new(registry_key).is_absolute() {
+            registry_key.clone()
+        } else {
+            entry.file.clone()
+        };
+        if file_identity.is_empty() {
             continue;
         }
         file_sessions
-            .entry(entry.file.clone())
+            .entry(file_identity)
             .or_default()
-            .push(session_id.clone());
+            .push(if entry.session_id.is_empty() {
+                registry_key.clone()
+            } else {
+                entry.session_id.clone()
+            });
     }
     let mut issues = Vec::new();
     for (file, session_ids) in &file_sessions {
@@ -3463,8 +3472,10 @@ mod tests {
                 pid: 100,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
                 file: "tasks/foo.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         registry.insert(
@@ -3474,8 +3485,10 @@ mod tests {
                 pid: 101,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
                 file: "tasks/bar.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         assert!(detect_duplicate_claims(&registry).is_empty());
@@ -3491,8 +3504,10 @@ mod tests {
                 pid: 100,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
                 file: "tasks/shared.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         registry.insert(
@@ -3502,8 +3517,10 @@ mod tests {
                 pid: 101,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
                 file: "tasks/shared.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         let issues = detect_duplicate_claims(&registry);
@@ -3524,8 +3541,10 @@ mod tests {
                 pid: 100,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
                 file: String::new(), // legacy entry — no file
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         registry.insert(
@@ -3535,8 +3554,10 @@ mod tests {
                 pid: 101,
                 cwd: "/work".to_string(),
                 started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
                 file: String::new(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         assert!(detect_duplicate_claims(&registry).is_empty());

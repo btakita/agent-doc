@@ -299,7 +299,10 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
 /// Look up the tmux pane for a document session from the registry.
 fn lookup_pane(_project_root: &Path, session_uuid: &str) -> Option<String> {
     let registry = sessions::load().ok()?;
-    registry.get(session_uuid).map(|entry| entry.pane.clone())
+    registry
+        .values()
+        .find(|entry| entry.session_id == session_uuid)
+        .map(|entry| entry.pane.clone())
 }
 
 #[cfg(test)]

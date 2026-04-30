@@ -642,8 +642,10 @@ mod tests {
             pid: 1,
             cwd: cwd.to_string(),
             started: "2026-01-01".to_string(),
+            session_id: "test-session".to_string(),
             file: "test.md".to_string(),
             window: window.to_string(),
+            supervisor_instance_id: String::new(),
         }
     }
 

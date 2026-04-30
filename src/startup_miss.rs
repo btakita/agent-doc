@@ -415,7 +415,8 @@ pub fn superseded_by_newer_registered_start(
         return Ok(None);
     };
     let Some(registered_pane) = crate::sessions::load_in(&root)?
-        .get(&miss.session_id)
+        .values()
+        .find(|entry| entry.session_id == miss.session_id)
         .map(|entry| entry.pane.clone())
     else {
         return Ok(None);
@@ -824,8 +825,10 @@ mod tests {
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
                 started: "2026-04-29T00:00:00Z".to_string(),
+                session_id: "session-123".to_string(),
                 file: doc.display().to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         crate::sessions::save_in(tmp.path(), &registry).unwrap();
@@ -870,8 +873,10 @@ mod tests {
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
                 started: "2026-04-29T00:00:00Z".to_string(),
+                session_id: "session-123".to_string(),
                 file: doc.display().to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         crate::sessions::save_in(tmp.path(), &registry).unwrap();

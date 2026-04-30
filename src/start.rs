@@ -1135,6 +1135,10 @@ type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 struct SupervisorShared {
     /// Current supervisor state for IPC `state` queries.
     supervisor_state: Mutex<SupervisorState>,
+    /// PID of the long-lived `agent-doc start` supervisor process.
+    supervisor_pid: u32,
+    /// Stable identity for this supervisor process across child restarts.
+    supervisor_instance_id: String,
     /// Current restart count.
     restart_count: AtomicU32,
     /// Whether a child is currently running.
@@ -1160,9 +1164,11 @@ struct SupervisorShared {
 }
 
 impl SupervisorShared {
-    fn new(cwd_source: &'static str) -> Self {
+    fn new(cwd_source: &'static str, supervisor_instance_id: String) -> Self {
         Self {
             supervisor_state: Mutex::new(SupervisorState::Healthy),
+            supervisor_pid: std::process::id(),
+            supervisor_instance_id,
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
@@ -1204,12 +1210,17 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                 "state": state.as_str(),
                 "restart_count": shared.restart_count.load(Ordering::Relaxed),
                 "cwd_source": shared.cwd_source,
+                "supervisor_pid": shared.supervisor_pid,
+                "supervisor_instance_id": shared.supervisor_instance_id,
+                "child_pid": shared.child_pid.load(Ordering::Relaxed),
             }))
         }
         IpcMethod::Pid => {
-            let pid = shared.child_pid.load(Ordering::Relaxed);
-            if pid > 0 {
-                IpcResponse::ok(serde_json::json!({ "pid": pid }))
+            if shared.supervisor_pid > 0 {
+                IpcResponse::ok(serde_json::json!({
+                    "pid": shared.supervisor_pid,
+                    "supervisor_instance_id": shared.supervisor_instance_id,
+                }))
             } else {
                 IpcResponse::ok(serde_json::json!({ "pid": null }))
             }
@@ -1644,7 +1655,14 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Register session → pane (with relative file path)
     let file_str = file.to_string_lossy();
-    sessions::register(&session_id, &pane_id, &file_str)?;
+    let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
+    sessions::register_supervisor(
+        &session_id,
+        &pane_id,
+        &file_str,
+        std::process::id(),
+        &supervisor_instance_id,
+    )?;
     eprintln!("Registered session {} → pane {}", &session_id[..8], pane_id);
 
     // Open session log
@@ -1783,7 +1801,10 @@ pub fn run(file: &Path) -> Result<()> {
         snapshot::find_project_root(&canonical).unwrap_or_else(|| resolved_cwd.path.clone());
 
     // Create shared state for IPC handler
-    let shared = Arc::new(SupervisorShared::new(resolved_cwd.source.as_str()));
+    let shared = Arc::new(SupervisorShared::new(
+        resolved_cwd.source.as_str(),
+        supervisor_instance_id,
+    ));
 
     // Start IPC listener
     let shared_for_ipc = shared.clone();
@@ -2762,8 +2783,10 @@ mod tests {
             pid: 0,
             cwd: tmp.path().display().to_string(),
             started: String::new(),
+            session_id: "start-duplicate-live-pane".to_string(),
             file: "tasks/software/corky.md".to_string(),
             window: iso.pane_window(&pane_a).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
         };
 
         let action =
@@ -2785,8 +2808,10 @@ mod tests {
             pid: 0,
             cwd: tmp.path().display().to_string(),
             started: String::new(),
+            session_id: "start-reuse-keeps-launcher-session".to_string(),
             file: "tasks/software/corky.md".to_string(),
             window: iso.pane_window(&owner_pane).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
         };
 
         let action = existing_session_pane_action_from_entry(
@@ -2817,8 +2842,10 @@ mod tests {
             pid: 0,
             cwd: tmp.path().display().to_string(),
             started: String::new(),
+            session_id: "start-duplicate-same-pane".to_string(),
             file: "tasks/software/corky.md".to_string(),
             window: iso.pane_window(&pane).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
         };
 
         let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
@@ -2836,8 +2863,10 @@ mod tests {
             pid: 0,
             cwd: tmp.path().display().to_string(),
             started: String::new(),
+            session_id: "start-stale-alive-pane".to_string(),
             file: "tasks/software/corky.md".to_string(),
             window: iso.pane_window(&pane_a).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
         };
 
         let action = existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None);
@@ -2857,8 +2886,10 @@ mod tests {
             pid: 0,
             cwd: tmp.path().display().to_string(),
             started: String::new(),
+            session_id: "start-duplicate-dead-pane".to_string(),
             file: "tasks/software/corky.md".to_string(),
             window: String::new(),
+            supervisor_instance_id: String::new(),
         };
 
         let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
@@ -3083,13 +3114,13 @@ mod tests {
 
     #[test]
     fn ctrl_d_flag_initialized_false() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
     }
 
     #[test]
     fn auto_trigger_outcome_defaults_to_not_needed() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         assert_eq!(
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
             AutoTriggerOutcome::NotNeeded
@@ -3231,7 +3262,7 @@ mod tests {
 
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::Pending as u8, Ordering::Relaxed);
@@ -3281,7 +3312,7 @@ mod tests {
 
     #[test]
     fn auto_trigger_inject_command_writes_carriage_return() {
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
         *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
             Box::new(RecordingWriter(written.clone())),
@@ -3300,7 +3331,7 @@ mod tests {
 
     #[test]
     fn auto_trigger_inject_command_honors_late_cancel_before_write() {
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
         *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
             Box::new(RecordingWriter(written.clone())),
@@ -3316,7 +3347,7 @@ mod tests {
 
     #[test]
     fn auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock() {
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
         let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(RecordingWriter(
             written.clone(),
@@ -3345,7 +3376,7 @@ mod tests {
 
     #[test]
     fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
             Box::new(FailingWriter),
         ))));
@@ -3359,7 +3390,7 @@ mod tests {
 
     #[test]
     fn current_child_prompt_visible_uses_latest_nonempty_line() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, b"old output\n");
         record_recent_output(&shared, "❯\n".as_bytes());
@@ -3372,7 +3403,7 @@ mod tests {
 
     #[test]
     fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, b"resumed child ready\n");
         record_recent_output(&shared, "❯\n".as_bytes());
@@ -3381,7 +3412,7 @@ mod tests {
 
     #[test]
     fn current_child_prompt_visible_handles_suffix_prompt_line() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
         assert!(current_child_prompt_visible(&shared, &harness));
@@ -3389,7 +3420,7 @@ mod tests {
 
     #[test]
     fn current_child_prompt_visible_skips_codex_footer_line() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(
@@ -3401,7 +3432,7 @@ mod tests {
 
     #[test]
     fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
-        let shared = SupervisorShared::new("test");
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"resumed child still printing\n");
@@ -3554,7 +3585,7 @@ mod tests {
             }
         }
 
-        let shared = Arc::new(SupervisorShared::new("test"));
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
         let handle = spawn_reader_thread(shared, reader);
 

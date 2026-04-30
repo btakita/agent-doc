@@ -451,7 +451,7 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
     let registry = sessions::load_in(project_root).unwrap_or_default();
     let mut deleted = 0;
     let mut kept = 0;
-    let mut uuids_to_prune: Vec<String> = Vec::new();
+    let mut keys_to_prune: Vec<String> = Vec::new();
 
     // Phase 1: scan socket files
     for entry in std::fs::read_dir(&supervisor_dir)? {
@@ -467,9 +467,13 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
         };
 
         // Check if the session has a live PID in the registry
-        let pid_is_alive = registry
-            .get(&uuid)
-            .map(|e| pid_alive(e.pid))
+        let registry_key = registry
+            .iter()
+            .find_map(|(key, entry)| (entry.session_id == uuid).then(|| key.clone()));
+        let pid_is_alive = registry_key
+            .as_deref()
+            .and_then(|key| registry.get(key))
+            .map(|entry| pid_alive(entry.pid))
             .unwrap_or(false);
 
         if pid_is_alive {
@@ -493,39 +497,41 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
         deleted += 1;
 
         // Mark for sessions.json pruning if entry exists
-        if registry.contains_key(&uuid) {
-            uuids_to_prune.push(uuid);
+        if let Some(key) = registry_key {
+            keys_to_prune.push(key);
         }
     }
 
     // Phase 2: prune sessions.json entries for dead sockets
     // Also find entries whose PID is dead and socket doesn't exist
-    for (uuid, entry) in &registry {
-        if uuids_to_prune.contains(uuid) {
+    for (registry_key, entry) in &registry {
+        if keys_to_prune.contains(registry_key) {
             continue; // already marked
         }
-        let sock_path = ipc::socket_path(project_root, uuid);
+        let sock_path = ipc::socket_path(project_root, &entry.session_id);
         if !sock_path.exists() && !pid_alive(entry.pid) {
-            uuids_to_prune.push(uuid.clone());
+            keys_to_prune.push(registry_key.clone());
             deleted += 1;
             if dry_run {
                 eprintln!(
                     "[gc] would prune stale session entry: {} (pid {} dead, no socket)",
-                    uuid, entry.pid
+                    entry.session_id, entry.pid
                 );
             }
         }
     }
 
     // Apply registry pruning
-    if !uuids_to_prune.is_empty() && !dry_run {
+    if !keys_to_prune.is_empty() && !dry_run {
         let registry_path = sessions::registry_path_in(project_root);
         if let Ok(_lock) = RegistryLock::acquire(&registry_path) {
             // Reload under lock to avoid stale reads
             if let Ok(mut reg) = sessions::load_in(project_root) {
-                for uuid in &uuids_to_prune {
-                    eprintln!("[gc] pruning stale session: {}", uuid);
-                    reg.remove(uuid);
+                for key in &keys_to_prune {
+                    if let Some(entry) = reg.get(key) {
+                        eprintln!("[gc] pruning stale session: {}", entry.session_id);
+                    }
+                    reg.remove(key);
                 }
                 let _ = sessions::save_in(project_root, &reg);
             }
@@ -586,14 +592,16 @@ mod tests {
         assert!(result.skipped >= 1, "should keep valid snapshot");
     }
 
-    fn make_session_entry(pid: u32) -> SessionEntry {
+    fn make_session_entry(session_id: &str, pid: u32) -> SessionEntry {
         SessionEntry {
             pane: "%99999".to_string(),
             pid,
             cwd: "/tmp".to_string(),
             started: "2026-01-01T00:00:00Z".to_string(),
-            file: "test.md".to_string(),
+            session_id: session_id.to_string(),
+            file: format!("{session_id}.md"),
             window: String::new(),
+            supervisor_instance_id: String::new(),
         }
     }
 
@@ -610,7 +618,7 @@ mod tests {
 
         // Register in sessions.json with a dead PID
         let mut reg = SessionRegistry::new();
-        reg.insert(uuid.to_string(), make_session_entry(999999));
+        reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
         sessions::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
@@ -622,7 +630,7 @@ mod tests {
 
         // sessions.json entry should be pruned
         let loaded = sessions::load_in(root).unwrap();
-        assert!(!loaded.contains_key(uuid));
+        assert!(!loaded.values().any(|entry| entry.session_id == uuid));
     }
 
     #[test]
@@ -637,7 +645,10 @@ mod tests {
 
         // Register with current PID (alive)
         let mut reg = SessionRegistry::new();
-        reg.insert(uuid.to_string(), make_session_entry(std::process::id()));
+        reg.insert(
+            uuid.to_string(),
+            make_session_entry(uuid, std::process::id()),
+        );
         sessions::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
@@ -674,14 +685,14 @@ mod tests {
         // sessions.json entry with dead PID, no socket file
         let uuid = "ghost-session";
         let mut reg = SessionRegistry::new();
-        reg.insert(uuid.to_string(), make_session_entry(999999));
+        reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
         sessions::save_in(root, &reg).unwrap();
 
         let (deleted, _kept) = clean_orphaned_sockets(root, false).unwrap();
         assert_eq!(deleted, 1, "should count pruned entry");
 
         let loaded = sessions::load_in(root).unwrap();
-        assert!(!loaded.contains_key(uuid));
+        assert!(!loaded.values().any(|entry| entry.session_id == uuid));
     }
 
     #[test]
@@ -696,7 +707,7 @@ mod tests {
         std::fs::write(&sock_path, "").unwrap();
 
         let mut reg = SessionRegistry::new();
-        reg.insert(uuid.to_string(), make_session_entry(999999));
+        reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
         sessions::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, true).unwrap();
@@ -708,7 +719,7 @@ mod tests {
 
         // And sessions.json should be unmodified
         let loaded = sessions::load_in(root).unwrap();
-        assert!(loaded.contains_key(uuid));
+        assert!(loaded.values().any(|entry| entry.session_id == uuid));
     }
 
     #[test]
@@ -821,9 +832,9 @@ mod tests {
         let mut reg = SessionRegistry::new();
         reg.insert(
             live_uuid.to_string(),
-            make_session_entry(std::process::id()),
+            make_session_entry(live_uuid, std::process::id()),
         );
-        reg.insert(dead_uuid.to_string(), make_session_entry(999999));
+        reg.insert(dead_uuid.to_string(), make_session_entry(dead_uuid, 999999));
         sessions::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
@@ -834,7 +845,7 @@ mod tests {
         assert!(!supervisor_dir.join(format!("{dead_uuid}.sock")).exists());
 
         let loaded = sessions::load_in(root).unwrap();
-        assert!(loaded.contains_key(live_uuid));
-        assert!(!loaded.contains_key(dead_uuid));
+        assert!(loaded.values().any(|entry| entry.session_id == live_uuid));
+        assert!(!loaded.values().any(|entry| entry.session_id == dead_uuid));
     }
 }

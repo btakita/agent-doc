@@ -131,22 +131,22 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     // Update sessions registry
     let old_path_str = old_path.to_string_lossy().to_string();
     let new_path_str = new_path.to_string_lossy().to_string();
-    // Also compare against absolute forms
-    let old_abs = if old_path.is_absolute() {
-        old_path_str.clone()
-    } else {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        cwd.join(old_path).to_string_lossy().to_string()
-    };
-    let new_rel = new_path_str.clone();
+    let old_key = sessions::canonical_registry_key_in(&project_root, &old_path_str);
+    let new_key = sessions::canonical_registry_key_in(&project_root, &new_path_str);
 
     let _lock = sessions::RegistryLock::acquire(&sessions::registry_path())?;
     let mut registry = sessions::load()?;
     let mut updated_sessions = 0u32;
-    for (_sid, entry) in registry.iter_mut() {
-        if entry.file == old_path_str || entry.file == old_abs {
-            entry.file = new_rel.clone();
-            updated_sessions += 1;
+    if let Some(mut entry) = registry.remove(&old_key) {
+        entry.file = new_path_str.clone();
+        registry.insert(new_key, entry);
+        updated_sessions += 1;
+    } else {
+        for entry in registry.values_mut() {
+            if entry.file == old_path_str {
+                entry.file = new_path_str.clone();
+                updated_sessions += 1;
+            }
         }
     }
     if updated_sessions > 0 {

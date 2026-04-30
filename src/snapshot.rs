@@ -427,11 +427,9 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         && let Ok(mut registry) = crate::sessions::load()
     {
         let mut updated = 0u32;
-        for (_sid, entry) in registry.iter_mut() {
-            // Match by session UUID — the file field may have the old path
-            if _sid == &session_uuid {
-                let old_file = entry.file.clone();
-                if old_file != doc_path_str && old_file != canonical_str {
+        for entry in registry.values_mut() {
+            if entry.session_id == session_uuid {
+                if entry.file != doc_path_str && entry.file != canonical_str {
                     entry.file = doc_path_str.clone();
                     updated += 1;
                 }

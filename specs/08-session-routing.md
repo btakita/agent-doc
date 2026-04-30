@@ -4,13 +4,15 @@
 
 ## Registry
 
-`sessions.json` maps document session UUIDs to tmux panes:
+`sessions.json` maps canonical absolute document paths to the owning tmux pane plus the current supervisor identity:
 
 ```json
 {
-  "cf853a21-...": {
+  "/path/to/project/tasks/plan.md": {
+    "session_id": "cf853a21-...",
     "pane": "%4",
     "pid": 12345,
+    "supervisor_instance_id": "9a18c1b2-...",
     "cwd": "/path/to/project",
     "started": "2026-02-25T21:24:46Z",
     "file": "tasks/plan.md",
@@ -19,7 +21,7 @@
 }
 ```
 
-Multiple documents can map to the same pane (one Claude session, multiple files). The `window` field (optional) enables window-scoped routing — `claim --window` and `layout --window` use it to filter panes to the correct IDE window.
+The registry key is the stable document identity; `session_id` stays in the value so the same document can preserve its session UUID while the owning supervisor instance changes. Multiple documents can still map to the same pane (one Claude/Codex session, multiple files). The `window` field (optional) enables window-scoped routing — `claim --window` and `layout --window` use it to filter panes to the correct IDE window.
 
 ## Use Cases
 

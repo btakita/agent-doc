@@ -1,6 +1,7 @@
 //! # Module: sessions
 //!
-//! Session registry — maps session UUIDs to tmux pane IDs and metadata.
+//! Session registry — maps canonical absolute document paths to tmux pane IDs
+//! and supervisor metadata.
 //!
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
 //! Re-exports `Tmux`, `IsolatedTmux`, `RegistryEntry` (as `SessionEntry`),
@@ -18,13 +19,15 @@
 //! - `register(session_id, pane_id, file)` acquires the lock, calls
 //!   `register_with_pid` using the current process ID.
 //! - `register_with_pid` queries the pane's window and delegates to `register_full`.
+//! - `register_supervisor` records the authoritative supervisor PID +
+//!   supervisor instance identity for a live pane owner.
 //! - `register_full` enforces single-session-per-pane by evicting stale entries that
 //!   share the same pane before inserting the new `SessionEntry`.
 //! - When the same session UUID is rebound to a different pane, `register_full`
 //!   best-effort appends `session_superseded ...` plus
 //!   `session_end origin=registry_rebind ...` to the prior session log before the
 //!   new pane registration lands.
-//! - `lookup(session_id)` returns the pane ID for a session, or `None` if not found.
+//! - `lookup(session_id)` returns the pane ID for a session UUID, or `None` if not found.
 //! - `lookup_entry(session_id)` returns the full `SessionEntry`, or `None`.
 //! - `current_pane()` reads `TMUX_PANE` env var; falls back to querying tmux for the
 //!   active pane (works from IDE processes outside a tmux shell).
@@ -95,6 +98,79 @@ pub fn registry_path_in(base_dir: &Path) -> PathBuf {
     base_dir.join(SESSIONS_FILE)
 }
 
+pub(crate) fn canonical_registry_key_in(base_dir: &Path, file: &str) -> String {
+    let path = Path::new(file);
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    };
+    canonicalize_or_normalize(&joined)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn canonicalize_or_normalize(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| normalize_path(path))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn entry_session_id<'a>(registry_key: &'a str, entry: &'a SessionEntry) -> &'a str {
+    if entry.session_id.is_empty() {
+        registry_key
+    } else {
+        entry.session_id.as_str()
+    }
+}
+
+fn choose_preferred_entry(left: &SessionEntry, right: &SessionEntry) -> bool {
+    if right.session_id.is_empty() != left.session_id.is_empty() {
+        return !right.session_id.is_empty();
+    }
+    right.started >= left.started
+}
+
+fn normalize_registry(base_dir: &Path, registry: SessionRegistry) -> SessionRegistry {
+    let mut normalized = SessionRegistry::new();
+    for (legacy_key, mut entry) in registry {
+        if entry.session_id.is_empty() {
+            entry.session_id = legacy_key.clone();
+        }
+        let file_hint = if !entry.file.is_empty() {
+            entry.file.clone()
+        } else {
+            legacy_key.clone()
+        };
+        let normalized_key = canonical_registry_key_in(base_dir, &file_hint);
+        if let Some(existing) = normalized.get(&normalized_key) {
+            if !choose_preferred_entry(existing, &entry) {
+                continue;
+            }
+        }
+        normalized.insert(normalized_key, entry);
+    }
+    normalized
+}
+
+fn find_registry_key_by_session_id(registry: &SessionRegistry, session_id: &str) -> Option<String> {
+    registry
+        .iter()
+        .find_map(|(key, entry)| (entry_session_id(key, entry) == session_id).then(|| key.clone()))
+}
+
 // ---------------------------------------------------------------------------
 // Agent-doc-specific tmux operations (not in tmux-router)
 // ---------------------------------------------------------------------------
@@ -151,7 +227,7 @@ pub(crate) fn load_in(base_dir: &Path) -> Result<SessionRegistry> {
         .with_context(|| format!("failed to read {}", path.display()))?;
     let registry: SessionRegistry = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(registry)
+    Ok(normalize_registry(base_dir, registry))
 }
 
 /// Save the session registry to disk.
@@ -198,7 +274,9 @@ pub fn deregister(session_id: &str) -> Result<bool> {
     let registry_path = registry_path();
     let _lock = RegistryLock::acquire(&registry_path)?;
     let mut registry = load()?;
-    let removed = registry.remove(session_id).is_some();
+    let removed = find_registry_key_by_session_id(&registry, session_id)
+        .and_then(|key| registry.remove(&key))
+        .is_some();
     if removed {
         save(&registry)?;
     }
@@ -208,7 +286,7 @@ pub fn deregister(session_id: &str) -> Result<bool> {
 pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
     // Query the window ID for this pane
     let window = pane_window(pane_id).unwrap_or_default();
-    register_full(session_id, pane_id, file, pid, &window)
+    register_full_internal_call(session_id, pane_id, file, pid, &window, None, None)
 }
 
 /// Like `register_with_pid` but accepts an explicit `cwd` override.
@@ -222,7 +300,26 @@ pub fn register_with_pid_and_cwd(
     cwd: &str,
 ) -> Result<()> {
     let window = pane_window(pane_id).unwrap_or_default();
-    register_full_with_cwd(session_id, pane_id, file, pid, &window, cwd)
+    register_full_with_cwd_internal_call(session_id, pane_id, file, pid, &window, cwd, None)
+}
+
+pub fn register_supervisor(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    supervisor_pid: u32,
+    supervisor_instance_id: &str,
+) -> Result<()> {
+    let window = pane_window(pane_id).unwrap_or_default();
+    register_full_internal_call(
+        session_id,
+        pane_id,
+        file,
+        supervisor_pid,
+        &window,
+        None,
+        Some(supervisor_instance_id),
+    )
 }
 
 pub fn register_full(
@@ -232,8 +329,7 @@ pub fn register_full(
     pid: u32,
     window: &str,
 ) -> Result<()> {
-    let base_dir = std::env::current_dir()?;
-    register_full_in(&base_dir, session_id, pane_id, file, pid, window)
+    register_full_internal_call(session_id, pane_id, file, pid, window, None, None)
 }
 
 /// Like `register_full` but with an explicit `base_dir` for the registry.
@@ -259,6 +355,7 @@ pub fn register_full_in(
         pid,
         window,
         &cwd,
+        None,
     )
 }
 
@@ -271,8 +368,7 @@ pub fn register_full_with_cwd(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let base_dir = std::env::current_dir()?;
-    register_full_with_cwd_in(&base_dir, session_id, pane_id, file, pid, window, cwd)
+    register_full_with_cwd_internal_call(session_id, pane_id, file, pid, window, cwd, None)
 }
 
 /// Like `register_full_with_cwd` but with an explicit `base_dir` for the registry.
@@ -296,6 +392,60 @@ pub fn register_full_with_cwd_in(
         pid,
         window,
         cwd,
+        None,
+    )
+}
+
+fn register_full_internal_call(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: Option<&str>,
+    supervisor_instance_id: Option<&str>,
+) -> Result<()> {
+    let base_dir = std::env::current_dir()?;
+    let resolved_cwd = cwd
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| base_dir.to_string_lossy().to_string());
+    let _lock = RegistryLock::acquire(&registry_path_in(&base_dir))?;
+    let mut registry = load_in(&base_dir)?;
+    register_full_internal(
+        &base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        &resolved_cwd,
+        supervisor_instance_id,
+    )
+}
+
+fn register_full_with_cwd_internal_call(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+    supervisor_instance_id: Option<&str>,
+) -> Result<()> {
+    let base_dir = std::env::current_dir()?;
+    let _lock = RegistryLock::acquire(&registry_path_in(&base_dir))?;
+    let mut registry = load_in(&base_dir)?;
+    register_full_internal(
+        &base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        cwd,
+        supervisor_instance_id,
     )
 }
 
@@ -308,13 +458,16 @@ fn register_full_internal(
     pid: u32,
     window: &str,
     cwd: &str,
+    supervisor_instance_id: Option<&str>,
 ) -> Result<()> {
     let started = chrono_now();
+    let registry_key = canonical_registry_key_in(base_dir, file);
+    let supervisor_instance_id = supervisor_instance_id.unwrap_or_default().to_string();
 
     // Enforce single session per pane: remove stale entries pointing to same pane
     let stale_keys: Vec<String> = registry
         .iter()
-        .filter(|(k, e)| e.pane == pane_id && k.as_str() != session_id)
+        .filter(|(k, e)| e.pane == pane_id && entry_session_id(k, e) != session_id)
         .map(|(k, _)| k.clone())
         .collect();
     for key in &stale_keys {
@@ -325,19 +478,21 @@ fn register_full_internal(
         registry.remove(key);
     }
 
-    if let Some(previous) = registry.get(session_id).cloned() {
+    if let Some(previous) = registry.get(&registry_key).cloned() {
         log_session_rebind(base_dir, session_id, &previous, pane_id, window);
     }
 
     registry.insert(
-        session_id.to_string(),
+        registry_key,
         SessionEntry {
             pane: pane_id.to_string(),
             pid,
             cwd: cwd.to_string(),
             started,
+            session_id: session_id.to_string(),
             file: file.to_string(),
             window: window.to_string(),
+            supervisor_instance_id,
         },
     );
     save_in(base_dir, &registry)
@@ -418,13 +573,15 @@ pub fn pane_window(pane_id: &str) -> Result<String> {
 /// Look up the pane ID for a session.
 pub fn lookup(session_id: &str) -> Result<Option<String>> {
     let registry = load()?;
-    Ok(registry.get(session_id).map(|e| e.pane.clone()))
+    Ok(find_registry_key_by_session_id(&registry, session_id)
+        .and_then(|key| registry.get(&key).map(|entry| entry.pane.clone())))
 }
 
 /// Look up a full registry entry by session ID.
 pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
     let registry = load()?;
-    Ok(registry.get(session_id).cloned())
+    Ok(find_registry_key_by_session_id(&registry, session_id)
+        .and_then(|key| registry.get(&key).cloned()))
 }
 
 /// Get the pane ID of the current pane.
@@ -583,14 +740,17 @@ mod tests {
                 pid: 12345,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "test-session".to_string(),
                 file: "test.md".to_string(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
         save_in(dir.path(), &reg).unwrap();
         let loaded = load_in(dir.path()).unwrap();
+        let key = canonical_registry_key_in(dir.path(), "test.md");
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded["test-session"].pane, "%42");
+        assert_eq!(loaded[&key].pane, "%42");
     }
 
     #[test]
@@ -615,8 +775,10 @@ mod tests {
                 pid: 1000,
                 cwd: "/tmp/a".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-a".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
         reg.insert(
@@ -626,8 +788,10 @@ mod tests {
                 pid: 2000,
                 cwd: "/tmp/b".to_string(),
                 started: "2026-01-01T00:01:00Z".to_string(),
+                session_id: "session-b".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
 
@@ -651,8 +815,10 @@ mod tests {
                 pid: 100,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-x".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
         reg.insert(
@@ -662,8 +828,10 @@ mod tests {
                 pid: 200,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:05:00Z".to_string(),
+                session_id: "session-x".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
 
@@ -683,8 +851,10 @@ mod tests {
                 pid: 1,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "dead-session-1".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
         reg.insert(
@@ -694,8 +864,10 @@ mod tests {
                 pid: 2,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "dead-session-2".to_string(),
                 file: String::new(),
                 window: String::new(),
+                supervisor_instance_id: String::new(),
             },
         );
 
@@ -842,11 +1014,9 @@ mod tests {
         .unwrap();
 
         let loaded = load_in(dir.path()).unwrap();
-        assert!(
-            loaded.contains_key("session-cwd-test"),
-            "session should be registered"
-        );
-        let entry = &loaded["session-cwd-test"];
+        let key = canonical_registry_key_in(dir.path(), "plan.md");
+        assert!(loaded.contains_key(&key), "session should be registered");
+        let entry = &loaded[&key];
         assert_eq!(
             entry.cwd, explicit_cwd,
             "stored cwd must match the explicit value passed in"
@@ -876,7 +1046,8 @@ mod tests {
         .unwrap();
 
         let loaded = load_in(dir.path()).unwrap();
-        let entry = &loaded["s-explicit"];
+        let key = canonical_registry_key_in(dir.path(), "doc.md");
+        let entry = &loaded[&key];
         assert_eq!(entry.cwd, explicit_cwd);
         // Verify it differs from the actual process cwd
         let process_cwd = std::env::current_dir()
@@ -904,8 +1075,10 @@ mod tests {
                 pid: 100,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-a".to_string(),
                 file: "old-file.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         reg.insert(
@@ -915,8 +1088,10 @@ mod tests {
                 pid: 100,
                 cwd: "/tmp".to_string(),
                 started: "2026-01-01T00:01:00Z".to_string(),
+                session_id: "session-b".to_string(),
                 file: "another-old.md".to_string(),
                 window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         save_in(dir.path(), &reg).unwrap();
@@ -925,18 +1100,21 @@ mod tests {
         register_full_in(dir.path(), "session-c", "%42", "new-file.md", 200, "@1").unwrap();
 
         let loaded = load_in(dir.path()).unwrap();
+        let new_key = canonical_registry_key_in(dir.path(), "new-file.md");
+        let old_key_a = canonical_registry_key_in(dir.path(), "old-file.md");
+        let old_key_b = canonical_registry_key_in(dir.path(), "another-old.md");
         // Only session-c should remain for pane %42
-        assert!(loaded.contains_key("session-c"), "new session should exist");
+        assert!(loaded.contains_key(&new_key), "new session should exist");
         assert!(
-            !loaded.contains_key("session-a"),
+            !loaded.contains_key(&old_key_a),
             "old session-a should be removed"
         );
         assert!(
-            !loaded.contains_key("session-b"),
+            !loaded.contains_key(&old_key_b),
             "old session-b should be removed"
         );
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded["session-c"].file, "new-file.md");
+        assert_eq!(loaded[&new_key].file, "new-file.md");
     }
 
     #[test]
@@ -960,8 +1138,10 @@ mod tests {
                 pid: 100,
                 cwd: dir.path().display().to_string(),
                 started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-rebind".to_string(),
                 file: "tasks/rebind.md".to_string(),
                 window: "@7".to_string(),
+                supervisor_instance_id: String::new(),
             },
         );
         save_in(dir.path(), &reg).unwrap();

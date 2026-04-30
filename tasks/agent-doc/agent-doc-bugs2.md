@@ -121,7 +121,7 @@ Added concrete next-step backlog items for both issue families:
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 
 The top backlog id is `#smliveplan`.
-<!-- agent:boundary:c9870070 -->
+<!-- agent:boundary:c35a6223 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -138,9 +138,9 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#smliveplan] Reconstruct the / alive-owner startup-miss episodes from ops.log and session logs, then add a regression proving routed triggers either open a new cycle or fail with durable provenance on a live pane.
-- [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves  may split alongside another pane but can never dispatch into a pane owned by a different document.
+- [ ] [#smliveplan] Reconstruct the `%412`/`%493` alive-owner startup-miss episodes from ops.log and session logs, then add a regression proving routed triggers either open a new cycle or fail with durable provenance on a live pane.
 - [ ] [#smlive] Prove and fix routed startup-miss false negatives on alive owner panes so accepted triggers always open a new cycle or fail with durable provenance instead of repeating on a healthy live pane.
+- [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 - [ ] [#rtxfreg] Add a regression/verification pass for cross-file tmux dispatch so split-anchor selection can never again target a pane owned by another document in the same session.
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

@@ -250,7 +250,27 @@ Published:
 - `src/agent-doc` commit `4291744` (`fix: guard fresh route dispatch target`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:8ca44185 -->
+❯ do #mcrc. spec-test-build-install-commit-push
+### Re: #mcrc — gpt-5
+
+`#mcrc` is already implemented in the current `src/agent-doc` branch; no new code change was needed in this turn.
+
+What I verified:
+- The fix landed earlier in `src/agent-doc` commit `ac63c22` (`fix: surface manual patchback follow-through`), and that commit is contained in the current pushed branch head `4291744` on `origin/20260422/codex-agent-backend`.
+- The current tree still contains the `session-check` manual-repair / commit-boundary follow-through message plus the matching `repair` / `preflight` fail-closed path and command-spec text.
+- The dedicated regressions for this bug family are present and passed in the full test run, including `session_check_surfaces_manual_patchback_follow_through` and `preflight_fails_closed_on_ambiguous_preflight_started_patchback_without_artifact`.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml` passed.
+- `cargo install --path src/agent-doc --force` passed.
+
+Current branch verification status:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` is not fully green, but the remaining failures are unrelated to `#mcrc`:
+  - `route::tests::alive_registered_pane_without_live_owner_deregisters_and_lazy_claims`
+  - `resync::tests::purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner`
+
+Because this fix was already implemented and pushed before this turn, there was no new `src/agent-doc` code delta to commit or push today.
+
+No new backlog items came out of this verification pass.
+<!-- agent:boundary:1ff4c202 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -267,7 +287,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.

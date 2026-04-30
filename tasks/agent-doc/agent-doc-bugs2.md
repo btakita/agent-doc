@@ -765,10 +765,18 @@ Implemented `#pathprov` with PID, pane, and supervisor instance identity.
 #### Published
 - `src/agent-doc`: `44339e5` pushed to `origin/20260422/codex-agent-backend`
 - `src/tmux-router`: `0070556` pushed to `origin/main`
-<!-- agent:boundary:47251031 -->
+### Re: follow-up — gpt-5
+
+No additional document changes to respond to beyond the `fg` reopen prompt. `#pathprov` is implemented, verified, built, installed, committed, and pushed.
+<!-- agent:boundary:3ee7b579 -->
 <!-- /agent:exchange -->
 
 <!--
+The claudescore-3.md pane kept on being swapped out of the `agent-doc` tmux window during the last agent-doc turn on this document.
+If I quickly switched back to claudescore-3.md, I retrieved the running pane.
+If I waited too long, I lost the running pane.
+
+Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov fix 
 -->
 
 ## Pending / Not Built

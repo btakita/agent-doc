@@ -34,9 +34,11 @@
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
 //!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
 //!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
-//!   Prompt decisions are logged explicitly, stdin EOF at that prompt counts
-//!   as quit, and non-empty non-`q` input is rejected and re-prompted instead
-//!   of silently restarting fresh.
+//!   Prompt decisions are logged explicitly. Prompt-time stdin EOF normally
+//!   counts as quit, except for a first-run Ctrl-D prompt inside the early
+//!   startup grace window, which restarts fresh so transient tmux stash/rescue
+//!   input races do not close the claimed pane. Non-empty non-`q` input is
+//!   rejected and re-prompted instead of silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
@@ -169,6 +171,7 @@ const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
+const EARLY_CTRL_D_EOF_RESTART_WINDOW: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -293,6 +296,19 @@ enum PromptOutcome {
     Quit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptEofPolicy {
+    Quit,
+    RestartFresh,
+}
+
+fn ctrl_d_prompt_eof_policy(run_duration: Duration, restart_count: u32) -> PromptEofPolicy {
+    if restart_count == 0 && run_duration <= EARLY_CTRL_D_EOF_RESTART_WINDOW {
+        return PromptEofPolicy::RestartFresh;
+    }
+    PromptEofPolicy::Quit
+}
+
 fn classify_prompt_decision(bytes_read: usize, input: &str) -> PromptDecision {
     if bytes_read == 0 {
         return PromptDecision::QuitEof;
@@ -337,6 +353,7 @@ fn prompt_for_restart_or_quit(
     prompt_kind: &str,
     prompt_text: &str,
     quit_event: &str,
+    eof_policy: PromptEofPolicy,
 ) -> PromptOutcome {
     loop {
         eprintln!("{prompt_text}");
@@ -353,13 +370,22 @@ fn prompt_for_restart_or_quit(
                 log_event(session_log, quit_event);
                 return PromptOutcome::Quit;
             }
-            PromptDecision::QuitEof => {
-                log_event(
-                    session_log,
-                    &format!("user_quit_after_eof prompt={prompt_kind}"),
-                );
-                return PromptOutcome::Quit;
-            }
+            PromptDecision::QuitEof => match eof_policy {
+                PromptEofPolicy::Quit => {
+                    log_event(
+                        session_log,
+                        &format!("user_quit_after_eof prompt={prompt_kind}"),
+                    );
+                    return PromptOutcome::Quit;
+                }
+                PromptEofPolicy::RestartFresh => {
+                    log_event(
+                        session_log,
+                        &format!("user_restart_fresh_after_eof prompt={prompt_kind}"),
+                    );
+                    return PromptOutcome::RestartFresh;
+                }
+            },
             PromptDecision::RestartFresh => {
                 log_event(
                     session_log,
@@ -1783,6 +1809,8 @@ pub fn run(file: &Path) -> Result<()> {
             args
         };
 
+        let run_started_at = Instant::now();
+
         // Build PtySpawnConfig and spawn child under pty
         let cfg = PtySpawnConfig {
             program: harness.binary.clone(),
@@ -1949,6 +1977,7 @@ pub fn run(file: &Path) -> Result<()> {
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
+        let run_duration = run_started_at.elapsed();
 
         if matches!(
             auto_trigger_outcome,
@@ -1992,6 +2021,7 @@ pub fn run(file: &Path) -> Result<()> {
                             "clean_exit",
                             "Press Enter to restart, or 'q' to exit.",
                             "user_quit",
+                            PromptEofPolicy::Quit,
                         ) {
                             PromptOutcome::Quit => {
                                 supervisor_exit_reason = "user_quit_clean_exit";
@@ -2067,6 +2097,11 @@ pub fn run(file: &Path) -> Result<()> {
                                     prompt_kind,
                                     "Press Enter to restart fresh, or 'q' to exit.",
                                     quit_event,
+                                    if ctrl_d_forwarded {
+                                        ctrl_d_prompt_eof_policy(run_duration, restart_count)
+                                    } else {
+                                        PromptEofPolicy::Quit
+                                    },
                                 ) {
                                     PromptOutcome::Quit => {
                                         supervisor_exit_reason = match prompt_kind {
@@ -2822,6 +2857,26 @@ mod tests {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0),
             RestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn ctrl_d_prompt_eof_policy_restarts_fresh_for_early_first_exit() {
+        assert_eq!(
+            ctrl_d_prompt_eof_policy(Duration::from_secs(8), 0),
+            PromptEofPolicy::RestartFresh
+        );
+    }
+
+    #[test]
+    fn ctrl_d_prompt_eof_policy_quits_after_grace_window_or_restart() {
+        assert_eq!(
+            ctrl_d_prompt_eof_policy(EARLY_CTRL_D_EOF_RESTART_WINDOW + Duration::from_secs(1), 0),
+            PromptEofPolicy::Quit
+        );
+        assert_eq!(
+            ctrl_d_prompt_eof_policy(Duration::from_secs(5), 1),
+            PromptEofPolicy::Quit
         );
     }
 

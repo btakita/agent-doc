@@ -151,7 +151,12 @@ on claude exit with code c:
                          later `session_start` / `session_end` transitions keep
                          user-input provenance in the session log
                          AND stdin EOF at that prompt counts as quit, not as an
-                         implicit restart
+                         implicit restart, EXCEPT for a first-run `Ctrl-D` prompt
+                         that fires inside the early-start grace window after a
+                         fresh pane start: that specific EOF must restart fresh
+                         instead of closing the pane so transient tmux
+                         stash/rescue input races do not look like an
+                         intentional quit
                          AND non-empty non-`q` input is rejected with a
                          re-prompt instead of silently restarting fresh
                          AND resume auto-trigger only accepts a prompt line that

@@ -655,7 +655,7 @@ I already ran the requested spec/test/build/install/commit/push cycle for this t
 - commit `1fc5a67` pushed to `origin/20260422/codex-agent-backend`
 
 I updated the `#tmuxcrash` backlog child list so it now shows completed `[x]` work and remaining `[ ]` work in one tracked sublist. The parent `#tmuxcrash` item stays open because the end-to-end restarted second-leg closeout proof in `#tmuxcrash-9rh5` is still the hard remaining check.
-continue #tmuxcrash. spec-test-build-install-commit-push
+❯ continue #tmuxcrash. spec-test-build-install-commit-push
 ### Re: `#tmuxcrash` narrowed remaining scope — gpt-5
 
 I continued `#tmuxcrash`, but this turn did not need a new repo code change. The remaining gap is now evidence reduction, not another tmux recovery path.
@@ -695,7 +695,33 @@ Published:
 - `src/agent-doc` commit `2460ef4` pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog item was added for this turn; this closes the duplicate-id regression without marking `#tmuxcrash` itself done.
-<!-- agent:boundary:ce831d67 -->
+continue #tmuxcrash. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` supervisor exit provenance — gpt-5
+
+I made an incremental provenance improvement under `#tmuxcrash`. The backlog item remains open and unchanged.
+
+Why the old drafted `echo '[agent-doc] startup-miss: ...'` text showed up in the Codex prompt and was not Entered:
+- that was the pre-`#smdq` path, where route injected a literal shell `echo ...` line into the pane input buffer instead of rendering a tmux-owned diagnostic
+- Codex treated that as pending composer input, not as an already-submitted shell command, so it sat visibly in the prompt box and looked like a hung/crashed pane
+- that path is already gone in current code: startup-miss notices now use `tmux display-message` and are not supposed to land as drafted harness input
+
+What I changed in `src/agent-doc`:
+- `start.rs` now logs child exit provenance on every `*_exit` and `restart_eval`: `exit_kind`, signal name when present, and the rendered exit status text
+- the supervisor now appends `supervisor_exit reason=...` immediately before `session_end`, so later forensics can distinguish deliberate quits / IPC stops / flapping halts from synthetic missing-pane recovery written elsewhere
+- updated `specs/supervisor.md` and `VERSIONS.md`
+- added regression coverage for signal-terminated and nonzero child-exit rendering
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `23f7f5e` pushed to `origin/20260422/codex-agent-backend`
+
+I did not mark `#tmuxcrash` done and I did not mutate backlog state in this turn.
+<!-- agent:boundary:eff26ddc -->
 <!-- /agent:exchange -->
 
 <!--

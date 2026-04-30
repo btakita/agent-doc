@@ -826,7 +826,34 @@ Note:
 Implemented `#rbret` in `src/agent-doc` and closed the editor-return rebind gap. `start` now reuses a proven live owner even when supervisor IPC is stale, `sync` clears superseded startup-miss markers and skips auto-start when an alive pane still owns the unresolved marker, and `route` now preserves and reasserts the fresh pane binding through stale-registration recovery so the replacement owner is not lost.
 
 Updated `specs/07-commands.md` and `VERSIONS.md`, ran `cargo test`, the sequential tmux-heavy shards (`route::tests::`, `resync::tests::`, `autoclaim::tests::`), `cargo build`, and `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`. Committed and pushed as `efa465d` (`fix: rebind editor-return sessions safely`) on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:f1c2bcab -->
+❯ do #dupfx. spec-test-build-install-commit-push
+### Re: #dupfx — gpt-5
+
+Implemented `#dupfx` in `src/agent-doc`.
+
+What changed:
+- `write.rs` now re-runs exchange prompt-prefix normalization on the final merged template/CRDT transcript, so a concurrent bare `do #...` line cannot survive the merge and trip post-commit `session-check` after the response already committed.
+- Strict replay paths now adopt the current transcript when the same visible response block is already present, instead of merging the same response body a second time and duplicating the `### Re:` block.
+- `repair.rs` now exposes the same normalized visible-response matcher so recovery and write-time replay checks share one duplicate detector.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the merged-normalization and replay-dedup invariants.
+
+Verification:
+- `cargo fmt --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml agent::tests::codex_network_status_detects_inherited_disable_mismatch -- --nocapture`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo build --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml`
+- `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `9a75546` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- The first full `cargo test` run hit one transient failure in `agent::tests::codex_network_status_detects_inherited_disable_mismatch`; the isolated rerun passed, and the subsequent full suite rerun passed cleanly.
+- I left the unrelated workspace changes outside `src/agent-doc` untouched.
+<!-- agent:boundary:78d57ae2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -840,7 +867,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md

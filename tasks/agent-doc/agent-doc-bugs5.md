@@ -54,7 +54,7 @@ The gap: when the pane dies during preflight (after `start_preflight()` but befo
 4. **Periodic checkpoint capture** — For responses in-flight when the pane dies:
    - Add a periodic capture (e.g., every 30s during response streaming) so partial responses can be recovered
    - This addresses the broader "mid-generation pane death" scenario from agent-doc-bugs.md item 2
-### Re: #agent-doc-bug — icebox component patch not parsed — opus-4-6
+### Re: #agent-doc-bug — icebox component patch not parsed — opus-4-6 (HEAD)
 
 **Bug:** When the skill includes `<!-- patch:icebox -->` or `<!-- replace:icebox -->` blocks in the response heredoc piped to `agent-doc finalize`, the binary does not parse them as component patches. It reports "0 template patches found" and treats everything as unmatched exchange content, inserting the full icebox item list into the exchange body via boundary synthesis fallback.
 

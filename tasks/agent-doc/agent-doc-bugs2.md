@@ -77,6 +77,7 @@ Verification:
 
 I did not commit or push. The worktree already has unrelated in-flight changes, including `src/agent-doc/src/resync.rs`, multiple sibling submodules, and session documents, so an automatic commit would not have been isolated or safe.
 <!-- agent:boundary:0566c854 -->
+commit + push all uncommitted files
 <!-- /agent:exchange -->
 
 <!--

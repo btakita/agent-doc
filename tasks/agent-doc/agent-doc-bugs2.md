@@ -76,7 +76,25 @@ Verification:
 - `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
 
 I did not commit or push. The worktree already has unrelated in-flight changes, including `src/agent-doc/src/resync.rs`, multiple sibling submodules, and session documents, so an automatic commit would not have been isolated or safe.
-<!-- agent:boundary:e4021750 -->
+❯ commit + push all uncommitted files
+### Re: commit + push all uncommitted files — gpt-5
+
+Committed and pushed every previously dirty repository in this workspace.
+
+Pushed commits:
+- `src/session-share/claudescore.com` `27236b5` on `main` (`feat: update scoring calibration assets`)
+- `src/session-share` `56a858f` on `main` (`docs: refresh claudescore session artifacts`)
+- `src/agent-doc` `b55f08e` on `20260422/codex-agent-backend` (`fix: harden sync pane ownership recovery`)
+- `src/agent-kit` `89f912d` on `main` (`chore: refresh Cargo.lock`)
+- `src/chromium-bridge` `3c7b6f1` on `main` (`chore: refresh Cargo.lock`)
+- `src/corky` `6a9ced3` on `20260413/corky-gsc` (`chore: refresh Cargo.lock`)
+- `src/eval-runner` `9724f05` on `main` (`chore: refresh Cargo.lock`)
+- `src/module-harness` `cea1b2a` on `main` (`chore: refresh Cargo.lock`)
+- `src/tagpath` `c7ca193` on `main` (`chore: refresh Cargo.lock`)
+- workspace root `a32f5459d` on `main` (`chore: sync workspace updates`)
+
+I also committed this document closeout at the workspace root. The workspace was clean before the closeout commit.
+<!-- agent:boundary:87cd45f7 -->
 <!-- /agent:exchange -->
 
 <!--

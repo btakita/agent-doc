@@ -615,12 +615,46 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 `src/agent-doc` is already at pushed HEAD (`d8ea9d9` on `origin/20260422/codex-agent-backend`), so the only remaining closeout here is marking `#c3tmux` done in this session document.
-Why did /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md close.
+❯ Why did /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md close.
 To me it seems that the provin6ce model has fundamental issues.
 `#c3tmux` is closed in [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). No new code delta was needed: the fix was already landed in `src/agent-doc` via `674e568`, `efa465d`, and `dda7faa`, and that subrepo is already at pushed `d8ea9d9` on `origin/20260422/codex-agent-backend`.
 
 I verified it with the focused regressions, full `cargo test`, `cargo build`, and `cargo install --path src/agent-doc --force`. The session-doc closeout commit is `9a3b81d92`, `main` is pushed to `origin`, and `agent-doc session-check` passed. The workspace is still locally dirty from later session-doc drift plus pre-existing changes in `src/agent-doc`, `src/session-share`, and `tasks/agent-doc/plan-stop-hook-write-applied-rewind.md`.
-<!-- agent:boundary:fffc3096 -->
+❯ Why did /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md close.
+❯ To me it seems that the provinance model still has fundamental issues. Please investigate. spec-test-build-install-commit-push
+### Re: claudescore-3 close + provenance follow-up — gpt-5
+
+I investigated the newer `claudescore-3.md` close/replacement loop. This was **not** the older cross-file route bug.
+
+What the local evidence showed:
+- `ops.log` records a real `commit_success` for `tasks/claudescore-3.md` at `1777574286`, then later a tiny prompt-bearing drift (`drift=16`) classified as `post_commit_local_drift kind=user_follow_up`.
+- After that, the session log repeatedly recorded pane-era replacements:
+  - `%583 -> %2`
+  - `%4 -> %6`
+  - `%6 -> %12`
+  - `%12 -> %17`
+- In those replacements, the older pane era never recorded a harness child exit before `session_superseded ... origin=registry_rebind`.
+- That exposed a remaining provenance hole in `start.rs`: a supervisor state of `halted` was still treated as sufficient authority to replace an alive registered pane, even when the session log still proved that pane was the latest open run with no later `*_exit` or `session_end`.
+
+What changed:
+- `start.rs` now fails closed on that exact stranded-owner shape instead of registry-rebinding a fresh pane on top of it.
+- Added regression coverage for open vs closed session-log rebind decisions.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+What this means for the broader provenance-model concern:
+- Yes, there was still a real provenance bug here: halted supervisor state was outranking open session-log evidence.
+- The separate post-turn dirty-doc classification issue is still the `#closeout-bypass` family tracked in [agent-doc-bugs3.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs3.md).
+- No new backlog item came out of this fix because that remaining separate issue is already tracked there.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `56c977c` (`fix: fail closed on stranded session-log rebind`) pushed to `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:9ae6dad6 -->
 <!-- /agent:exchange -->
 
 <!--

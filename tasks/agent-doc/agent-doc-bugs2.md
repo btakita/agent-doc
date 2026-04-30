@@ -113,7 +113,23 @@ So the difference between actual and intended behavior is:
 - Actual: the visible second column exists, but `claudescore-3.md` is still blocked on stale ownership metadata that points at `%75`, which belongs to this document. The result is a shell pane with an error instead of a running child.
 
 That lines up with `#asfc`, not the sync-layout bug I just fixed. The pane is no longer being collapsed out of the window; the remaining failure is stale live-pane provenance during `start`/rebind.
-<!-- agent:boundary:c502a8cf -->
+❯ <!- agent:boundary:c502a8cf -->
+### Re: pane behavior vs expected behavior — gpt-5
+
+I observed a real live mismatch, but it is no longer a window-layout mismatch.
+
+Current live state:
+- tmux window `0:agent-doc` has the intended two panes: `%75` at `/home/brian/work/btakita/agent-loop` and `%97` at `/home/brian/work/btakita/agent-loop/src/session-share`.
+- `%75` is the claimed live owner for `tasks/agent-doc/agent-doc-bugs2.md`.
+- `%97` is not a healthy `claudescore-3.md` child. Its pane contents show a failed `agent-doc start tasks/claudescore-3.md` attempt that returned to the shell prompt with:
+  `registered pane %75 for tasks/claudescore-3.md is still alive but no live owner was proven and the supervisor is unavailable`
+
+So the difference between actual and intended behavior is:
+- Intended: each document owns its own live pane, and `claudescore-3.md` should either rebind to its real pane or auto-recover into the visible `src/session-share` pane.
+- Actual: the visible second column exists, but `claudescore-3.md` is still blocked on stale ownership metadata that points at `%75`, which belongs to this document. The result is a shell pane with an error instead of a running child.
+
+That lines up with `#asfc`, not the sync-layout bug I just fixed. The pane is no longer being collapsed out of the window; the remaining failure is stale live-pane provenance during `start`/rebind.
+<!-- agent:boundary:3c99e1d9 -->
 <!-- /agent:exchange -->
 
 <!--

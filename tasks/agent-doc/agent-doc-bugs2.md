@@ -518,7 +518,7 @@ Published:
 
 Note:
 - I left unrelated dirty files elsewhere in the workspace untouched.
-continue with #tmuxcrash. spec-test-build-install-commit-push
+❯ continue with #tmuxcrash. spec-test-build-install-commit-push
 ### Re: tmux route owner proof under `#tmuxcrash` — gpt-5
 
 I continued the `#tmuxcrash` investigation and fixed a live tmux-backed routing bug that the manual Codex repro exposed.
@@ -540,7 +540,31 @@ Published:
 
 Note:
 - I did not mark `#tmuxcrash` done in backlog. This fix came out of the live repro, but the broader crash-provenance item still has remaining scope beyond this route-owner false positive.
-<!-- agent:boundary:570b10f2 -->
+continue with #tmuxcrash. spec-test-build-install-commit-push
+### Re: halted supervisor crash-loop guard under `#tmuxcrash` — gpt-5
+
+I continued `#tmuxcrash` and fixed one remaining false-crash recovery path: route/start were still treating a supervisor already in `halted` state as generic restartable state. This closes that subcase only; the parent `#tmuxcrash` item remains open.
+
+- `route.rs` now distinguishes `healthy`, `restartable`, and `halted` supervisor states. When a registered pane has no live-owner proof and its supervisor is already halted, route now fails closed with the pane id and restart count instead of auto-restarting that pane or auto-starting a replacement on top of the crash loop.
+- `start.rs` now uses the same classifier, but for an explicit manual `agent-doc start <FILE>` it clears the stale halted binding and starts fresh instead of reviving the same halted supervisor loop in place.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage for halted-state classification, stale-start handling, and the route fail-closed path.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `a8253a4` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I did not mark `#tmuxcrash` done. The remaining tracked work is still the end-to-end restarted second-leg live repro / closeout proof in `#tmuxcrash-9rh5`.
+<!-- agent:boundary:c5fdc822 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -561,6 +585,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
+- [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 - [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.

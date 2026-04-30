@@ -573,7 +573,28 @@ Updated [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc
 `prompt_target: do #smliveplan + #smlive. spec-test-build-install-commit-push`
 
 I ran the normal `finalize`/`commit` recovery flow, `repair`, and then stabilized the document state in git, but the guard still points at that older cycle metadata rather than any live diff in this file.
-<!-- agent:boundary:7cb6353e -->
+### Re: Stop hook entry + recovery — gpt-5
+
+We got into the Stop hook because the closeout metadata for `cycle-1777577852817` became internally inconsistent on April 30, 2026.
+
+What happened:
+- the active Codex-hook session tracked this file in `.agent-doc/codex-hooks/sessions/4fe6031aba8d1e9b593f5bde1baf0ec863bb7768750550b9af57bf99424b9a85.json`
+- the capture file for `cycle-1777577852817` says the response was committed
+- the session log records `commit_success` for that same cycle
+- but the cycle-state file was later rewritten to `phase: write_applied` / `last_event: repair_applied`
+
+That last rewind is what pulled us into the Stop hook: the hook keys off the open cycle-state file, so it saw "response write landed but no terminal commit followed" even though the capture and log already proved a commit happened.
+
+Recovery status:
+- I repaired the cycle through the binary-owned path and the active cycle is back to `phase: committed`
+- the Stop-hook-specific open-cycle failure is recovered
+- the remaining `session-check` issue from the earlier turn is a separate pending-done heuristic on the older recovered prose, not the Stop-hook cycle itself
+
+I also logged this as a new backlog item: `#stphk`.
+Plan: [plan-stop-hook-write-applied-rewind.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-stop-hook-write-applied-rewind.md)
+
+`#c3tmux` and `#duppb` remain open.
+<!-- agent:boundary:4fcfe9b5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -587,6 +608,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#c3tmux] src/session-share/tasks/claudescore-3.md unexpectedly started a new tmux session instead of reusing the existing live session. Repro from Apr 30, 2026. Fix should preserve session ownership.
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

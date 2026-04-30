@@ -235,6 +235,10 @@ Single log file per session at `.agent-doc/logs/<session-uuid>.log`, same path a
 Example:
 ```
 [1713041234] session_start file=tasks/plan.md pane=%12 session=abc12345
+[1713041235] document_cycle phase=preflight_started cycle=cycle-1713041235000 event=preflight_started
+[1713041237] document_cycle phase=response_captured cycle=cycle-1713041235000 event=response_captured capture_id=cycle-1713041235000
+[1713041238] document_cycle phase=write_applied cycle=cycle-1713041235000 event=write_template
+[1713041239] document_cycle phase=committed cycle=cycle-1713041235000 event=commit_success
 [1713041234] [supervisor] pty_allocated rows=40 cols=120
 [1713041234] [supervisor] cwd_resolved path=/home/brian/work/agent-loop source=project_root
 [1713041234] [supervisor] claude_spawn pid=54321 mode=fresh
@@ -250,6 +254,14 @@ Example:
 [1713041450] [supervisor] supervisor_exit reason=user_quit_clean_exit pane=%12 restart_count=1
 [1713041450] session_end
 ```
+
+Document closeout phases share the same per-session log:
+- `document_cycle phase=preflight_started ...`
+- `document_cycle phase=response_captured ...`
+- `document_cycle phase=write_applied ...`
+- `document_cycle phase=committed ...`
+
+Those entries are not supervisor lifecycle events, but they must land in the same `.agent-doc/logs/<session>.log` timeline so crash forensics can line up child exit / pane-loss provenance with the exact document closeout boundary instead of inferring that boundary from `.agent-doc/state/cycles/...` after the fact.
 
 At minimum, harness exit lines must preserve:
 - exit code

@@ -134,6 +134,7 @@ pub fn start_preflight(
         pending_done_ids: Vec::new(),
     };
     save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
 
@@ -153,6 +154,7 @@ pub fn mark_write_applied(
     state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
     state.normalized_file_hash = file_content.map(normalized_content_hash);
     save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
 
@@ -177,6 +179,7 @@ pub fn mark_response_captured(
     state.capture_id = Some(state.cycle_id.clone());
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
 
@@ -299,7 +302,36 @@ pub fn mark_committed(
         state.normalized_file_hash = Some(normalized_content_hash(content));
     }
     save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
     Ok(state)
+}
+
+fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
+        return;
+    };
+    let Some(session_id) = fm
+        .session
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return;
+    };
+
+    let mut event = format!(
+        "document_cycle phase={} cycle={} event={}",
+        cycle_phase_label(state.phase),
+        state.cycle_id,
+        state.last_event
+    );
+    if let Some(capture_id) = state.capture_id.as_deref() {
+        event.push_str(&format!(" capture_id={capture_id}"));
+    }
+    let _ = crate::startup_miss::append_session_log_event(file, session_id, &event);
 }
 
 fn save(file: &Path, state: &CycleState) -> Result<()> {
@@ -360,6 +392,15 @@ fn synthetic_state_with_id(
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
         pending_done_ids: Vec::new(),
+    }
+}
+
+fn cycle_phase_label(phase: CyclePhase) -> &'static str {
+    match phase {
+        CyclePhase::PreflightStarted => "preflight_started",
+        CyclePhase::ResponseCaptured => "response_captured",
+        CyclePhase::WriteApplied => "write_applied",
+        CyclePhase::Committed => "committed",
     }
 }
 
@@ -582,5 +623,58 @@ mod tests {
         let state = mark_write_applied(&doc, "recover_apply", Some("body"), Some("body")).unwrap();
         assert_eq!(state.phase, CyclePhase::WriteApplied);
         assert!(state.cycle_id.starts_with("synthetic-"));
+    }
+
+    #[test]
+    fn cycle_phase_transitions_append_to_session_log() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "---\nagent_doc_session: sess-123\n---\n\nbody\n").unwrap();
+
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let captured = mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "abc123",
+            Some(&started.cycle_id),
+        )
+        .unwrap();
+        let written =
+            mark_write_applied(&doc, "write_template", Some("body"), Some("body")).unwrap();
+        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/sess-123.log")).unwrap();
+        assert!(log.contains(&format!(
+            "document_cycle phase=preflight_started cycle={} event=preflight_started",
+            started.cycle_id
+        )));
+        assert!(log.contains(&format!(
+            "document_cycle phase=response_captured cycle={} event=response_captured capture_id={}",
+            captured.cycle_id, captured.cycle_id
+        )));
+        assert!(log.contains(&format!(
+            "document_cycle phase=write_applied cycle={} event=write_template",
+            written.cycle_id
+        )));
+        assert!(log.contains(&format!(
+            "document_cycle phase=committed cycle={} event=commit_success",
+            committed.cycle_id
+        )));
+    }
+
+    #[test]
+    fn cycle_phase_transitions_skip_session_log_without_session_id() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body\n").unwrap();
+
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        assert!(
+            !dir.path().join(".agent-doc/logs").exists(),
+            "plain documents without a session id should not create session logs"
+        );
     }
 }

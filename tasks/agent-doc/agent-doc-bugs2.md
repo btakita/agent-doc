@@ -883,7 +883,30 @@ Blocking verification failures from the required parallel `resync::tests::` shar
 - `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`
 
 Those failures are in existing live-tmux readiness / retained-dead-pane paths rather than in the new `#mcrc` regression test, but the shard is still required to pass. So `#mcrc` stays open after this turn.
-<!-- agent:boundary:93b919c5 -->
+❯ do #pbct. spec-test-build-install-commit-push
+### Re: #pbct — gpt-5
+
+I fixed `#pbct`.
+
+What changed in `src/agent-doc`:
+- `plan.rs` now emits `execution_scope=plan_backlog_only` when the active prompt target or harness prompt references `#agent-doc-bug`, and in that scope it suppresses `repo_actions` for the cycle instead of handing implementation work to the harness before plan/backlog capture.
+- The scope check is limited to real prompt targets plus harness-only synthetic prompt lines when there is no document diff, so a later `do #pbct. ...` turn is not misclassified just because the backlog item text itself mentions `#agent-doc-bug`.
+- `prompt_contract.rs`, `specs/07-commands.md`, `runbooks/planning-dispatch.md`, and the bundled `SKILL.md` now document the new `execution_scope` contract so Codex/Claude treat `#agent-doc-bug` turns as report-only until a later explicit `do #id ...` follow-up.
+- I also refreshed the local `.codex` / `.claude` planning-dispatch guidance in this workspace to match the bundled contract.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `f0f54dd` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- `#mcrc` remains open and unchanged from the previous blocked turn.
+- No new backlog item came out of this change.
+<!-- agent:boundary:0c907d1f -->
 <!-- /agent:exchange -->
 
 <!--

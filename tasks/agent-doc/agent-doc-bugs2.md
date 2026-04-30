@@ -1045,10 +1045,8 @@ Artifacts / local testing targets:
 Note:
 - I did not create a source-code commit from this turn because your document edit asked for the version bump and local builds, not a commit/push cycle.
 - No follow-up backlog item came out of this turn.
-<!-- agent:boundary:d4e72270 -->
-<!-- /agent:exchange -->
+❯ .agent-doc/config.toml did not update `tmux_session = "0"` to `tmux_session = "14"` when I started a new binding tmux session. I have since manually updated the tmux_session property. spec-test-build-install-commit-push
 
-<!--
 ```
 ❯ /home/brian/.cargo/bin/agent-doc start tasks/software/tsift.md
 [start] pane %565 is in session '14', expected '0' — auto-relocating to project session
@@ -1057,7 +1055,31 @@ Registered session tsift-v0 → pane %565
 [start] codex network access: enabled (policy: inherit, sandbox: danger-full-access; no inherited CODEX_SANDBOX_NETWORK_DISABLED override)
 Starting codex...
 ```
----
+### Re: tmux_session stale rebinding on start — gpt-5
+
+I fixed the stale `.agent-doc/config.toml` rebinding path in `agent-doc start`.
+
+What changed:
+- `start.rs` now updates the project `tmux_session` pin when a fresh start falls through to the current pane because the previously configured project session is dead. That covers the exact `expected '0'` / registered in `'14'` shape you reported.
+- The rebind is guarded so it does **not** overwrite a still-live configured session; it only persists the caller's session when the old configured session is actually dead.
+- Updated the session-routing specs in `specs/07-commands.md` and `specs/08-session-routing.md` to document the new stale-session rebind rule.
+- Added regression coverage for both paths: dead-session rebind and live-session no-overwrite.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Published:
+- `src/agent-doc` commit `7e078ef` (`fix: rebind dead tmux session pin on start`) pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the existing unrelated local edits in `src/agent-doc/VERSIONS.md` and `src/agent-doc/editors/jetbrains/gradle.properties` untouched.
+- No new backlog item came out of this turn.
+<!-- agent:boundary:e63d0aac -->
+<!-- /agent:exchange -->
+
+<!--
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

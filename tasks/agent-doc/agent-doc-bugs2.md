@@ -913,7 +913,38 @@ Run `/compact`, then re-invoke:
 `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 
 I stopped here intentionally because the skill instructions require a compact/reload boundary before continuing.
-<!-- agent:boundary:fc3ee4fa -->
+❯ Complete `agent-doc incorrectly closed the tmux pane that claimed monsterrodholders.md.`. Every time I navigate the editor to monsterrodholders.md, agent-doc closes the previously running tmux pane with a new pane. Same issue also happens with claudescore-3.md, but less frequently than monsterrodholders.md. Please find the root cause for this issue. Perform a thorough investigation. spec-test-build-install-commit-push
+### Re: tmux pane replacement on editor navigation — gpt-5
+
+I investigated the `monsterrodholders.md` / `claudescore-3.md` pane-replacement reports and fixed the primary closeout bug in `src/agent-doc`.
+
+Root cause:
+- the claimed pane was usually not being killed by `tmux-router` directly
+- the session logs instead showed a clean harness exit followed immediately by the supervisor prompt path, then an automatic quit on prompt-time EOF / inherited Ctrl-D
+- concrete examples in `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log` show `codex_exit code=0` -> `restart_eval ... ctrl_d=true ... action=prompt_user` -> `user_quit_after_ctrl_d` -> `session_end`
+- in this failure shape, editor navigation and stash/rescue churn leave a freshly started pane in a state where the supervisor sees EOF before any real user choice is possible; `start.rs` treated that as an intentional quit, so the claimed pane closed and later route/sync created a replacement pane
+
+What I changed:
+- `start.rs` now treats prompt-time EOF during the early first-run Ctrl-D window as `restart fresh`, not `quit`
+- that keeps a freshly started Codex pane alive through the stash/rescue race instead of collapsing the session and triggering `%old -> %new` replacement churn
+- updated `specs/supervisor.md` and `VERSIONS.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `513fa38` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the unrelated in-progress `src/session_check.rs` change untouched; it is still uncommitted in `src/agent-doc`
+- I did not add a new backlog item because this turn is a diagnosis + fix closeout, not a newly unresolved follow-up
+<!-- agent:boundary:25bc1897 -->
 <!-- /agent:exchange -->
 
 <!--

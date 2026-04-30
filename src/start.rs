@@ -907,6 +907,29 @@ fn should_fail_closed_for_unresolved_startup_miss_rebind(
     current_pane != registered_pane && miss.is_some_and(|miss| miss.pane_id == registered_pane)
 }
 
+fn should_fail_closed_for_open_session_log_rebind(
+    registered_pane: &str,
+    status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> bool {
+    status.is_some_and(|status| {
+        status.latest_start_pane.as_deref() == Some(registered_pane) && status.latest_session_open()
+    })
+}
+
+fn open_session_log_rebind_diagnostic(
+    file: &Path,
+    session_id: &str,
+    registered_pane: &str,
+) -> Result<Option<String>> {
+    let status = crate::startup_miss::session_log_status(file, session_id)?;
+    if !should_fail_closed_for_open_session_log_rebind(registered_pane, status.as_ref()) {
+        return Ok(None);
+    }
+    Ok(crate::startup_miss::session_log_diagnostic(
+        file, session_id,
+    )?)
+}
+
 fn existing_session_pane_action(
     tmux: &sessions::Tmux,
     session_id: &str,
@@ -1579,6 +1602,17 @@ pub fn run(file: &Path) -> Result<()> {
                         );
                     }
                     StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
+                        if let Some(detail) =
+                            open_session_log_rebind_diagnostic(file, &session_id, &stale_pane)?
+                        {
+                            anyhow::bail!(
+                                "registered pane {} for {} still has open session-log provenance ({}), but the supervisor reported halted after {} restarts — refusing to replace the pane without a recorded child exit or session_end",
+                                stale_pane,
+                                file.display(),
+                                detail,
+                                restart_count
+                            );
+                        }
                         eprintln!(
                             "[start] registered pane {} for {} has a halted supervisor after {} restarts — starting fresh via registry rebind so supersession provenance is preserved",
                             stale_pane,
@@ -2885,6 +2919,53 @@ mod tests {
         assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
             "%84", "%42", None
         ));
+    }
+
+    #[test]
+    fn open_session_log_blocks_cross_pane_rebind() {
+        let status = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("claude_start mode=fresh restart_count=0".to_string()),
+            last_event: Some("claude_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+
+        assert!(should_fail_closed_for_open_session_log_rebind(
+            "%42",
+            Some(&status)
+        ));
+        assert!(!should_fail_closed_for_open_session_log_rebind(
+            "%43",
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn closed_session_log_does_not_block_cross_pane_rebind() {
+        let status = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%42".to_string()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("claude_start mode=fresh restart_count=0".to_string()),
+            last_event: Some(
+                "session_end origin=registry_rebind pane=%42 next_pane=%84".to_string(),
+            ),
+            saw_process_exit_after_latest_start: true,
+            saw_session_end_after_latest_start: true,
+            saw_process_exit_after_latest_run: true,
+            saw_session_end_after_latest_run: true,
+        };
+
+        assert!(!should_fail_closed_for_open_session_log_rebind(
+            "%42",
+            Some(&status)
+        ));
+        assert!(!should_fail_closed_for_open_session_log_rebind("%42", None));
     }
 
     #[test]

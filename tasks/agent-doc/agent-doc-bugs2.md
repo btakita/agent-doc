@@ -472,7 +472,27 @@ No new backlog item came out of this answer yet because I can prove the old-vs-n
 To restate that line more precisely: `#staleown` only fixed the branch where an **alive registered pane** had **no process-tree proof**, **no usable supervisor-pid proof**, and an **unavailable supervisor path**. In that exact shape, `start` now fails closed.
 
 It does **not** mean every later pane replacement is forbidden. If some other path still decides to rebind the session, or if a supervisor/restart sequence leads to a fresh-pane handoff with explicit `session_superseded` provenance, that is outside the narrow stale-owner branch that `#staleown` changed.
-<!-- agent:boundary:c66e2770 -->
+❯ do #expatch. spec-test-build-install-commit-push
+### Re: #expatch — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+- `agent-doc patch` now defaults to `replace`, even when the target component is configured as append-mode.
+- Added an explicit `--mode replace|append|prepend` escape hatch for intentional cumulative patching.
+- Updated the command spec and release notes, and added CLI/unit regression coverage for the broken `agent-doc patch <FILE> exchange ...` repair path.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `50fa682` (`fix: default patch command to replace`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:8cbec4ef -->
 <!-- /agent:exchange -->
 
 <!--
@@ -486,7 +506,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#expatch] exchange repair bug: agent-doc patch on template append-mode docs appends the supplied exchange body instead of replacing the existing component. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026: using patch to restore the canonical exchange first left two copies of the late-session exchange history, then three copies on the next repair attempt. Fix: make component patch truly replace paired-marker content regardless of append semantics, or add an explicit replace-only exchange repair path for session recovery.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.

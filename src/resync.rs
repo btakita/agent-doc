@@ -30,9 +30,12 @@
 //!   kills individual unregistered idle shell panes in stash windows. Unregistered
 //!   agent panes in stash are preserved when they still prove ownership of
 //!   some registered document or still host a live supervisor session; otherwise
-//!   they are purged as orphaned. `purge_orphaned_agent_panes`
-//!   removes unregistered agent-doc/claude/node panes from any window, but only when
-//!   the window has at least one other pane (never orphans the last pane).
+//!   they are purged as orphaned. Automatic prune also reaps unregistered
+//!   retained-dead panes in non-stash windows when another pane remains in that
+//!   window, so dead-pane diagnostics do not linger forever after the registry
+//!   forgets them. `purge_orphaned_agent_panes` removes unregistered
+//!   agent-doc/claude/node panes from any window, but only when the window has at
+//!   least one other pane (never orphans the last pane).
 //! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `codex`, `node`) are
 //!   expected occupants of registered panes. `IDLE_SHELLS` (`zsh`, `bash`, `sh`,
 //!   `fish`) are treated as empty/unused slots. Short-lived shell startup helpers
@@ -41,7 +44,8 @@
 //!
 //! ## Agentic Contracts
 //! - `prune()` never kills a registered pane that is alive and in a non-stash window;
-//!   it only removes dead entries from the registry and stash-specific garbage.
+//!   it only removes dead entries from the registry, stash-specific garbage, and
+//!   unregistered retained-dead panes that still have sibling panes.
 //! - User-owned processes (anything not in `AGENT_PROCESSES` or `IDLE_SHELLS`) are
 //!   never killed by any automatic or fix path — they are left running.
 //! - Stash windows named exactly `"stash"` or matching `"stash-*"` are the only
@@ -80,6 +84,8 @@
 //!   unregistered agent pane that still hosts a live supervisor socket → pane survives purge.
 //! - `purge_orphaned_agent_panes_skips_last_pane`: window with a single unregistered
 //!   `claude` pane → pane not killed (would orphan the window).
+//! - `purge_unregistered_dead_non_stash_panes_skips_last_pane`: window with a single
+//!   retained dead pane → pane not killed automatically.
 //! - `wrong_window_detected_by_majority_vote`: three registered panes in session A,
 //!   two in window W1 and one in window W2 → the W2 pane produces a `WrongWindow`
 //!   issue; the W1 panes do not.
@@ -449,6 +455,7 @@ pub fn prune() -> Result<usize> {
     // reconciler explicitly needs them. Use `agent-doc resync --fix` for manual recovery.
     purge_stash_windows_bulk(&tmux, &windows, &panes);
     purge_unregistered_stash_panes_bulk(&tmux, &windows, &panes);
+    purge_unregistered_dead_non_stash_panes_bulk(&tmux, &panes);
     Ok(removed)
 }
 
@@ -1041,6 +1048,102 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
 
     if killed_count > 0 {
         eprintln!("resync: purged {} orphaned stash pane(s)", killed_count);
+    }
+}
+
+fn purge_unregistered_dead_non_stash_panes(tmux: &Tmux) {
+    let registry = sessions::load().unwrap_or_default();
+    purge_unregistered_dead_non_stash_panes_with_registry(tmux, &registry);
+}
+
+fn purge_unregistered_dead_non_stash_panes_with_registry(
+    tmux: &Tmux,
+    registry: &sessions::SessionRegistry,
+) {
+    let output = tmux
+        .cmd()
+        .args([
+            "list-panes",
+            "-a",
+            "-F",
+            "#{pane_id}\t#{window_id}\t#{window_name}",
+        ])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    let panes: PaneMeta = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(3, '\t').collect();
+            if parts.len() >= 3 {
+                Some((
+                    parts[0].to_string(),
+                    (parts[1].to_string(), parts[2].to_string(), String::new()),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    purge_unregistered_dead_non_stash_panes_bulk_with_registry(tmux, &panes, registry);
+}
+
+fn purge_unregistered_dead_non_stash_panes_bulk(tmux: &Tmux, panes: &PaneMeta) {
+    let registry = sessions::load().unwrap_or_default();
+    purge_unregistered_dead_non_stash_panes_bulk_with_registry(tmux, panes, &registry);
+}
+
+fn purge_unregistered_dead_non_stash_panes_bulk_with_registry(
+    tmux: &Tmux,
+    panes: &PaneMeta,
+    registry: &sessions::SessionRegistry,
+) {
+    let registered_panes: std::collections::HashSet<&str> =
+        registry.values().map(|entry| entry.pane.as_str()).collect();
+    let mut window_panes: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+
+    for (pane_id, (window_id, window_name, _cmd)) in panes {
+        if is_stash_window_name(window_name) {
+            continue;
+        }
+        window_panes
+            .entry(window_id.as_str())
+            .or_default()
+            .push(pane_id.as_str());
+    }
+
+    let mut killed = 0;
+    for pane_ids in window_panes.values() {
+        if pane_ids.len() < 2 {
+            continue;
+        }
+        for pane_id in pane_ids {
+            if registered_panes.contains(pane_id) {
+                continue;
+            }
+            if !tmux.pane_dead(pane_id) {
+                continue;
+            }
+            if let Err(err) = tmux.kill_pane(pane_id) {
+                eprintln!(
+                    "resync: failed to kill unregistered dead pane {}: {}",
+                    pane_id, err
+                );
+            } else {
+                killed += 1;
+            }
+        }
+    }
+
+    if killed > 0 {
+        eprintln!(
+            "resync: purged {} unregistered dead pane(s) from non-stash windows",
+            killed
+        );
     }
 }
 
@@ -1966,6 +2069,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         return_stashed_panes(&tmux);
         purge_stash_windows(&tmux);
         purge_unregistered_stash_panes(&tmux);
+        purge_unregistered_dead_non_stash_panes(&tmux);
         purge_orphaned_agent_panes(&tmux);
     }
 
@@ -3098,6 +3202,37 @@ mod tests {
     }
 
     #[test]
+    fn purge_unregistered_dead_non_stash_pane() {
+        let iso = IsolatedTmux::new("resync-purge-dead-non-stash");
+        let cwd = std::env::current_dir().unwrap();
+
+        let live_pane = iso.auto_start("test", &cwd).unwrap();
+        let dead_pane = iso.split_window(&live_pane, &cwd, "-dh").unwrap();
+        iso.enable_remain_on_exit(&dead_pane).unwrap();
+        iso.send_keys(&dead_pane, "printf 'dead pane\\n'; exit 0")
+            .unwrap();
+        assert!(
+            wait_for_pane_dead(&iso, &dead_pane, std::time::Duration::from_secs(3)),
+            "pane should first become retained dead"
+        );
+        assert!(
+            iso.pane_dead(&dead_pane),
+            "pane should remain visible as dead before cleanup"
+        );
+
+        let registry = SessionRegistry::new();
+        purge_unregistered_dead_non_stash_panes_with_registry(&iso, &registry);
+        assert!(
+            wait_for_pane_removed(&iso, &dead_pane, std::time::Duration::from_secs(3)),
+            "unregistered dead pane with siblings should be reaped"
+        );
+        assert!(
+            iso.pane_alive(&live_pane),
+            "live sibling pane should survive"
+        );
+    }
+
+    #[test]
     fn purge_orphan_does_not_kill_last_pane() {
         // A window with only one pane (even if orphaned agent) should not be touched.
         let iso = IsolatedTmux::new("resync-purge-last-pane");
@@ -3113,6 +3248,32 @@ mod tests {
         assert!(
             iso.pane_alive(&pane1),
             "last pane in window should not be killed"
+        );
+    }
+
+    #[test]
+    fn purge_unregistered_dead_non_stash_panes_skips_last_pane() {
+        let iso = IsolatedTmux::new("resync-purge-dead-last-pane");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        let _other_window = iso.new_window("test", &cwd).unwrap();
+        iso.enable_remain_on_exit(&pane).unwrap();
+        iso.send_keys(&pane, "printf 'dead last pane\\n'; exit 0")
+            .unwrap();
+        assert!(
+            wait_for_pane_dead(&iso, &pane, std::time::Duration::from_secs(3)),
+            "pane should become retained dead"
+        );
+        assert!(iso.pane_dead(&pane), "pane should be retained as dead");
+
+        let registry = SessionRegistry::new();
+        purge_unregistered_dead_non_stash_panes_with_registry(&iso, &registry);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        assert!(
+            iso.pane_dead(&pane),
+            "last pane in window should be preserved for manual inspection"
         );
     }
 

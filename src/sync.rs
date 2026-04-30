@@ -373,6 +373,26 @@ fn lookup_registry_entry_for_file_session(
     (entry.session_id == session_id).then_some(entry)
 }
 
+fn claimed_sync_pane_owner(
+    claimed_panes: &RefCell<std::collections::HashMap<String, PathBuf>>,
+    pane_id: &str,
+    file_path: &Path,
+) -> Option<PathBuf> {
+    let claimed = claimed_panes.borrow();
+    let owner = claimed.get(pane_id)?;
+    (owner != file_path).then_some(owner.clone())
+}
+
+fn reserve_sync_pane(
+    claimed_panes: &RefCell<std::collections::HashMap<String, PathBuf>>,
+    pane_id: &str,
+    file_path: &Path,
+) {
+    claimed_panes
+        .borrow_mut()
+        .insert(pane_id.to_string(), file_path.to_path_buf());
+}
+
 fn persist_dead_pane_capture(
     file: &Path,
     session_id: &str,
@@ -1283,6 +1303,8 @@ fn run_with_options(
     // Skipped when auto_start=false (e.g., when called from route which already handled the file).
     if auto_start {
         let mut auto_started_panes: Vec<(String, String)> = Vec::new();
+        let claimed_sync_panes: RefCell<std::collections::HashMap<String, PathBuf>> =
+            RefCell::new(std::collections::HashMap::new());
 
         // Parse file paths from col_args (each arg is "file1.md,file2.md")
         let all_files: Vec<PathBuf> = col_args
@@ -1365,9 +1387,27 @@ fn run_with_options(
                 &session_id[..8.min(session_id.len())],
                 registered_pane.as_deref().unwrap_or("none")
             );
-            let has_alive_pane = registered_pane
+            let claimed_owner = registered_pane
                 .as_ref()
-                .map(|pane| {
+                .and_then(|pane| claimed_sync_pane_owner(&claimed_sync_panes, pane, file_path));
+            if let (Some(pane), Some(owner)) = (registered_pane.as_ref(), claimed_owner.as_ref()) {
+                eprintln!(
+                    "[sync] pane {} is already reserved for {} in this sync run; treating {} as unresolved so layout can rehydrate a distinct pane",
+                    pane,
+                    owner.display(),
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "duplicate_live_pane_claim pane={} owner={} duplicate={}",
+                    pane,
+                    owner.display(),
+                    file_path.display()
+                ));
+            }
+            let has_alive_pane = claimed_owner.is_none()
+                && registered_pane
+                    .as_ref()
+                    .map(|pane| {
                     if !tmux.pane_alive(pane) {
                         return false;
                     }
@@ -1479,6 +1519,9 @@ fn run_with_options(
                 .unwrap_or(false);
 
             if has_alive_pane {
+                if let Some(ref pane) = registered_pane {
+                    reserve_sync_pane(&claimed_sync_panes, pane, file_path);
+                }
                 // Pane is alive — check if the file was renamed (registered path
                 // no longer exists but the session ID matches). If so, update the
                 // registry to the new path and reuse the existing pane.
@@ -1541,9 +1584,13 @@ fn run_with_options(
                 context_session.as_deref(),
                 window,
                 col_args,
+                &claimed_sync_panes,
             ) {
-                ExistingAssociatedPaneRecovery::Recovered
-                | ExistingAssociatedPaneRecovery::Ambiguous => continue,
+                ExistingAssociatedPaneRecovery::Recovered(pane_id) => {
+                    reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                    continue;
+                }
+                ExistingAssociatedPaneRecovery::Ambiguous => continue,
                 ExistingAssociatedPaneRecovery::None => {}
             }
 
@@ -1675,6 +1722,7 @@ fn run_with_options(
                         pane_id,
                         file_path.display()
                     ));
+                    reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
                     auto_started_panes.push((pane_id, file_str.clone()));
                 }
                 Err(e) => {
@@ -2324,7 +2372,7 @@ fn rescue_stashed_associated_pane(
 }
 
 enum ExistingAssociatedPaneRecovery {
-    Recovered,
+    Recovered(String),
     Ambiguous,
     None,
 }
@@ -2336,8 +2384,32 @@ fn recover_existing_associated_pane(
     context_session: Option<&str>,
     window: Option<&str>,
     col_args: &[String],
+    claimed_panes: &RefCell<std::collections::HashMap<String, PathBuf>>,
 ) -> ExistingAssociatedPaneRecovery {
-    let candidates = find_associated_panes(tmux, file_path, session_id);
+    let mut candidates = find_associated_panes(tmux, file_path, session_id);
+    let mut reserved_conflicts = Vec::new();
+    candidates.retain(|candidate| {
+        if let Some(owner) = claimed_sync_pane_owner(claimed_panes, &candidate.pane_id, file_path) {
+            reserved_conflicts.push((candidate.clone(), owner));
+            return false;
+        }
+        true
+    });
+    for (candidate, owner) in reserved_conflicts {
+        eprintln!(
+            "[sync] skipping associated pane {} for {} because it is already reserved for {} in this sync run",
+            candidate.pane_id,
+            file_path.display(),
+            owner.display()
+        );
+        sync_log(&format!(
+            "associated_pane_reserved file={} pane={} owner={} sources={}",
+            file_path.display(),
+            candidate.pane_id,
+            owner.display(),
+            candidate.source_summary()
+        ));
+    }
     match resolve_associated_panes(candidates, window) {
         AssociatedPaneResolution::Selected { winner, redundant } => {
             eprintln!(
@@ -2358,6 +2430,7 @@ fn recover_existing_associated_pane(
                 winner.source_summary(),
                 redundant.len()
             ));
+            let winner_pane = winner.pane_id.clone();
             if let Err(e) = reregister_recovered_owner(tmux, file_path, session_id, &winner.pane_id)
             {
                 eprintln!(
@@ -2377,7 +2450,7 @@ fn recover_existing_associated_pane(
                     col_args,
                 );
             }
-            ExistingAssociatedPaneRecovery::Recovered
+            ExistingAssociatedPaneRecovery::Recovered(winner_pane)
         }
         AssociatedPaneResolution::Ambiguous(candidates) => {
             let detail = candidates
@@ -3116,11 +3189,12 @@ mod tests {
             Some("test"),
             None,
             &["tasks/owned.md".to_string()],
+            &RefCell::new(std::collections::HashMap::new()),
         );
 
         assert!(matches!(
             recovery,
-            ExistingAssociatedPaneRecovery::Recovered
+            ExistingAssociatedPaneRecovery::Recovered(_)
         ));
         assert_eq!(
             sessions::lookup("associated-supervisor").unwrap(),
@@ -4568,5 +4642,67 @@ mod tests {
         assert_eq!(child_entry.file, "tasks/claudescore-3.md");
         assert_eq!(child_entry.cwd, subroot.to_string_lossy());
         assert_eq!(child_registry.len(), 1);
+    }
+
+    #[test]
+    fn claimed_sync_pane_owner_ignores_same_file_and_reports_other_owner() {
+        let claimed: RefCell<std::collections::HashMap<String, PathBuf>> =
+            RefCell::new(std::collections::HashMap::new());
+        let root_doc = PathBuf::from("tasks/agent-doc-bugs2.md");
+        let child_doc = PathBuf::from("src/session-share/tasks/claudescore-3.md");
+
+        reserve_sync_pane(&claimed, "%75", &root_doc);
+
+        assert_eq!(
+            claimed_sync_pane_owner(&claimed, "%75", &root_doc),
+            None,
+            "a file should be allowed to keep its own reserved pane"
+        );
+        assert_eq!(
+            claimed_sync_pane_owner(&claimed, "%75", &child_doc),
+            Some(root_doc),
+            "another file should see the reservation conflict"
+        );
+    }
+
+    #[test]
+    fn recover_existing_associated_pane_skips_reserved_candidates() {
+        let claimed: RefCell<std::collections::HashMap<String, PathBuf>> =
+            RefCell::new(std::collections::HashMap::new());
+        reserve_sync_pane(
+            &claimed,
+            "%75",
+            Path::new("tasks/agent-doc-bugs2.md"),
+        );
+
+        let winner = AssociatedPaneCandidate {
+            pane_id: "%75".to_string(),
+            pane_pid: "1000".to_string(),
+            session_name: "0".to_string(),
+            window_id: "@1".to_string(),
+            window_name: "agent-doc".to_string(),
+            current_command: "agent-doc".to_string(),
+            sources: [AssociatedPaneSource::ProcessTree].into_iter().collect(),
+        };
+        let filtered: Vec<AssociatedPaneCandidate> = vec![winner.clone()]
+            .into_iter()
+            .filter(|candidate| {
+                claimed_sync_pane_owner(
+                    &claimed,
+                    &candidate.pane_id,
+                    Path::new("src/session-share/tasks/claudescore-3.md"),
+                )
+                .is_none()
+            })
+            .collect();
+        assert!(
+            filtered.is_empty(),
+            "reserved pane candidates should be removed before associated-pane recovery"
+        );
+
+        match resolve_associated_panes(filtered, Some("@1")) {
+            AssociatedPaneResolution::None => {}
+            other => panic!("expected no available associated pane after filtering, got {other:?}"),
+        }
     }
 }

@@ -1076,10 +1076,17 @@ Published:
 Note:
 - I left the existing unrelated local edits in `src/agent-doc/VERSIONS.md` and `src/agent-doc/editors/jetbrains/gradle.properties` untouched.
 - No new backlog item came out of this turn.
-<!-- agent:boundary:e63d0aac -->
+### Re: commented follow-up notes — gpt-5
+
+I preserved the newer commented JB-plugin syntax-highlighting note and the startup-miss prompt example below the exchange, but I did not investigate those separate issues in this tmux-session turn.
+<!-- agent:boundary:853bdc23 -->
 <!-- /agent:exchange -->
 
 <!--
+The JB Plugin has some syntax highlighting issues. spec-test-build-install-commit-push
+![img_1.png](img_1.png)
+![img_2.png](img_2.png)
+---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

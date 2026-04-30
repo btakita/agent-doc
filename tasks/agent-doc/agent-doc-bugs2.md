@@ -496,7 +496,29 @@ Published:
 
 Note:
 - I left unrelated dirty files elsewhere in the workspace untouched.
-<!-- agent:boundary:d482a11b -->
+❯ do #stshdie. spec-test-build-install-commit-push
+### Re: #stshdie — gpt-5
+
+I fixed `#stshdie`.
+
+- `route.rs` now enables tmux `remain-on-exit` for auto-started agent-doc panes, and `tmux-router` now treats retained dead panes as dead instead of alive, so sync/route can preserve crash provenance without accidentally reusing a dead pane.
+- `sync.rs` now captures dead-pane provenance before replacement: tmux `pane_dead_status`, the current cycle phase, and a persisted tail under `.agent-doc/logs/dead-panes/`; it records that detail in the session log before the existing stale-preflight/session-loss repair path runs.
+- `resync.rs` now reaps orphaned retained-dead stash panes after that provenance has been captured, so the new retention contract does not leak dead stash clutter.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the retained-dead-pane contract.
+
+Verification:
+- `cargo test --manifest-path src/tmux-router/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/tmux-router` commit `45228d8` pushed to `origin/main`
+- `src/agent-doc` commit `3773bf1` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left unrelated dirty files elsewhere in the workspace untouched.
+<!-- agent:boundary:bd7c5c61 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -510,7 +532,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stshdie] Stashed tmux pane dies silently mid-cycle with zero diagnostic info. Repro from `src/session-share/tasks/claudescore.md` on Apr 29, 2026: pane %511 was auto-started at 19:44:25, ran preflight at 19:49:10 (`cycle-1777506550775`, `preflight_started`), was stashed at 19:50:57 when user switched to claudescore-3.md, then found dead 39 seconds later at 19:51:36 ("no alive pane"). Session log (`a1580e76`) ends abruptly mid-tool-use (Read of `news/2026-04-29/README.md`) with no error event, no graceful shutdown, no OOM/dmesg signal. `remain-on-exit` is off, so tmux destroyed the pane immediately with no exit status preservation. Fix: (1) set `remain-on-exit on` for agent-doc managed panes so dead panes preserve exit status before cleanup; (2) add a heartbeat or liveness probe to stashed panes so sync can detect and log the death cause before the pane is destroyed; (3) if the stashed process was mid-cycle, capture the cycle state and last assistant message for recovery provenance. Plan: tasks/agent-doc/plan-stashed-pane-silent-death.md
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.

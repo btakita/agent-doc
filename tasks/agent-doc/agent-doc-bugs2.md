@@ -1024,7 +1024,28 @@ Published:
 - `src/agent-doc` commit `7b7dde1` (`fix: preserve answered prompt prefixes on jb closeout`) pushed to `origin/20260422/codex-agent-backend`
 
 No new backlog item came out of this turn.
-<!-- agent:boundary:94112977 -->
+bump JB Plugin version and build both agent-doc for local testing + the JB Plugin.
+### Re: JB plugin version bump + local builds — gpt-5
+
+I bumped the JetBrains plugin version and rebuilt both deliverables for local testing.
+
+What changed in `src/agent-doc`:
+- `editors/jetbrains/gradle.properties`: `pluginVersion = 0.2.79`
+- `VERSIONS.md`: added the matching unreleased note for the plugin-version bump
+
+Builds completed:
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew buildPlugin` in `src/agent-doc/editors/jetbrains`
+
+Artifacts / local testing targets:
+- local `agent-doc` binary replaced at `/home/brian/.cargo/bin/agent-doc`
+- JB plugin package built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.79.zip`
+
+Note:
+- I did not create a source-code commit from this turn because your document edit asked for the version bump and local builds, not a commit/push cycle.
+- No follow-up backlog item came out of this turn.
+<!-- agent:boundary:d4e72270 -->
 <!-- /agent:exchange -->
 
 <!--

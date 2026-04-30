@@ -993,10 +993,50 @@ Verification:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml`
 
 No other `src/agent-doc` files were left uncommitted after this turn.
-<!-- agent:boundary:c7feefc4 -->
+❯ do #qprx. spec-test-build-install-commit-push
+### Re: #qprx — gpt-5
+
+I fixed `#qprx` in the JetBrains closeout path and confirmed the root cause.
+
+Root cause:
+- the committed transcript was correct, but the post-commit `preserve_head` boundary-reposition path in the JetBrains plugin could still choose the stale unsaved editor buffer as its source document
+- that comparator only treated response-heading attribution churn and boundary churn as equivalent to disk; it did **not** treat already-answered `❯ ` prompt-prefix drift as equivalent
+- in the reproduced shape, the editor buffer still had bare `commit + push all uncommitted src/agent-doc files`, while disk already had the committed `❯ `-prefixed historical prompt
+- the plugin then ran preserve-head reposition on the stale buffer and saved it back, which reintroduced the stripped prompt, kept `(HEAD)` on the heading, and minted a fresh boundary diff after the turn had already reported success
+
+What changed in `src/agent-doc`:
+- `editors/jetbrains/.../PatchWatcher.kt` now normalizes already-answered prompt prefixes in the comparison used by `shouldPreferCommittedDiskContentForRepositionUtil()`
+- the comparator now treats a `❯ ` difference as equivalent **only** when the next meaningful exchange line is the matching `### Re:` block, so historical answered prompts prefer the committed disk transcript during preserve-head cleanup
+- unresolved live follow-ups are still treated as real drift and do **not** trigger disk preference
+- updated `specs/08-session-routing.md` and `VERSIONS.md` to document the stronger editor cleanup invariant
+
+Regression coverage:
+- added a JB-plugin test for the exact `#qprx` shape: committed prefixed historical prompt on disk vs stale bare prompt in the editor buffer
+- added the safety test where an unresolved follow-up prompt must still prevent disk preference
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `7b7dde1` (`fix: preserve answered prompt prefixes on jb closeout`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item came out of this turn.
+<!-- agent:boundary:94112977 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+❯ /home/brian/.cargo/bin/agent-doc start tasks/software/tsift.md
+[start] pane %565 is in session '14', expected '0' — auto-relocating to project session
+[start] WARNING: no active pane found in session '0'; pane %565 will register in session '14'
+Registered session tsift-v0 → pane %565
+[start] codex network access: enabled (policy: inherit, sandbox: danger-full-access; no inherited CODEX_SANDBOX_NETWORK_DISABLED override)
+Starting codex...
+```
+---
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

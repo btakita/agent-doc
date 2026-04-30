@@ -467,7 +467,12 @@ So my current read is:
 One more concrete clue: the newest `%588` era logged a clean `codex_exit code=0`, then a `codex_restart mode=continue`, then `auto_trigger_timeout`, and only later `%588 -> %589` was rebound. That does not look like the original silent `%408 -> %434` stale-owner branch. It looks more like later restart / editor-return churn still causing a fresh-pane handoff.
 
 No new backlog item came out of this answer yet because I can prove the old-vs-new split, but I have not yet isolated the exact remaining branch that created `%585 -> %588` and `%588 -> %589`.
-<!-- agent:boundary:a9be7e08 -->
+### Re: quoted follow-up on `#staleown` — gpt-5
+
+To restate that line more precisely: `#staleown` only fixed the branch where an **alive registered pane** had **no process-tree proof**, **no usable supervisor-pid proof**, and an **unavailable supervisor path**. In that exact shape, `start` now fails closed.
+
+It does **not** mean every later pane replacement is forbidden. If some other path still decides to rebind the session, or if a supervisor/restart sequence leads to a fresh-pane handoff with explicit `session_superseded` provenance, that is outside the narrow stale-owner branch that `#staleown` changed.
+<!-- agent:boundary:c66e2770 -->
 <!-- /agent:exchange -->
 
 <!--

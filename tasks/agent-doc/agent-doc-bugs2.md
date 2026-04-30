@@ -771,7 +771,62 @@ No additional document changes to respond to beyond the `fg` reopen prompt. `#pa
 ### Re: follow-up — gpt-5
 
 No additional document changes to respond to beyond the `fg` reopen prompt. `#pathprov` is implemented, verified, built, installed, committed, and pushed.
-<!-- agent:boundary:faa4f531 -->
+❯ The agent-doc window does not show the tmux pane for this document.
+
+❯ When agent-doc-bugs2.md (left editor document) is selected in the editor:
+❯ - The left tmux pane in for claudescore-3.md...it is in the incorrect position.
+❯ - The right pane shows a "Pane is dead" pane. I cannot remove the pane from the pane itself.
+
+❯ ![img_6.png](img_6.png)
+
+❯ When claudescore-3.md (right editor document) is selected:
+❯ - The left pane shows a "Pane is dead" pane. I cannot remove the pane from the pane itself.
+❯ - The right tmux pane in for claudescore-3.md...now in the correct position.
+
+❯ ---
+❯ The previous session was running the prompt above, but crashed with:
+```
+/home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
+~/work/btakita/agent-loop main ⇡18 !4 ?1                                                                                                                                                                                   agent-loop 17:20:58
+❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
+Error: registered pane %44 for tasks/agent-doc/agent-doc-bugs2.md is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance
+```
+### Re: tmux pane ownership / dead-pane follow-up — gpt-5
+
+I found a real gap in the new `#pathprov` model, and it matches the behavior you saw.
+
+Root cause:
+- after `route` / `sync` / `resync` recovered a live pane, they re-registered it through the generic `sessions::register(...)` path
+- that path wrote the short-lived utility process PID and an empty `supervisor_instance_id` back into `sessions.json`
+- so the very next provenance check no longer had the top-down `pane + supervisor PID + supervisor instance id` proof that `#pathprov` depends on
+- once that metadata was erased, later route/sync passes fell back to weaker heuristics and could churn pane placement again or decide the recovered pane was stale
+
+What I changed in `src/agent-doc`:
+- added a recovered-owner re-registration path that uses the active tmux handle and preserves authoritative supervisor identity when the registry or supervisor socket can still prove it
+- wired `sync.rs`, `start.rs`, and `resync.rs` through that path instead of the generic register call
+- kept the mixed-root registry fix intact so recovered panes are written back to the owning document root, not the caller's root
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+What I observed live while debugging:
+- both `%44` and `%66` were still alive `agent-doc start ...` panes under tmux session `0`
+- for `agent-doc-bugs2.md`, the supervisor socket existed and the pane process tree was still alive
+- but the live `sessions.json` entries had empty `supervisor_instance_id` fields, which is exactly the broken downgraded state
+
+Dead-pane note:
+- by the time I inspected the live tmux state, there was no retained `pane_dead=1` pane to reap, so I did **not** make a separate dead-pane-reaper change in this turn
+- this patch is specifically for the ownership/provenance downgrade that can cause the pane swapping / stale-owner churn
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Status:
+- local fix is implemented and installed
+- I did not make a repo commit or push in this turn
+
+<!-- agent:boundary:fec3be24 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -781,6 +836,15 @@ If I waited too long, I lost the running pane.
 
 Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov incidently fix this issue?
 Even if #pathprov would incidently fix this case, I'm still concerned that it's possible for a tmux pane to be swapped out while the editor has the document open. Why is this even possible?
+
+spec-test-build-install-commit-push
+---
+I see a latent "Pane is dead" but the pane is never reaped.
+```
+So long and thanks for all the fish.
+  -- Douglas Adams
+Pane is dead (status 0, Thu Apr 30 17:04:46 2026)
+```
 
 spec-test-build-install-commit-push
 -->

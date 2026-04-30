@@ -444,6 +444,19 @@ pub fn superseded_by_newer_registered_start(
     }))
 }
 
+pub fn take_superseded_startup_miss(
+    file: &Path,
+) -> Result<Option<(StartupMiss, StartupMissSupersession)>> {
+    let Some(miss) = load(file)? else {
+        return Ok(None);
+    };
+    let Some(supersession) = superseded_by_newer_registered_start(file, &miss)? else {
+        return Ok(None);
+    };
+    clear(file)?;
+    Ok(Some((miss, supersession)))
+}
+
 pub fn latest_open_run_timestamp(status: &SessionLogStatus) -> Option<u64> {
     if status.latest_session_open() {
         status.latest_anchor_timestamp()
@@ -842,6 +855,56 @@ mod tests {
         assert_eq!(supersession.registered_pane, "%408");
         assert_eq!(supersession.latest_start_pane, "%408");
         assert_eq!(supersession.latest_open_timestamp, 11);
+    }
+
+    #[test]
+    fn take_superseded_startup_miss_clears_marker_and_returns_supersession() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            "session-123".to_string(),
+            crate::sessions::SessionEntry {
+                pane: "%408".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-04-29T00:00:00Z".to_string(),
+                file: doc.display().to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        crate::sessions::save_in(tmp.path(), &registry).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/session-123.log"),
+            concat!(
+                "[1] session_start file=test.md pane=%401 session=session-123\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[10] session_start file=test.md pane=%408 session=session-123\n",
+                "[11] codex_start mode=fresh restart_count=0\n",
+            ),
+        )
+        .unwrap();
+        let miss = StartupMiss {
+            file: doc.display().to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+        let state_path = state_path(&doc)
+            .unwrap()
+            .expect("startup-miss state path should exist");
+        fs::write(&state_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();
+
+        let Some((cleared_miss, supersession)) = take_superseded_startup_miss(&doc).unwrap() else {
+            panic!("expected stale startup miss to clear");
+        };
+        assert_eq!(cleared_miss.pane_id, "%401");
+        assert_eq!(supersession.registered_pane, "%408");
+        assert!(load(&doc).unwrap().is_none(), "marker should be cleared");
     }
 
     #[test]

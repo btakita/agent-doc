@@ -76,6 +76,11 @@
 //!   instead of auto-starting another replacement session on top. The `col_args`
 //!   slice is passed through to `route::provision_pane` so new panes split in the
 //!   correct direction based on column position (`is_first_column`).
+//! - Before sync auto-starts a replacement pane, it must clear any startup-miss
+//!   marker already superseded by a newer registered owner. If the current
+//!   registered pane is still alive and still owns the active startup-miss
+//!   marker, sync fails closed for that file instead of rebinding the document
+//!   to yet another pane era.
 //! - `register_synced_files` updates or creates registry entries for every file
 //!   assigned a pane by `tmux_router::sync`, covering files never individually claimed.
 //!
@@ -1295,6 +1300,27 @@ fn run_with_options(
 
             let registered_entry = sessions::lookup_entry(&session_id).ok().flatten();
             let registered_pane = registered_entry.as_ref().map(|entry| entry.pane.clone());
+            if let Some((miss, supersession)) =
+                crate::startup_miss::take_superseded_startup_miss(file_path)?
+            {
+                let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                eprintln!(
+                    "[sync] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
+                    miss.pane_id,
+                    miss_ts,
+                    file_path.display(),
+                    supersession.registered_pane
+                );
+                sync_log(&format!(
+                    "startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                    file_path.display(),
+                    miss.pane_id,
+                    supersession.registered_pane,
+                    miss_ts,
+                    supersession.latest_open_timestamp
+                ));
+            }
+            let unresolved_startup_miss = crate::startup_miss::load(file_path).ok().flatten();
 
             // Files with session UUIDs but no registry entry are auto-started.
             // The registry was likely pruned when the pane died. The user's intent
@@ -1439,6 +1465,32 @@ fn run_with_options(
                         }
                     }
                 }
+                continue;
+            }
+
+            if should_skip_autostart_for_unresolved_startup_miss(
+                registered_pane.as_deref(),
+                registered_pane
+                    .as_deref()
+                    .is_some_and(|pane| tmux.pane_alive(pane)),
+                unresolved_startup_miss.as_ref(),
+            ) {
+                let miss = unresolved_startup_miss
+                    .as_ref()
+                    .expect("guard checked presence");
+                let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                eprintln!(
+                    "[sync] unresolved startup-miss {} still belongs to alive pane {} for {} — skipping auto-start instead of rebinding over the existing owner",
+                    miss_ts,
+                    miss.pane_id,
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "startup_miss_skip_autostart file={} pane={} miss_timestamp={}",
+                    file_path.display(),
+                    miss.pane_id,
+                    miss_ts
+                ));
                 continue;
             }
 
@@ -2498,6 +2550,14 @@ fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
     path_components[path_components.len() - suffix_components.len()..] == suffix_components[..]
 }
 
+fn should_skip_autostart_for_unresolved_startup_miss(
+    registered_pane: Option<&str>,
+    pane_alive: bool,
+    miss: Option<&crate::startup_miss::StartupMiss>,
+) -> bool {
+    pane_alive && registered_pane.is_some_and(|pane| miss.is_some_and(|miss| miss.pane_id == pane))
+}
+
 fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
     if cmdline.contains(file_path) {
         return true;
@@ -2855,6 +2915,40 @@ mod tests {
             !cmdline_has_file_match(cmdline, file_path),
             "different relative path should not match by basename alone"
         );
+    }
+
+    #[test]
+    fn unresolved_startup_miss_skips_sync_autostart_only_for_matching_alive_pane() {
+        let miss = crate::startup_miss::StartupMiss {
+            file: "tasks/owned.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "associated-supervisor".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        assert!(should_skip_autostart_for_unresolved_startup_miss(
+            Some("%42"),
+            true,
+            Some(&miss)
+        ));
+        assert!(!should_skip_autostart_for_unresolved_startup_miss(
+            Some("%42"),
+            false,
+            Some(&miss)
+        ));
+        assert!(!should_skip_autostart_for_unresolved_startup_miss(
+            Some("%43"),
+            true,
+            Some(&miss)
+        ));
+        assert!(!should_skip_autostart_for_unresolved_startup_miss(
+            Some("%42"),
+            true,
+            None
+        ));
     }
 
     #[test]

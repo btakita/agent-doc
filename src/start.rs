@@ -13,12 +13,16 @@
 //!   session, focuses and reuses that pane instead of spawning a duplicate
 //!   supervisor in the current pane. When that pane lives in another tmux
 //!   session, `start` switches the caller's current client to the target
-//!   session before selecting the pane.
+//!   session before selecting the pane. Once that live-owner proof exists,
+//!   missing or stale supervisor IPC state must not authorize a replacement
+//!   pane for the same document.
 //! - If `sessions.json` points at an alive pane but no live owner can still be
 //!   proven for the document, `start` first consults the per-session supervisor:
 //!   healthy supervisors are reused, restartable supervisors are restarted in
 //!   place, and only unavailable supervisors are treated as stale before
-//!   starting in the current pane.
+//!   starting in the current pane. If that alive pane still carries the active
+//!   startup-miss marker for the document, `start` must fail closed instead of
+//!   rebinding the document to a fresh pane.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
@@ -865,6 +869,14 @@ fn stale_registered_pane_action(supervisor_health: SupervisorHealth) -> StaleReg
     }
 }
 
+fn should_fail_closed_for_unresolved_startup_miss_rebind(
+    current_pane: &str,
+    registered_pane: &str,
+    miss: Option<&crate::startup_miss::StartupMiss>,
+) -> bool {
+    current_pane != registered_pane && miss.is_some_and(|miss| miss.pane_id == registered_pane)
+}
+
 fn existing_session_pane_action(
     tmux: &sessions::Tmux,
     session_id: &str,
@@ -1434,6 +1446,28 @@ pub fn run(file: &Path) -> Result<()> {
 
     let pane_id = sessions::current_pane()?;
     let tmux = sessions::Tmux::default_server();
+    if let Some((miss, supersession)) = crate::startup_miss::take_superseded_startup_miss(file)? {
+        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+        eprintln!(
+            "[start] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
+            miss.pane_id,
+            miss_ts,
+            file.display(),
+            supersession.registered_pane
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "start_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                file.display(),
+                miss.pane_id,
+                supersession.registered_pane,
+                miss_ts,
+                supersession.latest_open_timestamp
+            ),
+        );
+    }
+    let unresolved_startup_miss = crate::startup_miss::load(file).ok().flatten();
 
     if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
         match action {
@@ -1446,77 +1480,37 @@ pub fn run(file: &Path) -> Result<()> {
                         existing_pane
                     );
                 }
-                match query_supervisor_health(file, &session_id) {
-                    SupervisorHealth::Healthy => {
-                        eprintln!(
-                            "session {} for {} is running in pane {} — switching focus",
-                            &session_id[..8.min(session_id.len())],
-                            file.display(),
-                            existing_pane
-                        );
-                        if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane)
-                        {
-                            eprintln!(
-                                "[start] warning: failed to focus pane {}: {}",
-                                existing_pane, e
-                            );
-                        }
-                        return Ok(());
-                    }
-                    SupervisorHealth::Restartable => {
-                        eprintln!(
-                            "session {} for {} in pane {} is not healthy — restarting via supervisor",
-                            &session_id[..8.min(session_id.len())],
-                            file.display(),
-                            existing_pane
-                        );
-                        if restart_via_supervisor(file, &session_id) {
-                            if let Err(e) =
-                                focus_existing_session_pane(&tmux, &pane_id, &existing_pane)
-                            {
-                                eprintln!(
-                                    "[start] warning: failed to focus pane {}: {}",
-                                    existing_pane, e
-                                );
-                            }
-                            return Ok(());
-                        }
-                        eprintln!(
-                            "[start] supervisor restart failed — deregistering and starting fresh"
-                        );
-                        let _ = sessions::deregister(&session_id)?;
-                    }
-                    SupervisorHealth::Halted { restart_count } => {
-                        eprintln!(
-                            "session {} for {} in pane {} halted after {} restarts — deregistering the crashed session and starting fresh",
-                            &session_id[..8.min(session_id.len())],
-                            file.display(),
-                            existing_pane,
-                            restart_count
-                        );
-                        let _ = sessions::deregister(&session_id)?;
-                    }
-                    SupervisorHealth::Unreachable => {
-                        eprintln!(
-                            "session {} for {} in pane {} has unreachable supervisor — deregistering and starting fresh",
-                            &session_id[..8.min(session_id.len())],
-                            file.display(),
-                            existing_pane
-                        );
-                        let _ = sessions::deregister(&session_id)?;
-                    }
-                    SupervisorHealth::NoSocket => {
-                        eprintln!(
-                            "session {} for {} in pane {} has no supervisor socket — deregistering and starting fresh",
-                            &session_id[..8.min(session_id.len())],
-                            file.display(),
-                            existing_pane
-                        );
-                        let _ = sessions::deregister(&session_id)?;
-                    }
+                eprintln!(
+                    "session {} for {} is already running in pane {} — switching focus",
+                    &session_id[..8.min(session_id.len())],
+                    file.display(),
+                    existing_pane
+                );
+                if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane) {
+                    eprintln!(
+                        "[start] warning: failed to focus pane {}: {}",
+                        existing_pane, e
+                    );
                 }
+                return Ok(());
             }
             ExistingSessionPaneAction::ClearStale(stale_pane) => {
+                if should_fail_closed_for_unresolved_startup_miss_rebind(
+                    &pane_id,
+                    &stale_pane,
+                    unresolved_startup_miss.as_ref(),
+                ) {
+                    let miss = unresolved_startup_miss
+                        .as_ref()
+                        .expect("guard checked presence");
+                    let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                    anyhow::bail!(
+                        "startup-miss from {} still belongs to alive pane {} for {} — refusing to start a replacement pane over the existing owner",
+                        miss_ts,
+                        stale_pane,
+                        file.display()
+                    );
+                }
                 match stale_registered_pane_action(query_supervisor_health(file, &session_id)) {
                     StaleRegisteredPaneAction::ReuseRegistered => {
                         eprintln!(
@@ -2720,6 +2714,38 @@ mod tests {
             stale_registered_pane_action(SupervisorHealth::NoSocket),
             StaleRegisteredPaneAction::ClearStale
         );
+    }
+
+    #[test]
+    fn unresolved_startup_miss_blocks_cross_pane_rebind() {
+        let miss = crate::startup_miss::StartupMiss {
+            file: "tasks/software/corky.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        assert!(should_fail_closed_for_unresolved_startup_miss_rebind(
+            "%84",
+            "%42",
+            Some(&miss)
+        ));
+        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
+            "%42",
+            "%42",
+            Some(&miss)
+        ));
+        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
+            "%84",
+            "%43",
+            Some(&miss)
+        ));
+        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
+            "%84", "%42", None
+        ));
     }
 
     #[test]

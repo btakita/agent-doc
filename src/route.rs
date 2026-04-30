@@ -1154,11 +1154,7 @@ fn resolve_or_create_pane(
         split_before,
         harness,
         Some(created_panes),
-    )?;
-
-    // Look up the pane that was just created
-    sessions::lookup(session_id)?
-        .ok_or_else(|| anyhow::anyhow!("auto-start completed but pane not found in registry"))
+    )
 }
 
 /// Rescue a pane from a stash window back to the agent-doc window.
@@ -2347,6 +2343,9 @@ fn auto_start_in_session(
         }
     }
 
+    // Reassert the final binding before returning. Startup/ack recovery paths can
+    // clear or rewrite the registry while the fresh pane is coming online.
+    register_dispatch_target(session_id, &new_pane, file_path)?;
     let _ = file; // suppress unused warning
     Ok(new_pane)
 }

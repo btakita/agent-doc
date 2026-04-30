@@ -174,10 +174,44 @@ I also verified the root worktree is clean afterward.
 
 Note:
 - I did not run tests or build/install passes as part of this commit-only request.
-<!-- agent:boundary:f640d4e0 -->
+❯ run tests + build/install for local testing
+### Re: run tests + build/install for local testing — gpt-5
+
+Ran the local verification pass for the `agent-doc` stack.
+
+Results:
+- `src/agent-doc`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml` failed: `1608 passed`, `6 failed`.
+  - Failing tests:
+    - `route::tests::eviction_skipped_when_agent_process_active`
+    - `route::tests::send_keys_delivers_claude_command_with_enter`
+    - `route::tests::send_keys_delivers_codex_command_with_enter`
+    - `route::tests::alive_registered_pane_reregisters_to_live_owner`
+    - `route::tests::full_auto_start_flow`
+    - `sync::tests::repair_missing_registered_pane_captures_retained_dead_pane_diagnostics`
+  - `cargo build --manifest-path src/agent-doc/Cargo.toml` passed.
+  - `cargo install --path src/agent-doc --force` passed.
+- `src/tmux-router`
+  - `cargo test --manifest-path src/tmux-router/Cargo.toml` passed: `89 passed`, `0 failed`.
+  - `cargo build --manifest-path src/tmux-router/Cargo.toml` passed.
+  - `cargo install --path src/tmux-router --force` passed.
+
+Notable failure details from the `src/agent-doc` test run:
+- The two `send_keys_delivers_*_command_with_enter` cases now leave the trigger text visible in the pane instead of observing the expected echoed `GOT:` line.
+- `alive_registered_pane_reregisters_to_live_owner` and `full_auto_start_flow` both timed out waiting for the mock agent prompt to become ready.
+- `repair_missing_registered_pane_captures_retained_dead_pane_diagnostics` failed because the pane was not retained as dead for diagnostics.
+
+Note:
+- `src/agent-doc` and `src/tmux-router` remained clean after the verification/build/install pass.
+- `src/session-share/tasks/claudescore-3.md` is currently locally modified in its own repo with a new prompt line (`Please add the amount of benchmark testing to apply to each backlog item.`). I did not change or commit that file in this turn.
+
+No new backlog items came out of this verification pass.
+<!-- agent:boundary:74798ea0 -->
 <!-- /agent:exchange -->
 
 <!--
+`❯ ` is being s
+---
 The JB Plugin syntax highlight has an off-by-1 incrementing position issue.
 ![img_5.png](img_5.png)
 ---

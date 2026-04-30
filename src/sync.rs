@@ -161,6 +161,7 @@ use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{component, frontmatter, resync, route, sessions, snapshot};
@@ -371,6 +372,62 @@ fn lookup_registry_entry_for_file_session(
     let registry = sessions::load_in(&project_root).ok()?;
     let entry = registry.get(&registry_key)?.clone();
     (entry.session_id == session_id).then_some(entry)
+}
+
+fn build_tmux_router_sync_registry(col_args: &[String]) -> Result<Option<NamedTempFile>> {
+    let mut registry = tmux_router::Registry::new();
+
+    for file_path in col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let path = Path::new(file_path);
+        if !path.exists() {
+            continue;
+        }
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let (fm, _) = match frontmatter::parse(&content) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        let Some(session_id) = fm.session else {
+            continue;
+        };
+        let Some(entry) = lookup_registry_entry_for_file_session(path, &session_id) else {
+            continue;
+        };
+        registry.insert(session_id, entry);
+    }
+
+    if registry.is_empty() {
+        return Ok(None);
+    }
+
+    let temp_dir = Path::new(".agent-doc/router-sync");
+    std::fs::create_dir_all(temp_dir).with_context(|| {
+        format!(
+            "failed to create synthetic tmux-router registry dir {}",
+            temp_dir.display()
+        )
+    })?;
+    let temp_file = NamedTempFile::new_in(temp_dir).with_context(|| {
+        format!(
+            "failed to create synthetic tmux-router registry in {}",
+            temp_dir.display()
+        )
+    })?;
+    tmux_router::registry::save_registry(temp_file.path(), &registry).with_context(|| {
+        format!(
+            "failed to save synthetic tmux-router registry {}",
+            temp_file.path().display()
+        )
+    })?;
+    Ok(Some(temp_file))
 }
 
 fn claimed_sync_pane_owner(
@@ -1767,12 +1824,36 @@ fn run_with_options(
         ));
     }
 
+    let tmux_router_registry = match build_tmux_router_sync_registry(col_args) {
+        Ok(registry) => registry,
+        Err(err) => {
+            let warning = format!(
+                "[sync] warning: failed to build synthetic tmux-router registry: {}",
+                err
+            );
+            eprintln!("{}", warning);
+            sync_log(&warning);
+            None
+        }
+    };
+    let tmux_router_registry_path = tmux_router_registry
+        .as_ref()
+        .map(|file| file.path())
+        .unwrap_or(registry_path.as_path());
+
     // NOTE: The busy pane guard (protect_pane) was removed from DETACH because it caused
     // 3-pane accumulation when the user switches documents in the same column. The guard
     // prevented stashing panes with active sessions, but when a new document replaces the
     // old one in a column, the old pane must give way. Column memory + stash rescue handle
     // session preservation for the non-agent-file case.
-    let result = tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
+    let result = tmux_router::sync(
+        col_args,
+        window,
+        focus,
+        tmux,
+        tmux_router_registry_path,
+        &resolve_file,
+    )?;
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -4642,6 +4723,109 @@ mod tests {
         assert_eq!(child_entry.file, "tasks/claudescore-3.md");
         assert_eq!(child_entry.cwd, subroot.to_string_lossy());
         assert_eq!(child_registry.len(), 1);
+    }
+
+    #[test]
+    fn tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\n---\n\n# Root\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-cross-root-focus-stability");
+        let root_pane = iso.new_session("test", root).unwrap();
+        let window = iso.pane_window(&root_pane).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
+
+        let mut root_registry = sessions::SessionRegistry::new();
+        let root_key = sessions::canonical_registry_key_in(
+            root,
+            root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        root_registry.insert(
+            root_key,
+            sessions::SessionEntry {
+                pane: root_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
+                cwd: root.to_string_lossy().to_string(),
+                started: "2026-04-30T23:31:02Z".to_string(),
+                session_id: "root-session".to_string(),
+                file: "tasks/agent-doc-bugs2.md".to_string(),
+                window: window.clone(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(root, &root_registry).unwrap();
+
+        let mut child_registry = sessions::SessionRegistry::new();
+        let child_key = sessions::canonical_registry_key_in(
+            &subroot,
+            child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        child_registry.insert(
+            child_key,
+            sessions::SessionEntry {
+                pane: child_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+                cwd: subroot.to_string_lossy().to_string(),
+                started: "2026-04-30T23:29:49Z".to_string(),
+                session_id: "child-session".to_string(),
+                file: "tasks/claudescore-3.md".to_string(),
+                window: window.clone(),
+                supervisor_instance_id: "instance-1".to_string(),
+            },
+        );
+        sessions::save_in(&subroot, &child_registry).unwrap();
+
+        let _cwd = ScopedCurrentDir::set(root);
+        let cols = vec![
+            "tasks/agent-doc-bugs2.md".to_string(),
+            "src/session-share/tasks/claudescore-3.md".to_string(),
+        ];
+        let synthetic_registry = build_tmux_router_sync_registry(&cols)
+            .unwrap()
+            .expect("cross-root sync should synthesize a router registry");
+        let resolve_file = |path: &Path| {
+            let content = std::fs::read_to_string(path).ok()?;
+            let (fm, _) = frontmatter::parse(&content).ok()?;
+            Some(FileResolution::Registered {
+                key: fm.session?,
+                tmux_session: None,
+            })
+        };
+        tmux_router::sync(
+            &cols,
+            Some(window.as_str()),
+            Some("src/session-share/tasks/claudescore-3.md"),
+            &iso,
+            synthetic_registry.path(),
+            &resolve_file,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![root_pane, child_pane],
+            "focusing the child document must not invert cross-root pane ownership"
+        );
     }
 
     #[test]

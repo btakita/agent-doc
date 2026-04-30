@@ -38,7 +38,72 @@ Active backlog:
 
 Icebox:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- agent:boundary:4169adf7 -->
+❯ Please investigate and diagram the reoccurring closing of tmux panes by agent-doc. We have taken >30 turn on fixing this problem but the problem still persists. Please provide a step-by-step sequence of events that causes agent-doc to incorrectly close the tmux panes on both claudescore-3.md and monsterrodholders.md.
+### Re: tmux pane close sequence — gpt-5
+
+This is not one single bug anymore. The April 29, 2026 evidence shows two different failure classes that both looked like "agent-doc closed my tmux pane" from the operator side.
+
+#### `claudescore-3.md`: cross-file misdispatch into the wrong live pane
+
+1. `route` was triggered for `src/session-share/tasks/claudescore-3.md`.
+2. The registered `claudescore-3.md` pane was gone or stashed, so `route` fell through to `auto_start_in_session(...)`.
+3. In that older path, `find_registered_pane_in_session(...)` could return the first alive pane in tmux session `14` without checking which file it owned.
+4. The live pane it found was `%401`, but `%401` belonged to `src/boost-client/tasks/monsterrodholders.md`, not `claudescore-3.md`.
+5. `route` sent the `claudescore-3.md` trigger into `%401`. `tmux send-keys` succeeded, so the dispatch looked accepted.
+6. No new `claudescore-3.md` document cycle started, because the command landed in a pane already running the `monsterrodholders.md` session.
+7. `route` then recorded `route_cycle_start_missing` / startup-miss and retried recovery. That recovery created extra panes and cleanup pressure around a session that already had the wrong owner.
+8. The user experience was "the claudescore pane closed / focus jumped / another window appeared," but the root cause was cross-file pane reuse, not tmux randomly killing the correct pane.
+
+Mermaid sketch:
+
+```mermaid
+sequenceDiagram
+    participant JB as JetBrains route
+    participant R as route(claudescore-3)
+    participant S14 as tmux session 14
+    participant M as pane %401 monsterrodholders
+    participant C as claudescore-3 cycle state
+
+    JB->>R: route claudescore-3.md
+    R->>S14: find registered pane in session
+    S14-->>R: %401 (alive, but wrong file)
+    R->>M: send claudescore trigger
+    M-->>R: tmux accepted keys
+    R->>C: wait for new cycle ack
+    C-->>R: no new claudescore cycle
+    R-->>JB: startup-miss / retry / extra pane churn
+```
+
+This is exactly the bug captured in [plan-route-cross-file-pane-mismatch.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-route-cross-file-pane-mismatch.md) and it matches the later hardening now present in [route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs:1323), where dispatch targets are file-validated before send.
+
+#### `monsterrodholders.md`: victim pane plus older stash/session-loss behavior
+
+For `monsterrodholders.md`, the bad sequence was different:
+
+1. Its pane was the live pane that the `claudescore-3.md` route incorrectly reused.
+2. That made `monsterrodholders.md` the victim session: it received foreign routed input and stopped being a trustworthy owner for its own document.
+3. In the older recovery/stash era, once a pane was stashed or its child died, tmux could destroy it immediately because `remain-on-exit` was not preserving enough provenance.
+4. After that disappearance, route only saw "no alive pane" or an unresolved startup-miss, so it deregistered and spawned replacements instead of proving what actually happened to the original pane.
+5. From the operator side, that looked like `agent-doc` had closed the `monsterrodholders.md` pane. More precisely: the pane was first misused as the wrong dispatch target, then later lost/replaced by the recovery path once ownership proof collapsed.
+
+The best write-up of that class is [plan-stashed-pane-silent-death.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-stashed-pane-silent-death.md). The important distinction is that this was a provenance failure around stash/death/restart, not the same cross-file bug as `claudescore-3.md`.
+
+#### Why the drafted `echo ... startup-miss ...` line appeared
+
+That line was an older implementation detail, not a user command. The earlier `startup-miss` diagnostic path literally typed an `echo '...'` command into the pane. In a live Codex pane, the harness composer could keep focus, so the text sat in the prompt box and was never submitted. That is why you saw:
+
+```text
+echo '[agent-doc] startup-miss: ...'
+```
+
+and why it was not Entered.
+
+That specific path has since been changed. The current implementation uses tmux `display-message` instead of drafting a shell `echo` into the harness input buffer; see [route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs:416).
+
+#### Bottom line
+
+The April 29, 2026 `claudescore-3.md` incident was a cross-file dispatch bug that hijacked the live `monsterrodholders.md` pane. The `monsterrodholders.md` symptom was then amplified by older stash/session-loss recovery behavior that replaced panes after ownership proof failed. The residual issue still visible in newer logs is mostly a **startup-miss on a live pane** problem, not the older "agent-doc literally killed the correct pane" bug.
+<!-- agent:boundary:30749b3d -->
 <!-- /agent:exchange -->
 
 <!--

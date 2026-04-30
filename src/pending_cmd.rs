@@ -636,7 +636,8 @@ mod tests {
         let (_tmp, doc) = doc_with_pending(concat!(
             "- [ ] [#tmuxcrash] parent task\n",
             "  - [ ] [#tmuxcrash-old1] stale child\n",
-            "  - [ ] [#tmuxcrash-old2] stale child two\n"
+            "  - [ ] [#tmuxcrash-old2] stale child two\n",
+            "- [ ] [#keep1] sibling task\n"
         ));
         edit(
             &doc,
@@ -658,6 +659,7 @@ mod tests {
             .filter(|line| line.trim_start().starts_with("- [ ] [#tmuxcrash-"))
             .collect();
         assert_eq!(child_lines.len(), 2, "got: {pending}");
+        assert!(pending.contains("\n- [ ] [#keep1] sibling task"));
     }
 
     #[test]

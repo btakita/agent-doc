@@ -678,7 +678,10 @@ fn parse_pending_edit_payload(new_text: &str) -> Result<(String, String)> {
             "pending edit: multiline text may only contain indented continuation lines after the first line"
         );
     }
-    let item = items.into_iter().next().expect("single parsed edit item");
+    let mut item = items.into_iter().next().expect("single parsed edit item");
+    if !item.continuation.is_empty() && !item.continuation.ends_with('\n') {
+        item.continuation.push('\n');
+    }
     Ok((item.text, item.continuation))
 }
 
@@ -2215,7 +2218,8 @@ mod tests {
         let body = concat!(
             "- [ ] [#tmuxcrash] parent task\n",
             "  - [ ] [#tmuxcrash-old1] stale child\n",
-            "  - [ ] [#tmuxcrash-old2] stale child two\n"
+            "  - [ ] [#tmuxcrash-old2] stale child two\n",
+            "- [ ] [#keep1] sibling task\n"
         );
         let new_body = op_edit(
             body,
@@ -2228,6 +2232,7 @@ mod tests {
         assert!(new_body.contains("  - fresh child two"));
         assert!(!new_body.contains("stale child"));
         assert!(!new_body.contains("stale child two"));
+        assert!(new_body.contains("  - fresh child two\n- [ ] [#keep1] sibling task"));
     }
 
     #[test]

@@ -206,12 +206,34 @@ Note:
 - `src/session-share/tasks/claudescore-3.md` is currently locally modified in its own repo with a new prompt line (`Please add the amount of benchmark testing to apply to each backlog item.`). I did not change or commit that file in this turn.
 
 No new backlog items came out of this verification pass.
-<!-- agent:boundary:74798ea0 -->
+❯ `❯ ` prompt prefix is being stripped away by the uncommitted user affordance that adds the ` (HEAD)` suffix. spec-test-build-install-commit-push
+### Re: prompt prefix `(HEAD)` false artifact — gpt-5
+
+Fixed in `src/agent-doc`.
+
+Root cause:
+- `classify_diff()` treated any added line containing `(HEAD)` as a pure boundary artifact, so preflight nulled the diff even when the line was ordinary user prose.
+
+What changed:
+- narrowed `boundary_artifact` detection to real `### Re: ... (HEAD)` heading churn and `<!-- agent:boundary:... -->` churn only
+- added a diff regression for the exact prose shape in this document
+- added a preflight regression proving the same line opens `preflight_started` instead of returning `no_changes`
+- updated `specs/04-diff-computation.md` to document that arbitrary prose mentioning `(HEAD)` stays prompt-bearing
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml classify_head_mention_in_user_prose_as_content_addition`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_does_not_swallow_user_prose_that_mentions_head`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `787a6fc` (`fix: keep head mentions prompt-bearing`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:79a07d00 -->
 <!-- /agent:exchange -->
 
 <!--
-`❯ ` is being s
----
 The JB Plugin syntax highlight has an off-by-1 incrementing position issue.
 ![img_5.png](img_5.png)
 ---

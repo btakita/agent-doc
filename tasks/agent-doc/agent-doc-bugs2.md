@@ -343,7 +343,33 @@ I inspected the live `exchange` component and confirmed the repair path had mult
 I repaired the component by restoring the last known single-copy exchange body from `HEAD~4`, which is the last revision before the duplicate repair attempts. The live `exchange` component is back to one copy.
 
 I also filed a new agent-doc bug in backlog as `#expatch` for the root binary behavior: `agent-doc patch <FILE> exchange` on this append-mode template doc appended the supplied body instead of replacing the paired-marker component content, which is what created the duplicate and then triplicate exchange history during repair.
-<!-- agent:boundary:e0de7d5d -->
+❯ Please assess why agent-doc recently closed the tmux pane that claimed /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md. spec-test-build-install-commit-push
+### Re: monsterrodholders pane replacement — gpt-5
+
+This looks like a different bug from the routed startup-miss handling.
+
+What the logs show:
+
+1. `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` records `session_start file=tasks/monsterrodholders.md pane=%408` at `2026-04-29 07:46:33 UTC`. After that, there is no `session_end` and no `session_superseded %408 -> ...` entry.
+2. At `2026-04-29 19:52:12 UTC`, `src/boost-client/.agent-doc/logs/ops.log` records `route_startup_miss_detected ... pane=%408 ... live_owner=%408 ... session_log=open ...` immediately followed by `route_startup_miss_cleared_live_owner ... pane=%408`. So the routed startup-miss path did not kill `%408`; it recognized `%408` as the live owner and cleared the stale marker.
+3. At `2026-04-29 20:44:16 UTC`, the same session log jumps straight to `session_start ... pane=%434` with the same session id. There is still no `%408 -> %434` supersession record.
+4. The pattern repeats before normal rebind provenance starts showing up: `%434 -> %499 -> %502 -> %505 -> %519 -> %529` are all fresh `session_start` eras without matching `session_superseded` / `session_end origin=registry_rebind` for the displaced pane. Only later, `%529 -> %533` and subsequent moves are recorded cleanly.
+
+My read of the failure:
+
+- I do not see evidence that `route` directly closed the claimed `monsterrodholders.md` pane.
+- I do see evidence that a later `start` path replaced an alive registered owner after live-owner proof failed.
+- The matching code path is `src/agent-doc/src/start.rs`: `existing_session_pane_action(...)` can return `ClearStale(stale_pane)` when the registered pane is alive but neither process-tree matching nor supervisor PID lookup proves ownership. In that branch, `start` deregisters the existing pane and then registers the current pane as a fresh owner.
+- That branch explains the user-visible symptom "agent-doc closed/replaced the pane" and also explains the missing provenance: it is not the normal `session_superseded ... origin=registry_rebind` path.
+
+Bottom line:
+
+- For `monsterrodholders.md`, the recent bad event is best described as **silent alive-pane replacement after lost ownership proof**, not a routed startup-miss closeout.
+- I added a new backlog item, `#staleown`, for this exact `%408 -> %434` replacement-without-provenance bug family.
+
+Note:
+- This cycle was investigation-only. I did not change `src/agent-doc` code, so I did not run the cargo/spec/build/install/publish suite here.
+<!-- agent:boundary:c503ed6b -->
 <!-- /agent:exchange -->
 
 <!--

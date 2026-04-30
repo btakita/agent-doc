@@ -722,7 +722,7 @@ fn strip_re_heading_attribution(content: &str) -> String {
     }
 }
 
-fn normalize_post_commit_re_heading_drift(content: &str) -> String {
+pub(crate) fn normalize_post_commit_re_heading_drift(content: &str) -> String {
     strip_re_heading_attribution(&normalize_transient_agent_doc_markers(content))
 }
 

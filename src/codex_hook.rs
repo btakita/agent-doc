@@ -70,6 +70,14 @@ struct SessionState {
     updated_at: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActiveSessionState {
+    pub session_id: String,
+    pub doc_path: String,
+    pub last_turn_id: String,
+    pub last_prompt: String,
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum StopResponse {
@@ -466,6 +474,18 @@ fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
 }
 
 pub(crate) fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
+    let Some(state) = load_active_session_for_current_file(file)? else {
+        return Ok(None);
+    };
+    if state.last_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(state.last_prompt))
+}
+
+pub(crate) fn load_active_session_for_current_file(
+    file: &Path,
+) -> Result<Option<ActiveSessionState>> {
     let Some(session_id) = current_session_id() else {
         return Ok(None);
     };
@@ -477,10 +497,15 @@ pub(crate) fn load_prompt_for_current_session(file: &Path) -> Result<Option<Stri
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
     let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if state_file != current_file || state.last_prompt.trim().is_empty() {
+    if state_file != current_file {
         return Ok(None);
     }
-    Ok(Some(state.last_prompt))
+    Ok(Some(ActiveSessionState {
+        session_id: state.session_id,
+        doc_path: state.doc_path,
+        last_turn_id: state.last_turn_id,
+        last_prompt: state.last_prompt,
+    }))
 }
 
 fn save_state(root: &Path, state: &SessionState) -> Result<()> {
@@ -707,6 +732,62 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Why was startup missed?"));
         assert!(content.contains("Recovered through Stop."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_auto_closes_active_session_post_commit_drift() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        let drifted = format!("{original}\nPost-closeout active-session drift.\n");
+        fs::write(&doc, &drifted).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CODEX_THREAD_ID").ok();
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("active Codex session changed this document"));
+            }
+            other => panic!("expected interrupted session-check status, got {other:?}"),
+        }
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Recovered post-closeout drift.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        if let Some(value) = prev {
+            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
+        } else {
+            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+        }
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Post-closeout active-session drift."));
+        assert!(content.contains("Recovered post-closeout drift."));
         match crate::session_check::inspect(&doc).unwrap() {
             crate::session_check::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));

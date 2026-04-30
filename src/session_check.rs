@@ -415,6 +415,15 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 marker
             )));
         }
+        if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
+                state.cycle_id,
+                phase_name(state.phase),
+                state.last_event,
+                marker
+            )));
+        }
         if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
@@ -462,6 +471,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                )));
+            }
+            if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
                     marker
                 )));
             }
@@ -540,6 +555,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
+                    marker
+                )));
+            }
+            if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: last ops.log event is terminal, but the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
                     marker
                 )));
             }
@@ -909,6 +930,52 @@ fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
+fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
+    let Some(session) = crate::codex_hook::load_active_session_for_current_file(file)? else {
+        return Ok(None);
+    };
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let current = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    if current == snapshot {
+        return Ok(None);
+    }
+    if crate::git::normalize_transient_agent_doc_markers(&current)
+        == crate::git::normalize_transient_agent_doc_markers(&snapshot)
+    {
+        return Ok(None);
+    }
+    if crate::git::normalize_post_commit_re_heading_drift(&current)
+        == crate::git::normalize_post_commit_re_heading_drift(&snapshot)
+    {
+        return Ok(None);
+    }
+
+    let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    let prompt_preview = session
+        .last_prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("agent-doc session");
+    let prompt_preview = prompt_preview.trim();
+
+    let detail = match prompt_marker {
+        Some(marker) => format!(
+            "{}; active_session={} turn={} prompt={}",
+            marker, session.session_id, session.last_turn_id, prompt_preview
+        ),
+        None => format!(
+            "active_session={} turn={} prompt={}",
+            session.session_id, session.last_turn_id, prompt_preview
+        ),
+    };
+    Ok(Some(detail))
+}
+
 fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
     let detail = match state.phase {
         crate::cycle_state::CyclePhase::PreflightStarted => {
@@ -1133,12 +1200,57 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
 
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
     fn make_project(tmp: &Path) -> std::path::PathBuf {
         fs::create_dir_all(tmp.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(tmp.join(".agent-doc/snapshots")).unwrap();
         let doc = tmp.join("doc.md");
         fs::write(&doc, "body").unwrap();
         doc
+    }
+
+    fn track_active_codex_session(root: &Path, doc: &Path, prompt: &str) {
+        let session_id = "codex-session";
+        let state_dir = root.join(".agent-doc/codex-hooks/sessions");
+        fs::create_dir_all(&state_dir).unwrap();
+        let hash = crate::ops_log::content_hash(session_id);
+        let state_path = state_dir.join(format!("{hash}.json"));
+        let payload = serde_json::json!({
+            "session_id": session_id,
+            "doc_path": doc.display().to_string(),
+            "last_turn_id": "turn-1",
+            "last_prompt": prompt,
+            "updated_at": 1u64
+        });
+        fs::write(state_path, serde_json::to_string_pretty(&payload).unwrap()).unwrap();
     }
 
     fn setup_committed_capture(
@@ -1525,6 +1637,69 @@ mod tests {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("no new agent-doc cycle started"));
                 assert!(message.contains("prompt_target"));
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_interrupts_on_active_session_post_commit_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done. Manual active-turn drift.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+        track_active_codex_session(
+            root,
+            &doc,
+            &format!(
+                "agent-doc {}\nDo #closeout-bypass. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("active Codex session changed this document"));
+                assert!(message.contains("binary-owned write/commit path"));
+                assert!(message.contains("agent-doc"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
         }

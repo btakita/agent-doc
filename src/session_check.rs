@@ -944,13 +944,8 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
     if current == snapshot {
         return Ok(None);
     }
-    if crate::git::normalize_transient_agent_doc_markers(&current)
-        == crate::git::normalize_transient_agent_doc_markers(&snapshot)
-    {
-        return Ok(None);
-    }
-    if crate::git::normalize_post_commit_re_heading_drift(&current)
-        == crate::git::normalize_post_commit_re_heading_drift(&snapshot)
+    if crate::git::normalize_committed_exchange_artifacts(&current)
+        == crate::git::normalize_committed_exchange_artifacts(&snapshot)
     {
         return Ok(None);
     }
@@ -1702,6 +1697,61 @@ mod tests {
                 assert!(message.contains("agent-doc"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_ignores_active_session_canonicalization_only_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do #closeout-bypass. spec-test-build-install-commit-push\n",
+            "### Re: #closeout-bypass — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Do #closeout-bypass. spec-test-build-install-commit-push\n",
+            "### Re: #closeout-bypass — gpt-5 (HEAD)\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+        track_active_codex_session(
+            root,
+            &doc,
+            &format!(
+                "agent-doc {}\nDo #closeout-bypass. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected ok status, got {other:?}"),
         }
     }
 

@@ -1473,6 +1473,14 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
+fn fresh_route_start_ack_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(30)
+    }
+}
+
 fn routed_cycle_ack_timeout(live_child_for_file: bool) -> Duration {
     if cfg!(test) {
         if live_child_for_file {
@@ -2303,16 +2311,13 @@ fn auto_start_in_session(
             );
         }
 
-        match wait_for_start_ack(
-            file,
-            cycle_baseline.as_ref(),
-            routed_cycle_ack_timeout(false),
-        ) {
+        let ack_timeout = fresh_route_start_ack_timeout();
+        match wait_for_start_ack(file, cycle_baseline.as_ref(), ack_timeout) {
             Some(state) => {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={}",
+                        "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={} timeout_secs={}",
                         file.display(),
                         new_pane,
                         harness.binary,
@@ -2322,7 +2327,8 @@ fn auto_start_in_session(
                             crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
                             crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
                             crate::cycle_state::CyclePhase::Committed => "committed",
-                        }
+                        },
+                        ack_timeout.as_secs()
                     ),
                 );
                 let _ = crate::startup_miss::clear(file);
@@ -2331,10 +2337,11 @@ fn auto_start_in_session(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "fresh_route_start_missing file={} pane={} harness={}",
+                        "fresh_route_start_missing file={} pane={} harness={} timeout_secs={}",
                         file.display(),
                         new_pane,
-                        harness.binary
+                        harness.binary,
+                        ack_timeout.as_secs()
                     ),
                 );
                 let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
@@ -3578,6 +3585,11 @@ history line
     }
 
     #[test]
+    fn fresh_route_start_ack_timeout_allows_restart_slack() {
+        assert_eq!(fresh_route_start_ack_timeout(), Duration::from_secs(2));
+    }
+
+    #[test]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -4148,6 +4160,79 @@ history line
             lookup.as_deref(),
             Some(new_pane.as_str()),
             "target document should bind to the new pane"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-extended-ack");
+        let session = "claude";
+        let cwd = test_cwd();
+        let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-extended-ack.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_start = write_mock_start_agent_doc(dir.path());
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-fresh-start-extended-ack",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("fresh auto-start should tolerate a delayed but real initial cycle start");
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should still dispatch the trigger before observing the delayed ack: {content}"
+        );
+
+        let state = crate::cycle_state::load(&doc)
+            .unwrap()
+            .expect("cycle state should exist after delayed fresh-start ack");
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
         );
     }
 

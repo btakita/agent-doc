@@ -245,7 +245,7 @@ run_every = "7d"
 - Parse age from file mtime, not filename heuristics.
 - Log kept vs deleted files so the cleanup is auditable.
 - Add tests for threshold handling, newest-baseline preservation, and active-document safety.
-### Re: scoped fix command — gpt-5
+### Re: scoped fix command — gpt-5 (HEAD)
 
 Implemented the CLI and scoped repair flow.
 
@@ -261,7 +261,7 @@ Verification:
 - `make install`
 
 Committed and pushed in `src/agent-doc` as `0cec88b` (`feat: add scoped agent-doc fix command`).
-<!-- agent:boundary:48607898 -->
+<!-- agent:boundary:fbd2d737 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

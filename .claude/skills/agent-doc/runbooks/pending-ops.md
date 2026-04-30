@@ -14,12 +14,27 @@ Pending items carry stable IDs and GFM checkboxes:
 
 ```
 - [ ] [#a3f2] active item
-- [x] [#b1c4] user-marked done (preflight reaps next cycle)
+- [x] [#b1c4] user-marked done (commit-required closeouts reap it in the same cycle; preflight / repair also clean up stale completed items)
 - [/] [#c9e0] gated — skipped by reaper, waiting on external signal
+1. [ ] [#d4e5] explicit top priority
 ```
 
 Preflight lazy-backfills IDs and checkboxes on any item that lacks them. You do not assign
 hashes yourself unless you intentionally use the `id=<custom> ` prefix on add.
+
+If any tracked parent item in a backlog or icebox uses ordered-list style (`1.`, `2.`, `3.`),
+the binary treats that component as an ordered tracked surface and renumbers all tracked parent
+items sequentially in current item order on render. That keeps explicit priority lists stable
+across add/reorder/done/reap operations.
+
+Backlog and icebox sections may also contain markdown headings or blank separator
+lines for organization. The granular pending ops preserve those non-item lines in
+place; they mutate only the actual task bullets.
+
+Nested lists are supported under a backlog/icebox item as indented continuation
+lines. Keep the tracked parent marker flush-left (`- ` or `1. `); the binary treats
+the indented children as part of that parent item and preserves them through reorder, done,
+reap, and transfer.
 
 ## Granular flags
 
@@ -28,7 +43,7 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
-| `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle. Repeat for multiple ids. |
+| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |
@@ -101,6 +116,12 @@ agent-doc write plan.md \
 That keeps the backlog self-describing: the pending line already tells the next
 cycle which concrete plan file exists and should be opened.
 
+If the document is being used collaboratively, treat that cross-document read as
+a security boundary. Shared docs should carry both
+`agent_doc_collaboration: shared` and an auditable
+`agent_doc_security_review: <review-id>` before a `do #id` cycle follows a
+plan path into another `.md` file.
+
 ## What to decide each cycle
 
 - Items completed during this response → `--pending-done <id>`
@@ -110,9 +131,10 @@ cycle which concrete plan file exists and should be opened.
 - **Unaccepted recommendations** → `--pending-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
 - **Existing `do #id` work that completed this cycle** → `--pending-done <id>` in
-  the same closeout command. Session-doc closeouts now fail before commit when a
-  response clearly completes `#id` but omits the matching done mutation. If the
-  item is code-complete but blocked on an external gate, prefer
+  the same closeout command whether the item lived in the live backlog or the
+  icebox. Session-doc closeouts now fail before commit when a response clearly
+  completes `#id` but omits the matching done mutation. If the item is
+  code-complete but blocked on an external gate, prefer
   `--pending-gate <id>` instead of leaving it silently open.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step

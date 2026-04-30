@@ -1,0 +1,25 @@
+# Plan — reap completed backlog items on terminal closeout
+
+- [ ] Reconstruct the exact failure chain from `src/session-share/tasks/claudescore-3.md`, where multiple backlog items were correctly marked `[x]` in the closeout commit but remained published in the live `agent:backlog` because no later preflight pass revisited the document.
+- [ ] Distinguish this state class from the older stale-completed-item bugs already fixed in `repair` / `preflight`:
+  - not "item should have been `--pending-done` but was left open"
+  - not "preflight saw an existing `[x]` and failed to persist the reap"
+  - specifically "closeout intentionally allowed newly done items to survive for a future reap that never happened"
+- [ ] Trace the exact allow-path in `src/agent-doc`:
+  - `session_check::check_completed_pending_reap_guard`
+  - any cycle metadata that treats freshly `--pending-done` ids as exempt
+  - `preflight` / `finalize` sequencing around snapshot persistence, commit, and post-commit validation
+- [ ] Define the invariant for terminal closeout:
+  - if a successful closeout leaves no remaining live work for a document, completed backlog items must be reaped in the same persisted cycle
+  - otherwise `agent-doc` must fail closed and say why the reap was intentionally deferred
+- [ ] Decide whether the fix belongs in:
+  - `finalize` / pre-commit maintenance so the reap happens before the closeout commit, or
+  - post-commit validation that immediately triggers a safe repair/reap commit when the closeout would otherwise strand `[x]` items
+- [ ] Verify archive behavior at the same time: if `agent:pending-done` / done-archive components exist, reaped terminal-closeout items must still preserve the expected archive record instead of disappearing or being duplicated.
+- [ ] Add regression coverage for:
+  - closeout that marks one backlog item done and leaves no other open items
+  - closeout that marks some items done while other open/gated items remain
+  - committed document containing only freshly-done items in `agent:backlog`
+  - fail-closed behavior when the terminal reap cannot be persisted safely through snapshot + commit boundaries
+- [ ] Update the pending-system spec and runbook guidance only after the code-level invariant and regressions are in place.
+- [ ] Patch the verified outcome back into `tasks/agent-doc/agent-doc-bugs2.md` and reduce the backlog item only after the terminal-closeout repro is covered by tests.

@@ -121,8 +121,8 @@ Added concrete next-step backlog items for both issue families:
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 
 The top backlog id is `#smliveplan`.
-❯ do #smliveplan + #smlive. spec-test-build-install-commit-push
-### Re: #smliveplan + #smlive — gpt-5
+do #smliveplan + #smlive. spec-test-build-install-commit-push
+### Re: #smliveplan + #smlive — gpt-5 (HEAD)
 
 Implemented the live-owner startup-miss fix in `src/agent-doc` and traced the two requested incidents.
 
@@ -150,6 +150,7 @@ Note:
 
 No new backlog items came out of this fix.
 <!-- agent:boundary:27a7d020 -->
+commit + push all uncommitted files
 <!-- /agent:exchange -->
 
 <!--

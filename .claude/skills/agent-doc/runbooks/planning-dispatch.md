@@ -19,6 +19,7 @@ The command emits a structured planning record as JSON.
 ## Planning Record
 
 - `prompt_targets` — ordered prompts that must be answered this cycle
+- `execution_scope` — `normal | plan_backlog_only`; `plan_backlog_only` means the active prompt is a report/planning contract such as `#agent-doc-bug`, so the cycle must create plan/backlog artifacts and must not start repo implementation yet
 - `repo_actions` — concrete repo work to complete before response persistence
 - `required_commands` — binary/harness commands that must run this cycle
 - `pending_mutations` — pending items that must be resolved before persistence
@@ -30,9 +31,10 @@ The command emits a structured planning record as JSON.
 1. Run the planning phase after preflight and before repo work.
 2. Execute `required_commands` and respect `handoff` before free-form response generation.
 3. If `handoff=orchestrate`, use the emitted `agent-doc orchestrate ...` command instead of manually simulating the batch.
-4. Execute `repo_actions` before `finalize` / `write --commit`.
-5. Resolve `pending_mutations` in the same cycle so pending state does not drift.
-6. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
+4. If `execution_scope=plan_backlog_only`, do not start repo implementation, tests, builds, installs, commits, or pushes from this cycle even if the raw prompt contained imperative wording. Capture the plan and backlog items first, then wait for a later `do #id ...` turn to authorize implementation.
+5. Otherwise, execute `repo_actions` before `finalize` / `write --commit`.
+6. Resolve `pending_mutations` in the same cycle so pending state does not drift.
+7. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
 
 ## Notes
 

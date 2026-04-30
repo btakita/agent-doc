@@ -1,5 +1,23 @@
 # Plan — stabilize repeated tmux pane crashes during `agent-doc` sessions
 
+**Pending:** `#tmuxcrash`
+**Status:** Draft
+
+## Problem
+
+Multiple April 29, 2026 reports still surface to the user as "the tmux pane crashed", but the persisted evidence shows a mixed failure family:
+
+- `tasks/software/tsift.md`
+  - `.agent-doc/logs/tsift-v0.1.log` records `session_start file=tasks/software/tsift.md pane=%411 session=tsift-v0` with no matching `codex_exit` or `session_end`
+  - `.agent-doc/logs/ops.log` records `route_cycle_start_missing file=tasks/software/tsift.md pane=%411 harness=codex marker=prompt_target: do #afyn. spec-test-build-install-commit-push`
+  - `.agent-doc/state/startup-miss/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c.json` still exists
+- `tasks/agent-doc/agent-doc-bugs2.md`
+  - `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log` records `session_start ... pane=%412` with no matching `codex_exit` or `session_end`
+  - `.agent-doc/logs/ops.log` records `route_cycle_start_missing file=tasks/agent-doc/agent-doc-bugs2.md pane=%407 harness=codex marker=prompt_target: do #xfrr. spec-test-build-install-commit-push`
+  - `.agent-doc/state/startup-miss/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json` still exists
+
+So the bug is broader than one literal tmux pane death. The current system can leave behind fresh-start panes, startup-miss markers, and supervisor logs that never reach a clean exit boundary, while the user only sees "the pane crashed".
+
 Source: `tasks/software/tsift.md`
 
 - [ ] Reconstruct the three known crash episodes from persisted evidence before changing behavior:

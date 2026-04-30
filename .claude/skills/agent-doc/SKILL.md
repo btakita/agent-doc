@@ -78,6 +78,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 After `preflight`, run `agent-doc plan <FILE>` and use the emitted planning record as the execution contract for the cycle. The planning record is binary-owned and includes:
 
 - `prompt_targets` — ordered prompts that still require a response
+- `execution_scope` — whether this cycle may execute repo work normally or must stay in plan/backlog capture only mode
 - `repo_actions` — concrete repo work to finish before persistence
 - `required_commands` — binary/harness commands the cycle must run
 - `pending_mutations` — pending items that must be resolved this cycle
@@ -91,7 +92,7 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Respond to new `## User` blocks, prompt-bearing inline edits (blockquotes, comments, edits to previous responses), and structural changes.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; the turn is incomplete until each unresolved prompt in that tail is answered or explicitly grouped into one response. Concretely, each `prompt_target` must be answered or grouped, while `content_edit` items are user corrections to incorporate and `recovery_artifact` / `boundary_artifact` items are normalization signals instead of ordinary conversation.
-- Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
+- Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode for this cycle even if the raw prompt sounds imperative; do not start repo implementation until a later explicit `do #id ...` turn. Otherwise, if the user edit requests implementation, tests, builds, benchmarks, commits, or pushes, do that work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 
@@ -100,6 +101,8 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 **Streaming checkpoints:** for long multi-topic responses, flush partial content at natural breakpoints so the user sees progress. Full procedure + baseline re-save pattern: [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md).
 
 **Prefer wrapping exchange responses in `<!-- patch:exchange -->`** for clarity. Raw (unwrapped) content also works via boundary synthesis.
+
+**`#agent-doc-bug` scope:** when `agent-doc plan` returns `execution_scope=plan_backlog_only`, the prompt is a report/planning contract. Create the plan file(s), capture the backlog item(s), and explain the deferred implementation boundary instead of editing code in that same cycle.
 
 ### 1b. Update pending (template mode)
 
@@ -122,6 +125,7 @@ If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -
 Complete the requested implementation, verification, build/install, and local inspection work for this turn **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after the edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook to do this for you.
+**Parallel tmux suites are gating:** when the touched surface affects tmux routing, pane/session lifecycle, sync/resync, or other tmux-heavy behavior, the verification plan must include the parallel tmux suites in their parallel form (for example `--test-threads=16`, or the repo's current equivalent). If a parallel tmux suite fails, the turn has not passed verification, even if the same test passes in isolation or under a synchronous rerun.
 
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 

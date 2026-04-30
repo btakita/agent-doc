@@ -417,7 +417,57 @@ For the recent `monsterrodholders.md` shape, the most likely concrete sequence i
 That is exactly why the `#staleown` fix changed `start`: once both proofs are gone, alive-by-itself is no longer enough to authorize replacement.
 
 No new backlog item came out of this explanation.
-<!-- agent:boundary:5fce00a3 -->
+❯ I tried to navigate back to monsterrodholders.md, but once again, the pane was replaced. Was this due to running an old version of agent-doc?
+
+❯ Pleas explain this a bit more. If the proofs are gone, what happens if there is a running supervisor for the document?
+❯ > That is exactly why the `#staleown` fix changed `start`: once both proofs are gone, alive-by-itself is no longer enough to authorize replacement.
+### Re: was the new `monsterrodholders.md` replacement just an old binary? — gpt-5
+
+Not entirely.
+
+What I can prove from the logs:
+- `dda7faa` (`fix: fail closed on stale alive-owner rebind`) is dated **April 30, 2026 14:22:19 -0400** in `src/agent-doc`.
+- The `monsterrodholders.md` session log shows a replacement **before** that fix at **2026-04-30 14:05:51 -0400**: `%575 -> %585`.
+- But it also shows replacements **after** that fix at **2026-04-30 14:27:42 -0400**: `%585 -> %588`, and **2026-04-30 14:34:46 -0400**: `%588 -> %589`.
+
+So:
+- the **14:05** replacement could still have happened under the old behavior,
+- the later **14:27** and **14:34** replacements were **not** explained solely by an old version.
+
+There is another important clue: the recent replacements are now logged as normal registry rebinds:
+- `session_superseded old_pane=%585 new_pane=%588 ...`
+- `session_end origin=registry_rebind pane=%585 next_pane=%588`
+- `session_superseded old_pane=%588 new_pane=%589 ...`
+- `session_end origin=registry_rebind pane=%588 next_pane=%589`
+
+That is the **new** provenance-preserving behavior from `#staleown`. The old bad shape was the silent `%408 -> %434` jump with **no** supersession record. So the current issue is not "the old silent no-proof replacement happened again in exactly the same way." It is "a later path is still deciding to start a fresh pane and rebind the session."
+
+### Re: what if there is a running supervisor? — gpt-5
+
+In code terms, a **provable** running supervisor should prevent the `NoLiveOwner` state.
+
+The proof model is:
+- process-tree match on the file, or
+- supervisor socket `Pid` response that maps the live child PID back to a tmux pane
+
+If the supervisor is really running **and** its socket responds **and** the PID still maps back into the pane tree, then supervisor-pid proof exists and we do **not** have "no live owner can be proven."
+
+So when I said "if the proofs are gone," I meant one of these narrower cases:
+- the supervisor is not running,
+- the supervisor is running but the socket is missing/unreachable,
+- the socket responds but the reported child PID no longer maps back to the pane,
+- or the registered pane has already drifted away from the supervisor-owned child.
+
+That distinction matters because `#staleown` only changed one branch in `start.rs`: **alive pane + no live-owner proof + supervisor unavailable** now fails closed instead of silently replacing the pane. It did **not** ban every later registry-rebind path.
+
+So my current read is:
+- the older pre-`dda7faa` replacement may indeed have been the bug we fixed,
+- the later post-`dda7faa` replacements are evidence of a **different remaining rebind path**, not just an out-of-date binary.
+
+One more concrete clue: the newest `%588` era logged a clean `codex_exit code=0`, then a `codex_restart mode=continue`, then `auto_trigger_timeout`, and only later `%588 -> %589` was rebound. That does not look like the original silent `%408 -> %434` stale-owner branch. It looks more like later restart / editor-return churn still causing a fresh-pane handoff.
+
+No new backlog item came out of this answer yet because I can prove the old-vs-new split, but I have not yet isolated the exact remaining branch that created `%585 -> %588` and `%588 -> %589`.
+<!-- agent:boundary:a9be7e08 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -142,7 +142,7 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 4. If found → `tmux split-window` alongside that pane (`-dbh` for left-column, `-dh` for right-column)
 5. If split-window fails → fall back to creating a new window
 6. If no split target found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
-7. Any pane created by this auto-start path must enable tmux `remain-on-exit on` on its current window before the harness launch begins, so later pane death preserves `pane_dead_status` and recent pane output for sync/resync diagnostics instead of disappearing immediately.
+7. Any pane created by this auto-start path must enable tmux pane-local `remain-on-exit on` on that pane before the harness launch begins, so later pane death preserves `pane_dead_status` and recent pane output for sync/resync diagnostics even after the pane is moved into stash or rescued back out.
 
 ## claim
 

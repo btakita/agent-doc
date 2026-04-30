@@ -1115,7 +1115,40 @@ Artifacts / local testing:
 Note:
 - I left the unrelated local formatting change in `src/agent-doc/src/start.rs` unstaged and uncommitted.
 - No new backlog item came out of this turn.
-<!-- agent:boundary:0a6f92dc -->
+### Re: JB plugin syntax highlighting — gpt-5
+
+I fixed the JetBrains highlighting issues and tightened the shared editor-token contract in `src/agent-doc`.
+
+Root cause:
+- the shared visual-token scanner only marked the component comments themselves, so agent-managed block bodies stayed visually flat
+- standalone bracket labels like `[recommended]` were left to the default Markdown parser, which rendered them like broken reference/link syntax in JetBrains
+
+What changed:
+- `src/syntax.rs` now emits shared `component_body` and `label_tag` tokens, while still excluding fenced code, inline code, checklist markers, and image alt text
+- JetBrains now gives agent-managed component bodies a muted background tint and renders label tags as metadata chips instead of broken markdown refs
+- VS Code consumes the same new shared tokens so the editor contract stays aligned across both integrations
+- during verification I also fixed the full-suite flake in `src/agent/mod.rs` by making the codex-network env test use the shared test env lock under parallel `cargo test`
+- updated `editors/SPEC.md` and `VERSIONS.md`
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `c184d32` (`fix: improve editor visual highlighting`) pushed to `origin/20260422/codex-agent-backend`
+
+Artifacts / local testing:
+- local `agent-doc` binary replaced at `/home/brian/.cargo/bin/agent-doc`
+- JB plugin package built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.79.zip`
+
+Note:
+- I left the unrelated local formatting change in `src/agent-doc/src/start.rs` unstaged and uncommitted.
+- No new backlog item came out of this turn.
+<!-- agent:boundary:e3660e09 -->
 <!-- /agent:exchange -->
 
 <!--

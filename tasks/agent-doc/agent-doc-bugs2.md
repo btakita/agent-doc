@@ -635,7 +635,27 @@ About the `echo '[agent-doc] startup-miss ...'` text that appeared in the bound 
 - `#smdq` already changed that path to a tmux display overlay, so that diagnostic is no longer supposed to land as pending pane input.
 
 I did not add a new backlog item. Both reports fit the existing `#tmuxcrash` / `#smst` family: false crash surfacing caused by startup-miss/live-owner state, not true child-death provenance.
-<!-- agent:boundary:1f204817 -->
+❯ continue #tmuxcrash. Please include done tasks and not done tasks under the backlog #tmuxcrash child list. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` repeated pane-loss fail-closed guard — gpt-5
+
+I continued `#tmuxcrash` and closed another false-crash recovery path. `route` and `sync` were still willing to keep auto-starting replacement panes after repeated `missing_pane` losses, which let the same unstable state keep resurfacing as if the pane had simply crashed again.
+
+What changed in `src/agent-doc`:
+- added a shared recent-loss detector that counts repeated `supervisor_exit code=missing_pane` events for the same session inside a 10-minute window
+- made `route` fail closed instead of auto-restarting when that repeated-loss window trips
+- made `sync` skip its auto-start path under the same repeated-loss window
+- fixed route-side dispatch registration so live-owner recovery writes to the document-root registry and validates against the canonical file path, which removes the parallel tmux route-owner mismatch that showed up during this investigation
+- updated the command spec and `VERSIONS.md`
+
+I already ran the requested spec/test/build/install/commit/push cycle for this turn:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- commit `1fc5a67` pushed to `origin/20260422/codex-agent-backend`
+
+I updated the `#tmuxcrash` backlog child list so it now shows completed `[x]` work and remaining `[ ]` work in one tracked sublist. The parent `#tmuxcrash` item stays open because the end-to-end restarted second-leg closeout proof in `#tmuxcrash-9rh5` is still the hard remaining check.
+<!-- agent:boundary:e6f58b1f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -650,6 +670,18 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 
 <!-- agent:backlog -->
 - [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions can surface to the user as "the pane crashed" while the persisted state actually shows a mixed family of startup-miss, fresh-start, orphaned-supervisor, or missing-exit cases. Repro includes `tasks/software/tsift.md` on Apr 29, 2026, where the last pane died before the `#bjen` closeout was written back. Fix: add crash provenance, classify fresh-start vs real pane death, and verify recovery from a live tmux-backed Codex session. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
+  - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
+  - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
+  - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
+  - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
+  - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
+  - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
+  - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
+  - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
+  - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
+  - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
+  - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
+  - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
   - [ ] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
   - [ ] [#tmuxcrash-hmrz] If that recovered closeout is clean, move stale startup-miss and ownership cleanup out to `#smst`.
   - [ ] [#tmuxcrash-rn2d] Narrow `#tmuxcrash` to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.

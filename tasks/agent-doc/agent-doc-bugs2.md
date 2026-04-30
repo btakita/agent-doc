@@ -1181,7 +1181,37 @@ Note:
 - I left the pre-existing unrelated local formatting change in `src/agent-doc/src/start.rs` untouched
 - I did not create a source-code commit or push from this turn because this follow-up did not ask for a commit/push cycle
 - No new backlog item came out of this turn.
-<!-- agent:boundary:dd80a820 -->
+### Re: JB plugin syntax highlighting follow-up — gpt-5
+
+I fixed the remaining editor-highlighting gap behind the new screenshot repro.
+
+Root cause:
+- the shared visual-token scanner only tagged ordinary HTML scratch comments at the `<!-- ... -->` delimiter lines
+- multiline scratch-comment bodies therefore fell back to raw Markdown parsing inside JetBrains, which is why the commented example/image region near the exchange closeout still showed false syntax-style rendering even after the earlier component-body fix
+
+What changed:
+- `src/syntax.rs` now emits a shared `scratch_comment_body` token for ordinary HTML comment bodies, alongside the existing delimiter token
+- JetBrains now renders those body ranges with comment styling plus the same muted-body treatment used for agent-managed regions
+- VS Code consumes the same shared token so the editor contract stays aligned across both integrations
+- updated `editors/SPEC.md`, `docs/guide/editor-integration.md`, and `VERSIONS.md`
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Artifacts / local testing:
+- local `agent-doc` binary replaced at `/home/brian/.cargo/bin/agent-doc`
+- JB plugin package built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.79.zip`
+
+Note:
+- I left the pre-existing unrelated local formatting change in `src/agent-doc/src/start.rs` untouched
+- I did not create a source-code commit or push from this turn because this follow-up did not ask for a commit/push cycle
+- No new backlog item came out of this turn.
+<!-- agent:boundary:9510a731 -->
 <!-- /agent:exchange -->
 
 <!--

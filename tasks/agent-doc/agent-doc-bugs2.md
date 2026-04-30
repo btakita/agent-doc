@@ -859,7 +859,11 @@ Verification:
 Status:
 - local fix is implemented and installed
 - I did not make a repo commit or push in this turn
-<!-- agent:boundary:44bdb589 -->
+### Re: backlog capture closeout — gpt-5
+
+No new backlog item came out of this fix. I did not have a live retained-dead-pane repro after the provenance repair, so there is no accepted follow-up task to add yet.
+
+<!-- agent:boundary:4e9c02cd -->
 <!-- /agent:exchange -->
 
 <!--

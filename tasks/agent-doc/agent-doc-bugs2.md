@@ -654,7 +654,31 @@ Verification:
 
 Published:
 - `src/agent-doc` commit `56c977c` (`fix: fail closed on stranded session-log rebind`) pushed to `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:9ae6dad6 -->
+❯ Do #closeout-bypass. spec-test-build-install-commit-push
+### Re: #closeout-bypass — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+- `session-check` now fails closed when the current Codex session still owns the file and the document drifts after a committed closeout without reopening the binary-owned write/commit path. That state is no longer treated as harmless post-commit drift.
+- `codex_hook` now exposes active-session state separately from prompt-body lookup so `session-check` can make that determination even when the tracked invocation has no trailing prompt body.
+- Added regression coverage proving the Codex Stop hook can auto-close this interrupted state from `last_assistant_message`.
+
+Spec / tests:
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+- Added regressions for the direct `session-check` interruption and the Stop-hook recovery path.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `30c7d96` (`fix: fail closed on active-session drift`) pushed to `origin/20260422/codex-agent-backend`.
+
+No new backlog item came out of this fix.
+<!-- agent:boundary:0ff54c42 -->
 <!-- /agent:exchange -->
 
 <!--

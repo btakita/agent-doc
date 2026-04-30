@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor visual-token ranges now stay aligned after multibyte text.** `agent_doc_visual_tokens_json` now converts the shared scanner's internal UTF-8 byte ranges into UTF-16 document offsets before returning them to JetBrains and VS Code. This fixes the JB-plugin drift where highlights walked forward after emoji, smart punctuation, or other multibyte characters earlier in the document. Added FFI regression coverage and documented the editor-facing range contract.
+
 - **Scratch-comment bodies now stay highlighted as comments across both editors.** The shared visual-token scanner now emits dedicated body ranges for ordinary HTML scratch comments (`<!-- ... -->`), not just the delimiter lines. JetBrains and VS Code consume that extra token so multiline scratch comments no longer fall back to raw Markdown parsing inside the comment body, which fixes the remaining JB-plugin "syntax error" rendering around commented examples and screenshot/image notes near the exchange closeout.
 
 - **Editor overlays now mute agent-managed markdown bodies and normalize standalone bracket labels.** The shared visual-token scanner now emits agent-component body ranges plus standalone label tags such as `[recommended]`, excluding fenced/inline code, images, and checklist markers. JetBrains and VS Code both consume those new tokens so agent-managed blocks render with a muted background tint and bracket labels stop inheriting broken-link Markdown styling. This specifically cleans up the JB-plugin rendering issues where `agent:exchange`/backlog content stayed visually flat and tag-like labels looked like malformed references.

@@ -8,7 +8,8 @@
 //!   JSON-encoded array with fields `name`, `attrs`, `open_start`, `open_end`, `close_start`,
 //!   `close_end`, `content`.
 //! - `agent_doc_visual_tokens_json(doc)`: returns a JSON-encoded array of visual token ranges used
-//!   by editor plugins to highlight agent-doc-specific markdown structures consistently.
+//!   by editor plugins to highlight agent-doc-specific markdown structures consistently. Exported
+//!   offsets are UTF-16 document positions so editor APIs can consume them directly.
 //! - `agent_doc_apply_patch(doc, component_name, content, mode)`: applies a patch to a named
 //!   component using `replace`, `append`, or `prepend` mode.
 //! - `agent_doc_apply_patch_with_caret(…, caret_offset)`: caret-aware append — inserts content at
@@ -69,6 +70,48 @@ static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
 
 /// Sync debounce generation counter — only the latest scheduled sync fires.
 static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn utf8_offsets_to_utf16_offsets(
+    doc: &str,
+    offsets: &[usize],
+) -> std::collections::HashMap<usize, usize> {
+    let mut targets = offsets.to_vec();
+    targets.sort_unstable();
+    targets.dedup();
+
+    let mut mapped = std::collections::HashMap::with_capacity(targets.len());
+    let mut target_idx = 0usize;
+    let mut utf8_offset = 0usize;
+    let mut utf16_offset = 0usize;
+
+    while target_idx < targets.len() && targets[target_idx] == 0 {
+        mapped.insert(0, 0);
+        target_idx += 1;
+    }
+
+    for ch in doc.chars() {
+        let next_utf8 = utf8_offset + ch.len_utf8();
+        while target_idx < targets.len() && targets[target_idx] < next_utf8 {
+            mapped.insert(targets[target_idx], utf16_offset);
+            target_idx += 1;
+        }
+
+        utf8_offset = next_utf8;
+        utf16_offset += ch.len_utf16();
+
+        while target_idx < targets.len() && targets[target_idx] == utf8_offset {
+            mapped.insert(targets[target_idx], utf16_offset);
+            target_idx += 1;
+        }
+    }
+
+    while target_idx < targets.len() {
+        mapped.insert(targets[target_idx], utf16_offset);
+        target_idx += 1;
+    }
+
+    mapped
+}
 
 /// Serialized component info returned by [`agent_doc_parse_components`].
 #[repr(C)]
@@ -172,8 +215,9 @@ pub unsafe extern "C" fn agent_doc_parse_components(doc: *const c_char) -> FfiCo
 
 /// Collect editor-facing visual token ranges from a markdown document.
 ///
-/// The returned JSON array contains `{ kind, start, end }` objects, where byte
-/// offsets refer to UTF-8 positions in the original document.
+/// The returned JSON array contains `{ kind, start, end }` objects, where
+/// offsets are UTF-16 document positions suitable for JetBrains and VS Code
+/// range APIs.
 ///
 /// # Safety
 ///
@@ -185,7 +229,22 @@ pub unsafe extern "C" fn agent_doc_visual_tokens_json(doc: *const c_char) -> *mu
         Err(_) => return ptr::null_mut(),
     };
     let tokens = crate::syntax::collect_visual_tokens(doc_str);
-    let json = match serde_json::to_string(&tokens) {
+    let offsets: Vec<usize> = tokens
+        .iter()
+        .flat_map(|token| [token.start, token.end])
+        .collect();
+    let utf16_offsets = utf8_offsets_to_utf16_offsets(doc_str, &offsets);
+    let editor_tokens: Vec<_> = tokens
+        .iter()
+        .map(|token| {
+            serde_json::json!({
+                "kind": token.kind,
+                "start": utf16_offsets[&token.start],
+                "end": utf16_offsets[&token.end],
+            })
+        })
+        .collect();
+    let json = match serde_json::to_string(&editor_tokens) {
         Ok(json) => json,
         Err(_) => return ptr::null_mut(),
     };
@@ -1272,6 +1331,19 @@ pub unsafe extern "C" fn agent_doc_free_state(ptr: *mut u8, len: usize) {
 mod tests {
     use super::*;
 
+    fn parse_visual_tokens_json(doc: &str) -> Vec<serde_json::Value> {
+        let c_doc = CString::new(doc).unwrap();
+        let ptr = unsafe { agent_doc_visual_tokens_json(c_doc.as_ptr()) };
+        assert!(!ptr.is_null(), "visual token JSON should not be null");
+        let json_str = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(ptr) };
+        serde_json::from_str(&json_str).unwrap()
+    }
+
+    fn utf16_len(text: &str) -> usize {
+        text.encode_utf16().count()
+    }
+
     #[test]
     fn parse_components_roundtrip() {
         let doc = "before\n<!-- agent:status -->\nhello\n<!-- /agent:status -->\nafter\n";
@@ -1284,6 +1356,60 @@ mod tests {
         assert_eq!(parsed[0]["name"], "status");
         assert_eq!(parsed[0]["content"], "hello\n");
         unsafe { agent_doc_free_string(result.json) };
+    }
+
+    #[test]
+    fn visual_tokens_json_uses_utf16_document_offsets() {
+        let doc = "\
+é
+😀
+❯ do #qey0. spec-test-build-install-commit-push
+### Re: café — gpt-5
+- [recommended] next
+";
+        let tokens = parse_visual_tokens_json(doc);
+        let find = |kind: &str| {
+            tokens
+                .iter()
+                .find(|token| token["kind"] == kind)
+                .unwrap_or_else(|| panic!("missing token kind {kind}"))
+        };
+
+        let prompt = find("prompt");
+        assert_eq!(
+            prompt["start"].as_u64().unwrap() as usize,
+            utf16_len("é\n😀\n")
+        );
+        assert_eq!(
+            prompt["end"].as_u64().unwrap() as usize,
+            utf16_len("é\n😀\n❯ do #qey0. spec-test-build-install-commit-push")
+        );
+
+        let heading = find("response_heading");
+        assert_eq!(
+            heading["start"].as_u64().unwrap() as usize,
+            utf16_len("é\n😀\n❯ do #qey0. spec-test-build-install-commit-push\n")
+        );
+        assert_eq!(
+            heading["end"].as_u64().unwrap() as usize,
+            utf16_len(
+                "é\n😀\n❯ do #qey0. spec-test-build-install-commit-push\n### Re: café — gpt-5"
+            )
+        );
+
+        let label = find("label_tag");
+        assert_eq!(
+            label["start"].as_u64().unwrap() as usize,
+            utf16_len(
+                "é\n😀\n❯ do #qey0. spec-test-build-install-commit-push\n### Re: café — gpt-5\n- "
+            )
+        );
+        assert_eq!(
+            label["end"].as_u64().unwrap() as usize,
+            utf16_len(
+                "é\n😀\n❯ do #qey0. spec-test-build-install-commit-push\n### Re: café — gpt-5\n- [recommended]"
+            )
+        );
     }
 
     #[test]

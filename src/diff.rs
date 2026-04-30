@@ -2104,14 +2104,8 @@ pub fn classify_diff(diff_text: &str) -> DiffClassification {
 
 /// Check if the diff contains only boundary-related changes.
 fn is_boundary_artifact(added: &[&str], removed: &[&str]) -> bool {
-    let is_boundary_line = |line: &str| -> bool {
-        // (HEAD) markers
-        line.contains("(HEAD)")
-            // Boundary UUIDs: <!-- agent:boundary:XXXX -->
-            || line.contains("agent:boundary:")
-            // Empty lines that accompany boundary changes
-            || line.is_empty()
-    };
+    let is_boundary_line =
+        |line: &str| -> bool { is_boundary_artifact_line(line) || line.is_empty() };
     // Must have at least one change
     if added.is_empty() && removed.is_empty() {
         return false;
@@ -2123,13 +2117,31 @@ fn is_boundary_artifact(added: &[&str], removed: &[&str]) -> bool {
     // Paired check: added/removed pairs differ only by (HEAD) or boundary UUID
     if added.len() == removed.len() {
         return added.iter().zip(removed.iter()).all(|(a, r)| {
-            let a_clean = a.replace("(HEAD)", "").trim().to_string();
-            let r_clean = r.replace("(HEAD)", "").trim().to_string();
-            if a_clean == r_clean {
+            let a_trim = a.trim();
+            let r_trim = r.trim();
+            if a_trim == r_trim {
                 return true;
             }
-            // Both are boundary markers with different UUIDs
-            a.contains("agent:boundary:") && r.contains("agent:boundary:")
+            if a_trim.starts_with("<!-- agent:boundary:")
+                && r_trim.starts_with("<!-- agent:boundary:")
+            {
+                return true;
+            }
+            if is_head_boundary_artifact(a_trim)
+                && a_trim
+                    .strip_suffix(" (HEAD)")
+                    .is_some_and(|base| base.trim() == r_trim)
+            {
+                return true;
+            }
+            if is_head_boundary_artifact(r_trim)
+                && r_trim
+                    .strip_suffix(" (HEAD)")
+                    .is_some_and(|base| base.trim() == a_trim)
+            {
+                return true;
+            }
+            false
         });
     }
     false
@@ -2791,6 +2803,18 @@ Please fix the bug.\n\
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n-<!-- agent:boundary:abc123 -->\n+<!-- agent:boundary:def456 -->\n";
         let c = classify_diff(diff);
         assert_eq!(c.diff_type, DiffType::BoundaryArtifact);
+    }
+
+    #[test]
+    fn classify_head_mention_in_user_prose_as_content_addition() {
+        let diff = make_diff(
+            &[
+                "+`❯ ` prompt prefix is being stripped away by the uncommitted user affordance that adds the ` (HEAD)` suffix. spec-test-build-install-commit-push",
+            ],
+            &[],
+        );
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::ContentAddition);
     }
 
     #[test]

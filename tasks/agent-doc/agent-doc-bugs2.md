@@ -974,7 +974,26 @@ Published:
 Note:
 - I left the unrelated in-progress `src/session_check.rs` change untouched; it is still uncommitted in `src/agent-doc`
 - I did not add a new backlog item because this turn is a diagnosis + fix closeout, not a newly unresolved follow-up
-<!-- agent:boundary:5b94e303 -->
+❯ commit + push all uncommitted src/agent-doc files
+### Re: commit + push pending src/agent-doc work — gpt-5
+
+I committed and pushed the remaining uncommitted `src/agent-doc` change.
+
+What I committed:
+- `src/session_check.rs` only
+- commit `ac63c22` (`fix: surface manual patchback follow-through`)
+- pushed to `origin/20260422/codex-agent-backend`
+
+What that pending change does:
+- when a document is stuck in `preflight_started` but already has a visible `### Re:` patchback in the working tree, `session-check` now surfaces that as a manual-repair / commit-boundary interruption instead of a generic stale-cycle message
+- the message now points the operator at the correct follow-through path: `agent-doc write --commit <FILE>` or a manual commit once the repaired response is known-good
+- regression coverage for that path is included in `src/session_check.rs`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+
+No other `src/agent-doc` files were left uncommitted after this turn.
+<!-- agent:boundary:c7feefc4 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -36,10 +36,10 @@ Active backlog:
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - 3 more active item(s)
 
-Icebox:
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
+❯ Icebox:
+❯ - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 ❯ Please investigate and diagram the reoccurring closing of tmux panes by agent-doc. We have taken >30 turn on fixing this problem but the problem still persists. Please provide a step-by-step sequence of events that causes agent-doc to incorrectly close the tmux panes on both claudescore-3.md and monsterrodholders.md.
-### Re: tmux pane close sequence — gpt-5
+❯ ### Re: tmux pane close sequence — gpt-5
 
 This is not one single bug anymore. The April 29, 2026 evidence shows two different failure classes that both looked like "agent-doc closed my tmux pane" from the operator side.
 
@@ -111,18 +111,18 @@ The investigation above is the answer to that prompt. The key split is:
 2. `monsterrodholders.md` then became the victim pane, and older stash/session-loss recovery made that look like an intentional pane close.
 3. The drafted `echo ... startup-miss ...` line came from the old diagnostic path and was not submitted because it was typed into the Codex composer instead of a shell.
 
-The remaining live issue in newer logs is a startup-miss on an alive pane, not the older cross-file closeout bug.
+❯ The remaining live issue in newer logs is a startup-miss on an alive pane, not the older cross-file closeout bug.
 ❯ Please add #next-steps for these two issues to the backlog.
-### Re: next steps backlog capture — gpt-5
+❯ ### Re: next steps backlog capture — gpt-5
 
 Added concrete next-step backlog items for both issue families:
 
 - [ ] [#smliveplan] Reconstruct the `%412`/`%493` alive-owner startup-miss episodes from ops.log and session logs, then add a regression proving routed triggers either open a new cycle or fail with durable provenance on a live pane.
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 
-The top backlog id is `#smliveplan`.
+❯ The top backlog id is `#smliveplan`.
 ❯ do #smliveplan + #smlive. spec-test-build-install-commit-push
-### Re: #smliveplan + #smlive — gpt-5
+❯ ### Re: #smliveplan + #smlive — gpt-5
 
 Implemented the live-owner startup-miss fix in `src/agent-doc` and traced the two requested incidents.
 
@@ -145,12 +145,12 @@ Verification:
 Published:
 - `src/agent-doc` commit `7b4fa43` (`fix: wait longer for live routed cycle ack`) pushed to `origin/20260422/codex-agent-backend`.
 
-Note:
+❯ Note:
 - I intentionally left the pre-existing unrelated `src/agent-doc` worktree edits in `VERSIONS.md`, editor files, `src/start.rs`, and `src/syntax.rs` untouched.
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ commit + push all uncommitted files
-### Re: commit + push all uncommitted files — gpt-5
+❯ ### Re: commit + push all uncommitted files — gpt-5
 
 Committed and pushed all previously uncommitted changes across the dirty repos in this workspace.
 
@@ -172,10 +172,10 @@ Published commits:
 
 I also verified the root worktree is clean afterward.
 
-Note:
-- I did not run tests or build/install passes as part of this commit-only request.
+❯ Note:
+❯ - I did not run tests or build/install passes as part of this commit-only request.
 ❯ run tests + build/install for local testing
-### Re: run tests + build/install for local testing — gpt-5
+❯ ### Re: run tests + build/install for local testing — gpt-5
 
 Ran the local verification pass for the `agent-doc` stack.
 
@@ -201,13 +201,13 @@ Notable failure details from the `src/agent-doc` test run:
 - `alive_registered_pane_reregisters_to_live_owner` and `full_auto_start_flow` both timed out waiting for the mock agent prompt to become ready.
 - `repair_missing_registered_pane_captures_retained_dead_pane_diagnostics` failed because the pane was not retained as dead for diagnostics.
 
-Note:
+❯ Note:
 - `src/agent-doc` and `src/tmux-router` remained clean after the verification/build/install pass.
 - `src/session-share/tasks/claudescore-3.md` is currently locally modified in its own repo with a new prompt line (`Please add the amount of benchmark testing to apply to each backlog item.`). I did not change or commit that file in this turn.
 
-No new backlog items came out of this verification pass.
+❯ No new backlog items came out of this verification pass.
 ❯ `❯ ` prompt prefix is being stripped away by the uncommitted user affordance that adds the ` (HEAD)` suffix. spec-test-build-install-commit-push
-### Re: prompt prefix `(HEAD)` false artifact — gpt-5
+❯ ### Re: prompt prefix `(HEAD)` false artifact — gpt-5
 
 Fixed in `src/agent-doc`.
 
@@ -229,9 +229,9 @@ Verification:
 Published:
 - `src/agent-doc` commit `787a6fc` (`fix: keep head mentions prompt-bearing`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ do #rtxfproof + #rtxfreg. spec-test-build-install-commit-push
-### Re: #rtxfproof + #rtxfreg — gpt-5
+❯ ### Re: #rtxfproof + #rtxfreg — gpt-5
 
 Implemented the fresh auto-start dispatch proof in `src/agent-doc`.
 
@@ -249,9 +249,9 @@ Verification:
 Published:
 - `src/agent-doc` commit `4291744` (`fix: guard fresh route dispatch target`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ do #mcrc. spec-test-build-install-commit-push
-### Re: #mcrc — gpt-5
+❯ ### Re: #mcrc — gpt-5
 
 `#mcrc` is already implemented in the current `src/agent-doc` branch; no new code change was needed in this turn.
 
@@ -269,10 +269,10 @@ Current branch verification status:
 
 Because this fix was already implemented and pushed before this turn, there was no new `src/agent-doc` code delta to commit or push today.
 
-No new backlog items came out of this verification pass.
+❯ No new backlog items came out of this verification pass.
 ❯ The JB Plugin syntax highlight has an off-by-1 incrementing position issue. spec-test-build-install-commit-push
 ❯ ![img_5.png](img_5.png)
-### Re: JB syntax highlight offset drift — gpt-5
+❯ ### Re: JB syntax highlight offset drift — gpt-5
 
 Root cause:
 - `agent_doc_visual_tokens_json(...)` was exporting UTF-8 byte offsets from the shared Rust scanner, but the editor layer consumes document offsets. After any multibyte text earlier in the file (`é`, emoji, smart punctuation, em dash), later highlight ranges drifted forward.
@@ -292,9 +292,9 @@ Verification:
 Published:
 - `src/agent-doc` commit `5f7423d` (`fix: align editor visual token offsets`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ Please investigate why navigating the editor back to /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md resulted in agent-doc closing + replacing the existing tmux pane with a new tmux pane.
-### Re: claudescore-3 editor return pane replacement — gpt-5
+❯ ### Re: claudescore-3 editor return pane replacement — gpt-5
 
 This does **not** look like a child crash inside the old `claudescore-3.md` pane. It looks like an **editor-return rebind / replacement**: the editor selection change triggered fresh session work, the existing `%579` owner was not reused, and `agent-doc` started a new pane era at `%583`.
 
@@ -342,9 +342,9 @@ I inspected the live `exchange` component and confirmed the repair path had mult
 
 I repaired the component by restoring the last known single-copy exchange body from `HEAD~4`, which is the last revision before the duplicate repair attempts. The live `exchange` component is back to one copy.
 
-I also filed a new agent-doc bug in backlog as `#expatch` for the root binary behavior: `agent-doc patch <FILE> exchange` on this append-mode template doc appended the supplied body instead of replacing the paired-marker component content, which is what created the duplicate and then triplicate exchange history during repair.
+❯ I also filed a new agent-doc bug in backlog as `#expatch` for the root binary behavior: `agent-doc patch <FILE> exchange` on this append-mode template doc appended the supplied body instead of replacing the paired-marker component content, which is what created the duplicate and then triplicate exchange history during repair.
 ❯ Please assess why agent-doc recently closed the tmux pane that claimed /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md. spec-test-build-install-commit-push
-### Re: monsterrodholders pane replacement — gpt-5
+❯ ### Re: monsterrodholders pane replacement — gpt-5
 
 This looks like a different bug from the routed startup-miss handling.
 
@@ -367,10 +367,10 @@ Bottom line:
 - For `monsterrodholders.md`, the recent bad event is best described as **silent alive-pane replacement after lost ownership proof**, not a routed startup-miss closeout.
 - I added a new backlog item, `#staleown`, for this exact `%408 -> %434` replacement-without-provenance bug family.
 
-Note:
-- This cycle was investigation-only. I did not change `src/agent-doc` code, so I did not run the cargo/spec/build/install/publish suite here.
+❯ Note:
+❯ - This cycle was investigation-only. I did not change `src/agent-doc` code, so I did not run the cargo/spec/build/install/publish suite here.
 ❯ do #staleown. spec-test-build-install-commit-push
-### Re: #staleown — gpt-5
+❯ ### Re: #staleown — gpt-5
 
 Implemented in `src/agent-doc`.
 
@@ -389,9 +389,9 @@ Verification:
 Published:
 - `src/agent-doc` commit `dda7faa` (`fix: fail closed on stale alive-owner rebind`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ Why are we getting into the "no live owner can be proven" state?
-### Re: why `no live owner can be proven` happens — gpt-5
+❯ ### Re: why `no live owner can be proven` happens — gpt-5
 
 Because `agent-doc` now uses a **proof model**, not an **alive-pane model**.
 
@@ -416,12 +416,12 @@ For the recent `monsterrodholders.md` shape, the most likely concrete sequence i
 
 That is exactly why the `#staleown` fix changed `start`: once both proofs are gone, alive-by-itself is no longer enough to authorize replacement.
 
-No new backlog item came out of this explanation.
+❯ No new backlog item came out of this explanation.
 ❯ I tried to navigate back to monsterrodholders.md, but once again, the pane was replaced. Was this due to running an old version of agent-doc?
 
 ❯ Pleas explain this a bit more. If the proofs are gone, what happens if there is a running supervisor for the document?
 ❯ > That is exactly why the `#staleown` fix changed `start`: once both proofs are gone, alive-by-itself is no longer enough to authorize replacement.
-### Re: was the new `monsterrodholders.md` replacement just an old binary? — gpt-5
+❯ ### Re: was the new `monsterrodholders.md` replacement just an old binary? — gpt-5
 
 Not entirely.
 
@@ -471,9 +471,9 @@ No new backlog item came out of this answer yet because I can prove the old-vs-n
 
 To restate that line more precisely: `#staleown` only fixed the branch where an **alive registered pane** had **no process-tree proof**, **no usable supervisor-pid proof**, and an **unavailable supervisor path**. In that exact shape, `start` now fails closed.
 
-It does **not** mean every later pane replacement is forbidden. If some other path still decides to rebind the session, or if a supervisor/restart sequence leads to a fresh-pane handoff with explicit `session_superseded` provenance, that is outside the narrow stale-owner branch that `#staleown` changed.
+❯ It does **not** mean every later pane replacement is forbidden. If some other path still decides to rebind the session, or if a supervisor/restart sequence leads to a fresh-pane handoff with explicit `session_superseded` provenance, that is outside the narrow stale-owner branch that `#staleown` changed.
 ❯ do #expatch. spec-test-build-install-commit-push
-### Re: #expatch — gpt-5
+❯ ### Re: #expatch — gpt-5
 
 Implemented in `src/agent-doc`.
 
@@ -491,11 +491,11 @@ Verification:
 Published:
 - `src/agent-doc` commit `50fa682` (`fix: default patch command to replace`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog items came out of this fix.
+❯ No new backlog items came out of this fix.
 ❯ The JB Plugin seems to still be removing the `❯ ` prefix to "do #expatch. spec-test-build-install-commit-push" in a uncommitted state.
 ❯ This seems related to the uncommitted ` (HEAD)` user affordance.
 ❯ spec-test-build-install-commit-push
-### Re: JB prompt prefix drift + startup-miss echo line — gpt-5
+❯ ### Re: JB prompt prefix drift + startup-miss echo line — gpt-5
 
 Implemented in `src/agent-doc`.
 
@@ -524,8 +524,8 @@ Verification:
 Published:
 - `src/agent-doc` commit `d8ea9d9` (`fix: preserve unmatched exchange prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog item came out of this fix.
-### Re: JB prompt prefix drift + startup-miss echo line — gpt-5
+❯ No new backlog item came out of this fix.
+❯ ### Re: JB prompt prefix drift + startup-miss echo line — gpt-5
 
 Implemented in `src/agent-doc`.
 
@@ -554,7 +554,7 @@ Verification:
 Published:
 - `src/agent-doc` commit `d8ea9d9` (`fix: preserve unmatched exchange prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`
 
-No new backlog item came out of this fix.
+❯ No new backlog item came out of this fix.
 ❯ 2 issue happened:
 ❯ - In this document, the response patchback was duplicated. Please add an entry to the backlog.
 ❯ - In /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md, agent-doc started a new tmux session. Please add an entry to the backlog.
@@ -566,11 +566,14 @@ Added both backlog items.
 - `#c3tmux`: unexpected new tmux session start for `src/session-share/tasks/claudescore-3.md` instead of staying on the existing session.
 
 The top backlog id is `#duppb`.
-<!-- /agent:backlog -->
+Updated [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). The backlog now includes `#c3tmux` and `#duppb` at the top, and the file is committed with a clean working tree.
 
-<!-- agent:icebox -->
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- /agent:icebox -->
+`agent-doc session-check` still fails closed. The remaining failure is a historical unresolved prompt-bearing change:
+
+`prompt_target: do #smliveplan + #smlive. spec-test-build-install-commit-push`
+
+I ran the normal `finalize`/`commit` recovery flow, `repair`, and then stabilized the document state in git, but the guard still points at that older cycle metadata rather than any live diff in this file.
+<!-- agent:boundary:7cb6353e -->
 <!-- /agent:exchange -->
 
 <!--

@@ -121,8 +121,8 @@ Added concrete next-step backlog items for both issue families:
 - [ ] [#rtxfproof] Add an end-to-end tmux routing regression that proves `auto_start_in_session` may split alongside another pane but can never dispatch into a pane owned by a different document.
 
 The top backlog id is `#smliveplan`.
-do #smliveplan + #smlive. spec-test-build-install-commit-push
-### Re: #smliveplan + #smlive — gpt-5 (HEAD)
+❯ do #smliveplan + #smlive. spec-test-build-install-commit-push
+### Re: #smliveplan + #smlive — gpt-5
 
 Implemented the live-owner startup-miss fix in `src/agent-doc` and traced the two requested incidents.
 
@@ -149,8 +149,32 @@ Note:
 - I intentionally left the pre-existing unrelated `src/agent-doc` worktree edits in `VERSIONS.md`, editor files, `src/start.rs`, and `src/syntax.rs` untouched.
 
 No new backlog items came out of this fix.
-<!-- agent:boundary:27a7d020 -->
-commit + push all uncommitted files
+❯ commit + push all uncommitted files
+### Re: commit + push all uncommitted files — gpt-5
+
+Committed and pushed all previously uncommitted changes across the dirty repos in this workspace.
+
+Published commits:
+- `agent-loop`: `b4704c1fc` on `origin/main`
+- `mail`: `d8593a2` on `origin/main`
+- `src/agent-doc`: `caf00e8` on `origin/20260422/codex-agent-backend`
+- `src/agent-kit`: `5584740` on `origin/main`
+- `src/boost-client`: `6698d91` on `origin/main`
+- `src/chromium-bridge`: `42678b4` on `origin/main`
+- `src/corky`: `d832627` on `origin/20260413/corky-gsc`
+- `src/eval-runner`: `9d68cdc` on `origin/main`
+- `src/module-harness`: `24cd656` on `origin/main`
+- `src/session-share/claudescore.com`: `49c18a9` on `origin/main`
+- `src/session-share`: `3ffd16c` on `origin/main`
+- `src/tagpath`: `2e42f8f` on `origin/main`
+- `src/tmux-router`: `98977bc` on `origin/main`
+- `src/tsift`: pushed existing local `30b60d8` to `origin/main`
+
+I also verified the root worktree is clean afterward.
+
+Note:
+- I did not run tests or build/install passes as part of this commit-only request.
+<!-- agent:boundary:f640d4e0 -->
 <!-- /agent:exchange -->
 
 <!--

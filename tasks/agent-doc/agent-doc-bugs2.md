@@ -369,7 +369,28 @@ Bottom line:
 
 Note:
 - This cycle was investigation-only. I did not change `src/agent-doc` code, so I did not run the cargo/spec/build/install/publish suite here.
-<!-- agent:boundary:4bf305fd -->
+❯ do #staleown. spec-test-build-install-commit-push
+### Re: #staleown — gpt-5
+
+Implemented in `src/agent-doc`.
+
+What changed:
+- `start.rs` now fails closed when a registered pane is still alive, no live owner can be proven, and the supervisor is unavailable, instead of silently clearing the binding and rebinding a fresh pane.
+- Explicit alive-pane replacement paths no longer pre-deregister the session before fresh start, so the later `sessions::register(...)` call still appends `session_superseded` plus `session_end origin=registry_rebind` provenance.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the stricter fail-closed / provenance contract.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml stale_registered_pane_uses_supervisor_before_fail_closed_or_rebind -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `dda7faa` (`fix: fail closed on stale alive-owner rebind`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:c2df9e44 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -383,7 +404,6 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#staleown] start silently replaces an alive registered pane when live-owner proof fails. Repro from src/boost-client/tasks/monsterrodholders.md on Apr 29, 2026: route still recognized %408 as live_owner=%408 and cleared the startup-miss marker, but the session log later jumped %408 -> %434 -> %499 -> %502 -> %505 -> %519 -> %529 with fresh session_start entries and no session_superseded / session_end origin=registry_rebind for the displaced panes. Likely cause: start.rs existing_session_pane_action + ClearStale deregisters an alive registered pane when process-tree / supervisor ownership proof fails, then starts fresh in the current pane without recording the handoff. Fix: fail closed or refocus/recover the alive owner until replacement is explicitly proven, and always append supersession provenance before any alive-pane replacement.
 - [ ] [#expatch] exchange repair bug: agent-doc patch on template append-mode docs appends the supplied exchange body instead of replacing the existing component. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026: using patch to restore the canonical exchange first left two copies of the late-session exchange history, then three copies on the next repair attempt. Fix: make component patch truly replace paired-marker content regardless of append semantics, or add an explicit replace-only exchange repair path for session recovery.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md

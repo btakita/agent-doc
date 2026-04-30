@@ -125,8 +125,9 @@
 //!   must not contain a `tmux_session` frontmatter key.
 //! - resolve_file_ignores_frontmatter_tmux_session: `FileResolution::Registered` always
 //!   has `tmux_session: None` regardless of what the frontmatter contains.
-//! - find_alive_pane_for_file: pane whose child process cmdline contains `agent-doc`
-//!   and the file path is returned; panes without a matching cmdline are skipped.
+//! - find_alive_pane_for_file: pane whose child process tree still includes the
+//!   long-lived `agent-doc start <file>` owner command is returned; control-surface
+//!   utility invocations like `agent-doc route <file>` are skipped.
 //! - empty_col_args_filtered: col_args `["file1.md", "", "file2.md", ""]` → after
 //!   filtering, only `["file1.md", "file2.md"]` are processed.
 //! - is_file_rename_detects_rename_when_old_path_gone: old path absent + paths differ →
@@ -2502,6 +2503,47 @@ fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
     false
 }
 
+fn token_basename(token: &str) -> &str {
+    Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
+}
+
+fn token_is_agent_doc_binary(token: &str) -> bool {
+    token_basename(token).starts_with("agent-doc")
+}
+
+fn token_is_harness_binary(token: &str) -> bool {
+    matches!(token_basename(token), "claude" | "codex" | "node")
+}
+
+fn token_is_non_owner_agent_doc_subcommand(token: &str) -> bool {
+    matches!(token, "route" | "claim")
+}
+
+fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
+    if !cmdline_has_file_match(cmdline, file_path) {
+        return false;
+    }
+
+    let tokens = cmdline.split_whitespace().collect::<Vec<_>>();
+    if let Some(idx) = tokens
+        .iter()
+        .position(|token| token_is_agent_doc_binary(token))
+    {
+        let Some(next) = tokens.get(idx + 1) else {
+            return false;
+        };
+        if *next == "start" {
+            return true;
+        }
+        return !token_is_non_owner_agent_doc_subcommand(next);
+    }
+
+    tokens.iter().any(|token| token_is_harness_binary(token))
+}
+
 fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let output = match std::process::Command::new("ps")
         .args(["-p", pid, "-o", "command="])
@@ -2511,10 +2553,7 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
         _ => return false,
     };
     let cmdline = String::from_utf8_lossy(&output.stdout);
-    let has_agent =
-        cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex");
-    let has_file = cmdline_has_file_match(&cmdline, file_path);
-    has_agent && has_file
+    agent_doc_cmdline_is_owner(&cmdline, file_path)
 }
 
 /// Detect whether a file has been renamed: the registered path differs from
@@ -2686,6 +2725,28 @@ mod tests {
             }
             other => panic!("expected ambiguous resolution, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn agent_doc_cmdline_owner_detection_only_accepts_start_supervisor() {
+        let file = "tasks/live-tmux-repro-codex.md";
+
+        assert!(agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc start tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(agent_doc_cmdline_is_owner(
+            "/usr/bin/codex /home/brian/work/btakita/agent-loop/tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(!agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc route tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(!agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc claim tasks/live-tmux-repro-codex.md --pane %522",
+            file
+        ));
     }
 
     #[test]

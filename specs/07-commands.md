@@ -137,11 +137,12 @@ When `agent-doc audit-docs` is launched from an outer repo via a nested crate ch
 2. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
 3. Find a split target pane:
    - **Sync path** (`skip_wait=true`): pick the split target by column position — first pane in the agent-doc window for left-column files, last pane for right-column files. This places the new pane adjacent to its column neighbors.
-   - **Route path** (`skip_wait=false`): search `sessions.json` for any registered pane alive in the target session.
+   - **Route path** (`skip_wait=false`): search `sessions.json` for any registered pane alive in the target session. This pane is a layout anchor only, not a dispatch target for the new document.
 4. If found → `tmux split-window` alongside that pane (`-dbh` for left-column, `-dh` for right-column)
 5. If split-window fails → fall back to creating a new window
 6. If no split target found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
 7. Any pane created by this auto-start path must enable tmux pane-local `remain-on-exit on` on that pane before the harness launch begins, so later pane death preserves `pane_dead_status` and recent pane output for sync/resync diagnostics even after the pane is moved into stash or rescued back out.
+8. After registration, every routed send in this fresh-pane path must still pass the same file-bound dispatch guard as existing-pane routing. Route may split beside another document's pane in the same session, but it must only send the routed command to the newly created pane registered for the target file.
 
 ## claim
 

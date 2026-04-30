@@ -2243,13 +2243,13 @@ fn auto_start_in_session(
             harness,
         ) {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_unchecked(tmux, &new_pane, file_path, harness, None)?
+            send_command_checked(tmux, &new_pane, file_path, harness, None)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_unchecked(tmux, &new_pane, file_path, harness, None)? {
+            match send_command_checked(tmux, &new_pane, file_path, harness, None)? {
                 CommandDispatchStatus::Accepted => {
                     crate::ops_log::log_op(
                         file,
@@ -4035,6 +4035,116 @@ history line
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch to the stale registered pane: {stale_content}"
+        );
+    }
+
+    #[test]
+    fn auto_start_reuses_other_file_pane_only_as_split_anchor() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-cross-file-split-anchor");
+        let session = "claude";
+        let cwd = test_cwd();
+
+        let anchor_pane = iso.auto_start(session, &cwd).unwrap();
+        let anchor_window = iso.pane_window(&anchor_pane).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &anchor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; while IFS= read -r CMD; do printf "ANCHOR:%s\n" "$CMD"; done'"#,
+        );
+        let _ =
+            wait_for_pane_contains(&iso, &anchor_pane, "\n>", std::time::Duration::from_secs(3));
+
+        let anchor_doc = dir.path().join("other.md");
+        std::fs::write(&anchor_doc, "# Other\n").unwrap();
+        let target_doc = dir.path().join("target.md");
+        std::fs::write(&target_doc, "# Target\n").unwrap();
+
+        let anchor_path = anchor_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let target_path = target_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        sessions::register("route-cross-file-anchor", &anchor_pane, &anchor_path).unwrap();
+
+        let mock_start = write_mock_start_agent_doc(dir.path());
+        let target_doc_for_thread = target_doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &target_doc_for_thread,
+                Some("# Target\n"),
+                Some("# Target\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &target_doc,
+                None,
+                &[],
+                "route-cross-file-target",
+                &target_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("route should provision a fresh pane without cross-file dispatch");
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+        assert_ne!(
+            new_pane, anchor_pane,
+            "auto-start must create a distinct pane rather than dispatching into the anchor"
+        );
+        assert_eq!(
+            iso.pane_window(&new_pane).unwrap(),
+            anchor_window,
+            "fresh pane should split alongside the existing session pane"
+        );
+
+        let target_content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            target_content.contains("GOT:agent-doc "),
+            "fresh pane should receive the routed command: {target_content}"
+        );
+
+        let anchor_content = sessions::capture_pane(&iso, &anchor_pane).unwrap_or_default();
+        assert!(
+            !anchor_content.contains("ANCHOR:agent-doc "),
+            "existing pane for another document must stay a split anchor only: {anchor_content}"
+        );
+
+        let lookup = sessions::lookup("route-cross-file-target").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "target document should bind to the new pane"
         );
     }
 

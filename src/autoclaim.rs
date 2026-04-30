@@ -138,7 +138,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
     // Focus the pane so the user sees immediate visual feedback.
     // Without this, the pane content doesn't refresh until something
     // else triggers a window switch (e.g. changing editor tabs).
-    if let Err(e) = tmux.select_pane(&pane_id) {
+    if let Err(e) = tmux.select_pane(pane_id) {
         eprintln!("[autoclaim] Failed to focus pane {}: {}", pane_id, e);
     }
 
@@ -146,7 +146,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
     // Without this, the layout remains stale after context compaction.
     let claimed_refs: Vec<(&String, &sessions::SessionEntry)> =
         claimed.iter().map(|(k, v)| (k, v)).collect();
-    sync_after_autoclaim_in(tmux, &pane_id, &claimed_refs, base_dir);
+    sync_after_autoclaim_in(tmux, pane_id, &claimed_refs, base_dir);
 
     // Output claim commands for the new session context.
     // Claude Code's SessionStart hook pipes stdout back as context.

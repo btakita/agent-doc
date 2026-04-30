@@ -4669,11 +4669,7 @@ mod tests {
     fn recover_existing_associated_pane_skips_reserved_candidates() {
         let claimed: RefCell<std::collections::HashMap<String, PathBuf>> =
             RefCell::new(std::collections::HashMap::new());
-        reserve_sync_pane(
-            &claimed,
-            "%75",
-            Path::new("tasks/agent-doc-bugs2.md"),
-        );
+        reserve_sync_pane(&claimed, "%75", Path::new("tasks/agent-doc-bugs2.md"));
 
         let winner = AssociatedPaneCandidate {
             pane_id: "%75".to_string(),

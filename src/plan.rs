@@ -236,19 +236,17 @@ fn execution_scope_for_prompt_targets(
     harness_prompt_only: bool,
     prompt_presets: &indexmap::IndexMap<String, String>,
 ) -> ExecutionScope {
-    if crate::prompt_contract::prompt_targets_reference_preset(
+    let agent_doc_bug_requested = crate::prompt_contract::prompt_targets_reference_preset(
         prompt_targets,
         prompt_presets,
         "#agent-doc-bug",
-    ) {
-        ExecutionScope::PlanBacklogOnly
-    } else if harness_prompt_only
+    ) || harness_prompt_only
         && crate::prompt_contract::prompt_targets_reference_preset(
             added_diff_lines,
             prompt_presets,
             "#agent-doc-bug",
-        )
-    {
+        );
+    if agent_doc_bug_requested {
         ExecutionScope::PlanBacklogOnly
     } else {
         ExecutionScope::Normal

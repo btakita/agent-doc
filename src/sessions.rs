@@ -155,10 +155,10 @@ fn normalize_registry(base_dir: &Path, registry: SessionRegistry) -> SessionRegi
             legacy_key.clone()
         };
         let normalized_key = canonical_registry_key_in(base_dir, &file_hint);
-        if let Some(existing) = normalized.get(&normalized_key) {
-            if !choose_preferred_entry(existing, &entry) {
-                continue;
-            }
+        if let Some(existing) = normalized.get(&normalized_key)
+            && !choose_preferred_entry(existing, &entry)
+        {
+            continue;
         }
         normalized.insert(normalized_key, entry);
     }
@@ -343,6 +343,7 @@ pub fn register_supervisor_in(
     )
 }
 
+#[cfg(test)]
 pub fn register_full(
     session_id: &str,
     pane_id: &str,
@@ -354,6 +355,7 @@ pub fn register_full(
 }
 
 /// Like `register_full` but with an explicit `base_dir` for the registry.
+#[cfg(test)]
 pub fn register_full_in(
     base_dir: &Path,
     session_id: &str,
@@ -381,6 +383,7 @@ pub fn register_full_in(
 }
 
 /// Like `register_full` but uses the provided `cwd` instead of querying the process cwd.
+#[cfg(test)]
 pub fn register_full_with_cwd(
     session_id: &str,
     pane_id: &str,
@@ -417,6 +420,7 @@ pub fn register_full_with_cwd_in(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_full_with_cwd_and_instance_in(
     base_dir: &Path,
     session_id: &str,
@@ -495,6 +499,7 @@ fn register_full_with_cwd_internal_call(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_full_internal(
     base_dir: &Path,
     registry: &mut SessionRegistry,
@@ -541,7 +546,7 @@ fn register_full_internal(
             supervisor_instance_id,
         },
     );
-    save_in(base_dir, &registry)
+    save_in(base_dir, registry)
 }
 
 fn log_session_rebind(

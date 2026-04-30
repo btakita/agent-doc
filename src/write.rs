@@ -3524,7 +3524,7 @@ pub fn run_stream(
     // Load snapshot to identify which lines are new (user-typed this cycle).
     let snapshot_doc = snapshot::load(file).ok().flatten();
     if let Some(ref snap) = snapshot_doc {
-        content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, &snap, file);
+        content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
     }
 
     // Lift pending out of exchange if nested (structural repair)

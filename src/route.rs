@@ -1079,12 +1079,12 @@ fn resolve_or_create_pane(
             "[route] found existing running pane {} for {}, re-registering",
             existing, file_path
         );
-        register_dispatch_target(session_id, &existing, file_path)?;
-        ensure_existing_pane_ready_for_dispatch(tmux, file, &existing, harness)?;
-        register_dispatch_target(session_id, &existing, file_path)?;
+        register_dispatch_target(session_id, existing, file_path)?;
+        ensure_existing_pane_ready_for_dispatch(tmux, file, existing, harness)?;
+        register_dispatch_target(session_id, existing, file_path)?;
         send_command(
             tmux,
-            &existing,
+            existing,
             file_path,
             harness,
             pending_prompt_context
@@ -1094,7 +1094,7 @@ fn resolve_or_create_pane(
         require_routed_cycle_ack(
             tmux,
             file,
-            &existing,
+            existing,
             session_id,
             harness,
             cycle_baseline.as_ref(),

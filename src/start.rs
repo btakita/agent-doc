@@ -925,9 +925,28 @@ fn open_session_log_rebind_diagnostic(
     if !should_fail_closed_for_open_session_log_rebind(registered_pane, status.as_ref()) {
         return Ok(None);
     }
-    Ok(crate::startup_miss::session_log_diagnostic(
-        file, session_id,
-    )?)
+    crate::startup_miss::session_log_diagnostic(file, session_id)
+}
+
+fn session_log_open_owner_pane(
+    tmux: &sessions::Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(status) = crate::startup_miss::session_log_status(file, session_id)? else {
+        return Ok(None);
+    };
+    if !status.latest_session_open() {
+        return Ok(None);
+    }
+    let Some(pane_id) = status.latest_start_pane.as_deref() else {
+        return Ok(None);
+    };
+    if excluded_pane == Some(pane_id) || !tmux.pane_alive(pane_id) {
+        return Ok(None);
+    }
+    Ok(Some(pane_id.to_string()))
 }
 
 fn existing_session_pane_action(
@@ -943,11 +962,14 @@ fn existing_session_pane_action(
         session_id,
         Some(current_pane),
     );
+    let session_log_owner =
+        session_log_open_owner_pane(tmux, file, session_id, Some(current_pane))?;
     Ok(existing_session_pane_action_from_entry(
         tmux,
         current_pane,
         entry.as_ref(),
         live_owner.as_deref(),
+        session_log_owner.as_deref(),
     ))
 }
 
@@ -956,8 +978,9 @@ fn existing_session_pane_action_from_entry(
     current_pane: &str,
     entry: Option<&sessions::SessionEntry>,
     live_owner: Option<&str>,
+    session_log_owner: Option<&str>,
 ) -> Option<ExistingSessionPaneAction> {
-    if let Some(owner) = live_owner
+    if let Some(owner) = live_owner.or(session_log_owner)
         && owner != current_pane
     {
         return Some(ExistingSessionPaneAction::Reuse(owner.to_string()));
@@ -1652,10 +1675,10 @@ pub fn run(file: &Path) -> Result<()> {
     // a fresh session in this pane. If a live owner already exists elsewhere, moving the
     // launcher pane first can rip it out of its original tmux window/session before the
     // reuse path returns.
-    if let Some(expected_session) = config::project_tmux_session() {
-        if !relocate_if_wrong_session(&tmux, &pane_id, &expected_session) {
-            rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
-        }
+    if let Some(expected_session) = config::project_tmux_session()
+        && !relocate_if_wrong_session(&tmux, &pane_id, &expected_session)
+    {
+        rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
     }
 
     // Register session → pane (with relative file path)
@@ -1836,8 +1859,7 @@ pub fn run(file: &Path) -> Result<()> {
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
-    let mut supervisor_exit_reason = "loop_exhausted";
-    loop {
+    let supervisor_exit_reason = loop {
         // Build args for this iteration
         let auto_trigger;
         let args = if !first_run {
@@ -2008,8 +2030,7 @@ pub fn run(file: &Path) -> Result<()> {
         // Check IPC-requested stop
         if shared.stop_requested.load(Ordering::Relaxed) {
             log_event(&mut session_log, "ipc_stop");
-            supervisor_exit_reason = "ipc_stop";
-            break;
+            break "ipc_stop";
         }
 
         // Check IPC-requested restart (override normal exit classification)
@@ -2087,8 +2108,7 @@ pub fn run(file: &Path) -> Result<()> {
                             PromptEofPolicy::Quit,
                         ) {
                             PromptOutcome::Quit => {
-                                supervisor_exit_reason = "user_quit_clean_exit";
-                                break;
+                                break "user_quit_clean_exit";
                             }
                             PromptOutcome::RestartFresh => {
                                 raw_mode.resume();
@@ -2167,12 +2187,11 @@ pub fn run(file: &Path) -> Result<()> {
                                     },
                                 ) {
                                     PromptOutcome::Quit => {
-                                        supervisor_exit_reason = match prompt_kind {
+                                        break match prompt_kind {
                                             "ctrl_d" => "user_quit_after_ctrl_d",
                                             "resume_failure" => "user_quit_after_resume_failure",
                                             _ => "user_quit",
                                         };
-                                        break;
                                     }
                                     PromptOutcome::RestartFresh => {
                                         raw_mode.resume();
@@ -2246,11 +2265,10 @@ pub fn run(file: &Path) -> Result<()> {
                     restart_count
                 );
                 log_event(&mut session_log, "supervisor_halted");
-                supervisor_exit_reason = "supervisor_halted";
-                break;
+                break "supervisor_halted";
             }
         }
-    }
+    };
 
     // Restore terminal to original mode before cleanup
     drop(raw_mode);
@@ -2794,8 +2812,13 @@ mod tests {
             supervisor_instance_id: String::new(),
         };
 
-        let action =
-            existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), Some(&pane_a));
+        let action = existing_session_pane_action_from_entry(
+            &iso,
+            &pane_b,
+            Some(&entry),
+            Some(&pane_a),
+            None,
+        );
         assert_eq!(
             action,
             Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
@@ -2824,6 +2847,7 @@ mod tests {
             &launcher_pane,
             Some(&entry),
             Some(&owner_pane),
+            None,
         );
         assert_eq!(
             action,
@@ -2853,7 +2877,7 @@ mod tests {
             supervisor_instance_id: String::new(),
         };
 
-        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None, None);
         assert_eq!(action, None);
     }
 
@@ -2874,10 +2898,41 @@ mod tests {
             supervisor_instance_id: String::new(),
         };
 
-        let action = existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None);
+        let action =
+            existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None, None);
         assert_eq!(
             action,
             Some(ExistingSessionPaneAction::ClearStale(pane_a.clone()))
+        );
+    }
+
+    #[test]
+    fn existing_session_pane_action_reuses_session_log_owner_without_process_tree_proof() {
+        let iso = IsolatedTmux::new("start-session-log-owner-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane_a = iso.new_session("test", tmp.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane_a.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-session-log-owner-pane".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane_a).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
+        };
+
+        let action = existing_session_pane_action_from_entry(
+            &iso,
+            &pane_b,
+            Some(&entry),
+            None,
+            Some(&pane_a),
+        );
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
         );
     }
 
@@ -2897,7 +2952,7 @@ mod tests {
             supervisor_instance_id: String::new(),
         };
 
-        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None, None);
         assert_eq!(action, None);
     }
 
@@ -3002,6 +3057,30 @@ mod tests {
             Some(&status)
         ));
         assert!(!should_fail_closed_for_open_session_log_rebind("%42", None));
+    }
+
+    #[test]
+    fn session_log_open_owner_pane_reuses_alive_latest_open_pane() {
+        let iso = IsolatedTmux::new("start-session-log-open-owner");
+        let tmp = TempDir::new().unwrap();
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        let current_pane = iso.split_window(&owner_pane, tmp.path(), "-dh").unwrap();
+        let doc = tmp.path().join("tasks/software/corky.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# corky\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/session-123.log"),
+            format!(
+                "[1] session_start file=tasks/software/corky.md pane={} session=session-123\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let owner =
+            session_log_open_owner_pane(&iso, &doc, "session-123", Some(&current_pane)).unwrap();
+        assert_eq!(owner.as_deref(), Some(owner_pane.as_str()));
     }
 
     #[test]

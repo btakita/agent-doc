@@ -428,11 +428,12 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     {
         let mut updated = 0u32;
         for entry in registry.values_mut() {
-            if entry.session_id == session_uuid {
-                if entry.file != doc_path_str && entry.file != canonical_str {
-                    entry.file = doc_path_str.clone();
-                    updated += 1;
-                }
+            if entry.session_id == session_uuid
+                && entry.file != doc_path_str
+                && entry.file != canonical_str
+            {
+                entry.file = doc_path_str.clone();
+                updated += 1;
             }
         }
         if updated > 0 {

@@ -76,8 +76,7 @@ Verification:
 - `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
 
 I did not commit or push. The worktree already has unrelated in-flight changes, including `src/agent-doc/src/resync.rs`, multiple sibling submodules, and session documents, so an automatic commit would not have been isolated or safe.
-<!-- agent:boundary:0566c854 -->
-commit + push all uncommitted files
+<!-- agent:boundary:e4021750 -->
 <!-- /agent:exchange -->
 
 <!--

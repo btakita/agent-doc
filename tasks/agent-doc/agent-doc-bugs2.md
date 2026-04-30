@@ -103,7 +103,16 @@ That specific path has since been changed. The current implementation uses tmux 
 #### Bottom line
 
 The April 29, 2026 `claudescore-3.md` incident was a cross-file dispatch bug that hijacked the live `monsterrodholders.md` pane. The `monsterrodholders.md` symptom was then amplified by older stash/session-loss recovery behavior that replaced panes after ownership proof failed. The residual issue still visible in newer logs is mostly a **startup-miss on a live pane** problem, not the older "agent-doc literally killed the correct pane" bug.
-<!-- agent:boundary:30749b3d -->
+### Re: follow-up on the pane-close investigation — gpt-5
+
+The investigation above is the answer to that prompt. The key split is:
+
+1. `claudescore-3.md` failed because route reused the wrong live pane across files.
+2. `monsterrodholders.md` then became the victim pane, and older stash/session-loss recovery made that look like an intentional pane close.
+3. The drafted `echo ... startup-miss ...` line came from the old diagnostic path and was not submitted because it was typed into the Codex composer instead of a shell.
+
+The remaining live issue in newer logs is a startup-miss on an alive pane, not the older cross-file closeout bug.
+<!-- agent:boundary:bd59bc6d -->
 <!-- /agent:exchange -->
 
 <!--

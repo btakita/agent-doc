@@ -38,7 +38,30 @@ Active backlog:
 
 Icebox:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- agent:boundary:a5171c70 -->
+❯ I see latent tmux panes that say "Pane is dead" but the pane is never reaped.
+```
+So long and thanks for all the fish.
+  -- Douglas Adams
+Pane is dead (status 0, Thu Apr 30 17:04:46 2026)
+```
+
+❯ spec-test-build-install-commit-push
+### Re: latent dead panes — gpt-5
+
+Implemented the dead-pane cleanup.
+
+- `resync::prune()` now reaps unregistered retained-dead panes in non-stash windows when another pane remains in the window, and `resync --fix` uses the same cleanup path.
+- Added regression coverage for sibling-pane cleanup and last-pane preservation, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+- Switched the workspace Cargo override in `.cargo/config.toml` to `paths = ["src/tmux-router"]` so local root-based builds actually exercise the sibling `tmux-router` checkout.
+
+Verification completed:
+- `cargo test purge_unregistered_dead_non_stash` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force` passed.
+
+I did not commit or push. The full `cargo clippy --manifest-path src/agent-doc/Cargo.toml -- -D warnings` gate is still failing in pre-existing unrelated files (`start.rs`, `sessions.rs`, `autoclaim.rs`, `plan.rs`, `route.rs`, `snapshot.rs`, `write.rs`), so `spec-test-build-install-commit-push` is blocked on that repo-wide warning debt rather than this dead-pane fix.
+<!-- agent:boundary:1a96200e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -48,15 +71,6 @@ If I waited too long, I lost the running pane.
 
 Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov incidently fix this issue?
 Even if #pathprov would incidently fix this case, I'm still concerned that it's possible for a tmux pane to be swapped out while the editor has the document open. Why is this even possible?
-
-spec-test-build-install-commit-push
----
-I see a latent "Pane is dead" but the pane is never reaped.
-```
-So long and thanks for all the fish.
-  -- Douglas Adams
-Pane is dead (status 0, Thu Apr 30 17:04:46 2026)
-```
 
 spec-test-build-install-commit-push
 -->

@@ -270,13 +270,33 @@ Current branch verification status:
 Because this fix was already implemented and pushed before this turn, there was no new `src/agent-doc` code delta to commit or push today.
 
 No new backlog items came out of this verification pass.
-<!-- agent:boundary:1ff4c202 -->
+❯ The JB Plugin syntax highlight has an off-by-1 incrementing position issue. spec-test-build-install-commit-push
+❯ ![img_5.png](img_5.png)
+### Re: JB syntax highlight offset drift — gpt-5
+
+Root cause:
+- `agent_doc_visual_tokens_json(...)` was exporting UTF-8 byte offsets from the shared Rust scanner, but the editor layer consumes document offsets. After any multibyte text earlier in the file (`é`, emoji, smart punctuation, em dash), later highlight ranges drifted forward.
+
+What changed:
+- converted the shared visual-token FFI export to UTF-16 document offsets in `src/ffi.rs` before serializing tokens for JetBrains and VS Code
+- added an FFI regression that covers accented text, emoji, smart punctuation, prompts, response headings, and `[recommended]` labels
+- updated `editors/SPEC.md` and `VERSIONS.md` to lock the editor-facing range contract
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release --lib`
+- `agent-doc lib-install`
+
+Published:
+- `src/agent-doc` commit `5f7423d` (`fix: align editor visual token offsets`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog items came out of this fix.
+<!-- agent:boundary:9864f90e -->
 <!-- /agent:exchange -->
 
 <!--
-The JB Plugin syntax highlight has an off-by-1 incrementing position issue.
-![img_5.png](img_5.png)
----
 I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
 ```
 › echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do

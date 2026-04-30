@@ -794,7 +794,33 @@ Published:
 Note:
 - No new actionable follow-up items were identified in this turn.
 - The first full `agent-doc` suite run and the first parallel `route::tests` shard each had one transient failure that passed on immediate rerun; I left code unchanged because the isolated failing tests passed and the required full + parallel suites finished green.
-<!-- agent:boundary:d0eaa7e7 -->
+do #tmuxcrash. spec-test-build-install-commit-push
+### Re: `#tmuxcrash` — gpt-5
+
+I closed the remaining `#tmuxcrash` provenance gap.
+
+What changed in `src/agent-doc`:
+- `startup_miss.rs` now treats any `session_end ...` tokenized line as a real session closeout, so `session_end origin=registry_rebind ...` and `session_end origin=sync_missing_pane ...` no longer leave the latest pane era looking falsely open.
+- `route.rs` now reasserts the chosen pane binding immediately before dispatch on reused panes, and the fresh auto-start path now uses the dedicated new-pane dispatch path instead of tripping its own registry guard during recovery.
+- Updated `specs/07-commands.md`, `specs/supervisor.md`, and `VERSIONS.md` to record the metadata-bearing `session_end` invariant.
+
+That closes `#tmuxcrash-rn2d`: closeout provenance no longer depends on an exact whole-line `session_end` match, and routed recovery no longer misclassifies its own fresh replacement panes as unbound.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resync::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml autoclaim::tests:: -- --nocapture --test-threads=16`
+- `cargo test --manifest-path src/tmux-router/Cargo.toml -- --test-threads=16`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Published:
+- `src/agent-doc` commit `b78253b` pushed to `origin/20260422/codex-agent-backend`
+
+Note:
+- I left the unrelated workspace changes outside `src/agent-doc` untouched.
+<!-- agent:boundary:3bc3b50e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -808,13 +834,7 @@ I see the following in the binding codex session prompt. Why is it there? Why wa
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcrash] Repeated tmux-backed `agent-doc` sessions previously surfaced to the user as "the pane crashed" while the persisted state actually mixed startup-miss, fresh-start, orphaned-supervisor, and missing-exit cases. The false-crash family is now narrowed: stale startup-miss / superseded-owner cleanup belongs in `#smst`, and the remaining `#tmuxcrash` scope is only true crash provenance gaps such as real child death, missing-exit, orphaned-supervisor, and commit-boundary failures. Repro history includes `tasks/software/tsift.md` on Apr 29, 2026. Plan: tasks/agent-doc/plan-tmux-pane-crash-stability.md
-  - [x] [#tmuxcrash-rebindlog] Preserve replacement-pane / ownership provenance so recovery analysis can distinguish rebinds from real crashes.
-  - [x] [#tmuxcrash-routebind] Re-register routed panes in the document-root registry and validate dispatch against the canonical file path, so live-owner recovery stays bound under parallel tmux routing.
-  - [x] [#tmuxcrash-lossguard] Fail closed after repeated missing-pane recovery loops in `route` / `sync` instead of auto-starting replacement panes indefinitely.
-  - [x] [#tmuxcrash-9rh5] Let a restarted second-leg live repro finish its full write/commit path and confirm `session-check` closes cleanly.
-  - [x] [#tmuxcrash-hmrz] Move stale startup-miss and ownership cleanup out to `#smst` once the recovered closeout is clean.
-  - [ ] [#tmuxcrash-rn2d] Keep `#tmuxcrash` limited to true crash provenance only: real child death, missing-exit, orphaned-supervisor, and commit-boundary failures.
+- [ ] [#rbret] Returning to an already-running document in the editor can look like "the tmux pane crashed" even though the session log shows registry rebinds, not a child crash. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 30, 2026: pane `%529` recorded a retained routed startup-miss, then switching back to `monsterrodholders.md` led to `session_superseded` / `session_end origin=registry_rebind` hops `%529 -> %533 -> %536 -> %540` in the same tmux window while the stale startup-miss marker still pointed at `%529`. The fix should make editor-return sync reuse/focus the canonical live owner, clear stale startup-miss state before any fresh start/rebind decision, and surface rebinds as rebinds rather than pane crashes. Plan: tasks/agent-doc/plan-editor-return-session-rebind.md
 - [ ] [#dupfx] Duplicate response patchback when finalize commits successfully but session-check fails on a bare user prompt line and recovery replays the same response. Plan: tasks/agent-doc/plan-session-check-prefix-duplication.md
 - [ ] [#mcrc] Surface and require explicit follow-through when a missing response patchback is repaired manually in a session doc but not committed afterward. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the `#asch1` response was manually inserted and visible in the working tree, but `git status` still showed `M tasks/monsterrodholders.md` and the user had to ask why the patchback was not committed. The fix should either commit the manual repair as part of the recovery flow or emit a blocking notice that the recovery is still uncommitted.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.

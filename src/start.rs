@@ -23,10 +23,12 @@
 //! - If `sessions.json` points at an alive pane but no live owner can still be
 //!   proven for the document, `start` first consults the per-session supervisor:
 //!   healthy supervisors are reused, restartable supervisors are restarted in
-//!   place, and only unavailable supervisors are treated as stale before
-//!   starting in the current pane. If that alive pane still carries the active
-//!   startup-miss marker for the document, `start` must fail closed instead of
-//!   rebinding the document to a fresh pane.
+//!   place, halted supervisors may be replaced only through a later
+//!   registry-rebind that records supersession provenance, and unavailable
+//!   supervisors fail closed instead of rebinding the document to a fresh pane.
+//!   If that alive pane still carries the active startup-miss marker for the
+//!   document, `start` must also fail closed instead of rebinding the document
+//!   to a fresh pane.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
@@ -820,7 +822,7 @@ enum StaleRegisteredPaneAction {
     ReuseRegistered,
     RestartRegistered,
     ClearStaleHalted { restart_count: u32 },
-    ClearStale,
+    FailClosedUnavailable,
 }
 
 fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
@@ -892,7 +894,7 @@ fn stale_registered_pane_action(supervisor_health: SupervisorHealth) -> StaleReg
             StaleRegisteredPaneAction::ClearStaleHalted { restart_count }
         }
         SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
-            StaleRegisteredPaneAction::ClearStale
+            StaleRegisteredPaneAction::FailClosedUnavailable
         }
     }
 }
@@ -1572,27 +1574,24 @@ pub fn run(file: &Path) -> Result<()> {
                             return Ok(());
                         }
                         eprintln!(
-                            "[start] supervisor restart failed for pane {} — clearing stale entry",
+                            "[start] supervisor restart failed for pane {} — starting replacement via registry rebind so supersession provenance is preserved",
                             stale_pane
                         );
-                        let _ = sessions::deregister(&session_id)?;
                     }
                     StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
                         eprintln!(
-                            "[start] registered pane {} for {} has a halted supervisor after {} restarts — clearing the stale crashed session and starting fresh",
+                            "[start] registered pane {} for {} has a halted supervisor after {} restarts — starting fresh via registry rebind so supersession provenance is preserved",
                             stale_pane,
                             file.display(),
                             restart_count
                         );
-                        let _ = sessions::deregister(&session_id)?;
                     }
-                    StaleRegisteredPaneAction::ClearStale => {
-                        eprintln!(
-                            "[start] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — clearing stale entry",
+                    StaleRegisteredPaneAction::FailClosedUnavailable => {
+                        anyhow::bail!(
+                            "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
                             stale_pane,
                             file.display()
                         );
-                        let _ = sessions::deregister(&session_id)?;
                     }
                 }
             }
@@ -2833,7 +2832,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_registered_pane_uses_supervisor_before_clearing() {
+    fn stale_registered_pane_uses_supervisor_before_fail_closed_or_rebind() {
         assert_eq!(
             stale_registered_pane_action(SupervisorHealth::Healthy),
             StaleRegisteredPaneAction::ReuseRegistered
@@ -2848,11 +2847,11 @@ mod tests {
         );
         assert_eq!(
             stale_registered_pane_action(SupervisorHealth::Unreachable),
-            StaleRegisteredPaneAction::ClearStale
+            StaleRegisteredPaneAction::FailClosedUnavailable
         );
         assert_eq!(
             stale_registered_pane_action(SupervisorHealth::NoSocket),
-            StaleRegisteredPaneAction::ClearStale
+            StaleRegisteredPaneAction::FailClosedUnavailable
         );
     }
 

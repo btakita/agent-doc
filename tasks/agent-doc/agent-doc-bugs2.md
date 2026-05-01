@@ -604,10 +604,47 @@ Verification completed:
 - `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
 
 No new backlog item is needed from this fix. The stash-pane lines are still noisy, but they are defensive rather than incorrect; if you want, that can be handled as a separate logging/UX cleanup.
-<!-- agent:boundary:94864079 -->
+❯ do [#bdryc]. spec-test-build-install-commit-push
+### Re: #bdryc — gpt-5
+
+Worked the stale-boundary answered-tail path and pushed the code change, while intentionally leaving `#bdryc` open until a live routed rerun confirms the original repro is gone.
+
+- `session_check.rs` now suppresses prompt-bearing drift when the changed exchange block already contains the user prompt plus a later real `### Re:` / `## Assistant` response, and it keeps that suppression active across weak response-body fragments like `Yes.` until a genuinely fresh prompt appears.
+- `route.rs` picks that up through the shared pending-change detector, so routed reopen no longer waits 30 seconds for `pending prompt_target: ...` when the visible tail is already answered and only the closeout boundary/commit repair remains.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml answered_prompt_after_stale_boundary -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Full-suite note: the targeted regressions passed, build/install passed, but the repo-wide `cargo test` run still has two existing `sync.rs` failures outside this patch:
+- `sync::tests::register_synced_files_updates_each_project_registry_by_path_key`
+- `sync::tests::tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves`
+
+Code commit/push:
+- `src/agent-doc` `d8a8e73` on `20260422/codex-agent-backend` (`fix: ignore answered stale-boundary tails`)
+
+`#bdryc` stays open until a real routed rerun confirms the live `pending prompt_target` repro is gone.
+<!-- agent:boundary:382e0c53 -->
 <!-- /agent:exchange -->
 
 <!--
+JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: pruned 3 stale session(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2763081) in pane %305 for tasks/claudescore-3.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar Error: registered pane %305 for tasks/claudescore-3.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%305 pane_pid=2757392 pane_session=0 current_command=agent-doc)
+```
+---
+JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %305 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2916780) in pane %306 for tasks/monsterrodholders.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: reverse-i-search: monst enter accept · esc cancel [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client Error: registered pane %306 for tasks/monsterrodholders.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%306 pane_pid=2914566 pane_session=0 current_command=agent-doc)
+```
+---
+Add a `Fix Document` command to the JB Plugin...which will run `agent-doc fix <path>`.
+---
+If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
+![img_7.png](img_7.png)
 -->
 
 ## Pending / Not Built

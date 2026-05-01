@@ -305,7 +305,24 @@ The active backlog is now clear; only icebox items remain.
 - Reproduced finding 2 with a synthetic `summaries.db` containing a stale row; `tsift summarize --stats --json` still returned `"stale_count":0`.
 
 Follow-up items added to backlog. Top remaining backlog item: `#scop`.
-<!-- agent:boundary:987551fd -->
+❯ do [#scop]. spec-test-build-install-commit-push
+### Re: #scop spec-test-build-install-commit-push — gpt-5
+
+Implemented `#scop` in `src/tsift` so summarize extract scopes now canonicalize existing paths and collapse lexical `.` / `..` segments before scope filtering and cache-key derivation. That fixes the false `No files to extract.` path for `tsift summarize --extract src/../src --diff --path <repo> --compact`, keeps the error surface on canonical `src/...` spellings, and also normalizes absolute symlinked scope paths.
+
+Added regression coverage in `src/main.rs` and `tests/exit_code.rs`, exposed the shared lexical normalizer from `src/summarize.rs`, and updated `SPEC.md` to document normalized extract-scope handling.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`438` unit tests and `47` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `323e73c` (`fix: normalize summarize extract scopes`).
+
+Top remaining backlog item: `#stct`.
+<!-- agent:boundary:78b7e7ce -->
 <!-- /agent:exchange -->
 
 <!--
@@ -315,7 +332,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#scop] Normalize summarize extract scopes before diff filtering and cache-key derivation so ./.. path spellings and symlinked scope spellings cannot yield false `No files to extract.` results or malformed summary keys.
 - [ ] [#stct] Make `tsift summarize --stats` compute real stale summary counts (missing files and hash-mismatched files) instead of hard-coding `stale_count: 0`, and align the CLI/spec contract.
 <!-- /agent:backlog -->
 

@@ -186,7 +186,24 @@ Verification:
 Committed and pushed `src/tsift` `main` as `f5e6d3b` (`fix: prune stale summaries on full extract`).
 
 Top remaining backlog item: `#fqry`.
-<!-- agent:boundary:36bb7485 -->
+❯ do [#fqry]. spec-test-build-install-commit-push
+### Re: #fqry spec-test-build-install-commit-push — gpt-5
+
+Implemented `#fqry` in `src/tsift` so `tsift summarize --file` now normalizes equivalent path spellings before lookup. The query path first preserves an exact normalized user spelling such as `src/lib.rs` or `./src/lib.rs`, then resolves nested relative spellings like `../lib.rs` against the `--path` anchor and collapses them back to the canonical root-relative cache key used by `summaries.db`.
+
+Added regression coverage in both `src/summarize.rs` and `tests/exit_code.rs`, and updated `SPEC.md` to document the normalized `--file` behavior.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`431` unit tests and `44` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `c6a49f8` (`fix: normalize summarize file lookups`).
+
+The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:edc860b7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -196,7 +213,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fqry] [recommended] Normalize `tsift summarize --file` inputs to the canonical root-relative cache key so `src/lib.rs`, `./src/lib.rs`, and nested-path spellings hit the same row.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

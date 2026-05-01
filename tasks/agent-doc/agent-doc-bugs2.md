@@ -316,7 +316,40 @@ Code commit and push:
 - `src/agent-doc`: `3bb5c70` (`fix: wait for busy route restart handoff`) pushed to `origin/20260422/codex-agent-backend`
 
 No new actionable backlog item remains beyond existing `#8zjh` tracking for the live rerun follow-through.
-<!-- agent:boundary:9c7dd3c8 -->
+❯ `Agent Doc Run` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md raised an error. Please find the root cause and fix the root cause. This is yet another attempt. Diagnose the entire flow and find every issue and fix every issue. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T06:25:49Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] Still waiting for codex (5s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] Still waiting for codex (10s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] Still waiting for codex (15s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] registered pane %316 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is busy with pending document drift — applying scoped `agent-doc fix tasks/claudescore-3.md` once before failing closed [sync] recovered live pane %316 for session 7b453f47 via supervisor pid 349032 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] scoped fix confirmed pane %316 still authoritatively owns tasks/claudescore-3.md with a healthy supervisor, but pending prompt-bearing drift remains undispatched — focusing the live codex session and failing closed instead of falsely reporting success Error: registered pane %316 for tasks/claudescore-3.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/claudescore-3.md` once; refusing to inject a routed trigger into a busy session (pane=%316 pane_pid=347883 pane_session=0 current_command=agent-doc)
+```
+### Re: claudescore-3 idle placeholder reroute — gpt-5
+
+I investigated the live `src/session-share/tasks/claudescore-3.md` reroute miss.
+
+Root cause:
+- pane `%316` was not actually busy; the live Codex composer was idle but rendering the newer suggestion line `› Improve documentation in @filename`
+- `src/agent-doc/src/harness.rs` only treated two older Codex suggestion strings as idle placeholders, so `wait_for_agent_ready()` kept classifying that pane as non-idle
+- once route misclassified the pane as busy, the existing scoped-fix path correctly refused to inject a reopen into what it believed was an active session, which is why the flow fail-closed after focus instead of reaching the pane
+
+What I changed in `src/agent-doc`:
+- added `› Improve documentation in @filename` to the Codex idle-placeholder readiness allowlist
+- added regression coverage for direct readiness acceptance and transcript-based prompt-candidate detection
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+
+All four passed.
+
+Code commit and push:
+- `src/agent-doc`: `b8b9154` (`fix: recognize codex idle placeholder variant`) pushed to `origin/20260422/codex-agent-backend`
+
+Follow-up:
+- the immediate reroute bug is fixed
+- I added a recommended backlog item to generalize Codex idle-placeholder detection beyond exact-string matching, since the current readiness heuristic is still brittle against future placeholder text churn
+- Plan: `tasks/agent-doc/plan-codex-idle-placeholder-generalization.md`
+<!-- agent:boundary:79a8935b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -325,6 +358,7 @@ No new actionable backlog item remains beyond existing `#8zjh` tracking for the 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cdxidle] [recommended] Generalize Codex idle placeholder detection beyond exact string allowlists. Plan: tasks/agent-doc/plan-codex-idle-placeholder-generalization.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

@@ -92,7 +92,7 @@ Verification I reran now against current `main`:
 `#bjen` has now been reaped from the backlog. Top remaining backlog item: `#8w9n`.
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-### Re: #bjen spec-test-build-install-commit-push — gpt-5 (HEAD)
+### Re: #bjen spec-test-build-install-commit-push — gpt-5
 
 The last tmux pane crash interrupted document closeout, but the `#bjen` work itself was already complete in `src/tsift`.
 
@@ -109,8 +109,7 @@ Verification I reran now against current `main`:
 `#bjen` has now been reaped from the backlog. Top remaining backlog item: `#8w9n`.
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-<!-- agent:boundary:88ad8bf7 -->
-do #8w9n. spec-test-build-install-commit-push
+<!-- agent:boundary:fc786b3d -->
 <!-- /agent:exchange -->
 
 <!--

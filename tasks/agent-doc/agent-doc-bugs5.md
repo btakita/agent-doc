@@ -2,6 +2,18 @@
 agent_doc_session: c9f4e2a1-7d3b-4c8e-a5f6-9e2b1d8c4a7f
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
+prompt_presets:
+   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. #follow-up-backlog
+   '#commit-push': commit + push all uncommitted files
+   '#follow-up-backlog': Any follow-up items to place in the backlog?
+   '#next-steps': #follow-up-backlog Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
+   "#spec-test-commit-push": update spec + tests. commit + push
 ---
 
 ## Status
@@ -74,7 +86,28 @@ The gap: when the pane dies during preflight (after `start_preflight()` but befo
 1. **`--icebox-add` / `--icebox-done` flags** — mirror `--pending-add` / `--pending-done` but target `agent:icebox`
 2. **Generic `--component-add <name> <text>`** — target any named component, not just backlog
 3. **Parse `<!-- replace:<component> -->` blocks in response heredoc** — the binary already parses `<!-- patch:exchange -->` (via boundary synthesis fallback), extend to other components
-<!-- agent:boundary:c0bb87e3 -->
+❯ do #spfxnorm. spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `842c6bd` (`fix: repair post-commit prompt prefix drift`).
+
+What changed:
+- `src/write.rs` now detects post-commit exchange lines that lost `❯ ` in the working tree, repairs only the exchange user region, and sends `normalize_prefix_lines` with the IPC boundary-reposition message when a live listener exists.
+- `src/git.rs` now repairs the same missing prefixes in the no-listener working-tree cleanup path before repositioning the boundary.
+- `editors/PLUGIN-SPEC.md` and `VERSIONS.md` now document the zero-content post-commit repair payload and the working-tree closeout behavior.
+
+Verification:
+- `make check` was run twice; each run hit a different single-test tmux flake in the parallel `--bin agent-doc` suite, but both failing tests passed immediately in isolated reruns.
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test -- --test-threads=1`
+- `make version-sync`
+- `make install`
+
+Pushed:
+- `src/agent-doc` branch `20260422/codex-agent-backend`
+- commit `842c6bd`
+
+No new follow-up backlog items came out of this fix.
+<!-- agent:boundary:5db17b95 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -86,7 +119,6 @@ The gap: when the pane dies during preflight (after `start_preflight()` but befo
 
 <!-- agent:backlog -->
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.

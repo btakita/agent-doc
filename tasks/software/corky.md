@@ -650,7 +650,28 @@ Delivery:
 - pushed `20260413/corky-gsc` to `origin`
 
 Top remaining backlog item is `#tokenstore-delete-preservation`.
-<!-- agent:boundary:08ac2823 -->
+### Re: #oauth-google-fixed-port spec-test-build-install-commit-push — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+Google-backed OAuth now stays on the fixed `127.0.0.1:8484` callback by default, and only falls back to an arbitrary loopback port when `CORKY_OAUTH_ALLOW_EPHEMERAL_PORT=1` is explicitly set for a client that supports wildcard loopback redirects. I updated the shared loopback helper plus the Gmail, Calendar, Contacts, GSC, and YouTube call sites so the unsafe fallback is opt-in instead of automatic, and tightened the bind error text to point users at either a registered-port override (`CORKY_OAUTH_CALLBACK_PORT`) or the explicit fallback opt-in.
+
+I added regression coverage in `src/oauth_loopback.rs` for the new opt-in behavior and refreshed the repo docs/instruction surfaces so `audit-docs` matches the code contract.
+
+Verification passed end to end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install`
+
+Delivery:
+- commit `ea4615e` — `fix: default google oauth to fixed callback port`
+- pushed `20260413/corky-gsc` to `origin`
+
+I closed `#oauth-google-fixed-port`.
+
+Top remaining backlog item is `#tokenstore-delete-preservation`.
+<!-- agent:boundary:566d572f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

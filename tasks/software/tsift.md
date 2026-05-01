@@ -109,7 +109,26 @@ Verification I reran now against current `main`:
 `#bjen` has now been reaped from the backlog. Top remaining backlog item: `#8w9n`.
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
-<!-- agent:boundary:fc786b3d -->
+❯ do #8w9n. spec-test-build-install-commit-push
+❯ do #8w9n. spec-test-build-install-commit-push
+### Re: #8w9n spec-test-build-install-commit-push — gpt-5
+
+`#8w9n` was already complete in `src/tsift` on `main` as commit `30b60d8` (`fix: harden summary read-only paths`), and that commit is already pushed to `origin/main`.
+
+That change set covers the summaries-side read-only hardening the backlog item asked for:
+- `SummaryDb` now exposes the resilient read-only open path with snapshot fallback.
+- `tsift status` carries summary-cache recovery state instead of failing hard when a rollback-journal lock wedges the live summaries DB.
+- `tsift summarize --stats`, symbol lookups, and `--file` lookups reuse the resilient summaries read path.
+- `SPEC.md` documents the read-only cache behavior and degraded recovery reporting.
+
+Fresh verification I reran now against current `main`:
+- `cargo test` passed (`427` unit tests and `42` integration tests)
+- `cargo build` passed
+- `cargo install --path .` passed
+- `tsift --version` => `0.1.21`
+
+No new commit was needed this cycle because the requested spec/test/build/install/commit/push work was already landed and published. The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:00e6b2fb -->
 <!-- /agent:exchange -->
 
 <!--
@@ -119,7 +138,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#8w9n] [recommended] Add resilient read-only handling for summaries.db in tsift status and summarize query paths, with degraded status/diagnostics instead of hard failure
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

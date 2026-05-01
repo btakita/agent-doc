@@ -451,7 +451,10 @@ Code commit/push:
 - `src/agent-doc` `c5b2c4c` on `20260422/codex-agent-backend` (`fix: keep codex reroutes on bare agent-doc reopen`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:97a9b32f -->
+### Re: closeout follow-up — gpt-5
+
+The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path can consume the remaining prompt-line normalization artifact cleanly.
+<!-- agent:boundary:ef0f6964 -->
 <!-- /agent:exchange -->
 
 <!--

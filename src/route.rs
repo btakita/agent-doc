@@ -157,7 +157,7 @@ enum ExistingPaneDispatchReadiness {
 enum BusyPaneAutoFixOutcome {
     RetryRoute,
     RetryRouteAfterSupervisorRestart,
-    FocusBusySameDocument,
+    RetryRouteAfterFreshRestart,
     FailClosed,
 }
 
@@ -173,6 +173,20 @@ enum SupervisorHealth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPromptBearingRouteContext {
     marker: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RoutedDispatchStartTracker {
+    trigger: String,
+    previous_session_id: Option<String>,
+    previous_turn_id: Option<String>,
+    previous_updated_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoutedDispatchStartProof {
+    CommandAcceptedOnly,
+    HarnessConsumed,
 }
 
 fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
@@ -198,6 +212,80 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
         "pane={} pane_pid={} pane_session={} current_command={}",
         pane_id, pane_pid, pane_session, current_command
     )
+}
+
+fn codex_dispatch_start_tracking_enabled(file: &Path) -> bool {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    crate::snapshot::find_project_root(&canonical)
+        .map(|root| root.join(".codex/hooks.json").is_file())
+        .unwrap_or(false)
+}
+
+fn build_routed_dispatch_start_tracker(
+    file: &Path,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<RoutedDispatchStartTracker>> {
+    if harness.binary != "codex" || !codex_dispatch_start_tracking_enabled(file) {
+        return Ok(None);
+    }
+    let latest = crate::codex_hook::load_latest_prompt_state_for_file(file)?;
+    Ok(Some(RoutedDispatchStartTracker {
+        trigger: harness.trigger_command(file_path),
+        previous_session_id: latest.as_ref().map(|state| state.session_id.clone()),
+        previous_turn_id: latest.as_ref().map(|state| state.last_turn_id.clone()),
+        previous_updated_at: latest.as_ref().map(|state| state.updated_at),
+    }))
+}
+
+fn routed_dispatch_start_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(10)
+    }
+}
+
+fn codex_consumed_routed_trigger(
+    tracker: &RoutedDispatchStartTracker,
+    state: &crate::codex_hook::ActiveSessionState,
+) -> bool {
+    if state.last_prompt.trim() != tracker.trigger.trim() {
+        return false;
+    }
+
+    match (
+        tracker.previous_session_id.as_deref(),
+        tracker.previous_turn_id.as_deref(),
+        tracker.previous_updated_at,
+    ) {
+        (None, None, None) => true,
+        (previous_session_id, previous_turn_id, previous_updated_at) => {
+            previous_session_id != Some(state.session_id.as_str())
+                || previous_turn_id != Some(state.last_turn_id.as_str())
+                || previous_updated_at.is_none_or(|updated_at| state.updated_at > updated_at)
+        }
+    }
+}
+
+fn wait_for_routed_dispatch_start(
+    file: &Path,
+    tracker: &RoutedDispatchStartTracker,
+    timeout: Duration,
+) -> Result<bool> {
+    let start = std::time::Instant::now();
+    let poll = Duration::from_millis(200);
+
+    while start.elapsed() < timeout {
+        if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
+            && codex_consumed_routed_trigger(tracker, &state)
+        {
+            return Ok(true);
+        }
+        std::thread::sleep(poll);
+    }
+
+    Ok(false)
 }
 
 fn format_associated_pane_resolution_error(
@@ -1041,15 +1129,12 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 auto_fix_attempted,
                                 &owner,
                                 &provenance,
-                                cycle_baseline.as_ref(),
-                                pending_prompt_context
-                                    .as_ref()
-                                    .map(|context| context.marker.as_str()),
                             );
                         }
                     }
                     register_dispatch_target(session_id, &owner, file_path)?;
-                    send_command(tmux, &owner, file_path, harness)?;
+                    let dispatch_start =
+                        dispatch_routed_reopen(tmux, file, &owner, file_path, harness)?;
                     require_routed_cycle_ack(
                         tmux,
                         file,
@@ -1061,6 +1146,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             .as_ref()
                             .map(|context| context.marker.as_str()),
                         true,
+                        dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
                     )?;
                     return Ok(owner);
                 }
@@ -1108,6 +1194,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 pending_prompt_context
                                     .as_ref()
                                     .map(|context| context.marker.as_str()),
+                                false,
                                 false,
                             )?;
                             return Ok(registered_pane.clone());
@@ -1212,16 +1299,13 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             auto_fix_attempted,
                             &registered_pane,
                             &provenance,
-                            cycle_baseline.as_ref(),
-                            pending_prompt_context
-                                .as_ref()
-                                .map(|context| context.marker.as_str()),
                         );
                     }
                 }
                 register_dispatch_target(session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-                send_command(tmux, &registered_pane, file_path, harness)?;
+                let dispatch_start =
+                    dispatch_routed_reopen(tmux, file, &registered_pane, file_path, harness)?;
                 require_routed_cycle_ack(
                     tmux,
                     file,
@@ -1233,6 +1317,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         .as_ref()
                         .map(|context| context.marker.as_str()),
                     true,
+                    dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
                 )?;
                 return Ok(registered_pane);
             }
@@ -1313,15 +1398,11 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     existing,
                     &provenance,
-                    cycle_baseline.as_ref(),
-                    pending_prompt_context
-                        .as_ref()
-                        .map(|context| context.marker.as_str()),
                 );
             }
         }
         register_dispatch_target(session_id, existing, file_path)?;
-        send_command(tmux, existing, file_path, harness)?;
+        let dispatch_start = dispatch_routed_reopen(tmux, file, existing, file_path, harness)?;
         require_routed_cycle_ack(
             tmux,
             file,
@@ -1333,6 +1414,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 .as_ref()
                 .map(|context| context.marker.as_str()),
             true,
+            dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
         )?;
         return Ok(existing.to_string());
     }
@@ -1368,15 +1450,11 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     &new_pane,
                     &provenance,
-                    cycle_baseline.as_ref(),
-                    pending_prompt_context
-                        .as_ref()
-                        .map(|context| context.marker.as_str()),
                 );
             }
         }
         register_dispatch_target(session_id, &new_pane, file_path)?;
-        send_command(tmux, &new_pane, file_path, harness)?;
+        let dispatch_start = dispatch_routed_reopen(tmux, file, &new_pane, file_path, harness)?;
         require_routed_cycle_ack(
             tmux,
             file,
@@ -1388,6 +1466,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 .as_ref()
                 .map(|context| context.marker.as_str()),
             false,
+            dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
         )?;
         return Ok(new_pane);
     }
@@ -1428,8 +1507,6 @@ fn retry_route_after_busy_pane_auto_fix(
     auto_fix_attempted: bool,
     busy_pane: &str,
     provenance: &str,
-    cycle_baseline: Option<&crate::cycle_state::CycleState>,
-    pending_prompt_marker: Option<&str>,
 ) -> Result<String> {
     if allow_auto_fix_retry {
         match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
@@ -1464,54 +1541,42 @@ fn retry_route_after_busy_pane_auto_fix(
                     true,
                 );
             }
-            BusyPaneAutoFixOutcome::FocusBusySameDocument => {
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_existing_pane_retry_dispatch_after_noop_fix file={} pane={} harness={}",
+                        "route_existing_pane_retry_route_after_fresh_restart file={} pane={} harness={}",
                         file.display(),
                         busy_pane,
                         harness.binary
                     ),
                 );
                 eprintln!(
-                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor, but prompt detection never settled — retrying the bare routed {} reopen once and requiring a fresh cycle ack before success",
+                    "[route] scoped fix left pane {} authoritative for {} with a healthy supervisor — restarting the live {} session fresh once before one final reroute",
                     busy_pane,
                     file.display(),
                     harness.binary
                 );
-                match send_command_checked(tmux, busy_pane, file_path, harness)? {
-                    CommandDispatchStatus::Accepted => {}
-                    CommandDispatchStatus::TimedOut => {
-                        if let Some(routed_pane) = retry_busy_dispatch_after_fresh_restart(
-                            tmux,
-                            file,
-                            busy_pane,
-                            session_id,
-                            file_path,
-                            harness,
-                            cycle_baseline,
-                            pending_prompt_marker,
-                        )? {
-                            return Ok(routed_pane);
-                        }
-                        emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                        anyhow::bail!(format_busy_existing_pane_error(
-                            file, busy_pane, harness, provenance, true
-                        ));
-                    }
+                if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+                    emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                    anyhow::bail!(format_busy_existing_pane_error(
+                        file, busy_pane, harness, provenance, true
+                    ));
                 }
-                require_routed_cycle_ack(
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return resolve_or_create_pane_with_auto_fix_retry(
                     tmux,
                     file,
-                    busy_pane,
+                    pane,
+                    col_args,
                     session_id,
+                    file_path,
+                    target_session,
                     harness,
-                    cycle_baseline,
-                    pending_prompt_marker,
+                    created_panes,
+                    false,
                     true,
-                )?;
-                return Ok(busy_pane.to_string());
+                );
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
         }
@@ -1621,13 +1686,6 @@ fn rescue_from_stash(
             eprintln!("[route] warning: re-register failed: {}", e);
         }
     }
-}
-
-/// Send the trigger command to a pane and focus it.
-/// Shows a brief tmux display-message on the target pane for immediate feedback.
-fn send_command(tmux: &Tmux, pane: &str, file_path: &str, harness: &HarnessConfig) -> Result<()> {
-    let _ = send_command_checked(tmux, pane, file_path, harness)?;
-    Ok(())
 }
 
 fn send_command_unchecked(
@@ -1819,6 +1877,48 @@ fn send_command_checked(
     send_command_unchecked(tmux, pane, file_path, harness)
 }
 
+fn dispatch_routed_reopen(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<RoutedDispatchStartProof> {
+    let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
+    let status = send_command_checked(tmux, pane, file_path, harness)?;
+    let Some(tracker) = tracker else {
+        return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
+    };
+
+    let timeout = routed_dispatch_start_timeout();
+    if wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_start_proven file={} pane={} harness={} timeout_secs={}",
+                file.display(),
+                pane,
+                harness.binary,
+                timeout.as_secs()
+            ),
+        );
+        return Ok(RoutedDispatchStartProof::HarnessConsumed);
+    }
+
+    let stage = match status {
+        CommandDispatchStatus::Accepted => "accepted in tmux but Codex never consumed",
+        CommandDispatchStatus::TimedOut => "left drafted in tmux and Codex never consumed",
+    };
+    anyhow::bail!(
+        "routed {} trigger for {} was {} the bare reopen in pane {} after waiting {}s",
+        harness.binary,
+        file.display(),
+        stage,
+        pane,
+        timeout.as_secs()
+    );
+}
+
 fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
 }
@@ -1974,7 +2074,7 @@ fn busy_existing_pane_auto_fix_outcome(
         return BusyPaneAutoFixOutcome::RetryRoute;
     }
     match supervisor_health {
-        Some(SupervisorHealth::Healthy) => BusyPaneAutoFixOutcome::FocusBusySameDocument,
+        Some(SupervisorHealth::Healthy) => BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart,
         _ => BusyPaneAutoFixOutcome::FailClosed,
     }
 }
@@ -2109,20 +2209,27 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         return Ok(false);
     }
 
-    if send_command_checked(tmux, pane, &file.display().to_string(), harness)?
-        != CommandDispatchStatus::Accepted
-    {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_cycle_start_retry_fresh_restart_send_timeout file={} pane={} harness={}",
-                file.display(),
-                pane,
-                harness.binary
-            ),
-        );
-        return Ok(false);
-    }
+    let _dispatch_start = match dispatch_routed_reopen(
+        tmux,
+        file,
+        pane,
+        &file.display().to_string(),
+        harness,
+    ) {
+        Ok(proof) => proof,
+        Err(_) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_cycle_start_retry_fresh_restart_dispatch_not_consumed file={} pane={} harness={}",
+                    file.display(),
+                    pane,
+                    harness.binary
+                ),
+            );
+            return Ok(false);
+        }
+    };
 
     match wait_for_start_ack(file, baseline, ack_timeout) {
         Some(state) => {
@@ -2144,92 +2251,6 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         }
         None => Ok(false),
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn retry_busy_dispatch_after_fresh_restart(
-    tmux: &Tmux,
-    file: &Path,
-    pane: &str,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    baseline: Option<&crate::cycle_state::CycleState>,
-    prompt_bearing_marker: Option<&str>,
-) -> Result<Option<String>> {
-    if harness.binary != "codex" {
-        return Ok(None);
-    }
-    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
-        return Ok(None);
-    }
-
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "route_existing_pane_retry_dispatch_after_fresh_restart file={} pane={} harness={}",
-            file.display(),
-            pane,
-            harness.binary,
-        ),
-    );
-    eprintln!(
-        "[route] busy {} pane {} for {} still never consumed the routed reopen — restarting the live session fresh once before fail-closing",
-        harness.binary,
-        pane,
-        file.display()
-    );
-
-    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane = crate::sync::find_live_owner_pane(tmux, file, session_id)
-        .unwrap_or_else(|| pane.to_string());
-
-    if !wait_for_agent_ready(
-        tmux,
-        &dispatch_pane,
-        fresh_route_start_ack_timeout(),
-        harness,
-    ) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_existing_pane_retry_fresh_restart_not_ready file={} pane={} dispatch_pane={} harness={}",
-                file.display(),
-                pane,
-                dispatch_pane,
-                harness.binary
-            ),
-        );
-        return Ok(None);
-    }
-
-    if send_command_checked(tmux, &dispatch_pane, file_path, harness)?
-        != CommandDispatchStatus::Accepted
-    {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_existing_pane_retry_fresh_restart_send_timeout file={} pane={} dispatch_pane={} harness={}",
-                file.display(),
-                pane,
-                dispatch_pane,
-                harness.binary
-            ),
-        );
-        return Ok(None);
-    }
-
-    require_routed_cycle_ack(
-        tmux,
-        file,
-        &dispatch_pane,
-        session_id,
-        harness,
-        baseline,
-        prompt_bearing_marker,
-        true,
-    )?;
-    Ok(Some(dispatch_pane))
 }
 
 fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
@@ -2307,6 +2328,7 @@ fn require_routed_cycle_ack(
     baseline: Option<&crate::cycle_state::CycleState>,
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
+    dispatch_start_proven: bool,
 ) -> Result<()> {
     if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
         return Ok(());
@@ -2377,21 +2399,28 @@ fn require_routed_cycle_ack(
                 baseline_id,
             )?;
             let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+            let dispatch_stage = if dispatch_start_proven {
+                "consumed"
+            } else {
+                "accepted"
+            };
             emit_startup_miss_diagnostic(
                 tmux,
                 pane,
                 file,
                 &format!(
-                    "routed trigger accepted but no document cycle started for pending {} after {}s (startup-miss {})",
+                    "routed trigger {} but no document cycle started for pending {} after {}s (startup-miss {})",
+                    dispatch_stage,
                     marker,
                     ack_timeout.as_secs(),
                     miss_ts
                 ),
             );
             anyhow::bail!(
-                "routed {} trigger for {} was accepted in pane {}, but no new document cycle started for pending {} after waiting {}s (startup_miss_timestamp={})",
+                "routed {} trigger for {} was {} in pane {}, but no new document cycle started for pending {} after waiting {}s (startup_miss_timestamp={})",
                 harness.binary,
                 file.display(),
+                dispatch_stage,
                 pane,
                 marker,
                 ack_timeout.as_secs(),
@@ -3106,16 +3135,16 @@ fn auto_start_in_session(
                 );
             }
         }
-        let dispatch = if ready {
+        let dispatch_start = if ready {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_checked(tmux, &dispatch_pane, file_path, harness)?
+            dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_checked(tmux, &dispatch_pane, file_path, harness)? {
-                CommandDispatchStatus::Accepted => {
+            match dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness) {
+                Ok(proof) => {
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -3129,9 +3158,9 @@ fn auto_start_in_session(
                         "[route] Fallback trigger injection recovered the fresh {} start for {}",
                         harness.binary, file_path
                     );
-                    CommandDispatchStatus::Accepted
+                    proof
                 }
-                CommandDispatchStatus::TimedOut => {
+                Err(err) => {
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -3141,31 +3170,10 @@ fn auto_start_in_session(
                             harness.binary
                         ),
                     );
-                    anyhow::bail!(
-                        "timed out waiting for {} prompt and fallback trigger injection was not accepted for {}",
-                        harness.binary,
-                        file.display()
-                    );
+                    return Err(err);
                 }
             }
         };
-
-        if dispatch != CommandDispatchStatus::Accepted {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "fresh_route_trigger_missing file={} pane={} harness={}",
-                    file.display(),
-                    dispatch_pane,
-                    harness.binary
-                ),
-            );
-            anyhow::bail!(
-                "{} accepted input did not confirm the fresh trigger dispatch for {}",
-                harness.binary,
-                file.display()
-            );
-        }
 
         let ack_timeout = fresh_route_start_ack_timeout();
         match wait_for_start_ack(file, cycle_baseline.as_ref(), ack_timeout) {
@@ -3213,12 +3221,21 @@ fn auto_start_in_session(
                     tmux,
                     &dispatch_pane,
                     file,
-                    "fresh start: trigger accepted but no document cycle started",
+                    if dispatch_start == RoutedDispatchStartProof::HarnessConsumed {
+                        "fresh start: trigger consumed but no document cycle started"
+                    } else {
+                        "fresh start: trigger accepted but no document cycle started"
+                    },
                 );
                 anyhow::bail!(
-                    "fresh {} start for {} never acknowledged with a document cycle after trigger injection",
+                    "fresh {} start for {} never acknowledged with a document cycle after trigger {}",
                     harness.binary,
-                    file.display()
+                    file.display(),
+                    if dispatch_start == RoutedDispatchStartProof::HarnessConsumed {
+                        "consumption"
+                    } else {
+                        "acceptance"
+                    }
                 );
             }
         }
@@ -3921,23 +3938,6 @@ mod tests {
         std::fs::write(
             &script,
             "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
-        )
-        .unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
-        script
-    }
-
-    fn write_mock_busy_registered_agent_doc_stuck_trigger(base: &Path) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
-        let bin_dir = base.join("bin");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        let script = bin_dir.join("agent-doc-busy-stuck-trigger");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf '> %s\\n' \"$CMD\"\ndone\n",
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -5199,8 +5199,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_retries_dispatch_for_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
-     {
+    fn resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix() {
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -5209,14 +5208,12 @@ Body\n\
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-healthy-supervisor");
-        let session = "claude";
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-fresh-reroute");
+        let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir
-            .path()
-            .join("route-live-pane-busy-healthy-supervisor.md");
+        let doc = dir.path().join("route-live-pane-busy-fresh-reroute.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
@@ -5238,123 +5235,7 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        let session_id = "route-live-pane-busy-healthy-supervisor";
-        sessions::register(session_id, &pane, &file_path).unwrap();
-
-        let restart_called = Arc::new(AtomicBool::new(false));
-        let restart_called_for_ipc = restart_called.clone();
-        let doc_for_thread = doc.clone();
-        let current_for_thread = current.clone();
-        let pane_for_thread = pane.clone();
-        let server_for_thread = Tmux {
-            server_socket: iso.server_socket.clone(),
-        };
-        std::thread::spawn(move || {
-            let start = std::time::Instant::now();
-            let timeout = std::time::Duration::from_secs(5);
-            let poll = std::time::Duration::from_millis(100);
-            let mut content = String::new();
-            while start.elapsed() < timeout {
-                content = sessions::capture_pane(&server_for_thread, &pane_for_thread)
-                    .unwrap_or_default();
-                if content.contains("EARLY:agent-doc ") {
-                    break;
-                }
-                std::thread::sleep(poll);
-            }
-            assert!(
-                content.contains("EARLY:agent-doc "),
-                "route should inject the bare reopen before awaiting a new cycle ack: {content}"
-            );
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
-        });
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0
-                    })),
-                    IpcMethod::Restart { .. } => {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        IpcResponse::ok_empty()
-                    }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-                }
-            })
-            .unwrap();
-
-        let resolved = resolve_or_create_pane(
-            &iso,
-            &doc,
-            None,
-            &[],
-            session_id,
-            &file_path,
-            session,
-            &HarnessConfig::codex(),
-            &mut Vec::new(),
-        )
-        .expect("route should retry the bare reopen when a healthy same-document supervisor still owns the pane");
-        assert_eq!(resolved, pane);
-        assert!(
-            !restart_called.load(Ordering::Relaxed),
-            "healthy supervisor path must not restart a busy same-document session"
-        );
-
-        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-        assert!(
-            after.contains("EARLY:agent-doc "),
-            "route should retry the routed reopen after the no-op fix path: {after}"
-        );
-        ipc.stop();
-    }
-
-    #[test]
-    fn retry_busy_dispatch_after_fresh_restart_retries_on_replacement_pane_after_handoff() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
-
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-stuck-trigger");
-        let session = "codex";
-        let cwd = test_cwd();
-        let pane = iso.auto_start(session, &cwd).unwrap();
-
-        let doc = dir.path().join("route-live-pane-busy-stuck-trigger.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-        let current = format!("{snapshot}❯ follow-up question\n");
-        std::fs::write(&doc, &current).unwrap();
-        let busy_agent = write_mock_busy_registered_agent_doc_stuck_trigger(dir.path());
-        send_keys_with_retry(
-            &iso,
-            &pane,
-            &format!("exec {} {}", busy_agent.display(), doc.display()),
-        );
-        let content =
-            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-        assert!(
-            content.contains("Working..."),
-            "busy mock session should be active in pane: {content}"
-        );
-
-        crate::snapshot::save(&doc, snapshot).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
-        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
-        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        let session_id = "route-live-pane-busy-stuck-trigger";
+        let session_id = "route-live-pane-busy-fresh-reroute";
         sessions::register(session_id, &pane, &file_path).unwrap();
 
         let restart_called = Arc::new(AtomicBool::new(false));
@@ -5424,18 +5305,18 @@ Body\n\
             replacement_pane
         });
 
-        let routed = retry_busy_dispatch_after_fresh_restart(
+        let routed = resolve_or_create_pane(
             &iso,
             &doc,
-            &pane,
+            None,
+            &[],
             session_id,
             &file_path,
+            session,
             &HarnessConfig::codex(),
-            Some(&baseline),
-            Some("prompt_target: follow-up question"),
+            &mut Vec::new(),
         )
-        .expect("fresh restart retry should succeed on the replacement pane after handoff")
-        .expect("fresh restart retry should report the replacement dispatch pane");
+        .expect("route should restart fresh once and reroute into the replacement pane");
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
@@ -5455,7 +5336,7 @@ Body\n\
         let busy_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !busy_after.contains("GOT:agent-doc "),
-            "route must not keep dispatching into the stale busy pane after the fresh restart retry: {busy_after}"
+            "route must not keep dispatching into the stale busy pane after the fresh restart reroute: {busy_after}"
         );
         ipc.stop();
     }
@@ -5685,7 +5566,8 @@ Body\n\
     }
 
     #[test]
-    fn busy_existing_pane_auto_fix_outcome_focuses_healthy_authoritative_session_without_changes() {
+    fn busy_existing_pane_auto_fix_outcome_restarts_fresh_for_healthy_authoritative_session_without_changes()
+     {
         assert_eq!(
             busy_existing_pane_auto_fix_outcome(
                 false,
@@ -5693,7 +5575,7 @@ Body\n\
                 Some(SupervisorHealth::Healthy),
                 false,
             ),
-            BusyPaneAutoFixOutcome::FocusBusySameDocument
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
         );
         assert_eq!(
             busy_existing_pane_auto_fix_outcome(

@@ -76,6 +76,7 @@ pub(crate) struct ActiveSessionState {
     pub doc_path: String,
     pub last_turn_id: String,
     pub last_prompt: String,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -493,6 +494,10 @@ pub(crate) fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>>
     Ok(Some(state.last_prompt))
 }
 
+pub(crate) fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
+    load_latest_state_for_file(file)
+}
+
 pub(crate) fn prompt_requests_clear(prompt: &str) -> bool {
     prompt.trim() == "/clear"
 }
@@ -519,6 +524,7 @@ pub(crate) fn load_active_session_for_current_file(
         doc_path: state.doc_path,
         last_turn_id: state.last_turn_id,
         last_prompt: state.last_prompt,
+        updated_at: state.updated_at,
     }))
 }
 
@@ -566,6 +572,7 @@ fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>>
         doc_path: state.doc_path,
         last_turn_id: state.last_turn_id,
         last_prompt: state.last_prompt,
+        updated_at: state.updated_at,
     }))
 }
 

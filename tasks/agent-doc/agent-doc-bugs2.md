@@ -383,10 +383,38 @@ All four passed. Cargo still emits the existing path-override warnings for `tmux
 
 Code commit and push:
 - `src/agent-doc`: `96750dc` (`fix: generalize codex idle placeholder readiness`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:daedc468 -->
+### Re: startup-miss drafted echo — gpt-5
+
+That drafted line is the old startup-miss diagnostic path.
+
+What happened in that failure shape was:
+- route accepted the routed trigger, but no new document cycle started
+- the old recovery path tried to surface the retry hint by drafting an `echo '[agent-doc] startup-miss: ...'` command into the live pane
+- in a live Codex composer, that text could stay in the input buffer instead of being submitted, so you saw the literal `› echo ...` line and nothing was Entered
+
+So the answer to "why is it there?" is: route was trying to show the startup-miss retry diagnostic inside the pane. The answer to "why was it not Entered?" is: that older implementation depended on harness-input delivery, and Codex treated it as drafted composer text rather than a shell command submission.
+
+Current state:
+- this is already fixed in `src/agent-doc/src/route.rs`
+- `emit_startup_miss_diagnostic()` now uses tmux `display-message` instead of injecting `echo ...` into the pane input buffer
+- the regression coverage is `route::tests::startup_miss_diagnostic_does_not_queue_shell_echo_in_pane`
+- the spec already documents the tmux overlay contract in `src/agent-doc/specs/07-commands.md`
+- the release note is in `src/agent-doc/VERSIONS.md` (`Startup-miss diagnostics no longer get stranded in the harness input buffer`)
+
+I did not make another code change for this prompt because the fix is already present on the current `src/agent-doc` branch. The verification run from this cycle already covered the current tree:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+
+All four passed.
+<!-- agent:boundary:b3262b24 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+agent-doc route failed (exit 1): resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T18:03:41Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. after waiting 30s (startup_miss_timestamp=2026-05-01T18:12:11Z)
+```
 -->
 
 ## Pending / Not Built

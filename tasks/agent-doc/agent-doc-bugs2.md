@@ -194,7 +194,28 @@ Code commit/push:
 - `src/agent-doc` `f66c085` on `20260422/codex-agent-backend` (`fix: extend fresh route start ack timeout`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:da472d1f -->
+❯ do #stphk. spec-test-build-install-commit-push
+### Re: #stphk — gpt-5
+
+Implemented the stop-hook cycle-state rewind fix.
+
+- `cycle_state.rs` now treats `Committed` as monotonic, so later `response_captured` / `write_applied` bookkeeping for the same cycle cannot reopen it.
+- `run.rs` now opens a fresh `preflight_started` cycle after its pre-commit boundary, so interrupted runs still leave the expected `write_applied` recovery surface.
+- Added regression coverage for committed-cycle non-regression and replay-after-commit, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml interrupted_run_leaves_write_applied_and_preflight_finishes_commit`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml mark_write_applied_does_not_regress_committed_cycle`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_run_does_not_rewind_committed_cycle_when_replaying_after_commit`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `6e54e06` on `20260422/codex-agent-backend` (`fix: keep committed cycle state monotonic`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:9196abca -->
 <!-- /agent:exchange -->
 
 <!--
@@ -211,7 +232,6 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stphk] Stop-hook recovery bug: a committed capture for tasks/agent-doc/agent-doc-bugs2.md was rewound back to cycle phase write_applied by a later repair_applied event, so the Codex Stop hook kept treating the turn as unfinished. Plan: tasks/agent-doc/plan-stop-hook-write-applied-rewind.md
 - [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md

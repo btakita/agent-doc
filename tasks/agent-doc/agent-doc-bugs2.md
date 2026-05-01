@@ -742,7 +742,22 @@ The main recommendation is to simplify the routed reopen/ack path first, not kee
 What did not fully settle is the live working-tree copy of [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md): `session-check` kept failing on editor-side post-commit drift, specifically a duplicated `patch:backlog` warning line and the answered prompt line losing its `❯` prefix. The response itself is committed in `HEAD` (`ae9e56f7b`, `49d04048a`), but the file is still locally modified in the working tree.
 
 If you want the next turn to be implementation, use `do [#runsm]` first.
-<!-- agent:boundary:4b304f7e -->
+❯ do [#runsm]. spec-test-build-install-commit-push
+### Re: #runsm routed reopen proof + build/test/install/commit-push — gpt-5
+
+Implemented the routed Codex reopen hardening in `src/route.rs` and `src/codex_hook.rs`. Route now treats Codex `UserPromptSubmit` hook advancement for the exact bare reopen command as the dispatch-start proof before the later cycle-ack health check, and the healthy same-document busy-pane no-op fix now goes straight to one bounded fresh restart plus a final reroute instead of reinjecting into the same busy pane first. I also updated `specs/07-commands.md` and `VERSIONS.md` to match the new routing contract.
+
+Verification and ship steps completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --test-threads=8`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Committed and pushed in `src/agent-doc` on `20260422/codex-agent-backend`:
+- `fd0e0a5` `fix: prove routed codex reopen consumption`
+
+I left the unrelated pre-existing dirty files in that worktree untouched.
+<!-- agent:boundary:8a73ebc8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -751,7 +766,6 @@ If you want the next turn to be implementation, use `do [#runsm]` first.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#runsm] [recommended] Simplify the routed Run Agent Doc reopen and acknowledgment state machine before more live rerun work. Plan: tasks/agent-doc/plan-run-agent-doc-routed-simplification.md
 - [ ] [#utf8p] [recommended] Fix the UTF-8 byte-boundary panic in component parsing triggered near `❯`. Plan: tasks/agent-doc/plan-component-parser-utf8-boundaries.md
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

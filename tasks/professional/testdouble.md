@@ -652,7 +652,37 @@ I would use PandaDoc first only if one of these is true:
 Practical recommendation: **email first, PandaDoc second if invited.**
 
 If you want, I can also draft a very short cover note for the attachment so the email feels even cleaner.
-<!-- agent:boundary:d4a6ea35 -->
+❯ How should the attachment be formatted? As a markdown file. Or should it just me inline in the email?
+### Re: attachment format — gpt-5
+
+I would not send a `.md` file unless they specifically asked for one.
+
+Best default:
+
+- Keep the main email short.
+- Put the proposed redlines **inline below the email**, separated by a heading like `Proposed Redlines`.
+- If you want cleaner presentation, attach a simple PDF or Word doc version, not raw markdown.
+
+Why:
+
+- A markdown attachment feels a little unnatural in a contract/business context.
+- Inline text is easiest for Todd to skim and forward internally.
+- If they want to work clause-by-clause, they can copy from the email or ask you to mark up PandaDoc directly.
+
+So my practical recommendation is:
+
+1. Send the email with the redlines inline underneath.
+2. Only use a separate attachment if the message becomes too long or you want cleaner formatting.
+3. If you use an attachment, make it a normal business document format, not markdown.
+
+If you want the leanest version, I would send:
+
+- Short email body.
+- A `Proposed Redlines` section immediately below it.
+- No separate file at all.
+
+That is probably the most normal and least awkward format here.
+<!-- agent:boundary:1a184a55 -->
 <!-- /agent:exchange -->
 
 ## Queue

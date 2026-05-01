@@ -1042,7 +1042,29 @@ Code commit/push:
 - `src/agent-doc` `f84a1d3` on `20260422/codex-agent-backend` (`docs: note audit-docs skip-dir pruning`)
 
 No follow-up backlog item is needed from this fix.
-<!-- agent:boundary:8e3acb66 -->
+❯ Please restart `3358814 brian     16  -4   90188  15756   7720 R 100.9   0.0  36:25.48 agent-doc` with a new process that uses skip-dir pruning.
+### Re: audit-docs restart with skip-dir pruning — gpt-5
+
+I restarted the runaway `audit-docs` process, but the first restart showed a second root cause: the old PID was still a deleted pre-fix binary, and the local `agent-doc` build graph was still wired so the direct dependency path resolved `agent-kit 0.3.2` / published `0.4.0` instead of the sibling checkout that contains the skip-dir pruning fix.
+
+What I changed locally:
+- `.cargo/config.toml` now includes `src/agent-kit` alongside `src/tmux-router` in the local Cargo path overrides.
+- `src/agent-doc/Cargo.toml` now targets `agent-kit = { version = "0.4.0", features = ["hooks"] }` so the direct dependency line matches the sibling checkout.
+- `src/agent-kit/src/lib.rs` now re-exports `pub mod skill;` so `agent-doc` still builds against the local `agent-kit 0.4.0` checkout.
+- Because `cargo install --path src/agent-doc` still rebuilt in a packaging context that ignored the sibling override, I replaced `/home/brian/.cargo/bin/agent-doc` directly with the verified workspace release binary from `/tmp/agent-doc-target/release/agent-doc`.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-kit/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `time timeout 20s /tmp/agent-doc-target/release/agent-doc audit-docs --root /home/brian/work/btakita/agent-loop` → completed in about `0.42s`, exit `1` from real audit findings, no hang
+- `time timeout 20s agent-doc audit-docs --root /home/brian/work/btakita/agent-loop` → completed in about `0.39s`, exit `1` from real audit findings, no hang
+- Restarted `agent-doc audit-docs --root /home/brian/work/btakita/agent-loop` via `nohup`; the replacement PID exited immediately after producing normal audit output, and there is no longer a lingering high-CPU `audit-docs` process for this root.
+
+I did not commit or push these local wiring changes.
+
+No follow-up backlog item is needed from this restart.
+<!-- agent:boundary:399f489e -->
 <!-- /agent:exchange -->
 
 <!--

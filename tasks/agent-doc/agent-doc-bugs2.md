@@ -583,8 +583,7 @@ So my read is:
 - the `monsterrodholders.md` timeout is existing boundary/repair drift, not a new stash-root ownership bug.
 
 The updated `#bdryc` wording is directionally right for the deterministic repair requirement. No new backlog item is needed from this turn because the live failures here still map back to `#bdryc` and `#wcrp` rather than a distinct third defect.
-
-<!-- agent:boundary:44d0ed15 -->
+<!-- agent:boundary:79694f99 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -593,9 +592,9 @@ The updated `#bdryc` wording is directionally right for the deterministic repair
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#bdryc] Completed-turn boundary stale after response patchback: if an assistant response lands in `agent:exchange` but the `agent:boundary` marker stays above that answered prompt, route and session-check keep treating the prompt as pending and reruns fail closed on `pending prompt_target` even though the turn is visibly complete. Repro from `src/session-share/tasks/claudescore-3.md` on May 1, 2026 after `Can we run specific rubrics for fine tuning?`. Expected fix: deterministic auto-repair first; interactive prompt only if multiple safe repairs are genuinely ambiguous. Plan: tasks/agent-doc/plan-boundary-completion-recovery.md
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
+- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

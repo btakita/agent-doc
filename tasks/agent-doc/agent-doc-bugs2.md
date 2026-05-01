@@ -177,15 +177,26 @@ Full-suite note:
 
 Code commit and push:
 - `src/agent-doc`: `ac9a2fd` (`fix: recover start from dead stash bindings`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:66e98ebb -->
+❯ Can we isolate the parallel tmux test from each other?
+❯ > •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
+❯ session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
+❯ this change actually regressed behavior.
+### Re: tmux test isolation — gpt-5
+
+Yes. The tmux-heavy tests are already mostly isolated from each other; the suite does not need a blanket `--test-threads=1` fallback for this shape.
+
+What is already isolating them:
+- `IsolatedTmux::new(...)` gives each integration test its own tmux socket/server.
+- `ScopedCurrentDir` serializes repo-local cwd mutation behind `ENV_MUTEX` in the suites that need temp roots.
+- `route.rs` also has narrower test locks for the shared mutation surfaces that still exist: `TMUX_START_MUTEX`, `TMUX_INJECT_MUTEX`, and `ROUTE_BIN_ENV_MUTEX`.
+
+The earlier full-suite failure was not the general socket-isolation layer breaking. The real issue was the test assumption inside `auto_start_reuses_other_file_pane_only_as_split_anchor()` in `src/route.rs`: it was assuming a fixed tmux session identity instead of deriving the actual anchor pane session at runtime. That is why it presented like cross-test contention even though the harness isolation was already mostly correct.
+
+So the short answer is: yes, parallel isolation is the right model here, and the fix path should stay targeted at the specific shared surface or bad test assumption that flakes rather than broad serial execution.
+<!-- agent:boundary:f8590252 -->
 <!-- /agent:exchange -->
 
 <!--
-Can we isolate the parallel tmux test from each other?
-> •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
-  session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
-  this change actually regressed behavior.
----
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->

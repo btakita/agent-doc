@@ -374,7 +374,27 @@ Code commit/push:
 - `src/agent-doc` `ac3eeef` on `20260422/codex-agent-backend` (`fix: carry forward formatting directives`)
 
 No follow-up backlog items are needed from this fix.
-<!-- agent:boundary:3dd23f42 -->
+#c3ps is complete
+do #ptdr. spec-test-build-install-commit-push
+### Re: #ptdr — gpt-5
+
+Closed out `#c3ps` from your note and implemented the `#ptdr` fail-closed guard.
+
+- `write.rs` now counts Markdown checklist rows in the live `agent:todo` component and rejects any `patch:todo` replacement that would reduce the total checklist item count, which blocks the destructive subset-patch shape from `src/session-share/tasks/claudescore.md`.
+- The guard runs across template response entrypoints (`write` / `finalize`, stream, IPC, and template recovery), so retries and non-default write paths cannot bypass it.
+- Added regression coverage for the destructive-subset repro and the allowed same-size rewrite case.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification completed:
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `e7aeec8` on `20260422/codex-agent-backend` (`fix: reject destructive todo patch subsets`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:56f678dd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -391,9 +411,8 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
+- [ ] [#codcommit] Out-of-band Codex response patchback can leave a session doc visibly answered but uncommitted. Repro from `src/session-share/tasks/claudescore.md` on May 1 2026: Codex edited the document directly, appending `### Re: create today's news — codex` and updating `news/README.md` / `news/2026-05-01/README.md`, but no `agent-doc finalize` / commit boundary ran, so the response was present in the working tree yet absent from git history. Fix should make this shape fail loudly instead of looking complete: (a) strengthen `session-check` / preflight detection for fresh visible `### Re:` blocks or tracked side-effect edits without a matching `agent-doc` cycle, (b) surface an explicit `agent-doc write --commit` or `finalize` recovery command, and (c) consider editor/plugin affordances that mark direct assistant patchbacks as uncommitted closeout drift until the commit boundary lands.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
-- [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

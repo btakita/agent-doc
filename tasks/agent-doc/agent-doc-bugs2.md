@@ -31,6 +31,7 @@ prompt_presets:
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260501-135728.md`*
 
 Active backlog:
+❯ - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
 - [ ] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
 ❯ - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
@@ -431,24 +432,52 @@ Verification I ran on the current tree:
 All six passed. Cargo still emitted the existing path-override warnings plus existing compile-time warnings; none were new blockers.
 
 I did not make another `src/agent-doc` code change in this cycle because I could not reproduce a remaining unfixed route defect on the current branch.
-
+❯ 46
 I did add the follow-up that still looks real here:
 - `#jberr` `[recommended]` Keep JetBrains `Run Agent Doc` route failures copyable/persistent instead of transient-only. Plan: `tasks/agent-doc/plan-jb-route-error-capture.md`
-<!-- agent:boundary:23598286 -->
-<!-- /agent:exchange -->
+❯ These errors occurred after canceling a running turn, then `/clear`. spec-test-build-install-commit-push
 
-<!--
 ```
 agent-doc route failed (exit 1): resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill [route] target tmux session: 1 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T18:12:11Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] Pane %316 is in session '0', not target '1' — skipping stash rescue [route] Still waiting for codex (5s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] codex ready after 5.0s (10 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending prompt_target: do [#sqnp]. spec-test-benchmarks-news-commit-push Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending prompt_target: do [#sqnp]. spec-test-benchmarks-news-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T18:49:26Z)
 ```
 ```
 agent-doc route failed (exit 1): resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T18:03:41Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. after waiting 30s (startup_miss_timestamp=2026-05-01T18:12:11Z)
 ```
+### Re: `/clear` routed reroute failure — gpt-5
+
+I found and fixed a remaining routed Codex recovery hole for the cancel + `/clear` shape.
+
+Root cause:
+- route could successfully inject the bare `agent-doc <FILE>` reopen into a live Codex pane and then wait 30 seconds for a new document cycle
+- after cancel + `/clear`, that pane could still look alive and dispatch-ready while the stale conversation state silently absorbed the reopen without starting a new `agent-doc` cycle
+- route then recorded a startup-miss and fail-closed, but it had no bounded in-place recovery step for that specific live-pane/Codex state corruption
+
+What changed in `src/agent-doc`:
+- `route.rs` now supports mode-aware supervisor restarts, not just `continue`
+- when a live Codex reroute times out waiting for a new cycle ack, route now performs one deterministic fresh supervisor restart of the same pane, waits for the restarted Codex prompt to become dispatch-ready again, and resends the same bare reopen once
+- if that second attempt still does not start a new cycle, route falls back to the existing startup-miss record + fail-closed error path exactly as before
+- updated `specs/07-commands.md` and `VERSIONS.md`
+- added a regression that simulates the live Codex pane absorbing the first reopen, then proves the fresh-restart retry succeeds
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout` -> pass
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` -> 1 unrelated existing failure: `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`; the new route regression and the surrounding route suite passed
+- `cargo build --manifest-path src/agent-doc/Cargo.toml` -> pass
+- `cargo install --path src/agent-doc --force` -> pass
+- `cargo install --path . --force` (from `src/agent-doc`) -> pass
+
+Code commit and push:
+- `src/agent-doc`: `965009a` (`fix: fresh-restart stalled live codex reroutes`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:a0d4cfd3 -->
+<!-- /agent:exchange -->
+
+<!--
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#stashown] [recommended] Investigate why full cargo test for src/agent-doc is currently red at resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner while the routed /clear recovery fix remains green.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

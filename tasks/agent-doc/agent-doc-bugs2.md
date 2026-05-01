@@ -1064,7 +1064,18 @@ Verification completed:
 I did not commit or push these local wiring changes.
 
 No follow-up backlog item is needed from this restart.
-<!-- agent:boundary:399f489e -->
+❯ You should **always** commit + push your changes. Stop leaving dangling, orphaned, uncommitted changes. It's bad hygene.
+### Re: commit + push hygiene for the audit-docs restart fix — gpt-5
+
+Agreed. I closed out the local wiring changes instead of leaving them dangling.
+
+Committed and pushed:
+- workspace root `06015354a` on `main` (`chore: wire local agent-kit path override`)
+- `src/agent-doc` `fe264aa` on `20260422/codex-agent-backend` (`build: resolve local agent-kit 0.4.0`)
+- `src/agent-kit` `266aa0d` on `main` (`fix: restore skill module export`)
+
+Those are the exact changes that made the local `agent-doc audit-docs --root /home/brian/work/btakita/agent-loop` path stop spinning and return real audit output in under half a second.
+<!-- agent:boundary:4eb64e1c -->
 <!-- /agent:exchange -->
 
 <!--

@@ -164,7 +164,9 @@ impl HarnessConfig {
                 matches!(trimmed, "❯" | "⏵")
                     || (trimmed.starts_with("⏵⏵ ") && trimmed.contains("(shift+tab to cycle)"))
             }
-            "codex" => matches!(trimmed, "❯" | ">" | "›"),
+            "codex" => {
+                matches!(trimmed, "❯" | ">" | "›") || is_codex_idle_placeholder_prompt(trimmed)
+            }
             _ => self.matches_prompt(trimmed),
         }
     }
@@ -206,6 +208,11 @@ impl HarnessConfig {
 
     /// Return the most recent non-empty, non-footer line from a captured transcript.
     pub fn last_prompt_candidate(&self, output: &str) -> Option<String> {
+        if self.binary == "codex"
+            && let Some(placeholder) = codex_idle_placeholder_candidate(output)
+        {
+            return Some(placeholder);
+        }
         output
             .lines()
             .rev()
@@ -224,6 +231,40 @@ impl HarnessConfig {
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
     }
+}
+
+fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
+    matches!(
+        trimmed,
+        "› Run /review on my current changes" | "› Find and fix a bug in @filename"
+    )
+}
+
+fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
+    let recent = output
+        .lines()
+        .rev()
+        .take(8)
+        .map(crate::prompt::strip_ansi)
+        .collect::<Vec<_>>();
+    if recent.is_empty() {
+        return None;
+    }
+    let normalized = recent
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.contains("· Context "))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    [
+        "› Run /review on my current changes",
+        "› Find and fix a bug in @filename",
+    ]
+    .into_iter()
+    .find(|placeholder| normalized.contains(placeholder))
+    .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -391,8 +432,15 @@ mod tests {
         let h = HarnessConfig::codex();
         assert!(h.is_dispatch_ready_prompt_line("›"));
         assert!(h.is_dispatch_ready_prompt_line("> "));
-        assert!(!h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
         assert!(!h.is_dispatch_ready_prompt_line("> agent-doc /tmp/session.md"));
+        assert!(!h.is_dispatch_ready_prompt_line("› investigate this issue"));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_accepts_idle_codex_placeholders() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
+        assert!(h.is_dispatch_ready_prompt_line("› Find and fix a bug in @filename"));
     }
 
     #[test]
@@ -424,6 +472,20 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
         assert_eq!(
             h.last_prompt_candidate(output).as_deref(),
             Some("Working...")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_wrapped_codex_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Run /review on my current
+changes
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 20% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Run /review on my current changes")
         );
     }
 

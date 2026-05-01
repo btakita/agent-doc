@@ -3650,7 +3650,21 @@ mod tests {
     }
 
     #[test]
-    fn wait_for_agent_ready_rejects_codex_prompt_with_drafted_text() {
+    fn ready_prompt_candidate_accepts_codex_idle_placeholder_prompt() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+Starting codex...
+› Run /review on my current changes
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "known idle Codex placeholder suggestions must count as a ready dispatch target"
+        );
+    }
+
+    #[test]
+    fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-drafted-prompt");
         let session = "test";
@@ -3661,7 +3675,7 @@ mod tests {
             "shell did not become ready before mock codex launch"
         );
 
-        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "› Run /review on my current changes\n"; printf "gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n"; cat'"#;
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "› investigate this issue\n"; printf "gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n"; cat'"#;
         send_keys_with_retry(&iso, &pane, script);
         let content = wait_for_pane_contains(
             &iso,
@@ -3678,7 +3692,7 @@ mod tests {
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
         assert!(
             !ready,
-            "a Codex prompt with drafted text must not count as an idle dispatch target"
+            "real drafted Codex text must not count as an idle dispatch target"
         );
     }
 

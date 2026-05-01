@@ -531,7 +531,32 @@ Code commit/push:
 I left `#wcrp` in backlog. That is a separate repair-path issue around bare `do #...` transcript drift, not the routed `agent: codex` false-positive that JB hit here.
 
 No new follow-up backlog items from this fix.
-<!-- agent:boundary:ebb9a50f -->
+❯ JB just surfaced an error. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %297 is registered in its own project root — skipping kill resync: stash pane %298 is registered in its own project root — skipping kill resync: stash pane %301 is registered in its own project root — skipping kill resync: stash pane %291 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 3835930) in pane %293 for tasks/claudescore-3.md [route] registered pane %293 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T04:06:30Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %293 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %293 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %293 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending prompt_target: Can we run specific rubrics for fine tuning? Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %293, but no new document cycle started for pending prompt_target: Can we run specific rubrics for fine tuning? after waiting 30s (startup_miss_timestamp=2026-05-01T04:29:06Z)
+```
+### Re: routed `prompt_target` startup-miss on live Codex panes — gpt-5
+
+Root cause was the route-side idle/acceptance contract, not session ownership. The live `claudescore-3.md` pane was a healthy Codex session, but route still treated a prompt line with drafted text (for example `› ...`) as idle. After injection, the Enter-verification loop only looked for the full `agent-doc <FILE>` on one physical tmux line, so a narrow pane could wrap the absolute path and make the drafted reopen look "accepted" even though it was still sitting in the composer. That is how JB could get `Command accepted ...` followed 30 seconds later by `no new document cycle started`.
+
+Implemented:
+- `src/harness.rs`: added `is_dispatch_ready_prompt_line()` so routed dispatch only treats an empty Codex/Claude composer as idle; drafted prompt text is now fail-closed instead of being appended to.
+- `src/route.rs`: route now treats wrapped `agent-doc <FILE>` lines as still-pending input, so the Enter retry loop no longer false-accepts a wrapped absolute path.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the empty-composer and wrapped-trigger requirements.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml is_dispatch_ready_prompt_line_rejects_drafted_codex_text -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml wait_for_agent_ready_rejects_codex_prompt_with_drafted_text -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml recent_lines_contain_trigger_matches_wrapped_codex_trigger -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `b70ccae` on `20260422/codex-agent-backend` (`fix: harden codex routed reopen dispatch`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:288d73b7 -->
 <!-- /agent:exchange -->
 
 <!--

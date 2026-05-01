@@ -1,1 +1,1 @@
-paths = ["src/tmux-router"]
+paths = ["src/tmux-router", "src/agent-kit"]

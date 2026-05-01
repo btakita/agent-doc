@@ -203,7 +203,7 @@ Verification:
 Committed and pushed `src/tsift` `main` as `c6a49f8` (`fix: normalize summarize file lookups`).
 
 The active backlog is now clear; only icebox items remain.
-#code-review
+❯ #code-review
 ### Re: code review — gpt-5
 
 #### Findings
@@ -252,7 +252,13 @@ Verification:
 Committed and pushed `src/tsift` `main` as `2e25b29` (`fix: canonicalize symlinked summary file lookups`).
 
 The active backlog is now clear; only icebox items remain.
-<!-- agent:boundary:fa4cd18b -->
+❯ #code-review
+The `agent-doc` skill was auto-updated from `0.33.12` to `0.33.16`, and the binary requested a reload boundary.
+
+Run `/compact`, then re-invoke:
+
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+<!-- agent:boundary:a217a3ba -->
 <!-- /agent:exchange -->
 
 <!--

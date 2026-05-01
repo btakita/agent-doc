@@ -110,6 +110,8 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 
 If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Custom pending IDs should use `--pending-add "id=spec1 text"`; leading `--pending-add "[#spec1] text"` is accepted for compatibility but is not the canonical form. Full-replace via `<!-- replace:backlog -->` or `<!-- patch:backlog -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
 
+If you need to rewrite `<!-- agent:icebox -->`, use a template patch block in the response body: `<!-- replace:icebox --> ... <!-- /replace:icebox -->`. Do not try to route icebox mutations through `--pending-add`; those flags still target backlog only.
+
 **Pending capture rule:** if your response identifies concrete follow-up work that should be tracked, add it to `agent:backlog` in the same cycle. Do not leave pending-worthy next steps as exchange-only prose.
 
 **Recommendations vs accepted work:** if the item is only a recommendation and the user has not accepted it yet, include `recommended` in the pending text (for example, `[recommended] Add regression coverage for X`). Do not silently promote hypotheticals or mutually exclusive options the user has not chosen.

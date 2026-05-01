@@ -442,6 +442,65 @@ fn write_allows_replace_pending_with_escape_hatch() {
 }
 
 #[test]
+fn write_applies_replace_icebox_block_without_exchange_fallback() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:pending -->\n",
+        "- [ ] [#aaaa] existing\n",
+        "<!-- /agent:pending -->\n\n",
+        "<!-- agent:icebox -->\n",
+        "<!-- /agent:icebox -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let payload = concat!(
+        "<!-- patch:exchange -->\n",
+        "### Re: #iceboxpatch — gpt-5\n\n",
+        "Applied the icebox rewrite through the binary-owned template path.\n",
+        "<!-- /patch:exchange -->\n",
+        "<!-- replace:icebox -->\n",
+        "- [ ] [#park1] Parked follow-up\n",
+        "<!-- /replace:icebox -->\n",
+    );
+    let assert_result = agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(payload)
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        !stderr.contains("0 template patches found"),
+        "stderr unexpectedly reported zero patches: {}",
+        stderr
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: #iceboxpatch — gpt-5"));
+    assert!(
+        content.contains(
+            "<!-- agent:icebox -->\n- [ ] [#park1] Parked follow-up\n<!-- /agent:icebox -->"
+        ),
+        "icebox content should be rewritten in place: {}",
+        content
+    );
+    assert!(
+        !content.contains(
+            "Applied the icebox rewrite through the binary-owned template path.\n- [ ] [#park1] Parked follow-up"
+        ),
+        "icebox payload should not be synthesized into exchange: {}",
+        content
+    );
+    assert!(!content.contains("replace:icebox"));
+}
+
+#[test]
 fn write_allows_legacy_patch_pending_with_legacy_flag() {
     // Dual-accept: `patch:pending` + `--allow-patch-pending` still works one
     // more release. Clap alias routes the legacy flag to `allow_replace_pending`.

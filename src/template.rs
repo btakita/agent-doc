@@ -139,6 +139,10 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
 /// `replace:` prefix signals full-replacement semantics and is the canonical name
 /// for pending mutations going forward. `patch:pending` is still parsed for one
 /// release with a deprecation warning emitted to stderr. See #25ag.
+///
+/// `<!-- replace:icebox -->...<!-- /replace:icebox -->` is also accepted so the
+/// skill has a binary-owned path to rewrite `agent:icebox` without dumping the
+/// payload into exchange as unmatched content.
 pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
     let bytes = response.as_bytes();
     let len = bytes.len();
@@ -180,17 +184,20 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         // Recognize two prefix forms:
         //   - `patch:<name>`     — original form (deprecated for pending component)
         //   - `replace:pending`  — canonical form for the pending component (#25ag)
+        //   - `replace:icebox`   — canonical full-rewrite form for the icebox component
         let parsed_prefix: Option<(&str, &str)> = if let Some(rest) = trimmed.strip_prefix("patch:")
         {
             Some(("patch", rest))
         } else if let Some(rest) = trimmed.strip_prefix("replace:") {
-            // Only `replace:pending` is accepted. Other `replace:*` names fall
-            // through as unmatched to avoid silently broadening the grammar.
+            // Only `replace:pending` and `replace:icebox` are accepted. Other
+            // `replace:*` names fall through as unmatched to avoid silently
+            // broadening the grammar.
             let rest_trim = rest.trim_start();
             let name_end = rest_trim
                 .find(|c: char| c.is_whitespace())
                 .unwrap_or(rest_trim.len());
-            if is_backlog_component(&rest_trim[..name_end]) {
+            let name = &rest_trim[..name_end];
+            if is_backlog_component(name) || name == component::ICEBOX_COMPONENT {
                 Some(("replace", rest))
             } else {
                 None
@@ -973,12 +980,8 @@ pub fn apply_patches_with_overrides(
                 && patch_content
                     .lines()
                     .any(|line| is_exchange_response_heading(line.trim_start()))
-                && let Some(anchored) = append_exchange_patch_after_prompt_anchor(
-                    doc,
-                    &result,
-                    comp,
-                    &patch_content,
-                )?
+                && let Some(anchored) =
+                    append_exchange_patch_after_prompt_anchor(doc, &result, comp, &patch_content)?
             {
                 result = anchored;
                 continue;
@@ -2058,6 +2061,20 @@ All systems go.
         assert_eq!(patches[0].content, "All systems go.\n");
         assert_eq!(patches[1].name, "log");
         assert_eq!(patches[1].content, "- Entry 1\n");
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn parse_patches_accepts_replace_icebox() {
+        let response = "\
+<!-- replace:icebox -->
+- [ ] [#park1] Parked follow-up
+<!-- /replace:icebox -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "icebox");
+        assert_eq!(patches[0].content, "- [ ] [#park1] Parked follow-up\n");
         assert!(unmatched.is_empty());
     }
 

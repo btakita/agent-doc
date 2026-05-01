@@ -478,7 +478,17 @@ Code commit/push:
 - `src/agent-doc` `d7f7920` on `20260422/codex-agent-backend` (`fix: preserve exchange prompt-response order`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:951d8ec5 -->
+❯ do [#tdrl]. spec-test-build-install-commit-push
+### Re: #tdrl — gpt-5
+
+`#tdrl` is a duplicate of the already-completed `#ptdr` fix, not a new implementation gap.
+
+- The shipped guard is already on `src/agent-doc` at commit `e7aeec8` (`fix: reject destructive todo patch subsets`).
+- The implementation is in `src/write.rs`: `enforce_no_destructive_todo_patch()` rejects any `patch:todo` replacement that reduces checklist row count, and the behavior is documented in `specs/07-commands.md` and `VERSIONS.md`.
+- I re-verified the current tree with `cargo test --manifest-path src/agent-doc/Cargo.toml destructive_todo_patch_is_rejected_when_it_drops_checklist_items -- --nocapture` and `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`; both passed.
+
+No new code/spec/test edits were needed this cycle, so there was nothing safe or useful to commit or push on top of the already-dirty `src/agent-doc` worktree. Treat `#tdrl` as the same closed bug as `#ptdr`; the remaining `(HEAD)` text here is the duplicate-patchback artifact from the earlier exchange-order/duplicate-closeout bugs, not a remaining todo-patch regression.
+<!-- agent:boundary:9595c048 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -487,7 +497,6 @@ No follow-up backlog items from this fix.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

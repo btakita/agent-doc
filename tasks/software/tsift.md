@@ -110,6 +110,7 @@ Verification I reran now against current `main`:
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
 ❯ do #8w9n. spec-test-build-install-commit-push
+❯ do #8w9n. spec-test-build-install-commit-push
 ### Re: #8w9n spec-test-build-install-commit-push — gpt-5
 
 `#8w9n` was already complete in `src/tsift` on `main` as commit `30b60d8` (`fix: harden summary read-only paths`), and that commit is already pushed to `origin/main`.
@@ -166,7 +167,12 @@ Verification:
 Committed and pushed `src/tsift` `main` as `eabc640` (`fix: tolerate summarize diff on unborn HEAD`).
 
 Top remaining backlog item: `#stle`.
-<!-- agent:boundary:425b1c74 -->
+### Re: #8w9n spec-test-build-install-commit-push — gpt-5
+
+`#8w9n` was already completed earlier in this session as `src/tsift` commit `30b60d8` (`fix: harden summary read-only paths`), so the duplicated prompt line did not require any new code, verification, or git changes.
+
+Top remaining backlog item stays `#stle`.
+<!-- agent:boundary:d75f1707 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -159,7 +159,111 @@ Negotiation priority, if they push back:
 4. Get the LLC / insurance answer in writing even if they refuse to amend the main form.
 
 If you want, I can turn this into tighter redline-ready contract text clause by clause against the actual markdown agreement.
-<!-- agent:boundary:f963343e -->
+❯ Yes, please continue with the tighter redline-ready contract.
+### Re: tighter redline-ready contract — gpt-5
+
+Below is the tighter redline-ready version against the actual agreement structure. I would propose these as targeted edits rather than rewriting the whole form.
+
+1. Section 2.2 (`Compensation > Breach`)
+
+Current problem: it says that if you fail to terminate under Section 4 or otherwise breach, and do not cure within 10 days, you forfeit any pending or future payments. That is much too broad.
+
+Suggested replacement for Section 2.2:
+
+> **2.2 Breach.** In the event that Subcontractor breaches this Agreement, Company shall provide written notice describing the breach in reasonable detail, and Subcontractor shall have ten (10) days from receipt of such notice to cure the breach, if curable. If the breach remains uncured after the applicable cure period, Company may pursue any remedies available at law or in equity; provided, however, that Company shall remain obligated to pay Subcontractor for all Services properly performed through the effective date of termination. Subcontractor shall not forfeit payment for Services properly performed and invoiced, or properly performable through the date of termination, except to the extent of damages finally determined to be owed to Company by a court of competent jurisdiction or otherwise agreed in writing by the parties.
+
+Shorter fallback version:
+
+> Delete `Subcontractor shall forfeit any rights to any pending or future payments from Company` and replace with `Company shall pay Subcontractor for all Services properly performed through the effective date of termination.`
+
+2. Section 4.2 (`Termination by Subcontractor`)
+
+Current problem: if you terminate within the first 60 days, you automatically forfeit outstanding invoices. That is the worst clause in the form.
+
+Suggested replacement for Section 4.2:
+
+> **4.2 Termination by Subcontractor.** Subcontractor may terminate this Agreement upon written notice to Company. If termination occurs during the first sixty (60) days following the start date, Subcontractor will use commercially reasonable efforts to provide transition assistance during any requested notice period not to exceed ten (10) business days. After the first sixty (60) days, if Subcontractor wishes to terminate this Agreement prior to the end date, or if there is no reasonably clear ending date in the Statement of Work, Subcontractor may terminate the engagement by sending written notice of such termination to Company at least thirty (30) days before ending work. In all events, Company shall pay Subcontractor for all Services satisfactorily performed prior to termination within thirty (30) days of receipt of an invoice, subject only to ordinary invoice review and any rights expressly provided under this Agreement.
+
+If they refuse a full rewrite, the minimum acceptable edit is:
+
+> Replace `they forfeit any outstanding invoices` with `Company shall pay Subcontractor for all Services satisfactorily performed prior to termination in accordance with Section 2.1.`
+
+3. New limitation-of-liability section, ideally after Section 11
+
+Current problem: you have uncapped indemnity and exposure to consequential/indirect damages, with no overall cap.
+
+Suggested new Section 11.1 or new Section 12:
+
+> **Limitation of Liability.** EXCEPT FOR LIABILITY ARISING FROM A PARTY’S FRAUD, WILLFUL MISCONDUCT, BREACH OF CONFIDENTIALITY, OR INFRINGEMENT OR MISAPPROPRIATION OF THE OTHER PARTY’S INTELLECTUAL PROPERTY RIGHTS, EACH PARTY’S TOTAL AGGREGATE LIABILITY ARISING OUT OF OR RELATING TO THIS AGREEMENT SHALL NOT EXCEED THE TOTAL AMOUNTS PAID OR PAYABLE TO SUBCONTRACTOR UNDER THE APPLICABLE STATEMENT OF WORK DURING THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM. IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY CONSEQUENTIAL, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR ANY LOST PROFITS, LOST REVENUE, OR LOSS OF BUSINESS OPPORTUNITY, WHETHER IN CONTRACT, TORT, OR OTHERWISE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+If you want a stronger contractor position, change the cap to `the total amounts paid or payable under the applicable Statement of Work`. If you want a concessionary fallback, use `two (2) times the total amounts paid or payable`.
+
+4. Section 11 (`Indemnification`)
+
+Current problem: it covers `all claims and liabilities including consequential or indirect damages` and is not limited to third-party claims.
+
+Suggested replacement for Section 11:
+
+> **11. Indemnification.** Subcontractor agrees to indemnify, defend, and hold harmless Company from any third-party claims, damages, liabilities, costs, and reasonable attorneys’ fees to the extent arising from (a) Subcontractor’s gross negligence or willful misconduct in performing the Services, or (b) a claim that materials or deliverables created by Subcontractor specifically for Company under this Agreement infringe such third party’s intellectual property rights; provided, however, that Subcontractor shall have no obligation to the extent any claim arises from Company specifications, Company-provided materials, Client-provided materials, or modifications made by Company, Client, or third parties. In no event shall Subcontractor be liable under this Section for consequential, indirect, incidental, special, exemplary, or punitive damages.
+
+If they push back on `gross negligence`, you can fall back to `negligence`, but keep the third-party-claim limitation and the exclusion of consequential/indirect damages.
+
+5. Section 5 (`Work For Hire`)
+
+Current problem: it sweeps in anything used in the work, with no carveout for your preexisting code, tools, libraries, templates, or know-how.
+
+Suggested replacement for Section 5:
+
+> **5. Work For Hire.** The Subcontractor expressly acknowledges and agrees that any deliverables specially prepared by Subcontractor for Company or Client under this Agreement, excluding Background Technology as defined below, shall be considered “work made for hire” and the exclusive property of Company or Client unless otherwise specified in writing. To the extent such deliverables may not be deemed a work made for hire under applicable law, Subcontractor hereby assigns to Company or Client all right, title, and interest in and to such deliverables. Notwithstanding the foregoing, Subcontractor retains all right, title, and interest in and to any preexisting materials, software, source code, object code, libraries, frameworks, tools, templates, routines, processes, documentation, concepts, know-how, and other technology or intellectual property owned, developed, or licensed by Subcontractor outside the scope of this Agreement, together with any modifications, enhancements, or derivatives thereof that do not constitute deliverables uniquely created for Company or Client (`Background Technology`). To the extent any Background Technology is incorporated into a deliverable, Subcontractor grants Company and Client a non-exclusive, perpetual, worldwide, fully paid-up license to use, copy, execute, display, and distribute such Background Technology solely as incorporated in, and as necessary to use, the deliverable.
+
+That is the cleanest version. If they want something shorter, keep at least the `Notwithstanding the foregoing... Background Technology` sentence and the license-back sentence.
+
+6. Section 6 (`Insurance`)
+
+Current problem: it is vague and lets them impose unknown later requirements.
+
+Suggested replacement for Section 6:
+
+> **Insurance.** Subcontractor shall maintain any insurance coverage expressly set forth in the applicable Statement of Work or otherwise agreed in writing by the parties prior to commencement of the applicable Services. Except as expressly agreed in writing for a specific engagement, no additional insurance requirements shall apply.
+
+If they do not want to amend the clause, at least get this in email:
+
+> `Please confirm whether there are any engagement-specific insurance requirements for this assignment. If so, please identify them before work begins.`
+
+7. Section 10.1 and Section 7 (`LLC / invoicing through entity`)
+
+The agreement does not clearly allow you to swap the contracting party from you personally to your LLC. I would not try to solve that with implication. Ask for an explicit rider or email confirmation.
+
+Suggested add-on sentence to Section 7.1:
+
+> Notwithstanding the foregoing, Subcontractor may elect to invoice Company through an entity controlled by Subcontractor, provided that Brian Kenji Takita remains personally responsible for performance of the Services and compliance with this Agreement, and such invoicing arrangement shall not be deemed an unauthorized subcontract under Section 10.1.
+
+If they do not want to amend the agreement text, send this confirmation request:
+
+> `Please confirm that I may invoice through my LLC, while I remain the individual personally performing the services, and that doing so is not considered use of a further subcontractor or subconsultant under Section 10.1.`
+
+What I would actually send back first
+
+> Thanks. I reviewed the subcontractor agreement and would like to request a few targeted edits before signing:
+>
+> 1. Remove the forfeiture language in Section 2.2 and Section 4.2 so that all services properly performed through termination remain payable.
+> 2. Add a standard limitation of liability, including a reasonable aggregate cap and exclusion of consequential and indirect damages.
+> 3. Narrow Section 11 so indemnity is limited to third-party claims and does not include consequential or indirect damages.
+> 4. Revise Section 5 to carve out my preexisting tools, libraries, templates, code, and general know-how, with a license only to the extent incorporated into deliverables.
+> 5. Clarify any engagement-specific insurance requirements in advance.
+> 6. Confirm that I may invoice through my LLC while remaining the individual performing the services, and that this does not violate Section 10.1.
+>
+> I’m happy to mark these directly in redline form if useful.
+
+Negotiation floor
+
+- Non-negotiable: remove invoice forfeiture for already-earned work.
+- Strongly recommended: add liability cap and consequential-damages exclusion.
+- Important if you reuse your own assets: add the IP / Background Technology carveout.
+- Operationally important: get LLC and insurance confirmation in writing even if the contract form stays mostly intact.
+
+If you want, the next step can be a tighter minimal-markup version that assumes Test Double will only accept a few sentence-level edits rather than full clause replacements.
+<!-- agent:boundary:f8575528 -->
 <!-- /agent:exchange -->
 
 ## Queue

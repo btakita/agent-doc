@@ -25,6 +25,9 @@
 //!   (only when `branch=true` and `no_git=false`).
 //! - Pre-commits user's changes via `git::commit` before sending to the agent
 //!   so the editor shows agent additions as diff-gutter entries.
+//! - Opens a fresh `preflight_started` cycle after that pre-commit boundary so
+//!   the response closeout for the current run is not attached to the earlier
+//!   user-only commit state.
 //! - Writes the agent response back through the mode-appropriate append or
 //!   template path, preserving concurrent user edits against the original
 //!   baseline captured before the agent call.
@@ -202,6 +205,7 @@ pub fn run(
     if !no_git {
         git::commit(file)?;
     }
+    start_run_cycle(file)?;
 
     eprintln!("Submitting to {}...", agent_name);
 
@@ -255,6 +259,14 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
         snapshot_content.as_deref(),
         Some(&file_content),
     )?;
+    Ok(())
+}
+
+fn start_run_cycle(file: &Path) -> Result<()> {
+    let file_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} before run dispatch", file.display()))?;
+    let snapshot_content = snapshot::load(file)?;
+    crate::cycle_state::start_preflight(file, snapshot_content.as_deref(), Some(&file_content))?;
     Ok(())
 }
 

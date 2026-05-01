@@ -18,6 +18,10 @@ First run prompt wraps full doc in `<document>` tags. Subsequent wraps diff in `
 
 **Interrupted-run contract:** if `run` writes the final response to disk but stops before the post-write commit finishes, the recorded cycle state must already be `write_applied` with the final file/snapshot hashes. That lets `agent-doc preflight` or `repair` finish the pending commit deterministically instead of misclassifying the cycle as stale `response_captured` drift.
 
+**Cycle-phase monotonicity:** once a cycle records `committed`, later repair/replay bookkeeping for that same cycle must not rewind the persisted cycle-state phase back to `response_captured` or `write_applied`. Lower-rank bookkeeping may be ignored or logged separately, but the on-disk cycle state that powers `session-check` and the Codex Stop hook must remain terminal.
+
+**Run pre-commit boundary:** `run` may still do a user-only pre-commit before contacting the agent, but it must open a fresh `preflight_started` cycle immediately after that pre-commit and before the response write path begins. Otherwise an interrupted run can inherit the older committed state and skip the required `write_applied` recovery surface.
+
 ## init
 
 Two modes:

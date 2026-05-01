@@ -1925,4 +1925,41 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
     }
+
+    #[test]
+    fn repair_run_does_not_rewind_committed_cycle_when_replaying_after_commit() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: replay after commit — gpt-5\n\n",
+            "Recovered answer.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        save_pending(&doc, response).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::ReplayedResponse);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_success");
+        let doc_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(doc_after.contains("### Re: replay after commit — gpt-5"));
+    }
 }

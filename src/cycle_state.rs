@@ -15,6 +15,8 @@
 //!   creates a synthetic cycle if a write lands without a prior preflight).
 //! - `mark_committed()` advances the cycle to `committed` (or creates a
 //!   synthetic committed cycle if commit happens without a prior state file).
+//! - Lower-rank bookkeeping must never rewind an already-committed cycle back
+//!   to `response_captured` or `write_applied`.
 //! - `load()` returns the current persisted state when present.
 //!
 //! ## Agentic Contracts
@@ -146,6 +148,9 @@ pub fn mark_write_applied(
 ) -> Result<CycleState> {
     let mut state =
         load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    if cycle_phase_rank(CyclePhase::WriteApplied) < cycle_phase_rank(state.phase) {
+        return Ok(state);
+    }
     state.phase = CyclePhase::WriteApplied;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
@@ -169,6 +174,9 @@ pub fn mark_response_captured(
     let mut state = load(file)?.unwrap_or_else(|| {
         synthetic_state_with_id(file, CyclePhase::PreflightStarted, cycle_id_hint)
     });
+    if cycle_phase_rank(CyclePhase::ResponseCaptured) < cycle_phase_rank(state.phase) {
+        return Ok(state);
+    }
     state.phase = CyclePhase::ResponseCaptured;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
@@ -404,6 +412,15 @@ fn cycle_phase_label(phase: CyclePhase) -> &'static str {
     }
 }
 
+fn cycle_phase_rank(phase: CyclePhase) -> u8 {
+    match phase {
+        CyclePhase::PreflightStarted => 0,
+        CyclePhase::ResponseCaptured => 1,
+        CyclePhase::WriteApplied => 2,
+        CyclePhase::Committed => 3,
+    }
+}
+
 fn is_zero(value: &usize) -> bool {
     *value == 0
 }
@@ -623,6 +640,45 @@ mod tests {
         let state = mark_write_applied(&doc, "recover_apply", Some("body"), Some("body")).unwrap();
         assert_eq!(state.phase, CyclePhase::WriteApplied);
         assert!(state.cycle_id.starts_with("synthetic-"));
+    }
+
+    #[test]
+    fn mark_write_applied_does_not_regress_committed_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        let state = mark_write_applied(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
+        let body_hash = crate::ops_log::content_hash("body");
+        assert_eq!(state.phase, CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_success");
+        assert_eq!(state.snapshot_hash.as_deref(), Some(body_hash.as_str()));
+        assert_eq!(state.file_hash.as_deref(), Some(body_hash.as_str()));
+    }
+
+    #[test]
+    fn mark_response_captured_does_not_regress_committed_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        let state = mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("new"),
+            Some("new"),
+            "abc",
+            Some(&committed.cycle_id),
+        )
+        .unwrap();
+        assert_eq!(state.phase, CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_success");
+        assert_eq!(state.capture_id, committed.capture_id);
+        assert_eq!(state.response_sha256, committed.response_sha256);
     }
 
     #[test]

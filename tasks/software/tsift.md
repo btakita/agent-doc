@@ -258,7 +258,7 @@ The `agent-doc` skill was auto-updated from `0.33.12` to `0.33.16`, and the bina
 Run `/compact`, then re-invoke:
 
 `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-#code-review
+❯ #code-review
 ### Re: code review — gpt-5
 
 #### Findings
@@ -289,7 +289,23 @@ Verification:
 Committed and pushed `src/tsift` `main` as `5f38aa7` (`fix: normalize summary cache file keys`).
 
 The active backlog is now clear; only icebox items remain.
-<!-- agent:boundary:56a7d178 -->
+#code-review
+### Re: code review — gpt-5
+
+#### Findings
+
+1. Relative summarize extract scopes are handled lexically instead of canonically, which breaks both `--diff` filtering and the cache keys written during extract. [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2605), [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3096), and [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3100) join `--extract` onto the anchor without normalization, filter changed files with a lexical `starts_with`, and derive the persisted key from that same path spelling. I reproduced the regression with a temp git repo: after modifying `src/lib.rs`, `tsift summarize --extract src/../src --diff --path <repo> --compact` incorrectly prints `No files to extract.` even though the file changed. The non-diff path leaks the same bug in the opposite direction: the extract error surface already reports `src/../src/lib.rs`, which means successful extracts under that scope would persist malformed keys that later canonical `--file src/lib.rs` lookups would not hit.
+
+2. `tsift summarize --stats` still reports a fake stale count. [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:825) promises cache staleness in stats output, but [src/tsift/src/summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:341) hard-codes `stale_count: 0` for every database. I verified the user-visible symptom by creating a synthetic `summaries.db` containing only a row for a missing file and then running `tsift summarize --stats --json --path <repo>`; the CLI still returned `"stale_count":0`. That makes the JSON contract misleading precisely when the cache needs cleanup attention.
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`436` unit tests and `46` integration tests).
+- Reproduced finding 1 with a temp git repo by modifying `src/lib.rs` and running `tsift summarize --extract src/../src --diff --path <repo> --compact`, which returned `No files to extract.`.
+- Reproduced finding 2 with a synthetic `summaries.db` containing a stale row; `tsift summarize --stats --json` still returned `"stale_count":0`.
+
+Follow-up items added to backlog. Top remaining backlog item: `#scop`.
+<!-- agent:boundary:987551fd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -299,6 +315,8 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#scop] Normalize summarize extract scopes before diff filtering and cache-key derivation so ./.. path spellings and symlinked scope spellings cannot yield false `No files to extract.` results or malformed summary keys.
+- [ ] [#stct] Make `tsift summarize --stats` compute real stale summary counts (missing files and hash-mismatched files) instead of hard-coding `stale_count: 0`, and align the CLI/spec contract.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

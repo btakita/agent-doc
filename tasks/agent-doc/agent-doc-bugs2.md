@@ -31,6 +31,7 @@ prompt_presets:
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260501-135728.md`*
 
 Active backlog:
+❯ - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 ❯ - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
 ❯ - [x] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
 ❯ - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
@@ -538,7 +539,6 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
-    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -700,11 +700,7 @@ Noted on the residual edits from the first `#clrpr` closeout:
 - the `(HEAD)` suffix on the committed `#clrpr` response is a closeout artifact, not a new prompt or unresolved work item
 
 No new backlog item is needed.
-<!-- agent:boundary:fb9ab4df -->
-<!-- /agent:exchange -->
-
-<!--
-`Run Agent Doc` has been broken for the past 2 days. Over 50 turns of Codex with gpt-5.4 high has been put into fixing the issues but it is still completely broken. Should we drastically simplify the logic? I'm ready to give up due to the constant failures and lack of clear progress. I don't have time to futz around with this failure mode anymore. I need `Run Agent Doc` to "just work".
+❯ `Run Agent Doc` has been broken for the past 2 days. Over 50 turns of Codex with gpt-5.4 high has been put into fixing the issues but it is still completely broken. Should we drastically simplify the logic? I'm ready to give up due to the constant failures and lack of clear progress. I don't have time to futz around with this failure mode anymore. I need `Run Agent Doc` to "just work".
 
 ```
 agent-doc route failed for tasks/monsterrodholders.md after 76s (exit 1): [sync] found alive agent-doc child (pid 849259) in pane %356 for tasks/monsterrodholders.md resync: stash pane %355 is registered in its own project root — skipping kill resync: purged 1 orphaned stash pane(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 849259) in pane %356 for tasks/monsterrodholders.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] registered pane %356 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md is busy with pending document drift — applying scoped `agent-doc fix tasks/monsterrodholders.md` once before failing closed [sync] recovered live pane %356 for session a9421282 via supervisor pid 849259 [sync] found alive agent-doc child (pid 849259) in pane %356 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [route] scoped fix confirmed pane %356 still authoritatively owns tasks/monsterrodholders.md with a healthy supervisor, but prompt detection never settled — retrying the bare routed codex reopen once and requiring a fresh cycle ack before success [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %356 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %356 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: How do I enable super-bot fight mode? [route] routed codex trigger for tasks/monsterrodholders.md never started a new cycle in pane %356 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (25s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (30s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %356, but no new document cycle started for pending prompt_target: How do I enable super-bot fight mode? after waiting 30s (startup_miss_timestamp=2026-05-01T20:21:41Z)
@@ -712,11 +708,38 @@ agent-doc route failed for tasks/monsterrodholders.md after 76s (exit 1): [sync]
 ```
 agent-doc route failed (exit 134): resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %353 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill [route] target tmux session: 0 thread 'main' (480303) panicked at src/component.rs:443:24: byte index 12303 is not a char boundary; it is inside '❯' (bytes 12302..12305) of ` ## Status  The session surface has now moved through the full follow-up calibration tranche: `#outcome`, `#slabel`, `#sdigest`, `#sfound`, `#sconduct`, `#soverscore`, `#sconfcal`, `#sclaudemd`, `#srootfit`, `#sdoccov`,`[...] note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 ```
+### Re: `#xguard` and Run Agent Doc reliability — gpt-5
+
+For `#xguard`: the issue it describes is real, and it is in the same template-write / component-parser family as the `src/component.rs:443` panic. The existing tracking artifact is already the right one: Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`. I am not adding a duplicate backlog item for that bug.
+
+For the broader `Run Agent Doc` question: yes, I would simplify this, but specifically the routed reopen path rather than the whole system.
+
+From the logs you pasted, there are two distinct failures:
+- `src/agent-doc/src/route.rs` is doing too much in one path: ownership recovery, busy-pane repair, reopen dispatch, fresh restart, and then waiting for a document-observed cycle ack. That is why you can get "command accepted" and still end with no usable turn.
+- `src/agent-doc/src/component.rs:443` has a direct UTF-8 slicing bug. The parser is walking byte offsets and then slicing a `&str` preview across the multibyte `❯` glyph, which explains the panic.
+
+My recommendation is:
+1. Stop spending more turns on live `monsterrodholders.md` reruns until the route state machine is simplified. The current branch layering is the failure mode.
+2. Fix the UTF-8 parser panic immediately; it is a concrete correctness bug and it poisons route/debug signals.
+3. Treat the existing `#mrunfix` / `#mrreplay` / `#mrbusy` items as downstream validation after the simplification lands, not as the main work.
+
+I added these plan-backed items to drive the next implementation turns:
+- Plan: `tasks/agent-doc/plan-run-agent-doc-routed-simplification.md`
+- Plan: `tasks/agent-doc/plan-component-parser-utf8-boundaries.md`
+
+If you want the next turn to be implementation instead of more diagnosis, the right directive is `do [#runsm]` first. `#utf8p` can be done independently, but `#runsm` is the one most likely to make `Run Agent Doc` "just work" again.
+
+<!-- agent:boundary:34c1e170 -->
+<!-- /agent:exchange -->
+
+<!--
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#runsm] [recommended] Simplify the routed Run Agent Doc reopen and acknowledgment state machine before more live rerun work. Plan: tasks/agent-doc/plan-run-agent-doc-routed-simplification.md
+- [ ] [#utf8p] [recommended] Fix the UTF-8 byte-boundary panic in component parsing triggered near `❯`. Plan: tasks/agent-doc/plan-component-parser-utf8-boundaries.md
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md

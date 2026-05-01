@@ -308,6 +308,68 @@ fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
     restart_via_supervisor_with_mode(file, session_id, "continue")
 }
 
+fn tracked_codex_clear_requires_fresh_restart(
+    harness: &HarnessConfig,
+    latest_prompt: Option<&str>,
+) -> bool {
+    harness.binary == "codex" && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
+}
+
+fn reapply_codex_launch_contract_after_clear(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<String> {
+    let latest_prompt = crate::codex_hook::load_latest_prompt_for_file(file)?;
+    if !tracked_codex_clear_requires_fresh_restart(harness, latest_prompt.as_deref()) {
+        return Ok(pane.to_string());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_codex_clear_restart_fresh file={} pane={} harness={} latest_prompt=/clear",
+            file.display(),
+            pane,
+            harness.binary
+        ),
+    );
+    eprintln!(
+        "[route] latest tracked Codex prompt for {} was `/clear` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
+        file.display()
+    );
+
+    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+        anyhow::bail!(
+            "latest tracked Codex prompt for {} was `/clear`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
+            file.display(),
+            file.display()
+        );
+    }
+
+    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
+    let dispatch_pane = crate::sync::find_live_owner_pane(tmux, file, session_id)
+        .unwrap_or_else(|| pane.to_string());
+    if !wait_for_agent_ready(
+        tmux,
+        &dispatch_pane,
+        fresh_route_start_ack_timeout(),
+        harness,
+    ) {
+        anyhow::bail!(
+            "latest tracked Codex prompt for {} was `/clear`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
+            file.display(),
+            dispatch_pane,
+            file.display()
+        );
+    }
+    register_dispatch_target(session_id, &dispatch_pane, file_path)?;
+    Ok(dispatch_pane)
+}
+
 fn startup_miss_requires_fresh_start(
     registered_pane: &str,
     live_owner: Option<&str>,
@@ -948,10 +1010,13 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         target_session,
                         is_first_column(file, col_args),
                     );
+                    let owner = reapply_codex_launch_contract_after_clear(
+                        tmux, file, owner, session_id, file_path, harness,
+                    )?;
                     match ensure_existing_pane_ready_for_dispatch(
                         tmux,
                         file,
-                        owner,
+                        &owner,
                         harness,
                         pending_prompt_context
                             .as_ref()
@@ -974,7 +1039,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 created_panes,
                                 allow_auto_fix_retry,
                                 auto_fix_attempted,
-                                owner,
+                                &owner,
                                 &provenance,
                                 cycle_baseline.as_ref(),
                                 pending_prompt_context
@@ -983,12 +1048,12 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             );
                         }
                     }
-                    register_dispatch_target(session_id, owner, file_path)?;
-                    send_command(tmux, owner, file_path, harness)?;
+                    register_dispatch_target(session_id, &owner, file_path)?;
+                    send_command(tmux, &owner, file_path, harness)?;
                     require_routed_cycle_ack(
                         tmux,
                         file,
-                        owner,
+                        &owner,
                         session_id,
                         harness,
                         cycle_baseline.as_ref(),
@@ -997,7 +1062,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             .map(|context| context.marker.as_str()),
                         true,
                     )?;
-                    return Ok(owner.to_string());
+                    return Ok(owner);
                 }
                 Some(_) => {}
                 None => match supervisor_health {
@@ -1110,11 +1175,19 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     target_session,
                     is_first_column(file, col_args),
                 );
-                register_dispatch_target(session_id, registered_pane, file_path)?;
-                match ensure_existing_pane_ready_for_dispatch(
+                let registered_pane = reapply_codex_launch_contract_after_clear(
                     tmux,
                     file,
                     registered_pane,
+                    session_id,
+                    file_path,
+                    harness,
+                )?;
+                register_dispatch_target(session_id, &registered_pane, file_path)?;
+                match ensure_existing_pane_ready_for_dispatch(
+                    tmux,
+                    file,
+                    &registered_pane,
                     harness,
                     pending_prompt_context
                         .as_ref()
@@ -1122,7 +1195,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 )? {
                     ExistingPaneDispatchReadiness::Ready => {}
                     ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
-                        return Ok(registered_pane.clone());
+                        return Ok(registered_pane);
                     }
                     ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
                         return retry_route_after_busy_pane_auto_fix(
@@ -1137,7 +1210,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             created_panes,
                             allow_auto_fix_retry,
                             auto_fix_attempted,
-                            registered_pane,
+                            &registered_pane,
                             &provenance,
                             cycle_baseline.as_ref(),
                             pending_prompt_context
@@ -1146,13 +1219,13 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         );
                     }
                 }
-                register_dispatch_target(session_id, registered_pane, file_path)?;
+                register_dispatch_target(session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-                send_command(tmux, registered_pane, file_path, harness)?;
+                send_command(tmux, &registered_pane, file_path, harness)?;
                 require_routed_cycle_ack(
                     tmux,
                     file,
-                    registered_pane,
+                    &registered_pane,
                     session_id,
                     harness,
                     cycle_baseline.as_ref(),
@@ -1161,7 +1234,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         .map(|context| context.marker.as_str()),
                     true,
                 )?;
-                return Ok(registered_pane.clone());
+                return Ok(registered_pane);
             }
         }
         eprintln!("[route] Pane {} is dead", registered_pane);
@@ -3799,6 +3872,29 @@ mod tests {
         script
     }
 
+    fn write_mock_registered_agent_doc_with_prefix(
+        base: &Path,
+        name: &str,
+        prefix: &str,
+    ) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join(name);
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf '{prefix}:%s\\n' \"$CMD\"\ndone\n",
+            ),
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn write_mock_registered_agent_doc_extra_line_detector(base: &Path) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -4876,6 +4972,167 @@ Body\n\
         assert!(
             content.contains("GOT:agent-doc "),
             "route should resend the reopen after the fresh restart: {content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn tracked_codex_clear_requires_fresh_restart_only_for_exact_clear_prompt() {
+        assert!(tracked_codex_clear_requires_fresh_restart(
+            &HarnessConfig::codex(),
+            Some("/clear")
+        ));
+        assert!(tracked_codex_clear_requires_fresh_restart(
+            &HarnessConfig::codex(),
+            Some("  /clear  ")
+        ));
+        assert!(!tracked_codex_clear_requires_fresh_restart(
+            &HarnessConfig::codex(),
+            Some("agent-doc tasks/bugs.md")
+        ));
+        assert!(!tracked_codex_clear_requires_fresh_restart(
+            &HarnessConfig::claude(),
+            Some("/clear")
+        ));
+    }
+
+    #[test]
+    fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-codex-clear-pre-dispatch-restart");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-codex-clear-pre-dispatch-restart.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+
+        let stale_agent =
+            write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-stale", "STALE");
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
+
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-codex-clear-pre-dispatch-restart";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let state_path = dir
+            .path()
+            .join(".agent-doc/codex-hooks/sessions/clear.json");
+        std::fs::write(
+            &state_path,
+            serde_json::json!({
+                "session_id": "codex-clear-session",
+                "doc_path": file_path,
+                "last_turn_id": "turn-clear",
+                "last_prompt": "/clear",
+                "updated_at": 42u64
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let fresh_agent =
+            write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-fresh", "FRESH");
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let restart_called_for_thread = restart_called.clone();
+        std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            iso_for_thread
+                .raw_cmd(&[
+                    "respawn-pane",
+                    "-k",
+                    "-t",
+                    &pane_for_thread,
+                    &format!(
+                        "exec {} {}",
+                        fresh_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                ])
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should restart fresh before rerouting after a tracked /clear");
+        assert_eq!(resolved, pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "route should request a fresh restart before dispatch"
+        );
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "FRESH:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("FRESH:agent-doc "),
+            "route should inject into the fresh post-clear session: {content}"
+        );
+        assert!(
+            !content.contains("STALE:agent-doc "),
+            "route should not dispatch into the pre-clear session: {content}"
         );
 
         ipc.stop();

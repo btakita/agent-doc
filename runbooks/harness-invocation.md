@@ -58,7 +58,8 @@ Identify your harness from your environment:
 - **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle (Codex runs shell commands natively), then immediately run `agent-doc session-check <FILE>`.
 - **Fail closed:** If `agent-doc session-check <FILE>` exits nonzero after write-back, the cycle is still open or the document still has prompt-bearing user edits with no newer cycle start. Do **not** report success or stop; continue recovery instead.
 - **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file. After `agent-doc write --commit <FILE>`, run the same `agent-doc session-check <FILE>` guard before ending the turn. That repair write-back should also be the last substantial action of the turn.
-- **Session resume:** Codex uses `codex resume --last` instead of `--continue`.
+- **Session resume:** Codex uses `codex resume --last` instead of `--continue` for ordinary continue flows.
+- **Tracked `/clear` recovery:** if the latest tracked Codex prompt for a document was `/clear`, the next `agent-doc route` rerun must restart the live session fresh before injecting `agent-doc <FILE>` so the original sandbox, writable roots, and network policy are reapplied instead of trusting post-clear resume inheritance.
 
 ## Cursor / Generic
 

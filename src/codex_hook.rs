@@ -483,6 +483,20 @@ pub(crate) fn load_prompt_for_current_session(file: &Path) -> Result<Option<Stri
     Ok(Some(state.last_prompt))
 }
 
+pub(crate) fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
+    let Some(state) = load_latest_state_for_file(file)? else {
+        return Ok(None);
+    };
+    if state.last_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(state.last_prompt))
+}
+
+pub(crate) fn prompt_requests_clear(prompt: &str) -> bool {
+    prompt.trim() == "/clear"
+}
+
 pub(crate) fn load_active_session_for_current_file(
     file: &Path,
 ) -> Result<Option<ActiveSessionState>> {
@@ -501,6 +515,53 @@ pub(crate) fn load_active_session_for_current_file(
         return Ok(None);
     }
     Ok(Some(ActiveSessionState {
+        session_id: state.session_id,
+        doc_path: state.doc_path,
+        last_turn_id: state.last_turn_id,
+        last_prompt: state.last_prompt,
+    }))
+}
+
+fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
+    let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let mut latest: Option<SessionState> = None;
+
+    for root in project_roots_for(file) {
+        let dir = root.join(".agent-doc/codex-hooks/sessions");
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return Ok(None);
+            };
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                return Ok(None);
+            };
+            let Ok(state) = serde_json::from_str::<SessionState>(&content) else {
+                return Ok(None);
+            };
+            let state_file = PathBuf::from(&state.doc_path)
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
+            if state_file != current_file {
+                continue;
+            }
+            let is_newer = latest
+                .as_ref()
+                .is_none_or(|best| state.updated_at >= best.updated_at);
+            if is_newer {
+                latest = Some(state);
+            }
+        }
+    }
+
+    Ok(latest.map(|state| ActiveSessionState {
         session_id: state.session_id,
         doc_path: state.doc_path,
         last_turn_id: state.last_turn_id,
@@ -659,6 +720,47 @@ mod tests {
         }
 
         assert_eq!(loaded, Some(format!("agent-doc {}", doc.display())));
+    }
+
+    #[test]
+    fn load_latest_prompt_for_file_picks_most_recent_matching_state() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let root = project_root_for(dir.path()).unwrap();
+
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session-old".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: format!("agent-doc {}", doc.display()),
+                updated_at: 10,
+            },
+        )
+        .unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session-new".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-2".to_string(),
+                last_prompt: "/clear".to_string(),
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        let loaded = load_latest_prompt_for_file(&doc).unwrap();
+        assert_eq!(loaded.as_deref(), Some("/clear"));
+    }
+
+    #[test]
+    fn prompt_requests_clear_matches_only_exact_builtin() {
+        assert!(prompt_requests_clear("/clear"));
+        assert!(prompt_requests_clear("  /clear  "));
+        assert!(!prompt_requests_clear("agent-doc tasks/foo.md"));
+        assert!(!prompt_requests_clear("/clear please"));
     }
 
     #[test]

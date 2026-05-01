@@ -2436,13 +2436,7 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         return Ok(false);
     }
 
-    let _dispatch_start = match dispatch_routed_reopen(
-        tmux,
-        file,
-        pane,
-        file_path,
-        harness,
-    ) {
+    let _dispatch_start = match dispatch_routed_reopen(tmux, file, pane, file_path, harness) {
         Ok(proof) => proof,
         Err(_) => {
             crate::ops_log::log_op(
@@ -3338,13 +3332,12 @@ fn auto_start_in_session(
         // the harness is still booting, or hand ownership back to an already
         // running pane for the same session. Follow that authoritative owner
         // instead of continuing to target the throwaway boot pane.
-        let dispatch_pane =
-            resolve_fresh_dispatch_target_after_ready_wait(
-                session_id,
-                &new_pane,
-                file_path,
-                startup_miss_handoff_blocked_pane,
-            )?;
+        let dispatch_pane = resolve_fresh_dispatch_target_after_ready_wait(
+            session_id,
+            &new_pane,
+            file_path,
+            startup_miss_handoff_blocked_pane,
+        )?;
         if dispatch_pane != new_pane {
             eprintln!(
                 "[route] fresh start pane {} handed ownership for {} back to existing pane {} during startup; dispatching follow-up there",
@@ -7005,7 +6998,9 @@ Body\n\
         let cwd = test_cwd();
         let existing_pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("fresh-start-ignore-startup-miss-handoff.md");
+        let doc = dir
+            .path()
+            .join("fresh-start-ignore-startup-miss-handoff.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let mock_agent = write_mock_registered_agent_doc(dir.path());

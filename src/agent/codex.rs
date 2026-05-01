@@ -54,10 +54,38 @@ use std::sync::{Arc, Mutex};
 use super::streaming::{StreamChunk, StreamingAgent};
 use super::{Agent, AgentResponse};
 
+#[derive(Clone)]
 pub struct Codex {
     command: String,
     base_args: Vec<String>,
     env: Vec<(String, Option<String>)>,
+}
+
+struct ParsedCodexResponse {
+    response: AgentResponse,
+    saw_resume_capability_drift: bool,
+}
+
+struct StreamProcess {
+    lines: std::io::Lines<std::io::BufReader<std::process::ChildStdout>>,
+    child: std::process::Child,
+    stderr_handle: Option<std::thread::JoinHandle<()>>,
+    stderr_buf: Arc<Mutex<String>>,
+}
+
+fn looks_like_local_browser_cdp_permission_denied(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let local_cdp = lower.contains("127.0.0.1:9222") || lower.contains("localhost:9222");
+    let permission_denied = lower.contains("operation not permitted")
+        || lower.contains("os error 1")
+        || lower.contains("eperm");
+    local_cdp && permission_denied
+}
+
+fn resume_capability_drift_notice() -> &'static str {
+    "[agent] codex resume session hit a stale local browser/CDP capability drift \
+     (`Operation not permitted` on 127.0.0.1:9222); retrying once with a fresh \
+     `codex exec` session"
 }
 
 pub(crate) fn default_base_args() -> Vec<String> {
@@ -152,6 +180,137 @@ impl Codex {
 
         cmd
     }
+
+    fn send_once(
+        &self,
+        prompt: &str,
+        session_id: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<ParsedCodexResponse> {
+        let mut cmd = self.build_command(session_id, false, model);
+        let output = cmd
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                if let Some(ref mut stdin) = child.stdin {
+                    stdin.write_all(prompt.as_bytes())?;
+                }
+                child.wait_with_output()
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("codex command failed: {}", stderr);
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut thread_id: Option<String> = None;
+        let mut response_text = String::new();
+        let mut saw_resume_capability_drift = false;
+
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if looks_like_local_browser_cdp_permission_denied(line) {
+                saw_resume_capability_drift = true;
+            }
+            let json: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            match event_type {
+                "thread.started" => {
+                    thread_id = json
+                        .get("thread_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+                "item.completed" => {
+                    let item = json.get("item");
+                    let item_type = item
+                        .and_then(|i| i.get("type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if item_type == "agent_message"
+                        && let Some(text) =
+                            item.and_then(|i| i.get("text")).and_then(|v| v.as_str())
+                    {
+                        if !response_text.is_empty() {
+                            response_text.push('\n');
+                        }
+                        response_text.push_str(text);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(ParsedCodexResponse {
+            response: AgentResponse {
+                text: response_text,
+                session_id: thread_id,
+            },
+            saw_resume_capability_drift,
+        })
+    }
+
+    fn spawn_stream_process(
+        &self,
+        prompt: &str,
+        session_id: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<StreamProcess> {
+        let mut cmd = self.build_command(session_id, false, model);
+        let mut child = cmd
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+
+        {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(prompt.as_bytes())?;
+            }
+            child.stdin.take();
+        }
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
+        let reader = std::io::BufReader::new(stdout);
+
+        let stderr_buf = Arc::new(Mutex::new(String::new()));
+        let stderr_handle = if let Some(stderr) = child.stderr.take() {
+            let buf = Arc::clone(&stderr_buf);
+            Some(std::thread::spawn(move || {
+                use std::io::Read;
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut content = String::new();
+                let _ = reader.read_to_string(&mut content);
+                if let Ok(mut guard) = buf.lock() {
+                    *guard = content;
+                }
+            }))
+        } else {
+            None
+        };
+
+        Ok(StreamProcess {
+            lines: reader.lines(),
+            child,
+            stderr_handle,
+            stderr_buf,
+        })
+    }
 }
 
 /// Parse a single JSONL line from Codex output into a StreamChunk.
@@ -225,75 +384,20 @@ impl Agent for Codex {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse> {
-        let mut cmd = self.build_command(session_id, fork, model);
-        let output = cmd
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                if let Some(ref mut stdin) = child.stdin {
-                    stdin.write_all(prompt.as_bytes())?;
-                }
-                child.wait_with_output()
+        let _ = fork;
+        let mut parsed = self.send_once(prompt, session_id, model)?;
+        if session_id.is_some() && parsed.saw_resume_capability_drift {
+            eprintln!("{}", resume_capability_drift_notice());
+            parsed = self.send_once(prompt, None, model).map_err(|e| {
+                anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
             })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("codex command failed: {}", stderr);
         }
 
-        let raw = String::from_utf8_lossy(&output.stdout);
-        let mut thread_id: Option<String> = None;
-        let mut response_text = String::new();
-
-        for line in raw.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let json: serde_json::Value = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-            match event_type {
-                "thread.started" => {
-                    thread_id = json
-                        .get("thread_id")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                }
-                "item.completed" => {
-                    let item = json.get("item");
-                    let item_type = item
-                        .and_then(|i| i.get("type"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if item_type == "agent_message"
-                        && let Some(text) =
-                            item.and_then(|i| i.get("text")).and_then(|v| v.as_str())
-                    {
-                        if !response_text.is_empty() {
-                            response_text.push('\n');
-                        }
-                        response_text.push_str(text);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if response_text.is_empty() {
+        if parsed.response.text.is_empty() {
             anyhow::bail!("Empty response from Codex");
         }
 
-        Ok(AgentResponse {
-            text: response_text,
-            session_id: thread_id,
-        })
+        Ok(parsed.response)
     }
 }
 
@@ -305,50 +409,22 @@ impl StreamingAgent for Codex {
         fork: bool,
         model: Option<&str>,
     ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>> {
-        let mut cmd = self.build_command(session_id, fork, model);
-        let mut child = cmd
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-
-        {
-            use std::io::Write;
-            if let Some(ref mut stdin) = child.stdin {
-                stdin.write_all(prompt.as_bytes())?;
-            }
-            child.stdin.take();
-        }
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
-        let reader = std::io::BufReader::new(stdout);
-
-        let stderr_buf = Arc::new(Mutex::new(String::new()));
-        let stderr_handle = if let Some(stderr) = child.stderr.take() {
-            let buf = Arc::clone(&stderr_buf);
-            Some(std::thread::spawn(move || {
-                use std::io::Read;
-                let mut reader = std::io::BufReader::new(stderr);
-                let mut content = String::new();
-                let _ = reader.read_to_string(&mut content);
-                if let Ok(mut guard) = buf.lock() {
-                    *guard = content;
-                }
-            }))
-        } else {
-            None
-        };
+        let _ = fork;
+        let process = self.spawn_stream_process(prompt, session_id, model)?;
 
         Ok(Box::new(CodexStreamIterator {
-            lines: reader.lines(),
-            child,
-            stderr_handle,
-            stderr_buf,
+            lines: process.lines,
+            child: process.child,
+            stderr_handle: process.stderr_handle,
+            stderr_buf: process.stderr_buf,
             session_id: None,
             done: false,
+            backend: self.clone(),
+            prompt: prompt.to_string(),
+            model: model.map(|m| m.to_string()),
+            allow_resume_capability_retry: session_id.is_some(),
+            retried_fresh: false,
+            yielded_agent_content: false,
         }))
     }
 }
@@ -360,6 +436,12 @@ struct CodexStreamIterator {
     stderr_buf: Arc<Mutex<String>>,
     session_id: Option<String>,
     done: bool,
+    backend: Codex,
+    prompt: String,
+    model: Option<String>,
+    allow_resume_capability_retry: bool,
+    retried_fresh: bool,
+    yielded_agent_content: bool,
 }
 
 impl CodexStreamIterator {
@@ -371,6 +453,28 @@ impl CodexStreamIterator {
             .lock()
             .map(|g| g.clone())
             .unwrap_or_default()
+    }
+
+    fn restart_fresh_after_resume_capability_drift(&mut self) -> Result<()> {
+        eprintln!("{}", resume_capability_drift_notice());
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = self.collect_stderr();
+        let process = self
+            .backend
+            .spawn_stream_process(&self.prompt, None, self.model.as_deref())
+            .map_err(|e| {
+                anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
+            })?;
+        self.lines = process.lines;
+        self.child = process.child;
+        self.stderr_handle = process.stderr_handle;
+        self.stderr_buf = process.stderr_buf;
+        self.session_id = None;
+        self.allow_resume_capability_retry = false;
+        self.retried_fresh = true;
+        self.yielded_agent_content = false;
+        Ok(())
     }
 }
 
@@ -385,6 +489,17 @@ impl Iterator for CodexStreamIterator {
             match self.lines.next() {
                 Some(Ok(line)) => {
                     if line.trim().is_empty() {
+                        continue;
+                    }
+                    if self.allow_resume_capability_retry
+                        && !self.retried_fresh
+                        && !self.yielded_agent_content
+                        && looks_like_local_browser_cdp_permission_denied(&line)
+                    {
+                        if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                            self.done = true;
+                            return Some(Err(e));
+                        }
                         continue;
                     }
                     match parse_codex_line(&line) {
@@ -402,6 +517,11 @@ impl Iterator for CodexStreamIterator {
                             {
                                 continue;
                             }
+                            if !chunk.is_final
+                                && (!chunk.text.is_empty() || chunk.thinking.is_some())
+                            {
+                                self.yielded_agent_content = true;
+                            }
                             return Some(Ok(chunk));
                         }
                         Err(e) => return Some(Err(e)),
@@ -412,12 +532,23 @@ impl Iterator for CodexStreamIterator {
                     return Some(Err(e.into()));
                 }
                 None => {
-                    self.done = true;
                     let stderr = self.collect_stderr();
                     let exit_status = self.child.wait().ok();
                     if let Some(status) = exit_status
                         && !status.success()
                     {
+                        if self.allow_resume_capability_retry
+                            && !self.retried_fresh
+                            && !self.yielded_agent_content
+                            && looks_like_local_browser_cdp_permission_denied(&stderr)
+                        {
+                            if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                                self.done = true;
+                                return Some(Err(e));
+                            }
+                            continue;
+                        }
+                        self.done = true;
                         let msg = if stderr.trim().is_empty() {
                             format!("codex subprocess exited with {status}")
                         } else {
@@ -425,6 +556,7 @@ impl Iterator for CodexStreamIterator {
                         };
                         return Some(Err(anyhow::anyhow!(msg)));
                     }
+                    self.done = true;
                     if !stderr.trim().is_empty() {
                         eprintln!("[agent] codex subprocess stderr: {}", stderr.trim());
                     }
@@ -439,6 +571,19 @@ impl Iterator for CodexStreamIterator {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    fn write_fake_codex_script(script: &str) -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("fake-codex.sh");
+        fs::write(&path, script).unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+        (dir, path.to_string_lossy().into_owned())
+    }
 
     #[test]
     fn streaming_stderr_surfaced_on_nonzero_exit() {
@@ -795,6 +940,74 @@ mod tests {
                 "-c",
                 "sandbox_mode=\"workspace-write\"",
             ]
+        );
+    }
+
+    #[test]
+    fn local_browser_cdp_permission_denied_matches_resume_capability_drift_signature() {
+        assert!(looks_like_local_browser_cdp_permission_denied(
+            "chromium-bridge check failed for 127.0.0.1:9222: Operation not permitted (os error 1)"
+        ));
+        assert!(!looks_like_local_browser_cdp_permission_denied(
+            "chromium-bridge check failed for 127.0.0.1:9222: Connection refused"
+        ));
+    }
+
+    #[test]
+    fn send_retries_fresh_exec_after_resume_capability_drift_signal() {
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"chromium-bridge check failed for 127.0.0.1:9222: Operation not permitted (os error 1)","exit_code":1,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"stale resume response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None);
+
+        let response = codex
+            .send("prompt", Some("resume-123"), false, None)
+            .unwrap();
+
+        assert_eq!(response.text, "fresh response");
+        assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
+    }
+
+    #[test]
+    fn streaming_retries_fresh_exec_before_yielding_stale_resume_response() {
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"chromium-bridge list failed for localhost:9222: Operation not permitted (os error 1)","exit_code":1,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"stale resume response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None);
+
+        let chunks: Vec<_> = codex
+            .send_streaming("prompt", Some("resume-123"), false, None)
+            .unwrap()
+            .collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap().text, "fresh response");
+        assert!(chunks[1].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[1].as_ref().unwrap().session_id.as_deref(),
+            Some("fresh-thread")
         );
     }
 }

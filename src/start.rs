@@ -471,10 +471,7 @@ fn resume_handoff_failed(
     )
 }
 
-fn clean_exit_before_prompt_seen(
-    auto_trigger_enabled: bool,
-    prompt_visible_once: bool,
-) -> bool {
+fn clean_exit_before_prompt_seen(auto_trigger_enabled: bool, prompt_visible_once: bool) -> bool {
     !auto_trigger_enabled && !prompt_visible_once
 }
 
@@ -2143,7 +2140,8 @@ pub fn run(file: &Path) -> Result<()> {
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
-        let clean_exit_before_prompt = clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
+        let clean_exit_before_prompt =
+            clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
         let run_duration = run_started_at.elapsed();
 
         if matches!(

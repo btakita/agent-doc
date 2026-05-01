@@ -976,6 +976,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 auto_fix_attempted,
                                 owner,
                                 &provenance,
+                                cycle_baseline.as_ref(),
+                                pending_prompt_context
+                                    .as_ref()
+                                    .map(|context| context.marker.as_str()),
                             );
                         }
                     }
@@ -1135,6 +1139,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             auto_fix_attempted,
                             registered_pane,
                             &provenance,
+                            cycle_baseline.as_ref(),
+                            pending_prompt_context
+                                .as_ref()
+                                .map(|context| context.marker.as_str()),
                         );
                     }
                 }
@@ -1232,6 +1240,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     existing,
                     &provenance,
+                    cycle_baseline.as_ref(),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
                 );
             }
         }
@@ -1283,6 +1295,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     &new_pane,
                     &provenance,
+                    cycle_baseline.as_ref(),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
                 );
             }
         }
@@ -1339,6 +1355,8 @@ fn retry_route_after_busy_pane_auto_fix(
     auto_fix_attempted: bool,
     busy_pane: &str,
     provenance: &str,
+    cycle_baseline: Option<&crate::cycle_state::CycleState>,
+    pending_prompt_marker: Option<&str>,
 ) -> Result<String> {
     if allow_auto_fix_retry {
         match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
@@ -1377,25 +1395,37 @@ fn retry_route_after_busy_pane_auto_fix(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_existing_pane_busy_fail_closed_after_noop_fix file={} pane={} harness={}",
+                        "route_existing_pane_retry_dispatch_after_noop_fix file={} pane={} harness={}",
                         file.display(),
                         busy_pane,
                         harness.binary
                     ),
                 );
-                if let Err(e) = tmux.select_pane(busy_pane) {
-                    eprintln!("[route] warning: failed to focus pane {}: {}", busy_pane, e);
-                }
-                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
                 eprintln!(
-                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor, but pending prompt-bearing drift remains undispatched — focusing the live {} session and failing closed instead of falsely reporting success",
+                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor, but prompt detection never settled — retrying the bare routed {} reopen once and requiring a fresh cycle ack before success",
                     busy_pane,
                     file.display(),
                     harness.binary
                 );
-                anyhow::bail!(format_busy_existing_pane_error(
-                    file, busy_pane, harness, provenance, true
-                ));
+                if send_command_checked(tmux, busy_pane, file_path, harness)?
+                    != CommandDispatchStatus::Accepted
+                {
+                    emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                    anyhow::bail!(format_busy_existing_pane_error(
+                        file, busy_pane, harness, provenance, true
+                    ));
+                }
+                require_routed_cycle_ack(
+                    tmux,
+                    file,
+                    busy_pane,
+                    session_id,
+                    harness,
+                    cycle_baseline,
+                    pending_prompt_marker,
+                    true,
+                )?;
+                return Ok(busy_pane.to_string());
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
         }
@@ -4796,7 +4826,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_fails_closed_for_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
+    fn resolve_or_create_pane_retries_dispatch_for_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
      {
         use std::sync::{
             Arc,
@@ -4840,6 +4870,32 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let server_for_thread = Tmux {
+            server_socket: iso.server_socket.clone(),
+        };
+        std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(5);
+            let poll = std::time::Duration::from_millis(100);
+            let mut content = String::new();
+            while start.elapsed() < timeout {
+                content = sessions::capture_pane(&server_for_thread, &pane_for_thread)
+                    .unwrap_or_default();
+                if content.contains("EARLY:agent-doc ") {
+                    break;
+                }
+                std::thread::sleep(poll);
+            }
+            assert!(
+                content.contains("EARLY:agent-doc "),
+                "route should inject the bare reopen before awaiting a new cycle ack: {content}"
+            );
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
@@ -4853,15 +4909,13 @@ Body\n\
                         IpcResponse::ok_empty()
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
+                    IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
 
-        let err = resolve_or_create_pane(
+        let resolved = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -4872,12 +4926,8 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect_err("route should fail closed when prompt-bearing drift remains stuck behind a busy same-document session");
-        assert!(
-            err.to_string()
-                .contains("refusing to inject a routed trigger into a busy session"),
-            "unexpected error: {err:#}"
-        );
+        .expect("route should retry the bare reopen when a healthy same-document supervisor still owns the pane");
+        assert_eq!(resolved, pane);
         assert!(
             !restart_called.load(Ordering::Relaxed),
             "healthy supervisor path must not restart a busy same-document session"
@@ -4885,8 +4935,8 @@ Body\n\
 
         let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
-            !after.contains("EARLY:agent-doc "),
-            "route should still refuse to inject while the same-document session is busy: {after}"
+            after.contains("EARLY:agent-doc "),
+            "route should retry the routed reopen after the no-op fix path: {after}"
         );
         ipc.stop();
     }

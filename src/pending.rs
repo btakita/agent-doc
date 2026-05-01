@@ -562,6 +562,30 @@ pub(crate) fn ensure_no_leading_custom_id_prefix(text: &str, context: &str) -> R
     }
 }
 
+pub(crate) fn ensure_no_new_leading_custom_id_prefix(
+    item_id: &str,
+    text: &str,
+    existing_ids: &HashSet<String>,
+    context: &str,
+) -> Result<()> {
+    match detect_leading_custom_id_prefix(text) {
+        None => Ok(()),
+        Some(LeadingCustomIdPrefix::BarePlaceholder) => bail!(
+            "{}: bare `[#]` placeholder is invalid — omit it or use `id=<id> <text>`",
+            context
+        ),
+        Some(LeadingCustomIdPrefix::Explicit) => bail!(
+            "{}: duplicate leading custom id prefix in item text — use exactly one leading `id=<id>` or `[#id]` prefix",
+            context
+        ),
+        Some(LeadingCustomIdPrefix::Bracketed) if existing_ids.contains(item_id) => Ok(()),
+        Some(LeadingCustomIdPrefix::Bracketed) => bail!(
+            "{}: duplicate leading custom id prefix in item text — use exactly one leading `id=<id>` or `[#id]` prefix",
+            context
+        ),
+    }
+}
+
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
         "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings (hyphen allowed)",
@@ -616,13 +640,44 @@ fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, St
     Ok((Some(raw_id.to_lowercase()), remainder.to_string()))
 }
 
-fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
-    let trimmed = text.trim();
-    if let Some(rest) = trimmed.strip_prefix("id=") {
-        return parse_explicit_custom_id_prefix(rest);
+    fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
+        let trimmed = text.trim();
+        if let Some(rest) = trimmed.strip_prefix("id=") {
+            return parse_explicit_custom_id_prefix(rest);
+        }
+        parse_bracketed_custom_id_prefix(trimmed)
     }
-    parse_bracketed_custom_id_prefix(trimmed)
-}
+
+    #[test]
+    fn existing_item_may_keep_leading_alias_tag() {
+        let mut existing_ids = HashSet::new();
+        existing_ids.insert("yckq".to_string());
+
+        ensure_no_new_leading_custom_id_prefix(
+            "yckq",
+            "[#ss01] ShipStation fix",
+            &existing_ids,
+            "pending/backlog patch",
+        )
+        .expect("existing alias tag should not be rejected");
+    }
+
+    #[test]
+    fn new_item_still_rejects_leading_alias_tag() {
+        let existing_ids = HashSet::new();
+        let err = ensure_no_new_leading_custom_id_prefix(
+            "yckq",
+            "[#ss01] ShipStation fix",
+            &existing_ids,
+            "pending/backlog patch",
+        )
+        .expect_err("new item alias tag should still be rejected");
+        assert!(
+            err.to_string().contains("duplicate leading custom id prefix"),
+            "unexpected error: {}",
+            err
+        );
+    }
 
 /// Serialize items back to a body string.
 #[allow(dead_code)]

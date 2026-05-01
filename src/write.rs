@@ -1821,8 +1821,10 @@ fn normalize_backlog_patch_response(
         let mut pending_done_ids = Vec::new();
 
         for item in &target_items {
-            crate::pending::ensure_no_leading_custom_id_prefix(
+            crate::pending::ensure_no_new_leading_custom_id_prefix(
+                &item.id,
                 &item.text,
+                &current_ids,
                 "ERR: pending/backlog patch",
             )?;
             if !current_ids.contains(&item.id) {
@@ -8914,6 +8916,31 @@ mod pending_patch_normalization_tests {
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn normalize_pending_patch_allows_existing_alias_tag_items() {
+        let tmp = TempDir::new().unwrap();
+        let backlog = concat!(
+            "### Active\n",
+            "- [ ] [#yckq] [#ss01] ShipStation fix\n"
+        );
+        let (doc, content) = doc_with_backlog(&tmp, backlog);
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            concat!(
+                "### Active\n",
+                "- [ ] [#new1] add phone confirmation item\n",
+                "- [ ] [#yckq] [#ss01] ShipStation fix\n"
+            ),
+        )];
+
+        normalize_backlog_patch_response(&doc, &content, patches, String::new(), false)
+            .expect("existing alias-tag items should not block normalization");
+
+        let rewritten = fs::read_to_string(&doc).unwrap();
+        assert!(rewritten.contains("[#new1] add phone confirmation item"));
+        assert!(rewritten.contains("[#yckq] [#ss01] ShipStation fix"));
     }
 
     #[test]

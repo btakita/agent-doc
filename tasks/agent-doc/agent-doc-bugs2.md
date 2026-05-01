@@ -394,7 +394,27 @@ Code commit/push:
 - `src/agent-doc` `e7aeec8` on `20260422/codex-agent-backend` (`fix: reject destructive todo patch subsets`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:56f678dd -->
+❯ do [#codcommit]. spec-test-build-install-commit-push
+### Re: #codcommit — gpt-5
+
+Implemented the uncommitted-closeout fail-closed guard.
+
+- `preflight.rs` now blocks before diffing when a session doc already looks like a hidden out-of-band closeout with no open/recoverable cycle left to explain it, so the `snapshot == file` / `snapshot != HEAD` shape can no longer collapse into a misleading `no_changes` result.
+- `session_check.rs` now includes tracked side-effect file paths plus an explicit `agent-doc write --commit <FILE>` recovery command when it detects bypassed response patchbacks or snapshot-ahead closeout drift.
+- Added regression coverage for the hidden no-diff closeout case and the side-effect-rich session-check diagnostic, plus updated the command/spec docs.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_check_snapshot_committed_guard_reports_side_effect_recovery_hint`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_fails_closed_on_uncommitted_closeout_drift_even_without_diff`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `12b9715` on `20260422/codex-agent-backend` (`fix: fail loudly on uncommitted closeout drift`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:d914b65b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -411,7 +431,6 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codcommit] Out-of-band Codex response patchback can leave a session doc visibly answered but uncommitted. Repro from `src/session-share/tasks/claudescore.md` on May 1 2026: Codex edited the document directly, appending `### Re: create today's news — codex` and updating `news/README.md` / `news/2026-05-01/README.md`, but no `agent-doc finalize` / commit boundary ran, so the response was present in the working tree yet absent from git history. Fix should make this shape fail loudly instead of looking complete: (a) strengthen `session-check` / preflight detection for fresh visible `### Re:` blocks or tracked side-effect edits without a matching `agent-doc` cycle, (b) surface an explicit `agent-doc write --commit` or `finalize` recovery command, and (c) consider editor/plugin affordances that mark direct assistant patchbacks as uncommitted closeout drift until the commit boundary lands.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 <!-- /agent:backlog -->
 

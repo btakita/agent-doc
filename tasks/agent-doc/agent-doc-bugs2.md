@@ -80,10 +80,29 @@ Verification in `src/agent-doc`:
 Follow-up:
 - Added `#clrrt` to backlog for a live replay of the `/clear` -> `Run Agent Doc` `claudescore-3.md` repro.
 - Plan: `tasks/agent-doc/plan-claudescore-3-clear-reroute-replay-validation.md`
-<!-- agent:boundary:0e305c28 -->
+❯ do [#clrrt]. spec-test-build-install-commit-push
+### Re: #clrrt /clear reroute replay — gpt-5
+
+`#clrrt` is closed. I fixed the remaining `/clear` reroute path in `src/agent-doc` and pushed `acb1f4a` (`fix: keep fresh reroutes off startup-miss pane`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/start.rs` now treats promptless clean exits on fresh/fresh-restart Codex runs as failed startup provenance and restarts fresh instead of chaining `--continue`.
+- `src/route.rs` now carries the just-replaced startup-miss pane as explicit blocked provenance during fresh-start ready wait, so route cannot hand the reopen back to the stale pane after it already decided to replace it.
+- Updated `specs/supervisor.md`, `specs/07-commands.md`, and `VERSIONS.md` to record the supervisor and route invariants.
+
+Verification:
+- `cargo test` passed (`1717` unit tests plus integration suites)
+- `cargo build`
+- `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
+- Live replay from `src/session-share`: `agent-doc route tasks/claudescore-3.md` started fresh pane `%371`, sent the reopen to `%371`, and `ops.log` recorded `fresh_route_start_acknowledged ... pane=%371` with no handoff back to `%364`.
+<!-- agent:boundary:536c6bb5 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+agent-doc route failed for tasks/claudescore-3.md after 55s (exit 1): resync: stash pane %361 is registered in its own project root — skipping kill resync: stash pane %362 is registered in its own project root — skipping kill resync: stash pane %359 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 480231) in pane %364 for tasks/claudescore-3.md [route] registered pane %364 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T22:11:34Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %364 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %364 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %364 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending prompt_target: do [#ctxmatrix]. spec-test-news-commit-push [route] routed codex trigger for tasks/claudescore-3.md never started a new cycle in pane %364 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] codex blocked after 24.1s in pane %364: interactive shell reverse-i-search Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %364, but no new document cycle started for pending prompt_target: do [#ctxmatrix]. spec-test-news-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T22:25:44Z)
+```
+---
 I hope you chose "Optimistic Injection with Proof".
 ---
 Add a Plugin Editor command to clear the context
@@ -92,7 +111,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#clrrt] [recommended] Replay the live claudescore-3 /clear reroute after the absolute-path retry fix. Plan: tasks/agent-doc/plan-claudescore-3-clear-reroute-replay-validation.md
+- [ ] [#cxcdp] Codex browser/CDP capability drift on resumed `agent-doc` sessions: `chromium-bridge` can work from a fresh outer Codex session while the same task doc's resumed `codex exec resume <id>` thread still fails local `127.0.0.1:9222` access with `Operation not permitted`, even with `codex_network_access: enabled` and `-s danger-full-access`. Fix should detect stale resumed-session capability drift, stop retrying the old thread, and force a fresh Codex exec with the current policy. Plan: `tasks/agent-doc/plan-codex-resume-cdp-capability-drift.md`
 - [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`

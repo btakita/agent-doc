@@ -194,10 +194,6 @@ enum RoutedDispatchStartProof {
 }
 
 impl RoutedDispatchStartProof {
-    fn proven_dispatch(self) -> bool {
-        !matches!(self, Self::CommandAcceptedOnly)
-    }
-
     fn dispatch_stage_label(self) -> &'static str {
         match self {
             Self::CommandAcceptedOnly => "accepted",
@@ -1256,7 +1252,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                     .as_ref()
                                     .map(|context| context.marker.as_str()),
                                 false,
-                                false,
+                                RoutedDispatchStartProof::CommandAcceptedOnly,
                             )?;
                             return Ok(registered_pane.clone());
                         }

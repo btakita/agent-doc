@@ -322,7 +322,10 @@ Verification:
 Committed and pushed `src/tsift` `main` as `323e73c` (`fix: normalize summarize extract scopes`).
 
 Top remaining backlog item: `#stct`.
-<!-- agent:boundary:78b7e7ce -->
+Implemented `#scop` in `src/tsift` and pushed `main` as `323e73c` (`fix: normalize summarize extract scopes`). The summarize extract path now canonicalizes existing scope paths and collapses lexical `.` / `..` segments before diff filtering and cache-key derivation, so `src/../src` and symlinked scope spellings no longer yield false `No files to extract.` results or malformed `src/../src/...` keys.
+
+Updated `SPEC.md`, added regressions in `src/main.rs` and `tests/exit_code.rs`, and ran the full requested flow: `cargo test` (`438` unit tests, `47` integration tests), `cargo clippy --all-targets --all-features -- -D warnings`, `cargo build`, `cargo install --path src/tsift`, and `tsift --version` (`0.1.21`). The session document was finalized successfully and `agent-doc session-check` passed. Top remaining backlog item is `#stct`.
+<!-- agent:boundary:08453754 -->
 <!-- /agent:exchange -->
 
 <!--

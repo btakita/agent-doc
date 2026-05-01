@@ -8,6 +8,8 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#code-review': Please review corky codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -466,10 +468,35 @@ Commits now on the branch:
 - `7b3a95c` — `docs: simplify corky skill command list`
 
 You can retry `corky gsc auth` from a normal desktop shell; when OAuth is encountered, corky should now raise a desktop notification in addition to the terminal/browser output.
-<!-- agent:boundary:98d80213 -->
+❯ Is there a pending release?
+### Re: corky code review — gpt-5
+
+I reviewed the current `src/corky` architecture as a single-process CLI with a few heavily shared cross-cutting layers: path resolution in `src/resolve.rs`, OAuth/token handling in `src/filter/gmail_auth.rs` plus per-integration auth modules, sync state in `src/sync/types.rs`, and the background loop in `src/watch.rs`. The recurring risk pattern is duplicated auth and persistence logic rather than isolated subsystem logic.
+
+Findings, ordered by severity:
+
+1. High: every interactive OAuth flow starts the browser before binding the callback listener, and they all contend for the same hard-coded `127.0.0.1:8484` port. That pattern appears in `src/filter/gmail_auth.rs:366-377`, `src/gsc/auth.rs:347-357`, `src/contact/push.rs:160-170`, and `src/social/auth.rs:299-310`. Root cause: each module independently does `open::that(...)` and only then starts `tiny_http::Server::http("127.0.0.1:8484")`. Fast redirects, a stale browser session, or two auth attempts close together can race the listener or fail on port-in-use before the user has a chance to recover.
+
+2. High: token and sync-state persistence are last-writer-wins with no inter-process locking and no atomic merge step. `src/social/token_store.rs:54-76` loads the whole token file and overwrites it with `std::fs::write`; `src/sync/mod.rs:42-57` and `src/watch.rs:47-60` do the same for `.sync-state.json`; `src/contact/sync.rs:93-103` updates only the `contacts` section by re-saving a whole `SyncState` snapshot. Root cause: multiple corky commands share the same JSON files, but the persistence contract assumes single-process ownership. Running `corky watch`, `corky sync`, and an interactive auth/send flow in parallel can silently drop tokens or revert unrelated sync-state sections.
+
+3. Medium: `corky draft send` bypasses the dedicated Gmail send-token key path that the rest of the Gmail API send flow already uses. `src/filter/gmail_auth.rs:260-296` explicitly introduced `get_send_access_token(...)` to avoid collisions with readonly/sync tokens, and `src/draft/mod.rs:396-447` uses it correctly. But `src/draft/send.rs:78-82` still calls `get_access_token_for_user(..., GMAIL_SEND_SCOPE, ...)` directly. Root cause: two send paths evolved separately, so `draft send` still stores compose-scope tokens under the shared user key. That can churn the user-scoped Gmail token entry, trigger unnecessary re-auth loops, and the current 401 guidance in `src/draft/send.rs:137-139` tells the user to run `corky filter auth`, which does not repair a missing `gmail.compose` scope.
+
+4. Medium: the GSC service-account cache is process-global instead of account- or config-scoped. `src/gsc/auth.rs:48-56` defines a single `static SA_TOKEN_CACHE`, and `try_service_account()` in `src/gsc/auth.rs:123-163` reads it before consulting the current account-specific config path. Root cause: the cache stores only the token and expiry, not which mailbox/config produced it. In a long-lived process that switches data dirs or runs multiple GSC accounts, a previously verified service-account token can be reused for the wrong logical account.
+
+The current automated suite does not catch these because they are mostly process-interleaving and auth-workflow issues, not pure functional-path failures. I ran `cargo test -q` in `src/corky`; the full suite passed.
+
+On the release question: yes, there is a pending release. `src/corky` is on branch `20260413/corky-gsc`, `v0.27.0` is still the latest tag and top entry in `VERSIONS.md`, and `HEAD` is 8 commits past that tag (`cf63185`, `e84e38e`, `f8aff38`, `7b3a95c`, and later branch commits are not released yet).
+
+I added the follow-up backlog in priority order. The top backlog item id is `oauth-listener-race`.
+<!-- agent:boundary:df54a6a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#oauth-listener-race] Extract a shared OAuth helper that binds the callback listener before opening the browser, handles busy-port collisions, and supports per-session callback port selection.
+- [ ] [#state-write-locking] Add atomic write + file locking + reload/merge semantics for `tokens.json` and `.sync-state.json` so concurrent corky processes cannot clobber each other.
+- [ ] [#gmail-send-token-key] Route `corky draft send` through the dedicated Gmail send-token path and fix the 401 remediation text so it points to compose-scope re-auth, not `corky filter auth`.
+- [ ] [#gsc-sa-cache-keying] Key the in-process GSC service-account cache by account/config fingerprint, or remove it until correctness is proven across multi-account runs.
+- [ ] [#release-v028] Cut the next corky release: update VERSIONS.md, pick the post-v0.27.0 version, and ship the 8 commits currently only on 20260413/corky-gsc.
 <!-- /agent:pending -->

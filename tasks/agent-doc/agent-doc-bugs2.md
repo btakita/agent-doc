@@ -408,7 +408,33 @@ I did not make another code change for this prompt because the fix is already pr
 - `cargo install --path src/agent-doc --force`
 
 All four passed.
-<!-- agent:boundary:b3262b24 -->
+❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is not working. The JB plugin surfaced an error that I was not able to copy in time. spec-test-build-install-commit-push
+### Re: claudescore-3 routed failure — gpt-5
+
+I investigated the `claudescore-3.md` report. The current state points to an already-fixed `src/agent-doc` route bug, not a new unfixed path.
+
+Root cause from the captured failure:
+- route accepted a rerun into live pane `%316`
+- the pending work was classified as `content_edit`
+- older Codex route behavior could still miss the new cycle start when either frontmatter-only drift was misclassified as pending content or the routed reopen payload picked up extra follow-up text instead of staying the bare `agent-doc <FILE>` reopen
+
+Those shapes are already fixed on the current `src/agent-doc` branch and already pushed. The current `claudescore-3.md` now preflights clean with `no_changes: true`, so there is no remaining live drift in that document to dispatch.
+
+Verification I ran on the current tree:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'route::tests::pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift' -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'route::tests::resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines' -- --exact`
+
+All six passed. Cargo still emitted the existing path-override warnings plus existing compile-time warnings; none were new blockers.
+
+I did not make another `src/agent-doc` code change in this cycle because I could not reproduce a remaining unfixed route defect on the current branch.
+
+I did add the follow-up that still looks real here:
+- `#jberr` `[recommended]` Keep JetBrains `Run Agent Doc` route failures copyable/persistent instead of transient-only. Plan: `tasks/agent-doc/plan-jb-route-error-capture.md`
+<!-- agent:boundary:c079fb7f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -420,6 +446,7 @@ agent-doc route failed (exit 1): resync: stash pane %338 is registered in its ow
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#xthm] jberr=[recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

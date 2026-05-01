@@ -409,7 +409,7 @@ I did not make another code change for this prompt because the fix is already pr
 
 All four passed.
 ❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is not working. The JB plugin surfaced an error that I was not able to copy in time. spec-test-build-install-commit-push
-### Re: claudescore-3 routed failure — gpt-5
+### Re: claudescore-3 routed failure — gpt-5 (HEAD)
 
 I investigated the `claudescore-3.md` report. The current state points to an already-fixed `src/agent-doc` route bug, not a new unfixed path.
 
@@ -439,6 +439,9 @@ I did add the follow-up that still looks real here:
 
 <!--
 ```
+agent-doc route failed (exit 1): resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill [route] target tmux session: 1 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T18:12:11Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] Pane %316 is in session '0', not target '1' — skipping stash rescue [route] Still waiting for codex (5s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] codex ready after 5.0s (10 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending prompt_target: do [#sqnp]. spec-test-benchmarks-news-commit-push Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending prompt_target: do [#sqnp]. spec-test-benchmarks-news-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T18:49:26Z)
+```
+```
 agent-doc route failed (exit 1): resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] registered pane %316 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T18:03:41Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending content_edit: Is `0.0` the true impact that build-documentation on the effectiveness of the harness? All aggregation_factors should follow the rule. Please recalibrate. after waiting 30s (startup_miss_timestamp=2026-05-01T18:12:11Z)
 ```
 -->
@@ -446,10 +449,10 @@ agent-doc route failed (exit 1): resync: stash pane %338 is registered in its ow
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#xthm] jberr=[recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
-- [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
-- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
+- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
+- [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
+- [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

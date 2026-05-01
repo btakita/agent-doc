@@ -132,7 +132,7 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::harness::HarnessConfig;
@@ -257,10 +257,28 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
 }
 
 fn codex_dispatch_start_tracking_enabled(file: &Path) -> bool {
+    codex_tracking_roots(file)
+        .into_iter()
+        .any(|root| root.join(".codex/hooks.json").is_file())
+}
+
+fn codex_tracking_roots(file: &Path) -> Vec<PathBuf> {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    crate::snapshot::find_project_root(&canonical)
-        .map(|root| root.join(".codex/hooks.json").is_file())
-        .unwrap_or(false)
+    let mut roots = Vec::new();
+    let mut current = if canonical.is_file() {
+        canonical.parent()
+    } else {
+        Some(canonical.as_path())
+    };
+
+    while let Some(path) = current {
+        if path.join(".agent-doc").is_dir() {
+            roots.push(path.to_path_buf());
+        }
+        current = path.parent();
+    }
+
+    roots
 }
 
 fn build_routed_dispatch_start_tracker(
@@ -4629,6 +4647,43 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert_eq!(
             codex_routed_dispatch_start_proof(&tracker, &state),
             Some(RoutedDispatchStartProof::HookStateAdvanced)
+        );
+    }
+
+    #[test]
+    fn codex_dispatch_start_tracking_enabled_accepts_workspace_hook_for_nested_agent_doc_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path();
+        let nested = workspace.join("src/session-share");
+        let doc = nested.join("tasks/claudescore-3.md");
+
+        std::fs::create_dir_all(workspace.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(workspace.join(".codex")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        assert!(
+            codex_dispatch_start_tracking_enabled(&doc),
+            "workspace-level Codex hooks should enable routed dispatch tracking for nested agent-doc roots"
+        );
+    }
+
+    #[test]
+    fn codex_dispatch_start_tracking_enabled_stays_false_without_any_hook_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src/session-share");
+        let doc = nested.join("tasks/claudescore-3.md");
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        assert!(
+            !codex_dispatch_start_tracking_enabled(&doc),
+            "route should not wait for hook-backed submission proof when no tracked root has Codex hooks installed"
         );
     }
 

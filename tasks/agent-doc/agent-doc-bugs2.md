@@ -998,10 +998,30 @@ Evidence:
 - The discovery path in [audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:335) walks broad globs like `src/**/AGENTS.md` and `src/**/CLAUDE.md` with no skip-dir filtering in that stage ([audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:350)). `instruction_files::run()` invokes that discovery before any per-file checks ([lib.rs](/home/brian/work/btakita/agent-loop/src/instruction-files/src/lib.rs:67), [audit_docs.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/audit_docs.rs:30)).
 - This workspace has very large vendored trees under `src`, especially `src/prescience-notes-dev/node_modules/...`, so `src/**/...` discovery is far more expensive than the actual markdown audit.
 
+❯ How can we ignore node_modules, .venv, etc?
+
 So the short answer is: `agent-doc` is almost certainly chewing through a huge `src/**` subtree for `audit-docs`, not looping on your active session document.
 
 If you just want the CPU back, kill PID `3358814`. If you want the root cause fixed, the right code change is to make instruction-file discovery skip heavy directories such as `node_modules`, `target`, `.git`, and similar vendor/cache trees instead of globbing all of `src/**`.
-<!-- agent:boundary:8ca2c86d -->
+### Re: skip vendored dirs in audit-docs discovery — gpt-5
+
+The main thing to notice is that `skip_dirs` already exists in `AuditConfig`; it is just not wired into instruction-file discovery.
+
+Concrete split today:
+- [audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:67) already lists `node_modules`, `.venv`, `target`, `.git`, `vendor`, etc. in `skip_dirs`.
+- [audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:178) already honors that skip list in `check_staleness()` by pruning directory recursion.
+- But [audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:350) discovers instruction files with raw recursive globs like `src/**/AGENTS.md` and `src/**/CLAUDE.md`, and `glob::glob(...)` there has no directory-prune step.
+
+So there are two possible fixes:
+
+1. Cheap but incomplete: post-filter glob matches by rejecting any path whose ancestors include a skipped dir name.
+This fixes false positives from files found under `node_modules` or `.venv`, but it does not fix the CPU problem because glob already traversed those trees.
+
+2. Real fix: replace the recursive `src/**/...` discovery with an explicit directory walk that prunes `config.skip_dirs` before descending.
+This is the one that actually avoids walking `node_modules`, `.venv`, `target`, `.git`, and similar trees.
+
+So if the goal is specifically to stop the CPU burn, the right implementation is not “ignore after match”; it is “never descend into skipped directories in the first place.” A `walkdir`-style traversal for the recursive patterns is the cleanest way to do that, while keeping the root-level direct checks and fixed `.agent` runbook paths as they are.
+<!-- agent:boundary:305eadfc -->
 <!-- /agent:exchange -->
 
 <!--

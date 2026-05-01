@@ -4151,6 +4151,20 @@ fn poll_ack_content_sidecar(
     }
 }
 
+fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> String {
+    match std::fs::read_to_string(file) {
+        Ok(on_disk_content) => splice_pending_component(content_ours, &on_disk_content),
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: failed to read {} while preserving pending mutations during normalization fallback: {}",
+                file.display(),
+                e
+            );
+            content_ours.to_string()
+        }
+    }
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
@@ -4312,9 +4326,10 @@ pub fn try_ipc(
                         && !verify_sidecar_normalization(&snap_content, lines)
                     {
                         if let Some(ours) = content_ours {
+                            let fallback = content_ours_with_pending_from_disk(file, ours);
                             eprintln!(
                                 "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                                ours.len()
+                                fallback.len()
                             );
                             crate::ops_log::log_op(
                                 file,
@@ -4323,7 +4338,7 @@ pub fn try_ipc(
                                     file.display()
                                 ),
                             );
-                            (ours.to_string(), "content_ours")
+                            (fallback, "content_ours")
                         } else {
                             eprintln!(
                                 "[write] sidecar normalization diverged but no content_ours available — using sidecar"
@@ -4712,9 +4727,10 @@ fn write_ipc_and_poll(
                             && !verify_sidecar_normalization(&content, lines)
                         {
                             if let Some(ours) = content_ours {
+                                let fallback = content_ours_with_pending_from_disk(doc_file, ours);
                                 eprintln!(
                                     "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                                    ours.len()
+                                    fallback.len()
                                 );
                                 crate::ops_log::log_op(
                                     doc_file,
@@ -4723,7 +4739,7 @@ fn write_ipc_and_poll(
                                         doc_file.display()
                                     ),
                                 );
-                                ours.to_string()
+                                fallback
                             } else {
                                 eprintln!(
                                     "[write] sidecar normalization diverged but no content_ours — using sidecar ({} bytes)",
@@ -5233,20 +5249,21 @@ fn normalize_final_template_content(
     normalize_template_structure_or_fail(&normalized, file)
 }
 
-/// Transfer the `agent:pending` component content from `source` into `target`.
+/// Transfer the tracked backlog/pending component content from `source` into
+/// `target`.
 ///
 /// When the on-disk file has pending mutations applied (e.g. `--pending-done`)
 /// that are not reflected in `content_ours` (which was built from a pre-mutation
-/// baseline), this function preserves those mutations by splicing the pending
-/// component from `source` into `target`.
+/// baseline), this function preserves those mutations by splicing the tracked
+/// backlog component from `source` into `target`.
 ///
 /// Behaviour:
-/// - If both `source` and `target` have a `pending` component: replaces the
+/// - If both `source` and `target` have a tracked backlog component: replaces the
 ///   content between the markers in `target` with the content from `source`.
-/// - If `source` has no `pending` component: returns `target` unchanged.
-/// - If `source` has a `pending` component but `target` does not: logs a warning
-///   and returns `target` unchanged (can't locate insertion point without knowing
-///   document structure).
+/// - If `source` has no tracked backlog component: returns `target` unchanged.
+/// - If `source` has tracked backlog content but `target` does not: logs a
+///   warning and returns `target` unchanged (can't locate insertion point
+///   without knowing document structure).
 fn splice_pending_component(target: &str, source: &str) -> String {
     let source_comps = match component::parse(source) {
         Ok(c) => c,
@@ -5280,8 +5297,8 @@ fn splice_pending_component(target: &str, source: &str) -> String {
         Some(tgt_comp) => tgt_comp.replace_content(target, source_content),
         None => {
             eprintln!(
-                "[write] WARNING: splice_pending: source has agent:pending but target does not — \
-                 pending mutations may be lost on IPC timeout"
+                "[write] WARNING: splice_pending: source has tracked backlog content but target does not — \
+                 pending mutations may be lost on IPC fallback"
             );
             target.to_string()
         }
@@ -7353,6 +7370,131 @@ mod ack_content_snapshot_tests {
         assert!(
             snap.contains("❯ do #jbpfx2"),
             "snapshot must use content_ours with ❯ prefix; got: {}",
+            snap
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_splices_pending_mutations_from_disk() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+        let on_disk_with_pending = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] [#keepme] Preserve pending add from disk
+<!-- /agent:backlog -->
+";
+        std::fs::write(&doc, on_disk_with_pending).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do #splpend
+agent response
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+        let normalize_prefix_lines = vec!["do #splpend".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path) {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                                if let Some(pid) = json.get("patch_id").and_then(|v| v.as_str()) {
+                                    let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #splpend
+agent response
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+                                    let _ = std::fs::write(
+                                        ack_dir.join(format!("{pid}.md")),
+                                        bad_sidecar,
+                                    );
+                                }
+                            }
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #splpend"),
+            "snapshot must preserve normalized prompt prefix; got: {}",
+            snap
+        );
+        assert!(
+            snap.contains("- [ ] [#keepme] Preserve pending add from disk"),
+            "snapshot must preserve pending mutations from disk during normalization fallback; got: {}",
             snap
         );
     }

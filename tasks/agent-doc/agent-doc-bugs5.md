@@ -87,7 +87,7 @@ The gap: when the pane dies during preflight (after `start_preflight()` but befo
 2. **Generic `--component-add <name> <text>`** — target any named component, not just backlog
 3. **Parse `<!-- replace:<component> -->` blocks in response heredoc** — the binary already parses `<!-- patch:exchange -->` (via boundary synthesis fallback), extend to other components
 ❯ do #spfxnorm. spec-test-build-install-commit-push
-### Re: #spfxnorm — gpt-5 (HEAD)
+### Re: #spfxnorm — gpt-5
 
 Implemented in `src/agent-doc` and pushed as `842c6bd` (`fix: repair post-commit prompt prefix drift`).
 
@@ -107,19 +107,7 @@ Pushed:
 - commit `842c6bd`
 
 No new follow-up backlog items came out of this fix.
-<!-- agent:boundary:5db17b95 -->
-Running `Force Claim for Tmux Pane` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/agentic-harness-engineering.md, I am getting an error:
-```
-resync: purged 2 orphaned stash pane(s)
-warning: overwriting claim on pane %151 (was /home/br → 132cd277)
-merged default components into .agent-doc/config.toml
-[claim] using cwd=/home/brian/work/btakita/agent-loop/src/session-share for registry entry
-focused pane %151
-Claimed /home/brian/work/btakita/agent-loop/src/session-share/tasks/agentic-harness-engineering.md for pane %151 (session 132cd277)
-Watch daemon started.
-```
-
-spec-test-build-install-commit-push
+<!-- agent:boundary:e9a17b97 -->
 <!-- /agent:exchange -->
 
 ## Queue

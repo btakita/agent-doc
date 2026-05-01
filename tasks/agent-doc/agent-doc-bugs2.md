@@ -556,17 +556,35 @@ Code commit/push:
 - `src/agent-doc` `b70ccae` on `20260422/codex-agent-backend` (`fix: harden codex routed reopen dispatch`)
 
 No new backlog item is needed from this fix.
+### Re: closeout normalization — gpt-5
+
+This follow-up only reopens and recloses the document so the binary-owned commit path can absorb the concurrent status/backlog drift and clear the transient `(HEAD)` closeout artifact cleanly. No additional code or backlog work was needed beyond the routed Codex reopen fix above.
+2 cases of `stash pane ... is registered in its own project root`. corky.md is active and blocking running agent-doc from the JB editor.
+
 ```
 agent-doc route failed (exit 1): resync: stash pane %292 is registered in its own project root — skipping kill resync: stash pane %294 is registered in its own project root — skipping kill resync: stash pane %291 is registered in its own project root — skipping kill resync: stash pane %297 is registered in its own project root — skipping kill resync: stash pane %298 is registered in its own project root — skipping kill resync: stash pane %290 is registered in its own project root — skipping kill resync: stash pane %293 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1535741) in pane %301 for tasks/monsterrodholders.md [route] codex ready after 0.5s (1 polls) [route] Pane %301 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %301 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %301 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending content_edit: Checkout is functioning, and the WooCommerce `10.7.0` / WooCommerce PayPal Payments `4.0.3` maintenance window is now fully validated. `#wcx1`, `#tprc`, `#ga4c`, `#cfse`, and `#trfc` are complete: production preflight on May 1, 2026 confirmed the upgraded plugin versions, writable WordPress paths, and a healthy stored PayPal webhook (`6TM19664BH124693K`); post-upgrade Stripe orders continued processing (`#86732`, `#86734`, `#86736`); live PayPal verification orders on the hidden test product succeeded (`#86735`, `#86738`); and product `86558` / `pmt-verify-xk7r92` was returned to `draft` after the test. The earlier April 27, 2026 "zero orders / traffic collapse" scare remains a partial-day false positive rather than a live checkout outage. Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %301, but no new document cycle started for pending content_edit: Checkout is functioning, and the WooCommerce `10.7.0` / WooCommerce PayPal Payments `4.0.3` maintenance window is now fully validated. `#wcx1`, `#tprc`, `#ga4c`, `#cfse`, and `#trfc` are complete: production preflight on May 1, 2026 confirmed the upgraded plugin versions, writable WordPress paths, and a healthy stored PayPal webhook (`6TM19664BH124693K`); post-upgrade Stripe orders continued processing (`#86732`, `#86734`, `#86736`); live PayPal verification orders on the hidden test product succeeded (`#86735`, `#86738`); and product `86558` / `pmt-verify-xk7r92` was returned to `draft` after the test. The earlier April 27, 2026 "zero orders / traffic collapse" scare remains a partial-day false positive rather than a live checkout outage. after waiting 30s (startup_miss_timestamp=2026-05-01T04:33:50Z)
 ```
 ```
-
 agent-doc route failed (exit 1): resync: stash pane %290 is registered in its own project root — skipping kill resync: stash pane %293 is registered in its own project root — skipping kill resync: stash pane %292 is registered in its own project root — skipping kill resync: stash pane %294 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 4132841) in pane %298 for tasks/software/corky.md [sync] recovered live pane %298 for session 584ef929 via supervisor pid 4132841 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: registered pane %298 for tasks/software/corky.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%298 pane_pid=4131303 pane_session=0 current_command=agent-doc)
 ```
-### Re: closeout normalization — gpt-5
+### Re: stash-pane skips and busy routed sessions — gpt-5
 
-This follow-up only reopens and recloses the document so the binary-owned commit path can absorb the concurrent status/backlog drift and clear the transient `(HEAD)` closeout artifact cleanly. No additional code or backlog work was needed beyond the routed Codex reopen fix above.
-<!-- agent:boundary:a3d0d579 -->
+The `resync: stash pane ... is registered in its own project root — skipping kill` lines are not the blocker. They come from `src/agent-doc/src/resync.rs` and are a protective diagnostic: when route/resync sees a stash pane that belongs to a sibling project's own registry, it refuses to kill it from the current root. That is noisy, but it is intentional safety behavior, not the cause of either JB failure.
+
+The two real failures are separate:
+
+- `tasks/software/corky.md`: route is fail-closing on the idle-prompt guard. `ops.log` records `route_existing_pane_not_idle file=tasks/software/corky.md pane=%298 ... current_command=agent-doc`, so the problem is that the pane is still considered busy, not that resync skipped a stash kill.
+- `src/boost-client/tasks/monsterrodholders.md`: the `pending content_edit ... no new document cycle started` timeout is in the same closeout/repair family as `#bdryc` and `#wcrp`. Route accepted the trigger, then waited for a new cycle ack for document drift that appears to have already been materially answered.
+
+So my read is:
+
+- the stash-pane message is warning-level noise that should probably be collapsed or deduplicated,
+- the `corky.md` failure is an existing busy-session routing problem,
+- the `monsterrodholders.md` timeout is existing boundary/repair drift, not a new stash-root ownership bug.
+
+The updated `#bdryc` wording is directionally right for the deterministic repair requirement. No new backlog item is needed from this turn because the live failures here still map back to `#bdryc` and `#wcrp` rather than a distinct third defect.
+
+<!-- agent:boundary:44d0ed15 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -575,7 +593,8 @@ This follow-up only reopens and recloses the document so the binary-owned commit
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bdryc] Completed-turn boundary stale after response patchback: if an assistant response lands in `agent:exchange` but the `agent:boundary` marker stays above that answered prompt, route and session-check keep treating the prompt as pending and reruns fail closed on `pending prompt_target` even though the turn is visibly complete. Repro from `src/session-share/tasks/claudescore-3.md` on May 1, 2026 after `Can we run specific rubrics for fine tuning?`. Plan: tasks/agent-doc/plan-boundary-completion-recovery.md
+- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
+- [ ] [#bdryc] Completed-turn boundary stale after response patchback: if an assistant response lands in `agent:exchange` but the `agent:boundary` marker stays above that answered prompt, route and session-check keep treating the prompt as pending and reruns fail closed on `pending prompt_target` even though the turn is visibly complete. Repro from `src/session-share/tasks/claudescore-3.md` on May 1, 2026 after `Can we run specific rubrics for fine tuning?`. Expected fix: deterministic auto-repair first; interactive prompt only if multiple safe repairs are genuinely ambiguous. Plan: tasks/agent-doc/plan-boundary-completion-recovery.md
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 <!-- /agent:backlog -->
 

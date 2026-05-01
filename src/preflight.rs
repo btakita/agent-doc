@@ -772,6 +772,21 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     Ok((recovered, committed))
 }
 
+fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
+    if let Some(message) = crate::session_check::detect_uncommitted_closeout_drift(file)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "preflight_blocked_uncommitted_closeout_drift file={} reason={}",
+                file.display(),
+                message.replace('\n', " ")
+            ),
+        );
+        anyhow::bail!("{}", message);
+    }
+    Ok(())
+}
+
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -845,6 +860,12 @@ pub fn run(file: &Path) -> Result<()> {
     if let Err(e) = snapshot::ensure_initialized(file) {
         eprintln!("[preflight] warning: auto-init failed: {}", e);
     }
+
+    // Step 1b2: Fail closed on out-of-band closeout drift before this preflight
+    // mutates backlog state or runs the generic commit path. Otherwise a
+    // snapshot/file pair that already contains a visible response could be
+    // normalized into a misleading `no_changes` result.
+    enforce_no_uncommitted_closeout_drift(file)?;
 
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
     // reorder detection. MUST run BEFORE step 2 commit so the single step-2
@@ -2490,6 +2511,46 @@ mod tests {
         run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_uncommitted_closeout_drift_even_without_diff() {
+        let dir = setup_project();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("news/2026-05-01")).unwrap();
+
+        let doc = root.join("session.md");
+        let news_index = root.join("news/README.md");
+        let news_day = root.join("news/2026-05-01/README.md");
+        let old_doc = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nold body\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, old_doc).unwrap();
+        std::fs::write(&news_index, "old news index\n").unwrap();
+        std::fs::write(&news_day, "old news day\n").unwrap();
+        snapshot::save(&doc, old_doc).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md", "news/README.md", "news/2026-05-01/README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let new_doc = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nold body\n### Re: create today's news — codex\nresponse\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, new_doc).unwrap();
+        snapshot::save(&doc, new_doc).unwrap();
+        std::fs::write(&news_index, "new news index\n").unwrap();
+        std::fs::write(&news_day, "new news day\n").unwrap();
+
+        let err = run(&doc).expect_err("preflight should fail before diffing hidden closeout drift");
+        let message = err.to_string();
+        assert!(message.contains("snapshot differs from HEAD"));
+        assert!(message.contains("tracked side-effect edits"));
+        assert!(message.contains("news/README.md"));
+        assert!(message.contains("news/2026-05-01/README.md"));
+        assert!(message.contains("agent-doc write --commit"));
     }
 
     #[test]

@@ -2465,6 +2465,50 @@ pub fn verify_snapshot_committed(file: &Path) -> Result<SnapshotCommitStatus> {
     }
 }
 
+/// List tracked modified paths in the owning git repo for `file`.
+///
+/// Paths are returned relative to the narrowed repo root (submodule when
+/// applicable). Untracked files are excluded.
+pub(crate) fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
+    if !is_in_git_repo(file) {
+        return Ok(Vec::new());
+    }
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+            "--ignored=no",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let mut paths = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        if line.starts_with("??") {
+            continue;
+        }
+        let mut path = line[3..].trim().to_string();
+        if let Some((_, renamed_to)) = path.rsplit_once(" -> ") {
+            path = renamed_to.trim().to_string();
+        }
+        if !path.is_empty() {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 /// Check whether the parent repo's submodule pointer is current for a file in a submodule.
 /// Returns `true` if the pointer needs updating (submodule is dirty in parent), `false` otherwise.
 pub(crate) fn is_submodule_pointer_stale(file: &Path) -> bool {

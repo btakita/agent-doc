@@ -245,9 +245,13 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
             snapshot_len,
             head_len,
         } => {
+            let side_effects = tracked_side_effect_note(file)?;
             let msg = format!(
-                "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed",
+                "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed{} {}",
                 snapshot_len, head_len
+                ,
+                side_effects,
+                closeout_recovery_hint(file)
             );
             eprintln!("{}", msg);
             crate::ops_log::log_op(
@@ -261,6 +265,77 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
             );
             Ok(GuardResult::Error(msg))
         }
+    }
+}
+
+fn closeout_recovery_hint(file: &Path) -> String {
+    format!(
+        "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
+        file.display(),
+        file.display()
+    )
+}
+
+fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let doc_name = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(crate::git::tracked_modified_paths(file)?
+        .into_iter()
+        .filter(|path| !path.starts_with(".agent-doc/"))
+        .filter(|path| path != &doc_name && !path.ends_with(&format!("/{doc_name}")))
+        .collect())
+}
+
+fn tracked_side_effect_note(file: &Path) -> Result<String> {
+    let mut paths = tracked_side_effect_paths(file)?;
+    if paths.is_empty() {
+        return Ok(String::new());
+    }
+    let overflow = paths.len().saturating_sub(3);
+    paths.truncate(3);
+    let mut note = format!("; tracked side-effect edits: {}", paths.join(", "));
+    if overflow > 0 {
+        note.push_str(&format!(" (+{} more)", overflow));
+    }
+    Ok(note)
+}
+
+pub(crate) fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
+    if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
+        return Ok(None);
+    }
+    if let Some(marker) = detect_bypassed_response_write(file)? {
+        return Ok(Some(format!(
+            "found likely direct response patchback without agent-doc cycle: {}{} {}",
+            marker,
+            tracked_side_effect_note(file)?,
+            closeout_recovery_hint(file)
+        )));
+    }
+    match crate::git::verify_snapshot_committed(file)? {
+        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
+            snapshot_len,
+            head_len,
+        } => {
+            if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+                return Ok(None);
+            }
+            Ok(Some(format!(
+                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}){} {}",
+                snapshot_len,
+                head_len,
+                tracked_side_effect_note(file)?,
+                closeout_recovery_hint(file)
+            )))
+        }
+        crate::git::SnapshotCommitStatus::Committed
+        | crate::git::SnapshotCommitStatus::NoSnapshot
+        | crate::git::SnapshotCommitStatus::NoHead
+        | crate::git::SnapshotCommitStatus::NotInGitRepo => Ok(None),
     }
 }
 
@@ -411,8 +486,10 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 )));
             }
             return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
-                marker
+                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
+                marker,
+                tracked_side_effect_note(file)?,
+                closeout_recovery_hint(file)
             )));
         }
         if let Some(marker) = detect_active_session_post_commit_drift(file)? {
@@ -470,8 +547,10 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     )));
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
-                    marker
+                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
+                    marker,
+                    tracked_side_effect_note(file)?,
+                    closeout_recovery_hint(file)
                 )));
             }
             if let Some(marker) = detect_active_session_post_commit_drift(file)? {
@@ -554,8 +633,10 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     )));
                 }
                 return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}",
-                    marker
+                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
+                    marker,
+                    tracked_side_effect_note(file)?,
+                    closeout_recovery_hint(file)
                 )));
             }
             if let Some(marker) = detect_active_session_post_commit_drift(file)? {
@@ -3100,6 +3181,81 @@ mod tests {
                     msg.contains("snapshot does not match HEAD"),
                     "expected snapshot-committed guard failure, got: {msg}"
                 );
+            }
+            SessionCheckStatus::Ok(msg) => {
+                panic!("expected Interrupted, got Ok: {msg}");
+            }
+        }
+    }
+
+    #[test]
+    fn session_check_snapshot_committed_guard_reports_side_effect_recovery_hint() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join("news/2026-05-01")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let news_index = root.join("news/README.md");
+        let news_day = root.join("news/2026-05-01/README.md");
+        fs::write(&doc, "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n").unwrap();
+        fs::write(&news_index, "old news index\n").unwrap();
+        fs::write(&news_day, "old daily news\n").unwrap();
+        crate::snapshot::save(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n",
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md", "news/README.md", "news/2026-05-01/README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: create today's news — codex\nresponse\n";
+        fs::write(&doc, new_content).unwrap();
+        crate::snapshot::save(&doc, new_content).unwrap();
+        fs::write(&news_index, "new news index\n").unwrap();
+        fs::write(&news_day, "new daily news\n").unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(new_content), Some(new_content)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(new_content),
+            Some(new_content),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(msg.contains("tracked side-effect edits"));
+                assert!(msg.contains("news/README.md"));
+                assert!(msg.contains("news/2026-05-01/README.md"));
+                assert!(msg.contains("agent-doc write --commit"));
             }
             SessionCheckStatus::Ok(msg) => {
                 panic!("expected Interrupted, got Ok: {msg}");

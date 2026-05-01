@@ -1572,6 +1572,66 @@ pub(crate) fn enforce_no_replace_pending(
     Ok(())
 }
 
+fn count_markdown_checklist_items(body: &str) -> usize {
+    body.lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            let Some(rest) = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+                .or_else(|| trimmed.strip_prefix("+ "))
+                .or_else(|| {
+                    let digit_run = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+                    if digit_run > 0 {
+                        trimmed[digit_run..].strip_prefix(". ")
+                    } else {
+                        None
+                    }
+                })
+            else {
+                return false;
+            };
+
+            rest.starts_with("[ ] ") || rest.starts_with("[x] ") || rest.starts_with("[/] ")
+        })
+        .count()
+}
+
+fn todo_component_checklist_count(current_content: &str) -> Result<Option<usize>> {
+    let components = component::parse(current_content)
+        .context("failed to parse components for todo patch validation")?;
+    Ok(components
+        .iter()
+        .find(|component| component.name == "todo")
+        .map(|component| count_markdown_checklist_items(component.content(current_content))))
+}
+
+pub(crate) fn enforce_no_destructive_todo_patch(
+    current_content: &str,
+    patches: &[template::PatchBlock],
+) -> Result<()> {
+    let Some(todo_patch) = patches.iter().rev().find(|patch| patch.name == "todo") else {
+        return Ok(());
+    };
+    let Some(current_count) = todo_component_checklist_count(current_content)? else {
+        return Ok(());
+    };
+    if current_count == 0 {
+        return Ok(());
+    }
+
+    let patched_count = count_markdown_checklist_items(&todo_patch.content);
+    if patched_count < current_count {
+        anyhow::bail!(
+            "ERR: patch:todo would reduce total checklist item count from {} to {} and is forbidden because it can silently delete untouched todo entries. Rewrite the full todo component or edit the document directly.",
+            current_count,
+            patched_count
+        );
+    }
+
+    Ok(())
+}
+
 struct NormalizedTemplateResponse {
     response_for_capture: Option<String>,
     patches: Vec<template::PatchBlock>,
@@ -3096,6 +3156,7 @@ pub fn run_template(
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    enforce_no_destructive_todo_patch(&current_content, &patches)?;
     enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
@@ -3275,6 +3336,7 @@ pub fn run_stream(
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    enforce_no_destructive_todo_patch(&current_content, &patches)?;
     enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
@@ -3862,6 +3924,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    enforce_no_destructive_todo_patch(&current_content, &patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -4059,6 +4122,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, false)?;
+    enforce_no_destructive_todo_patch(&content, &patches)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
     let snapshot_doc = snapshot::load(file).ok().flatten();
@@ -8794,6 +8858,15 @@ mod pending_patch_normalization_tests {
         (doc, content)
     }
 
+    fn doc_with_todo(root: &TempDir, todo_body: &str) -> (PathBuf, String) {
+        let doc = root.path().join("todo.md");
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n<!-- agent:todo patch=replace -->\n{todo_body}<!-- /agent:todo -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        (doc, content)
+    }
+
     #[test]
     fn normalize_pending_patch_repairs_lone_bare_placeholder() {
         let tmp = TempDir::new().unwrap();
@@ -8901,5 +8974,62 @@ mod pending_patch_normalization_tests {
         )];
         super::enforce_no_replace_pending(&patches, false)
             .expect_err("allow=false should reject backlog replacement");
+    }
+
+    #[test]
+    fn destructive_todo_patch_is_rejected_when_it_drops_checklist_items() {
+        let tmp = TempDir::new().unwrap();
+        let (_doc, content) = doc_with_todo(
+            &tmp,
+            concat!(
+                "### Phase 1\n\n",
+                "- [x] Select benchmark\n",
+                "- [x] Write methodology\n\n",
+                "### Phase 2\n\n",
+                "- [ ] Expand git signal extraction\n",
+                "- [ ] Re-score sessions\n",
+            ),
+        );
+        let patches = vec![crate::template::PatchBlock::new(
+            "todo",
+            concat!(
+                "### Phase 1\n\n",
+                "- [x] Select benchmark\n",
+                "- [x] Write methodology\n",
+            ),
+        )];
+
+        let err = super::enforce_no_destructive_todo_patch(&content, &patches)
+            .expect_err("subset todo patch should fail closed");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("patch:todo would reduce total checklist item count from 4 to 2"),
+            "unexpected error: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn todo_patch_with_same_checklist_count_is_allowed() {
+        let tmp = TempDir::new().unwrap();
+        let (_doc, content) = doc_with_todo(
+            &tmp,
+            concat!(
+                "### Phase 1\n\n",
+                "- [ ] Original item 1\n",
+                "- [ ] Original item 2\n",
+            ),
+        );
+        let patches = vec![crate::template::PatchBlock::new(
+            "todo",
+            concat!(
+                "### Phase 1\n\n",
+                "- [x] Updated item 1\n",
+                "- [ ] Updated item 2\n",
+            ),
+        )];
+
+        super::enforce_no_destructive_todo_patch(&content, &patches)
+            .expect("same-size todo rewrite should remain allowed");
     }
 }

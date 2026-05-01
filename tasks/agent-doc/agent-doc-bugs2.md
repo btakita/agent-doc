@@ -38,7 +38,27 @@ Active backlog:
 
 Icebox:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- agent:boundary:6168cae9 -->
+❯ do [#6btt]. spec-test-build-install-commit-push
+### Re: #6btt closeout — gpt-5
+
+`#6btt` is implementation-complete.
+
+The closeout-parity fix is already present in `src/agent-doc` and already pushed on `origin/20260422/codex-agent-backend`, centered on commit `3c5ff18` (`fix: refresh no-op closeout sidecars`). The spec and regression surfaces for that fix are already on the branch as well.
+
+Verification I ran on the current branch:
+- `cargo test`
+- `cargo build`
+- `cargo install --path src/agent-doc --force --config 'patch.crates-io.agent-kit.path="/home/brian/work/btakita/agent-loop/src/agent-kit"' --config 'patch.crates-io.tmux-router.path="/home/brian/work/btakita/agent-loop/src/tmux-router"'`
+
+Results:
+- `cargo test`: pass (`1682` unit tests plus integration suites, `0` failed)
+- `cargo build`: pass
+- local install: pass with the explicit local `patch.crates-io` overrides above
+
+I also verified that plain `cargo install --path . --force` still fails against registry `agent-kit` with `unresolved import agent_kit::skill`, so I captured that as a recommended follow-up instead of treating the local install path as fully clean.
+
+I did not push the root `agent-loop` superproject from this turn because it is already `main...origin/main [ahead 3]` with unrelated local history and multiple unrelated working-tree edits. The relevant `src/agent-doc` branch already matches `origin`, so this cycle closes the task and records the remaining install-contract follow-up locally.
+<!-- agent:boundary:c0d53536 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -54,7 +74,7 @@ If I restart codex with the supervisor, the real-time the next session process h
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
+- [ ] [#instcfg] [recommended] Make local cargo install for src/agent-doc succeed without extra --config patch.crates-io.* path overrides, or document the required invocation.
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

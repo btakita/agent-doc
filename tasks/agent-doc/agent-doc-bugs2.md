@@ -188,7 +188,26 @@ Verification:
 Plan: `tasks/agent-doc/plan-routed-codex-busy-substate-and-ack-gap.md`
 
 `#rbgap` stays open. This response records one verified sub-fix, but the remaining live reroute replay items already in backlog still need to prove the May 1 failure family is fully gone end-to-end.
-<!-- agent:boundary:c91b5f71 -->
+❯ complete [#rbgap]. spec-test-build-install-commit-push
+### Re: #rbgap routed fresh-retry handoff gap — gpt-5
+
+`#rbgap` is closed. I fixed the remaining live Codex reroute gap in `src/agent-doc` and pushed `dd25b24` (`fix: follow fresh reroute handoff before cycle ack retry`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/route.rs` now treats the fresh-restart retry after a missed live-child cycle ack as a handoff-aware path: it waits for authoritative pane reassignment, re-resolves the dispatch pane, and only then resends the bare `agent-doc <FILE>` reopen.
+- If the replacement pane never becomes dispatch-ready, route now fails at that stage instead of collapsing the retry into a second misleading `no new cycle started` outcome.
+- The relative-path and replacement-pane regressions now drive the cycle-ack retry path directly, and `specs/07-commands.md` plus `VERSIONS.md` document the new invariant.
+
+Verification:
+- `cargo test --bin agent-doc fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs -- --nocapture`
+- `cargo test --bin agent-doc resolve_or_create_pane_follows_fresh_restart_retry_handoff_to_replacement_pane -- --nocapture`
+- `cargo test`
+- `cargo test --bin agent-doc route_falls_back_to_existing_session -- --nocapture`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note: the full `cargo test` sweep still hit one suite-order tmux fallback flake in `route_falls_back_to_existing_session`, but the exact rerun passed immediately with the same code after the failing sweep. I did not fold that separate harness-level instability into `#rbgap`; the routed fresh-restart handoff and absolute-path regressions added for this issue are passing.
+<!-- agent:boundary:c2d18cdd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -200,7 +219,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rbgap] Investigate remaining Run Agent Doc routed reverse-i-search / accepted-no-cycle failures across monsterrodholders.md, claudescore-3.md, and agent-doc-bugs2.md. Plan: tasks/agent-doc/plan-routed-codex-busy-substate-and-ack-gap.md
 - [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`

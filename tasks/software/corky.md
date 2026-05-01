@@ -650,7 +650,7 @@ Delivery:
 - pushed `20260413/corky-gsc` to `origin`
 
 Top remaining backlog item is `#tokenstore-delete-preservation`.
-### Re: #oauth-google-fixed-port spec-test-build-install-commit-push — gpt-5
+### Re: #oauth-google-fixed-port spec-test-build-install-commit-push — gpt-5 (HEAD)
 
 Implemented and pushed in `src/corky`.
 

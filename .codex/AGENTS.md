@@ -47,7 +47,7 @@ Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness codex --reload restart`; if output contains `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
+**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness codex --reload restart`; if output contains `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If the command instead reports that the Codex instructions are already up to date, treat the current prompt as stale instruction drift, continue this turn, and use the installed Codex instructions as authoritative. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
 **Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
@@ -112,6 +112,8 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 ### 1b. Update pending (template mode)
 
 If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Custom pending IDs should use `--pending-add "id=spec1 text"`; leading `--pending-add "[#spec1] text"` is accepted for compatibility but is not the canonical form. Full-replace via `<!-- replace:backlog -->` or `<!-- patch:backlog -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
+
+If you need to rewrite `<!-- agent:icebox -->`, use a template patch block in the response body: `<!-- replace:icebox --> ... <!-- /replace:icebox -->`. Do not try to route icebox mutations through `--pending-add`; those flags still target backlog only.
 
 **Pending capture rule:** if your response identifies concrete follow-up work that should be tracked, add it to `agent:backlog` in the same cycle. Do not leave pending-worthy next steps as exchange-only prose.
 

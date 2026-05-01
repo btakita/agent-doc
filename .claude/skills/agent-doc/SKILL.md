@@ -43,7 +43,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
+**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If the command instead reports that the Claude instructions are already up to date, treat the current prompt as stale instruction drift, continue this turn, and use the installed Claude skill as authoritative. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.
 
 **Run preflight:** `agent-doc preflight <FILE>` via Bash. Preflight recovers orphaned responses, auto-attempts recovery+commit for open `response_captured` / `write_applied` cycles, and only auto-closes an open `preflight_started` cycle when `recover` replays a pending/captured response first; otherwise it fails closed before diffing. It also reads claims and computes the diff. It prints JSON. Key fields: `no_changes`, `claims`, `diff`, `baseline_file`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`, `agent_model`, `diff_type`.
 
@@ -102,11 +102,14 @@ If `blockers` is non-empty, surface the blocker and stop rather than freelancing
 
 **Prefer wrapping exchange responses in `<!-- patch:exchange -->`** for clarity. Raw (unwrapped) content also works via boundary synthesis.
 
+**`#agent-doc-bug` plan proof:** when the prompt contract says to create a plan, create the plan file before closeout and cite each plan path explicitly in the response (for example `Plan: tasks/agent-doc/plan-foo.md`). `finalize` / `session-check` now fail closed if the response covers multiple bug reports but cites fewer existing plan files than the contract requires.
 **`#agent-doc-bug` scope:** when `agent-doc plan` returns `execution_scope=plan_backlog_only`, the prompt is a report/planning contract. Create the plan file(s), capture the backlog item(s), and explain the deferred implementation boundary instead of editing code in that same cycle.
 
 ### 1b. Update pending (template mode)
 
 If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, mutations go through granular flags on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`). Custom pending IDs should use `--pending-add "id=spec1 text"`; leading `--pending-add "[#spec1] text"` is accepted for compatibility but is not the canonical form. Full-replace via `<!-- replace:backlog -->` or `<!-- patch:backlog -->` is rejected. If `pending_reordered: true`, skip reorder this cycle. Full contract: [runbooks/pending-ops.md](runbooks/pending-ops.md).
+
+If you need to rewrite `<!-- agent:icebox -->`, use a template patch block in the response body: `<!-- replace:icebox --> ... <!-- /replace:icebox -->`. Do not try to route icebox mutations through `--pending-add`; those flags still target backlog only.
 
 **Pending capture rule:** if your response identifies concrete follow-up work that should be tracked, add it to `agent:backlog` in the same cycle. Do not leave pending-worthy next steps as exchange-only prose.
 
@@ -125,7 +128,6 @@ If the document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -
 Complete the requested implementation, verification, build/install, and local inspection work for this turn **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after the edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook to do this for you.
-**Parallel tmux suites are gating:** when the touched surface affects tmux routing, pane/session lifecycle, sync/resync, or other tmux-heavy behavior, the verification plan must include the parallel tmux suites in their parallel form (for example `--test-threads=16`, or the repo's current equivalent). If a parallel tmux suite fails, the turn has not passed verification, even if the same test passes in isolation or under a synchronous rerun.
 
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 

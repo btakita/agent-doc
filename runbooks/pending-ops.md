@@ -1,9 +1,11 @@
 # Pending ops — granular contract
 
-When a template-mode document has an `<!-- agent:pending -->` component, the agent mutates it
-through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:pending -->`
-(or the deprecated `<!-- patch:pending -->`) is **forbidden** in normal response cycles — the
-binary rejects those blocks with a clear error. See `src/agent-doc/specs/pending-system.md`
+When a template-mode document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, the agent mutates it
+through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:backlog -->`
+(or the deprecated `<!-- patch:pending -->` / `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
+binary rejects those blocks with a clear error. Compatibility note: the binary may normalize one accidental
+list-shaped `replace:pending` / `patch:pending` block internally before capture/replay so the cycle is not stranded,
+but agents must still treat that as a recovery backstop rather than a supported authoring path. See `src/agent-doc/specs/pending-system.md`
 for the full contract.
 
 ## Item shape
@@ -12,12 +14,29 @@ Pending items carry stable IDs and GFM checkboxes:
 
 ```
 - [ ] [#a3f2] active item
-- [x] [#b1c4] user-marked done (preflight reaps next cycle)
+- [x] [#b1c4] user-marked done (commit-required closeouts reap it in the same cycle; preflight / repair also clean up stale completed items)
 - [/] [#c9e0] gated — skipped by reaper, waiting on external signal
+1. [ ] [#d4e5] explicit top priority
 ```
 
 Preflight lazy-backfills IDs and checkboxes on any item that lacks them. You do not assign
 hashes yourself unless you intentionally use the `id=<custom> ` prefix on add.
+
+If any tracked parent item in a backlog or icebox uses ordered-list style (`1.`, `2.`, `3.`),
+the binary treats that component as an ordered tracked surface and renumbers all tracked parent
+items sequentially in current item order on render. That keeps explicit priority lists stable
+across add/reorder/done/reap operations.
+
+Backlog and icebox sections may also contain markdown headings or blank separator
+lines for organization. The granular pending ops preserve those non-item lines in
+place; they mutate only the actual task bullets.
+
+Nested lists are supported under a backlog/icebox item as indented continuation
+lines. Keep the tracked parent marker flush-left (`- ` or `1. `); the binary treats
+the indented children as part of that parent item and preserves them through reorder, done,
+reap, and transfer. Nested child task lines are canonicalized too: the binary inserts
+missing checkboxes and nested ids shaped like `[#parentid-abcd]` so subtask bullets can
+be referenced without promoting them to their own flush-left parent items.
 
 ## Granular flags
 
@@ -25,27 +44,37 @@ Combine any number of flags in one `agent-doc write` call:
 
 | Flag | Purpose |
 |------|---------|
-| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with `id=<custom> `. Repeat for multiple adds. |
-| `--pending-done <id>` | Mark `[x]` — preflight reaps next cycle. Repeat for multiple ids. |
+| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
+| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |
 | `--pending-gate <id>` | Transition to `[/]` gated state. Reaper skips gated items. |
 | `--pending-ungate <id>` | Return `[/]` to `[ ]`. |
 
+`agent:icebox` is not populated by `--pending-add`. When the response needs to
+rewrite the icebox component, use a template patch block in the response body:
+`<!-- replace:icebox --> ... <!-- /replace:icebox -->`.
+
 ## Custom IDs
 
 When you need a stable human-chosen identifier, start the add text with
-`id=<custom> `:
+canonical `id=<custom> ` syntax:
 
 ```bash
-agent-doc pending plan.md add "id=spec1 write rollout spec"
+agent-doc backlog plan.md add "id=spec1 write rollout spec"
 agent-doc write plan.md --pending-add "id=fix42 add regression test"
 ```
 
 Rules:
-- `custom` is 1-8 ASCII alphanumeric characters.
+- `custom` is a non-empty ASCII alphanumeric string; hyphens are allowed.
 - `id=#spec1 ...` is also accepted; the leading `#` is stripped.
+- Leading `[#spec1] ...` is accepted as compatibility input and normalized to the
+  same custom id, but `id=<custom> ` remains the preferred form for agents.
+- Bare `[#] ...` is invalid in active add-time paths. Omit it to get a generated
+  id, or use `id=<custom> ...` / `[#custom] ...` for an explicit id.
+- Stacked leading prefixes such as `[#spec1] [#spec2] ...` or
+  `id=spec1 [#spec2] ...` are invalid. Use exactly one leading custom-id prefix.
 - The custom id must be unique within the pending component.
 - The remainder after the prefix becomes the item text.
 
@@ -61,6 +90,44 @@ New pending items go at the **beginning** of the list. When adding multiple new
 items in one cycle, preserve the order you presented them in so the first
 recommended next step stays first.
 
+Exception: if you are later adding a follow-on step from an ordered batch that
+is already partially represented in pending, place the new item next to its
+predecessor rather than prepending it above earlier steps. The practical pattern
+is:
+
+```bash
+agent-doc write plan.md \
+  --pending-add "id=step3 [recommended] Add step 3" \
+  --pending-reorder gkke,9pw9,step3
+```
+
+That keeps the ordered batch stable when Step 1 / Step 2 already exist and you
+are only promoting Step 3 in a later cycle. If the predecessor is not already in
+pending, fall back to the normal front-insertion rule.
+
+## Plan-backed pending items
+
+If a pending item points at a dedicated plan document, create the plan file
+first, then add the pending item in the same cycle and include that exact plan
+file path in the item text. Do not create a vague pending bullet like "write
+the plan" and only later decide which file it refers to.
+
+Preferred shape:
+
+```bash
+agent-doc write plan.md \
+  --pending-add "id=spec2 [recommended] Draft follow-up rollout plan in tasks/agent-doc/plan-spec2-rollout.md"
+```
+
+That keeps the backlog self-describing: the pending line already tells the next
+cycle which concrete plan file exists and should be opened.
+
+If the document is being used collaboratively, treat that cross-document read as
+a security boundary. Shared docs should carry both
+`agent_doc_collaboration: shared` and an auditable
+`agent_doc_security_review: <review-id>` before a `do #id` cycle follows a
+plan path into another `.md` file.
+
 ## What to decide each cycle
 
 - Items completed during this response → `--pending-done <id>`
@@ -69,6 +136,12 @@ recommended next step stays first.
   follow-up that should be tracked across cycles.
 - **Unaccepted recommendations** → `--pending-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
+- **Existing `do #id` work that completed this cycle** → `--pending-done <id>` in
+  the same closeout command whether the item lived in the live backlog or the
+  icebox. Session-doc closeouts now fail before commit when a response clearly
+  completes `#id` but omits the matching done mutation. If the item is
+  code-complete but blocked on an external gate, prefer
+  `--pending-gate <id>` instead of leaving it silently open.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step
   option in the same cycle unless the options are explicitly mutually exclusive and

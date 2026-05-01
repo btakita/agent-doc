@@ -863,7 +863,7 @@ Send result:
 - **Sent Message ID**: `19de4e6d62d5bc92`
 - **Local draft source**: [2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md](/home/brian/work/btakita/agent-loop/mail/drafts/2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md)
 ❯ The email is formatted as markdown...not as html for the email. Should I apologize and have you resend the html formatted email?
-### Re: resend or not — gpt-5
+### Re: resend or not — gpt-5 (HEAD)
 
 Probably **do not apologize and resend immediately** unless the message is actually hard to read.
 

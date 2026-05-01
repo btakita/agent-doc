@@ -30,17 +30,6 @@ prompt_presets:
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260501-135728.md`*
 
-Active backlog:
-❯ - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
-❯ - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
-❯ - [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`
-❯ - [x] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
-❯ - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
-- [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
-- 1 more active item(s)
-
-Icebox:
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 ❯ do [#6btt]. spec-test-build-install-commit-push
 ### Re: #6btt closeout — gpt-5
 
@@ -819,14 +808,49 @@ Commit and push:
 Captured. The backlog item and plan reference for `#cs3cvis` are already present in the document, so I am not adding a duplicate tracked item in this cycle.
 
 I did not start implementation for `#cs3cvis` in this turn.
-<!-- agent:boundary:70ec9e5f -->
-<!-- /agent:exchange -->
 
-<!--
-Another `Agent Doc Run` error. We should never refuse to inject a routed trigger into a busy session. What you consider a "busy session" is almost never busy. Just do it. If it works it works. If it doesn't work, check back in. Don't assume it won't work because this is almost always wrong. spec-test-build-install-commit-push
+❯ Another `Agent Doc Run` error. We should never refuse to inject a routed trigger into a busy session. What you consider a "busy session" is almost never busy. Just do it. If it works it works. If it doesn't work, check back in. Don't assume it won't work because this is almost always wrong. spec-test-build-install-commit-push
 ```
 agent-doc route failed for tasks/claudescore-3.md after 36s (exit 1): resync: stash pane %359 is registered in its own project root — skipping kill resync: stash pane %356 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 725658) in pane %355 for tasks/claudescore-3.md [route] registered pane %355 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md but startup-miss 2026-05-01T21:14:54Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] registered pane %355 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is busy with pending document drift — applying scoped `agent-doc fix tasks/claudescore-3.md` once before failing closed [sync] recovered live pane %355 for session 7b453f47 via supervisor pid 725658 [sync] found alive agent-doc child (pid 725658) in pane %355 for tasks/claudescore-3.md [route] scoped fix left pane %355 authoritative for tasks/claudescore-3.md with a healthy supervisor — restarting the live codex session fresh once before one final reroute [sync] found alive agent-doc child (pid 725658) in pane %355 for tasks/claudescore-3.md [route] registered pane %355 proves a newer open harness run after startup-miss 2026-05-01T21:14:54Z for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md — clearing stale marker [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: reverse-i-search: [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar Error: registered pane %355 for tasks/claudescore-3.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/claudescore-3.md` once; refusing to inject a routed trigger into a busy session (pane=%355 pane_pid=721483 pane_session=0 current_command=agent-doc)
 ```
+### Re: busy routed trigger retry — gpt-5
+
+I traced the failure to the last same-document Codex busy-pane branch in `src/agent-doc/src/route.rs`.
+
+Root cause:
+- route already had the scoped `agent-doc fix` retry and one bounded fresh supervisor restart
+- if the reroute still came back as "busy", the code immediately fail-closed even though the live pane could still just be stuck in stale shell/composer state after recovery
+- there was no final bounded recovery step to clear that state and prove whether the bare reopen would actually work
+
+What I changed:
+- after the existing scoped-fix + fresh-restart ladder is exhausted, same-document Codex reroutes now send one bounded interrupt sequence (`Escape`, then `C-c`), wait again for a truly idle prompt, and rerun the same bare `agent-doc <FILE>` reopen once
+- the bare reopen safety contract stays intact: this does not allow multiline payloads or drafted-composer injection
+- added a route regression for the interrupt-recovery branch, plus spec/version updates
+
+Files:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force` (from `src/agent-doc`)
+
+All four passed.
+
+Commit + push:
+- `src/agent-doc`: `796be07` (`fix: retry busy codex reroutes after interrupt`), pushed to `origin/20260422/codex-agent-backend`
+
+Plan: `tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md`
+
+I left the existing unrelated `src/agent-doc/Cargo.lock` worktree change unstaged.
+<!-- agent:boundary:63656b86 -->
+<!-- /agent:exchange -->
+
+<!--
+I hope you chose "Optimistic Injection with Proof".
 ---
 do [#utf8p]. spec-test-build-install-commit-push
 ---
@@ -836,6 +860,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#utf8p] [recommended] Fix the UTF-8 byte-boundary panic in component parsing triggered near `❯`. Plan: tasks/agent-doc/plan-component-parser-utf8-boundaries.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`

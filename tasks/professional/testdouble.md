@@ -834,7 +834,21 @@ If you want a slightly warmer version, change the opening line to `Thanks again 
 ### Re: closeout normalization — gpt-5
 
 Noted. The reply draft is addressed to Colleen, with Todd treated only as the agreement signer in the background.
-<!-- agent:boundary:98797752 -->
+❯ Use corky to create a gmail draft to Anya (not Colleen). https://mail.google.com/mail/u/1/#search/test+double/FMfcgzQgLXxhqGHCBxClmTXGddwvLjfm
+### Re: corky Gmail draft created — gpt-5
+
+Done. I used `corky` to create the Gmail draft on the `btak.dev@gmail.com` account and pushed it as a draft on the existing PandaDoc thread.
+
+Details:
+
+- **To**: `anya.iverova@testdouble.com`
+- **Subject**: `Re: Test Double Subcontractor Agreement - Brian Takita`
+- **Thread ID**: `19ddadbc6387a4bb`
+- **In-Reply-To**: `<20260429200849.22db2343a3e9e7c6@email.pandadoc.net>`
+- **Local draft file**: [2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md](/home/brian/work/btakita/agent-loop/mail/drafts/2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md)
+
+One note: I inferred `anya.iverova@testdouble.com` from the PandaDoc thread metadata because the synced conversation only exposed the PandaDoc sender address directly. The Gmail draft creation succeeded using that direct address.
+<!-- agent:boundary:a73f84f8 -->
 <!-- /agent:exchange -->
 
 ## Queue

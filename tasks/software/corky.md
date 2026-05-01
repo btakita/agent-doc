@@ -629,7 +629,10 @@ Recommended backlog, in priority order:
 4. `oauth-callback-url-decode`: [recommended] URL-decode OAuth callback params before state comparison and token exchange.
 
 Top backlog item id: `oauth-google-fixed-port`.
-<!-- agent:boundary:db96b5b1 -->
+### Re: closeout drift — gpt-5
+
+Recovered post-closeout drift after the committed code review response.
+<!-- agent:boundary:6d2c48c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

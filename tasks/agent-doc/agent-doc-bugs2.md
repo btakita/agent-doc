@@ -956,21 +956,41 @@ Code commit/push:
 
 No new backlog item is needed from this fix.
 
-<!-- agent:boundary:793b8d2b -->
+### Re: JB Plugin routed auto-start unbound dispatch — gpt-5
+
+I fixed the routed auto-start failure behind this JB Plugin error.
+
+Root cause:
+- After route auto-fixed the stale `%332` binding and started a fresh pane `%335`, `route.rs` still relied on the early fresh-pane registration surviving all the way through harness boot. Recovery churn during the ready-wait could clear that temporary geometry-only binding, so the first guarded `send_command_checked()` saw `%335` as unbound and failed closed with `route dispatch target %335 is not registered ...`, even though the new Codex pane was alive and ready.
+- I also found adjacent test-only registry/CWD races in the tmux route/sync coverage. Those did not cause the JB production failure, but they were masking the route fix under parallel suite runs, so I hardened the affected tests to use explicit registry roots and canonical absolute file paths instead of process-global cwd assumptions.
+
+Implemented in `src/agent-doc`:
+- `route.rs` now re-checks the fresh pane binding immediately before the first guarded trigger injection and re-registers it only when the pane is still safe to claim.
+- The rebind still fails closed for cross-file ownership or when a different pane already owns the same session, so the existing dispatch safety guard remains intact.
+- Added a regression that clears the fresh-pane registration during the ready wait and proves the first routed trigger still succeeds.
+- Hardened the route/sync tmux tests that were depending on shared cwd state, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification completed:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml auto_start_reuses_other_file_pane_only_as_split_anchor -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml concurrent_provision_pane_serializes_same_session_auto_start -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `5b2d461` on `20260422/codex-agent-backend` (`fix: rebind fresh route pane before dispatch`)
+
+No new backlog item is needed from this fix.
+
+<!-- agent:boundary:2267bed1 -->
 <!-- /agent:exchange -->
 
 <!--
-I keep on seeing. How can this be fixed?:
-```
-• The installed agent-doc binary is newer than the session instructions (0.33.16 vs 0.33.12). I’m reloading the skill
-  definition now; if it requests compaction, I’ll stop there as required.
-
-• Ran agent-doc skill install --reload compact
-  └ Skill already up to date (v0.33.16).
-```
----
 Can we isolate the parallel tmux test from each other?
-> • The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
+> •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
   session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
   this change actually regressed behavior.
 ---

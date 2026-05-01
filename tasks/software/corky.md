@@ -632,13 +632,30 @@ Top backlog item id: `oauth-google-fixed-port`.
 ### Re: closeout drift — gpt-5
 
 Recovered post-closeout drift after the committed code review response.
-<!-- agent:boundary:6d2c48c2 -->
+❯ do [#oauth-google-fixed-port]. spec-test-build-install-commit-push
+### Re: #oauth-google-fixed-port spec-test-build-install-commit-push — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+Google-backed OAuth flows now stay on the fixed `127.0.0.1:8484` callback by default, and only fall back to an arbitrary loopback port when the user explicitly sets `CORKY_OAUTH_ALLOW_EPHEMERAL_PORT=1` for a client that supports wildcard loopback redirects. I wired that opt-in behavior through the shared loopback helper, switched Gmail / Calendar / Contacts / GSC / YouTube to the safer default, added regression coverage for the opt-in gate and error surface, and updated the spec, README, AGENTS/CLAUDE guidance, and instruction/runbook surfaces so `audit-docs` matches the new contract.
+
+Verification passed end to end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Delivery:
+- commit `ea4615e` — `fix: default google oauth to fixed callback port`
+- pushed `20260413/corky-gsc` to `origin`
+
+Top remaining backlog item is `#tokenstore-delete-preservation`.
+<!-- agent:boundary:08ac2823 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#oauth-google-fixed-port] [recommended] Keep Google OAuth on fixed 8484 by default, or make arbitrary-port fallback opt-in only for credentials known to support loopback wildcard redirects
 - [ ] [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
 - [ ] [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange

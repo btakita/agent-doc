@@ -107,12 +107,37 @@ Pushed:
 - commit `842c6bd`
 
 No new follow-up backlog items came out of this fix.
-<!-- agent:boundary:e9a17b97 -->
+❯ Running `Force Claim for Tmux Pane` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/agentic-harness-engineering.md, I am getting an error:
+```
+resync: purged 2 orphaned stash pane(s)
+warning: overwriting claim on pane %151 (was /home/br → 132cd277)
+merged default components into .agent-doc/config.toml
+[claim] using cwd=/home/brian/work/btakita/agent-loop/src/session-share for registry entry
+focused pane %151
+Claimed /home/brian/work/btakita/agent-loop/src/session-share/tasks/agentic-harness-engineering.md for pane %151 (session 132cd277)
+Watch daemon started.
+```
+
+❯ spec-test-build-install-commit-push
+### Re: force-claim warning and queue duplication — gpt-5
+
+That `Force Claim for Tmux Pane` transcript is not a binary failure. `claim` only emits `warning: overwriting claim on pane ...` when `--force` explicitly tells it to commandeer a live pane that is already bound to another session (`src/agent-doc/src/claim.rs`). The later lines `Claimed ...` and `Watch daemon started.` mean the command completed successfully.
+
+So if the editor surfaced this as an "error", the bug is presentation, not claim semantics. The JetBrains force-claim action merges stdout/stderr and still treats exit `0` as success (`src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ForceClaimAction.kt`), so the current output is expected for an intentional takeover. If you did **not** mean to steal `%151` from another document, use plain `Claim`; if you did, this warning is the correct audit trail.
+
+The new `Queue` / `Backlog` entries are also what triggered preflight's shadow warning. Right now the same six ids exist in both components, so there is no single source of truth. I would keep one canonical copy only; otherwise every cycle will continue to warn. Priority-wise I would put `#oobpmt` first because it can hide fresh user prompts before diffing, then `#iceboxpatch`, then `#staleflt` and `#257p`.
+<!-- agent:boundary:6022c18d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
+- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
+- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
+- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
+- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 <!-- /agent:queue -->
 
 ## Backlog

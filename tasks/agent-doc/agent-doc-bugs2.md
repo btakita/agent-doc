@@ -538,6 +538,7 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
+    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -622,7 +623,7 @@ The added `Then nothing.` detail is consistent with the same direct run-path fai
 So the pushed `73f27e8` fix is aimed at exactly that follow-on shape. The remaining follow-up is still the live rerun captured in the backlog validation plan, to confirm the direct `monsterrodholders.md` flow now reaches a normal closeout instead of stopping after `Route Already In Progress`.
 ❯ do [#mrunfix] + [#mrreplay] + [#mrbusy]
 
-❯ If I cancel a run then clear...`Run Agent Doc` thinks Codex is busy. spec-test-benchmarks-news-commit-push
+❯ If I cancel a run then clear...`Run Agent Doc` thinks Codex is busy. spec-test-build-install-commit-push
 ### Re: cancel + `/clear` busy reroute follow-up — gpt-5
 
 
@@ -651,10 +652,21 @@ Backlog status:
 - `#mrreplay` is still open: I did not perform the live startup-miss replay validation in this cycle
 - `#mrbusy` is still open: I fixed the shared route bug, but I did not run the live monsterrodholders reroute validation in this cycle
 - no new follow-up item is needed because the remaining live validation work is already tracked in those existing plan-backed backlog items
-<!-- agent:boundary:fe7bbdac -->
+### Re: warning-line + `/clear` wording normalization — gpt-5
+
+
+Noted on both content edits:
+- the duplicated `patch:backlog` warning line in the quoted repair output is just captured stderr duplication from that older replay transcript; it does not change the root cause or the fix I shipped for the `/clear` busy reroute
+- the active `/clear` prompt for this turn is the `spec-test-build-install-commit-push` variant, and this cycle already followed that contract via spec/test/build/install/commit/push on `src/agent-doc`
+
+No new backlog item is needed from those two edits.
+<!-- agent:boundary:fe8a0c87 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+agent-doc route failed (exit 134): resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %353 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill [route] target tmux session: 0 thread 'main' (480303) panicked at src/component.rs:443:24: byte index 12303 is not a char boundary; it is inside '❯' (bytes 12302..12305) of ` ## Status  The session surface has now moved through the full follow-up calibration tranche: `#outcome`, `#slabel`, `#sdigest`, `#sfound`, `#sconduct`, `#soverscore`, `#sconfcal`, `#sclaudemd`, `#srootfit`, `#sdoccov`,`[...] note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
 -->
 
 ## Pending / Not Built

@@ -81,7 +81,7 @@ Follow-up:
 - Added `#clrrt` to backlog for a live replay of the `/clear` -> `Run Agent Doc` `claudescore-3.md` repro.
 - Plan: `tasks/agent-doc/plan-claudescore-3-clear-reroute-replay-validation.md`
 ❯ do [#clrrt]. spec-test-build-install-commit-push
-### Re: #clrrt /clear reroute replay — gpt-5 (HEAD)
+### Re: #clrrt /clear reroute replay — gpt-5
 
 `#clrrt` is closed. I fixed the remaining `/clear` reroute path in `src/agent-doc` and pushed `acb1f4a` (`fix: keep fresh reroutes off startup-miss pane`) to `origin/20260422/codex-agent-backend`.
 
@@ -95,8 +95,28 @@ Verification:
 - `cargo build`
 - `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
 - Live replay from `src/session-share`: `agent-doc route tasks/claudescore-3.md` started fresh pane `%371`, sent the reopen to `%371`, and `ops.log` recorded `fresh_route_start_acknowledged ... pane=%371` with no handoff back to `%364`.
-<!-- agent:boundary:536c6bb5 -->
-do [#cxcdp]. spec-test-build-install-commit-push
+❯ do [#cxcdp]. spec-test-build-install-commit-push
+### Re: #cxcdp resumed Codex CDP capability drift — gpt-5
+
+`#cxcdp` is closed. I updated `src/agent-doc` so resumed `codex exec resume <id>` turns that hit the local CDP EPERM signature on `127.0.0.1:9222` / `localhost:9222` are discarded and retried once through a fresh `codex exec`, letting the fresh thread replace the stale `resume` id.
+
+What changed:
+- `src/agent/codex.rs` now detects that signature in resumed blocking and streaming Codex responses, retries once fresh before stale output is surfaced, and keeps browser-down cases distinct by only matching the EPERM signature.
+- Added Codex backend regressions for the blocking retry path, the streaming retry-before-yield path, and the signature classifier.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Commit / push:
+- `src/agent-doc`: `7415e98` (`fix: reset stale codex resume sessions after cdp eperm`)
+- `origin/20260422/codex-agent-backend` is up to date with that commit.
+
+Verification:
+- `cargo test agent::codex`
+- `cargo test` passed (`1720` unit tests plus integration/doc tests)
+- `cargo build`
+- `cargo install --path . --force`
+
+Plan: `tasks/agent-doc/plan-codex-resume-cdp-capability-drift.md`
+<!-- agent:boundary:58685830 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -121,7 +141,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cxcdp] Codex browser/CDP capability drift on resumed `agent-doc` sessions: `chromium-bridge` can work from a fresh outer Codex session while the same task doc's resumed `codex exec resume <id>` thread still fails local `127.0.0.1:9222` access with `Operation not permitted`, even with `codex_network_access: enabled` and `-s danger-full-access`. Fix should detect stale resumed-session capability drift, stop retrying the old thread, and force a fresh Codex exec with the current policy. Plan: `tasks/agent-doc/plan-codex-resume-cdp-capability-drift.md`
 - [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`

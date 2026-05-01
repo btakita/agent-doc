@@ -126,7 +126,28 @@ That `Force Claim for Tmux Pane` transcript is not a binary failure. `claim` onl
 So if the editor surfaced this as an "error", the bug is presentation, not claim semantics. The JetBrains force-claim action merges stdout/stderr and still treats exit `0` as success (`src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ForceClaimAction.kt`), so the current output is expected for an intentional takeover. If you did **not** mean to steal `%151` from another document, use plain `Claim`; if you did, this warning is the correct audit trail.
 
 The new `Queue` / `Backlog` entries are also what triggered preflight's shadow warning. Right now the same six ids exist in both components, so there is no single source of truth. I would keep one canonical copy only; otherwise every cycle will continue to warn. Priority-wise I would put `#oobpmt` first because it can hide fresh user prompts before diffing, then `#iceboxpatch`, then `#staleflt` and `#257p`.
-<!-- agent:boundary:6022c18d -->
+❯ do [#iceboxpatch]. spec-test-build-install-commit-push
+### Re: #iceboxpatch — gpt-5
+
+Implemented in `src/agent-doc` and pushed as `a2c89a6` (`fix: parse replace icebox patches`).
+
+What changed:
+- `src/template.rs` now accepts `<!-- replace:icebox --> ... <!-- /replace:icebox -->` as a real template patch, so icebox rewrites no longer fall through as unmatched exchange content.
+- Added regression coverage for both the parser and the write path, including the exact `0 template patches found` failure shape.
+- Updated the skill/runbook text so future sessions use `replace:icebox` instead of trying to route icebox mutations through backlog flags.
+
+Verification:
+- `cargo test parse_patches_accepts_replace_icebox --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test write_applies_replace_icebox_block_without_exchange_fallback --manifest-path src/agent-doc/Cargo.toml`
+- `make check`
+- `make install`
+
+Pushed:
+- `src/agent-doc` branch `20260422/codex-agent-backend`
+- commit `a2c89a6`
+
+No new follow-up backlog items came out of this fix.
+<!-- agent:boundary:b7eec1c3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -143,7 +164,6 @@ The new `Queue` / `Backlog` entries are also what triggered preflight's shadow w
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.

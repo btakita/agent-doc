@@ -421,14 +421,40 @@ No actionable document diff was detected for this cycle.
 - The prior `#codcommit` response is already committed.
 - The remaining working-tree drift is in HTML comments, which preflight does not treat as a prompt-bearing exchange/status/backlog edit.
 - If you want me to respond to the JB plugin routing/startup-miss errors next cycle, move that note into visible document content (for example a `## User` block or plain exchange text) instead of an HTML comment.
-<!-- agent:boundary:aa4f7e95 -->
-<!-- /agent:exchange -->
-
-<!--
-I'm getting some errors surfaced by the JB plugin.
+❯ I'm getting some errors surfaced by the JB plugin.
 ```
 agent-doc route failed (exit 1): resync: stash pane %298 is registered in its own project root — skipping kill resync: stash pane %297 is registered in its own project root — skipping kill resync: stash pane %293 is registered in its own project root — skipping kill resync: stash pane %290 is registered in its own project root — skipping kill resync: stash pane %291 is registered in its own project root — skipping kill resync: stash pane %294 is registered in its own project root — skipping kill resync: stash pane %292 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 3845244) in pane %295 for tasks/monsterrodholders.md [route] registered pane %295 still owns /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md but startup-miss 2026-05-01T02:47:55Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %295 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %295 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %295 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: do #wcup1. spec-test-commit-push Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %295, but no new document cycle started for pending prompt_target: do #wcup1. spec-test-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T02:51:44Z)
 ```
+❯ spec-test-build-install-commit-push
+### Re: JB routed startup-miss false accept — gpt-5
+
+Root cause was the Codex-specific reroute payload, not the 30s ack wait itself.
+
+The failing `monsterrodholders.md` pane proved that route was sending a multiline payload into an already-live Codex session: `agent-doc <file>` plus the unresolved prompt body. Codex accepted that as ordinary chat text, produced a conversational in-pane answer about `#wcup1`, and never re-entered the binary-owned `agent-doc` cycle. Route then correctly failed closed because no new `preflight_started`/cycle ack ever appeared.
+
+Implemented:
+
+- `src/route.rs` now keeps Codex reroutes on the bare `agent-doc <FILE>` reopen instead of appending follow-up prompt lines.
+- Removed the now-harmful routed prompt-body expansion path and updated the routing spec/docs.
+- Added regression coverage that rejects any extra follow-up line injection on Codex reroutes.
+
+Verification completed:
+
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml routed_trigger_payload_keeps_bare_reopen -- --test-threads=1`
+- `cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml send_command_checked_codex_does_not_append_follow_up_lines -- --test-threads=1`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path /home/brian/work/btakita/agent-loop/src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
+
+Code commit/push:
+
+- `src/agent-doc` `c5b2c4c` on `20260422/codex-agent-backend` (`fix: keep codex reroutes on bare agent-doc reopen`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:97a9b32f -->
+<!-- /agent:exchange -->
+
+<!--
 -->
 
 ## Pending / Not Built

@@ -128,7 +128,30 @@ Fresh verification I reran now against current `main`:
 - `tsift --version` => `0.1.21`
 
 No new commit was needed this cycle because the requested spec/test/build/install/commit/push work was already landed and published. The active backlog is now clear; only icebox items remain.
-<!-- agent:boundary:00e6b2fb -->
+#code-review
+### Re: code review — gpt-5
+
+Reviewed `src/tsift` with `cargo test` and targeted manual repros around summarize workflows, cache lifecycle, and path normalization.
+
+#### Findings
+
+**1. `tsift summarize --diff --extract` is unusable before the first commit**  
+`git_changed_files()` shells out to `git diff ... HEAD` unconditionally, so an unborn branch aborts the whole extract before any file work starts (`src/tsift/src/summarize.rs:781-809`, `src/tsift/src/main.rs:2608-2610`). I reproduced this in a fresh temp repo: `tsift summarize --extract src --diff .` fails with `fatal: ambiguous argument 'HEAD'`. Fresh repos should degrade to "tracked changes = none, untracked files = current scope" instead of hard-failing.
+
+**2. Full re-extracts never reap deleted summaries, so query mode can return summaries for files that no longer exist**  
+Outside `--diff`, `cmd_summarize()` always sets `deleted_summary_paths` to empty and only deletes rows from that set (`src/tsift/src/main.rs:2628-2642`). Query mode then reads rows directly by `symbol_name` / `file_path` with no liveness check (`src/tsift/src/main.rs:2763-2799`, `src/tsift/src/summarize.rs:268-289`). That means a normal full `tsift summarize --extract` run can leave stale cache rows behind after source deletion, and later `tsift summarize <symbol>` still returns them. I verified the visible symptom by querying a temp `summaries.db` row whose `src/deleted.rs` file was gone; the CLI still printed the stale summary.
+
+**3. `tsift summarize --file` does not normalize equivalent paths**  
+Extract writes cache keys as root-relative paths like `src/lib.rs` (`src/tsift/src/main.rs:2663-2667`), but file query mode passes the user string straight into `get_by_file()` (`src/tsift/src/main.rs:2766-2768`, `src/tsift/src/summarize.rs:280-289`). I reproduced the mismatch against a temp cache: `--file src/lib.rs` hit, while `--file ./src/lib.rs` missed the same row. Absolute or nested-directory spellings will miss for the same reason.
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`427` unit tests and `42` integration tests).
+- Reproduced the unborn-`HEAD` `--diff` failure against a fresh temp repo.
+- Reproduced the literal-path cache miss for `summarize --file` with a temp `summaries.db`.
+
+Follow-up items added to backlog. Top remaining backlog item: `#ubhd`.
+<!-- agent:boundary:ef604ab5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -138,6 +161,9 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ubhd] [recommended] Make `tsift summarize --diff --extract` tolerate unborn HEAD and treat fresh repos as untracked-only instead of failing on `git diff ... HEAD`.
+- [ ] [#stle] [recommended] Reap deleted summary rows during full `tsift summarize --extract` runs so query mode cannot return summaries for files that no longer exist.
+- [ ] [#fqry] [recommended] Normalize `tsift summarize --file` inputs to the canonical root-relative cache key so `src/lib.rs`, `./src/lib.rs`, and nested-path spellings hit the same row.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

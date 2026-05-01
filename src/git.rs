@@ -79,6 +79,7 @@
 //! - commit_repairs_committed_head_before_user_follow_up_noop: snapshot lags behind a committed response in `HEAD`, working tree adds only a new user follow-up, and commit repairs the snapshot up to `HEAD` instead of staging the stale snapshot and rewinding the doc
 //! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
 //! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
+//! - commit_already_current_repairs_transient_working_tree_churn_refreshes_crdt_and_signal: no-op closeout cleanup also refreshes CRDT/editor-facing sidecars so stale transient churn cannot reappear from cached live state
 //! - verify_snapshot_committed_returns_committed_when_matching: snapshot matches HEAD → `Committed`
 //! - verify_snapshot_committed_returns_differs_when_snapshot_ahead: snapshot has content not in HEAD → `SnapshotDiffersFromHead`
 //! - verify_snapshot_committed_no_snapshot: no snapshot file → `NoSnapshot`
@@ -1813,6 +1814,14 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // Strip ephemeral guard markers from snapshot and working tree so they
         // match the committed blob (which was already stripped during staging).
         strip_guard_markers_from_disk(file);
+        if let Ok(cleaned) = std::fs::read_to_string(file)
+            && let Err(e) = refresh_live_closeout_sidecars(file, &cleaned, false)
+        {
+            eprintln!(
+                "[commit] warning: failed to refresh CRDT sidecars after post-commit cleanup: {}",
+                e
+            );
+        }
 
         // Submodule pointer update: if we just committed inside a submodule,
         // stage the new submodule HEAD in the parent and partial-commit it.
@@ -2070,6 +2079,52 @@ fn strip_guard_markers(content: &str) -> String {
     }
 }
 
+fn document_uses_crdt(content: &str) -> bool {
+    crate::frontmatter::parse(content)
+        .map(|(fm, _)| fm.resolve_mode().is_crdt())
+        .unwrap_or(false)
+}
+
+fn refresh_live_closeout_sidecars(
+    file: &Path,
+    committed_doc: &str,
+    signal_editor_refresh: bool,
+) -> Result<Option<bool>> {
+    if document_uses_crdt(committed_doc) {
+        let crdt = crate::crdt::CrdtDoc::from_text(committed_doc).encode_state();
+        crate::snapshot::save_crdt(file, &crdt)?;
+    }
+
+    if !signal_editor_refresh {
+        return Ok(None);
+    }
+
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+        return Ok(None);
+    };
+
+    if crate::ipc_socket::is_listener_active(&root)
+        && crate::ipc_socket::send_vcs_refresh(&root).unwrap_or(false)
+    {
+        return Ok(Some(true));
+    }
+
+    let Some(signal_file) = vcs_refresh_signal_path(file) else {
+        return Ok(None);
+    };
+    match std::fs::write(&signal_file, "") {
+        Ok(()) => Ok(Some(true)),
+        Err(e) => {
+            eprintln!(
+                "[commit] VCS refresh signal failed during closeout sidecar refresh: {}",
+                e
+            );
+            Ok(Some(false))
+        }
+    }
+}
+
 /// Write content to git's object database and return the blob hash.
 fn hash_object(git_root: &Path, content: &str) -> Result<String> {
     let output = Command::new("git")
@@ -2290,6 +2345,7 @@ fn repair_clean_head_if_only_transient_worktree_drift(
 
     crate::write::atomic_write_pub(file, &head_doc)?;
     crate::snapshot::save(file, &head_doc)?;
+    refresh_live_closeout_sidecars(file, &head_doc, true)?;
     crate::ops_log::log_op(
         file,
         &format!("transient_cleanup file={} basis=head", file.display()),
@@ -4216,6 +4272,7 @@ mod tests {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         Command::new("git")
             .current_dir(root)
@@ -4247,7 +4304,7 @@ mod tests {
             .unwrap();
 
         let doc = root.join("session.md");
-        let committed = "---\nagent_doc_session: test\n---\n\n\
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: newer\n\
             body\n\
@@ -4266,7 +4323,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let transient = "---\nagent_doc_session: test\n---\n\n\
+        let transient = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: newer (HEAD)\n\
             body\n\
@@ -4274,6 +4331,8 @@ mod tests {
             <!-- /agent:exchange -->\n";
         fs::write(&doc, transient).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
+        let stale_crdt = crate::crdt::CrdtDoc::from_text(transient).encode_state();
+        crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
 
         let did_commit = commit(&doc).expect("HEAD-current closeout should succeed");
         assert!(
@@ -4291,6 +4350,20 @@ mod tests {
         assert_eq!(
             snap, committed,
             "snapshot should also be restored to clean HEAD after transient cleanup"
+        );
+
+        let crdt = crate::snapshot::load_crdt(&doc)
+            .unwrap()
+            .expect("CRDT state should be preserved for CRDT docs");
+        let crdt_text = crate::crdt::CrdtDoc::decode_state(&crdt).unwrap().to_text();
+        assert_eq!(
+            crdt_text, committed,
+            "CRDT state should be refreshed to the same clean HEAD content after no-op cleanup"
+        );
+
+        assert!(
+            root.join(".agent-doc/patches/vcs-refresh.signal").exists(),
+            "no-op closeout cleanup should still signal the editor/VCS refresh path"
         );
     }
 

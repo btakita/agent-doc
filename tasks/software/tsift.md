@@ -218,7 +218,24 @@ The active backlog is now clear; only icebox items remain.
 - Reproduced finding 2 with the installed `tsift` binary against a symlinked checkout path.
 
 Follow-up items added to backlog. Top remaining backlog item: `#rnme`.
-<!-- agent:boundary:d4d26006 -->
+❯ do [#rnme]. spec-test-build-install-commit-push
+### Re: #rnme spec-test-build-install-commit-push — gpt-5
+
+Implemented `#rnme` in `src/tsift` so `tsift summarize --diff --extract` now reaps stale summary rows for git renames. The diff adapter now parses `git diff --name-status --find-renames HEAD`, keeps the new side of a rename in the extract set, and feeds the old side into summary-row deletion before extraction.
+
+Added regression coverage in `src/main.rs` for both rename tracking and rename-row cleanup, and updated `SPEC.md` to document that `--diff` deletes the old side of `git mv` tombstones.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`433` unit tests and `44` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `ef88b69` (`fix: reap summarize rename tombstones`).
+
+Top remaining backlog item: `#slnk`.
+<!-- agent:boundary:e84eebe5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -228,7 +245,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rnme] make summarize --diff --extract reap stale summary rows for git renames
 - [ ] [#slnk] canonicalize absolute summarize --file queries so symlinked paths hit the root-relative cache key
 <!-- /agent:backlog -->
 

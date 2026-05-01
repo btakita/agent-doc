@@ -388,11 +388,21 @@ fn startup_miss_route_provenance(
 }
 
 const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
+const BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 
 fn startup_miss_diagnostic_message(file: &Path, reason: &str) -> String {
     format!(
         "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
         reason,
+        file.display()
+    )
+}
+
+fn busy_route_diagnostic_message(file: &Path, harness: &HarnessConfig) -> String {
+    format!(
+        "[agent-doc] routed follow-up for {} is still pending because the live {} session is busy. Finish or interrupt the current task, then rerun `Run Agent Doc` or `agent-doc route {}`.",
+        file.display(),
+        harness.binary,
         file.display()
     )
 }
@@ -444,6 +454,27 @@ fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason:
     {
         eprintln!(
             "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
+            pane_id, e
+        );
+    }
+}
+
+fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: &HarnessConfig) {
+    let msg = busy_route_diagnostic_message(file, harness);
+    if let Err(e) = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-d",
+            BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS,
+            &msg,
+        ])
+        .status()
+    {
+        eprintln!(
+            "[route] warning: failed to emit busy-route diagnostic to pane {}: {}",
             pane_id, e
         );
     }
@@ -1325,7 +1356,7 @@ fn retry_route_after_busy_pane_auto_fix(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_existing_pane_busy_focus_after_noop_fix file={} pane={} harness={}",
+                        "route_existing_pane_busy_fail_closed_after_noop_fix file={} pane={} harness={}",
                         file.display(),
                         busy_pane,
                         harness.binary
@@ -1334,13 +1365,16 @@ fn retry_route_after_busy_pane_auto_fix(
                 if let Err(e) = tmux.select_pane(busy_pane) {
                     eprintln!("[route] warning: failed to focus pane {}: {}", busy_pane, e);
                 }
+                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
                 eprintln!(
-                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor — focusing the live {} session instead of forcing a restart",
+                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor, but pending prompt-bearing drift remains undispatched — focusing the live {} session and failing closed instead of falsely reporting success",
                     busy_pane,
                     file.display(),
                     harness.binary
                 );
-                return Ok(busy_pane.to_string());
+                anyhow::bail!(format_busy_existing_pane_error(
+                    file, busy_pane, harness, provenance, true
+                ));
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
         }
@@ -3637,7 +3671,7 @@ mod tests {
                 "new-session",
                 "-d",
                 "-s",
-                session,
+                &session,
                 "-c",
                 &cwd.to_string_lossy(),
                 "-P",
@@ -4423,8 +4457,8 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_focuses_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
-    {
+    fn resolve_or_create_pane_fails_closed_for_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
+     {
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -4488,7 +4522,7 @@ Body\n\
             })
             .unwrap();
 
-        let reused = resolve_or_create_pane(
+        let err = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -4499,8 +4533,12 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should focus the authoritative busy pane instead of restarting it");
-        assert_eq!(reused, pane);
+        .expect_err("route should fail closed when prompt-bearing drift remains stuck behind a busy same-document session");
+        assert!(
+            err.to_string()
+                .contains("refusing to inject a routed trigger into a busy session"),
+            "unexpected error: {err:#}"
+        );
         assert!(
             !restart_called.load(Ordering::Relaxed),
             "healthy supervisor path must not restart a busy same-document session"
@@ -4509,7 +4547,7 @@ Body\n\
         let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !after.contains("EARLY:agent-doc "),
-            "route should focus, not inject, while the same-document session is still busy: {after}"
+            "route should still refuse to inject while the same-document session is busy: {after}"
         );
         ipc.stop();
     }
@@ -4942,7 +4980,7 @@ Body\n\
                 &[],
                 "route-live-owner-missing",
                 &file_path,
-                session,
+                &session,
                 &HarnessConfig::codex(),
                 &mut Vec::new(),
             );
@@ -5056,10 +5094,12 @@ Body\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let iso = IsolatedTmux::new("route-test-cross-file-split-anchor");
-        let session = "claude";
+        let requested_session = "claude";
         let cwd = test_cwd();
 
-        let anchor_pane = iso.auto_start(session, &cwd).unwrap();
+        let anchor_pane = iso.auto_start(requested_session, &cwd).unwrap();
+        let session = pane_session_name(&iso, &anchor_pane)
+            .expect("anchor pane should report its tmux session");
         let anchor_window = iso.pane_window(&anchor_pane).unwrap();
         send_keys_with_retry(
             &iso,
@@ -5112,7 +5152,7 @@ Body\n\
                 &[],
                 "route-cross-file-target",
                 &target_path,
-                session,
+                &session,
                 &HarnessConfig::codex(),
                 &mut created_panes,
             );

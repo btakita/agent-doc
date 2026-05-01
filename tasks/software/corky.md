@@ -552,7 +552,7 @@ I closed `#gmail-send-token-key`.
 Top remaining backlog item is `#gsc-sa-cache-keying`.
 ❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
 ❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
-### Re: gsc service-account cache keying — gpt-5
+### Re: gsc service-account cache keying — gpt-5 (HEAD)
 
 Implemented and pushed in `src/corky`.
 
@@ -572,6 +572,7 @@ I closed `#gsc-sa-cache-keying`.
 
 Top remaining backlog item is `#release-v028`.
 <!-- agent:boundary:249c36ae -->
+do [#release-v028]
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -33,7 +33,6 @@ prompt_presets:
 Active backlog:
 ❯ - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 ❯ - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
-❯ - [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`
 ❯ - [x] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
 ❯ - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
@@ -788,8 +787,33 @@ The prior repair commits succeeded in `HEAD`, but the live working copy kept div
 ### Re: closeout normalization — gpt-5
 
 The only remaining live-file delta after the prior closeout was prompt normalization: the newly answered `Yet another JB Plugin error...` line no longer carries a leading `❯` in the working copy. I am reopening closeout only to persist that normalization through the binary-owned commit path. No new plan or backlog change beyond `#snrun`.
-<!-- agent:boundary:42a81c0e -->
-do [#snrun]. spec-test-build-install-commit-push
+❯ do [#snrun]. spec-test-build-install-commit-push
+### Re: #snrun routed Codex auto-remediation — gpt-5
+
+I finished the remaining routed Codex proof/closeout fix in `src/agent-doc/src/route.rs`.
+
+What changed:
+- the supervisor-restart routed cycle-ack path now carries `RoutedDispatchStartProof::CommandAcceptedOnly` instead of the stale boolean call site, so the typed accepted/submitted/consumed staging stays consistent across the reroute/restart path
+- removed the dead `proven_dispatch()` helper left behind by that older boolean flow
+
+Verification:
+- targeted reroute regressions passed when re-run individually:
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml wait_for_agent_ready_rejects_codex_reverse_history_search`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml load_latest_prompt_for_file_picks_most_recent_matching_state`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml send_keys_delivers_claude_command_with_enter`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml full_auto_start_flow`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml` passed
+- local installs passed:
+  - `cargo install --path src/agent-doc --force`
+  - `cargo install --path . --force` from `src/agent-doc`
+
+Full-suite note:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` is still intermittently red in the existing tmux-heavy resync/route/sync failure family; in this run it reported 15 failures, but the route/codex-hook cases I spot-checked from that list passed when rerun individually. I did not broaden this turn into that separate suite-stability investigation.
+
+Commit and push:
+- `src/agent-doc`: `510449d` (`fix: keep routed ack proof typed`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:5e9863cf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -804,7 +828,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snrun] [recommended] Implement snappy auto-remediation for routed Codex failures: recognize interactive terminal states like reverse-i-search earlier, add a second post-send consumption proof, and rerun the JetBrains repro. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#utf8p] [recommended] Fix the UTF-8 byte-boundary panic in component parsing triggered near `❯`. Plan: tasks/agent-doc/plan-component-parser-utf8-boundaries.md
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

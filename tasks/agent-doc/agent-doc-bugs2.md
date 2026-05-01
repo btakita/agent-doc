@@ -270,13 +270,10 @@ Code commit/push:
 - `src/agent-doc` `d54c6c7` on `20260422/codex-agent-backend` (`fix: fail closed on same-root sync pane aliases`)
 
 No follow-up backlog items from this fix.
-### Re: closeout follow-up — gpt-5 (HEAD)
+### Re: closeout follow-up — gpt-5
 
 The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path acknowledges the remaining prompt-line artifact cleanly.
-<!-- agent:boundary:e4e62aed -->
-`Sync: --col tasks/agent-doc/agent-doc-bugs2.md --col src/session-share/tasks/claudescore-3.md [focus: src/session-share/tasks/claudescore-3.md]` does not autostart a tmux session. Why? Please investigate all tmux autostart and planes not switching in src/session-share/.
-
-spec-test-build-install-commit-push
+<!-- agent:boundary:47537a98 -->
 <!-- /agent:exchange -->
 
 <!--

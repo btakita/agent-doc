@@ -143,6 +143,10 @@ on claude exit with code c:
         Clean:    harness-specific clean-exit handling, transition Healthy
                   Claude: prompt user (Enter/q)
                   Codex: auto-restart in resume mode so `codex exec` stays attached
+                         EXCEPT when a fresh/fresh-restart Codex child exits
+                         cleanly before it ever surfaces an idle prompt; treat
+                         that as failed startup provenance and restart fresh
+                         instead of chaining `--continue`
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the user can
                          choose to quit the supervisor cleanly

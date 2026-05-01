@@ -43,6 +43,9 @@
 //! - On clean exit (code 0): honors the active harness policy.
 //!   Claude prompts on stderr and waits for Enter (fresh restart) or `q` + Enter (exit).
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
+//!   Exception: if a fresh/fresh-restart Codex child exits cleanly before it ever
+//!   surfaces an idle prompt, treat that as failed startup provenance and restart
+//!   fresh instead of chaining `--continue`.
 //!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
 //!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
 //!   Prompt decisions are logged explicitly. Prompt-time stdin EOF on that
@@ -434,9 +437,13 @@ fn restart_continue_exit_strategy(
     failed_resume: bool,
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
+    clean_exit_before_prompt: bool,
 ) -> RestartContinueExitStrategy {
     if ctrl_d_forwarded {
         return RestartContinueExitStrategy::PromptUser;
+    }
+    if clean_exit_before_prompt {
+        return RestartContinueExitStrategy::RestartFresh;
     }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
@@ -462,6 +469,13 @@ fn resume_handoff_failed(
             | AutoTriggerOutcome::SendFailed
             | AutoTriggerOutcome::Cancelled
     )
+}
+
+fn clean_exit_before_prompt_seen(
+    auto_trigger_enabled: bool,
+    prompt_visible_once: bool,
+) -> bool {
+    !auto_trigger_enabled && !prompt_visible_once
 }
 
 fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
@@ -1225,6 +1239,8 @@ struct SupervisorShared {
     ctrl_d_forwarded: AtomicBool,
     /// Outcome of the most recent auto-trigger attempt after a restart.
     auto_trigger_outcome: AtomicU8,
+    /// Whether the current child ever surfaced an idle harness prompt.
+    prompt_visible_once: AtomicBool,
 }
 
 impl SupervisorShared {
@@ -1244,6 +1260,7 @@ impl SupervisorShared {
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
+            prompt_visible_once: AtomicBool::new(false),
         }
     }
 
@@ -1319,6 +1336,7 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
 /// Spawn the master→stdout forwarding thread with escape sequence filtering.
 fn spawn_reader_thread(
     shared: Arc<SupervisorShared>,
+    harness: crate::harness::HarnessConfig,
     mut reader: Box<dyn std::io::Read + Send>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -1371,6 +1389,9 @@ fn spawn_reader_thread(
                             continue;
                         }
                         record_recent_output(&shared, &filtered);
+                        if current_child_prompt_visible(&shared, &harness) {
+                            shared.prompt_visible_once.store(true, Ordering::Relaxed);
+                        }
                         let mut lock = stdout.lock();
                         if lock.write_all(&filtered).is_err() || lock.flush().is_err() {
                             break;
@@ -1992,10 +2013,11 @@ pub fn run(file: &Path) -> Result<()> {
         shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
+        shared.prompt_visible_once.store(false, Ordering::Relaxed);
         shared.recent_output.lock().unwrap().clear();
 
         // Spawn I/O forwarding threads
-        let reader_thread = spawn_reader_thread(shared.clone(), pty_reader);
+        let reader_thread = spawn_reader_thread(shared.clone(), harness.clone(), pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
         let writer_stop_flag = Arc::new(AtomicBool::new(false));
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
@@ -2116,10 +2138,12 @@ pub fn run(file: &Path) -> Result<()> {
         );
         let auto_trigger_outcome =
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed));
+        let prompt_visible_once = shared.prompt_visible_once.load(Ordering::Relaxed);
 
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
+        let clean_exit_before_prompt = clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
         let run_duration = run_started_at.elapsed();
 
         if matches!(
@@ -2201,6 +2225,7 @@ pub fn run(file: &Path) -> Result<()> {
                             failed_resume,
                             ctrl_d_forwarded,
                             recent_failures,
+                            clean_exit_before_prompt,
                         ) {
                             RestartContinueExitStrategy::PromptUser => {
                                 raw_mode.suspend();
@@ -2260,19 +2285,33 @@ pub fn run(file: &Path) -> Result<()> {
                                 }
                             }
                             RestartContinueExitStrategy::RestartFresh => {
-                                eprintln!(
-                                    "\n{} exited after a failed resume handoff ({}). Restarting fresh instead of resuming...",
-                                    harness.binary,
-                                    auto_trigger_outcome.as_str()
-                                );
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "resume_restart_fresh outcome={} restart_count={}",
-                                        auto_trigger_outcome.as_str(),
-                                        restart_count + 1
-                                    ),
-                                );
+                                if clean_exit_before_prompt {
+                                    eprintln!(
+                                        "\n{} exited cleanly before ever surfacing a prompt. Restarting fresh instead of resuming...",
+                                        harness.binary
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "fresh_restart_before_prompt restart_count={}",
+                                            restart_count + 1
+                                        ),
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "\n{} exited after a failed resume handoff ({}). Restarting fresh instead of resuming...",
+                                        harness.binary,
+                                        auto_trigger_outcome.as_str()
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "resume_restart_fresh outcome={} restart_count={}",
+                                            auto_trigger_outcome.as_str(),
+                                            restart_count + 1
+                                        ),
+                                    );
+                                }
                                 first_run = true;
                                 restart_count += 1;
                             }
@@ -3270,7 +3309,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prefers_resume_by_default() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, 0),
+            restart_continue_exit_strategy(false, false, 0, false),
             RestartContinueExitStrategy::Resume
         );
     }
@@ -3278,7 +3317,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_user_after_ctrl_d() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0),
+            restart_continue_exit_strategy(false, true, 0, false),
             RestartContinueExitStrategy::PromptUser
         );
     }
@@ -3306,7 +3345,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
         assert_eq!(
-            restart_continue_exit_strategy(true, false, 1),
+            restart_continue_exit_strategy(true, false, 1, false),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3314,8 +3353,16 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
         assert_eq!(
-            restart_continue_exit_strategy(true, false, FAILED_RESUME_THRESHOLD),
+            restart_continue_exit_strategy(true, false, FAILED_RESUME_THRESHOLD, false),
             RestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, 0, true),
+            RestartContinueExitStrategy::RestartFresh
         );
     }
 
@@ -3354,7 +3401,7 @@ mod tests {
             CleanExitResolution::RestartContinue
         );
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0),
+            restart_continue_exit_strategy(false, true, 0, false),
             RestartContinueExitStrategy::PromptUser
         );
     }
@@ -3362,9 +3409,16 @@ mod tests {
     #[test]
     fn ctrl_d_with_failed_resume_still_prompts_user() {
         assert_eq!(
-            restart_continue_exit_strategy(true, true, 1),
+            restart_continue_exit_strategy(true, true, 1, false),
             RestartContinueExitStrategy::PromptUser
         );
+    }
+
+    #[test]
+    fn clean_exit_before_prompt_seen_only_applies_to_fresh_runs() {
+        assert!(clean_exit_before_prompt_seen(false, false));
+        assert!(!clean_exit_before_prompt_seen(false, true));
+        assert!(!clean_exit_before_prompt_seen(true, false));
     }
 
     #[test]
@@ -3794,7 +3848,7 @@ mod tests {
 
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
-        let handle = spawn_reader_thread(shared, reader);
+        let handle = spawn_reader_thread(shared, crate::harness::HarnessConfig::codex(), reader);
 
         // Close the write end → reader sees EOF → thread exits
         unsafe { libc::close(fds[1]) };

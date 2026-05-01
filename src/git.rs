@@ -1814,13 +1814,24 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // Strip ephemeral guard markers from snapshot and working tree so they
         // match the committed blob (which was already stripped during staging).
         strip_guard_markers_from_disk(file);
-        if let Ok(cleaned) = std::fs::read_to_string(file)
-            && let Err(e) = refresh_live_closeout_sidecars(file, &cleaned, false)
-        {
-            eprintln!(
-                "[commit] warning: failed to refresh CRDT sidecars after post-commit cleanup: {}",
-                e
-            );
+        if let Ok(cleaned) = std::fs::read_to_string(file) {
+            match repair_clean_head_if_only_transient_worktree_drift(file, &cleaned) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    if let Err(e) = refresh_live_closeout_sidecars(file, &cleaned, false) {
+                        eprintln!(
+                            "[commit] warning: failed to refresh CRDT sidecars after post-commit cleanup: {}",
+                            e
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[commit] warning: failed to reconcile post-commit transient worktree drift: {}",
+                        e
+                    );
+                }
+            }
         }
 
         // Submodule pointer update: if we just committed inside a submodule,
@@ -3433,17 +3444,17 @@ mod tests {
             "committed blob should still contain the older heading; got:\n{blob}"
         );
 
-        // Post-commit cleanup preserves (HEAD) in the working tree so the user
-        // sees which headings are new, while committed blob + snapshot stay clean.
+        // Post-commit cleanup now converges the working tree back to committed
+        // HEAD when the only remaining drift is agent-owned transient churn.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("### Re: newer (HEAD)"),
-            "working tree must preserve (HEAD) on newest heading; got:\n{working}"
+            working.contains("### Re: newer\n"),
+            "working tree should keep the clean newest heading after closeout; got:\n{working}"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
-            1,
-            "working tree should retain exactly one (HEAD) marker; got:\n{working}"
+            0,
+            "working tree should not retain transient head markers after closeout; got:\n{working}"
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
@@ -4364,6 +4375,151 @@ mod tests {
         assert!(
             root.join(".agent-doc/patches/vcs-refresh.signal").exists(),
             "no-op closeout cleanup should still signal the editor/VCS refresh path"
+        );
+    }
+
+    fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
+                let content = if !file_path.is_empty() {
+                    std::fs::read_to_string(file_path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    fn wait_for_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+
+    #[test]
+    fn commit_success_repairs_transient_working_tree_churn_after_real_commit() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let initial = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ❯ Initial prompt\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, initial).unwrap();
+        crate::snapshot::save(&doc, initial).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let _listener = start_fake_listener(root);
+        wait_for_listener(root);
+
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ❯ Initial prompt\n\
+            ### Re: closeout follow-up — gpt-5\n\
+            body\n\
+            <!-- agent:boundary:committed-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        let transient = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ❯ Initial prompt\n\
+            ### Re: closeout follow-up — gpt-5 (HEAD)\n\
+            body\n\
+            <!-- agent:boundary:fresh-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        crate::snapshot::save(&doc, committed).unwrap();
+        fs::write(&doc, transient).unwrap();
+        let stale_crdt = crate::crdt::CrdtDoc::from_text(transient).encode_state();
+        crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
+
+        let did_commit = commit(&doc).expect("real closeout commit should succeed");
+        assert!(did_commit, "snapshot should produce a real git commit");
+
+        let head = show_head(&doc)
+            .unwrap()
+            .expect("committed document should be readable from HEAD after commit");
+        let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working, head,
+            "post-commit cleanup should restore the working tree to the committed HEAD blob"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap, head,
+            "snapshot should stay aligned with the committed HEAD blob"
+        );
+
+        let crdt = crate::snapshot::load_crdt(&doc)
+            .unwrap()
+            .expect("CRDT state should be preserved for CRDT docs");
+        let crdt_text = crate::crdt::CrdtDoc::decode_state(&crdt).unwrap().to_text();
+        assert_eq!(
+            crdt_text, head,
+            "CRDT state should refresh to the committed HEAD blob after post-commit repair"
+        );
+
+        let status = tracked_modified_paths(&doc).unwrap();
+        assert!(
+            status.is_empty(),
+            "post-commit cleanup should leave no tracked worktree dirtiness for the document: {status:?}"
         );
     }
 

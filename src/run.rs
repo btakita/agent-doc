@@ -286,44 +286,50 @@ fn build_prompt(
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
+    let active_format_requirements =
+        crate::prompt_contract::format_active_format_requirements(content)
+            .map(|section| format!("\n\n{}\n", section))
+            .unwrap_or_default();
     match (run_mode, fm.resume.is_some()) {
         (RunMode::Template, true) => format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
-             {}\
+             {}{}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, prompt_bearing_changes, content
+            the_diff, prompt_bearing_changes, active_format_requirements, content
         ),
         (RunMode::Template, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
+             {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            content
+            active_format_requirements, content
         ),
         (RunMode::Append, true) => format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
-             {}\
+             {}{}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            the_diff, prompt_bearing_changes, content
+            the_diff, prompt_bearing_changes, active_format_requirements, content
         ),
         (RunMode::Append, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
+             {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user asked questions or prompt-bearing edits inline (e.g., in blockquotes or prior responses), address those too.",
-            content
+            active_format_requirements, content
         ),
     }
 }
@@ -498,6 +504,31 @@ mod tests {
         assert!(prompt.contains("kind=\"prompt_target\""));
         assert!(prompt.contains("❯ First unresolved question?"));
         assert!(prompt.contains("❯ Second unresolved question?"));
+    }
+
+    #[test]
+    fn build_prompt_carries_forward_active_format_requirements() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization — gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = build_prompt(RunMode::Template, &fm, "diff", doc);
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
     }
 
     #[test]

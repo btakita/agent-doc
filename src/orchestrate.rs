@@ -943,30 +943,33 @@ fn build_agent_prompt(mode: ResolvedMode, diff_text: Option<&str>, doc: &str) ->
     let prompt_bearing = diff::format_prompt_bearing_changes(diff_text)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
+    let active_format_requirements = crate::prompt_contract::format_active_format_requirements(doc)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
 
     if mode.is_template() {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
-             {}\
+             {}{}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            diff_text, prompt_bearing, doc
+            diff_text, prompt_bearing, active_format_requirements, doc
         )
     } else {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
-             {}\
+             {}{}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            diff_text, prompt_bearing, doc
+            diff_text, prompt_bearing, active_format_requirements, doc
         )
     }
 }
@@ -2823,5 +2826,33 @@ mod tests {
             vec!["do #stale1".to_string()],
             "should extract user's directive, not the numbered list from the response"
         );
+    }
+
+    #[test]
+    fn build_agent_prompt_carries_forward_active_format_requirements() {
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization — gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = build_agent_prompt(
+            ResolvedMode {
+                format: crate::frontmatter::AgentDocFormat::Template,
+                write: crate::frontmatter::AgentDocWrite::Crdt,
+            },
+            Some("diff"),
+            doc,
+        );
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
     }
 }

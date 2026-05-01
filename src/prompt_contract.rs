@@ -40,6 +40,28 @@ const NO_FOLLOWUP_PHRASES: &[&str] = &[
     "no new follow up work",
 ];
 
+const FORMAT_REQUIREMENT_COMPONENT_SIGNALS: &[&str] = &[
+    "backlog", "pending", "todo", "icebox", "exchange", "response",
+];
+
+const FORMAT_REQUIREMENT_SHAPE_SIGNALS: &[&str] = &[
+    "2-level",
+    "two-level",
+    "two level",
+    "numeric list",
+    "numbered list",
+    "bullet list",
+    "organize",
+    "format",
+    "grouped",
+    "section",
+    "sections",
+    "heading",
+    "headings",
+    "priority",
+    "top",
+];
+
 pub(crate) fn prompt_requests_plan_work(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -91,6 +113,27 @@ pub(crate) fn response_explicitly_has_no_followups(response_text: &str) -> bool 
     NO_FOLLOWUP_PHRASES
         .iter()
         .any(|phrase| lower.contains(phrase))
+}
+
+pub(crate) fn format_active_format_requirements(content: &str) -> Option<String> {
+    let requirements = collect_active_format_requirements(content);
+    if requirements.is_empty() {
+        return None;
+    }
+
+    let mut rendered = String::from(
+        "Active document-level formatting / structure requirements carried forward from earlier user prompts:\n\
+         Preserve these when they still apply to the component or response you are updating.\n\
+         If your response-format rules prevent an exact match, say that explicitly instead of silently flattening the structure.\n\n",
+    );
+    for (idx, requirement) in requirements.iter().enumerate() {
+        rendered.push_str(&format!(
+            "<requirement index=\"{}\">\n{}\n</requirement>\n\n",
+            idx + 1,
+            requirement
+        ));
+    }
+    Some(rendered)
 }
 
 pub(crate) fn required_explicit_backlog_item_count(
@@ -154,6 +197,75 @@ fn effective_prompt_texts(
     }
 
     texts
+}
+
+fn collect_active_format_requirements(content: &str) -> Vec<String> {
+    let mut requirements = Vec::new();
+    let mut current_block = Vec::new();
+
+    for raw_line in content.lines() {
+        let trimmed_start = raw_line.trim_start();
+        if let Some(rest) = trimmed_start.strip_prefix('❯') {
+            if !current_block.is_empty() {
+                maybe_push_format_requirement(&mut requirements, &current_block.join("\n"));
+                current_block.clear();
+            }
+            let line = rest.trim_start();
+            if !line.is_empty() {
+                current_block.push(line.to_string());
+            }
+            continue;
+        }
+
+        if current_block.is_empty() {
+            continue;
+        }
+
+        if trimmed_start.is_empty() {
+            maybe_push_format_requirement(&mut requirements, &current_block.join("\n"));
+            current_block.clear();
+            continue;
+        }
+
+        if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
+            current_block.push(trimmed_start.to_string());
+            continue;
+        }
+
+        maybe_push_format_requirement(&mut requirements, &current_block.join("\n"));
+        current_block.clear();
+    }
+
+    if !current_block.is_empty() {
+        maybe_push_format_requirement(&mut requirements, &current_block.join("\n"));
+    }
+
+    requirements
+}
+
+fn maybe_push_format_requirement(requirements: &mut Vec<String>, block: &str) {
+    if looks_like_format_requirement(block)
+        && !requirements.iter().any(|existing| existing == block)
+    {
+        requirements.push(block.to_string());
+    }
+}
+
+fn looks_like_format_requirement(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let references_component = FORMAT_REQUIREMENT_COMPONENT_SIGNALS
+        .iter()
+        .any(|signal| lower.contains(signal));
+    let references_shape = FORMAT_REQUIREMENT_SHAPE_SIGNALS
+        .iter()
+        .any(|signal| lower.contains(signal));
+    let imperative_shape = lower.contains("use a ")
+        || lower.contains("use an ")
+        || lower.contains("keep ")
+        || lower.contains("place ")
+        || lower.contains("preserve ");
+
+    references_component && (references_shape || imperative_shape)
 }
 
 fn effective_prompt_references_preset(
@@ -478,6 +590,44 @@ mod tests {
         assert!(!response_explicitly_has_no_followups(
             "I did not find a third issue in this pass."
         ));
+    }
+
+    #[test]
+    fn format_active_format_requirements_surfaces_prior_backlog_shape_directive() {
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization — gpt-5\n",
+            "I reorganized the backlog.\n",
+        );
+
+        let rendered =
+            format_active_format_requirements(doc).expect("expected formatting requirements");
+
+        assert!(
+            rendered.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(rendered.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
+        assert!(
+            rendered.contains(
+                "If your response-format rules prevent an exact match, say that explicitly"
+            )
+        );
+    }
+
+    #[test]
+    fn format_active_format_requirements_ignores_agent_confirmation_prose() {
+        let doc = concat!(
+            "### Re: backlog organization — gpt-5\n",
+            "I reorganized the backlog into numbered sections with urgent work at the top.\n",
+        );
+
+        assert!(format_active_format_requirements(doc).is_none());
     }
 
     #[test]

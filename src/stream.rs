@@ -496,26 +496,31 @@ fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) ->
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
+    let active_format_requirements =
+        crate::prompt_contract::format_active_format_requirements(content)
+            .map(|section| format!("\n\n{}\n", section))
+            .unwrap_or_default();
     if fm.resume.is_some() {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
-             {}\
+             {}{}\
              The full document is now:\n\n\
              <document>\n{}\n</document>\n\n\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, prompt_bearing_changes, content
+            the_diff, prompt_bearing_changes, active_format_requirements, content
         )
     } else {
         format!(
             "The user is starting a session document. Here is the full document:\n\n\
+             {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            content
+            active_format_requirements, content
         )
     }
 }
@@ -795,6 +800,31 @@ mod tests {
         assert!(prompt.contains("kind=\"prompt_target\""));
         assert!(prompt.contains("❯ First unresolved question?"));
         assert!(prompt.contains("❯ Second unresolved question?"));
+    }
+
+    #[test]
+    fn build_prompt_carries_forward_active_format_requirements() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization — gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = build_prompt(&fm, "diff", doc);
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
     }
 
     #[test]

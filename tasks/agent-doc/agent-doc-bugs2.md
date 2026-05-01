@@ -270,7 +270,10 @@ Code commit/push:
 - `src/agent-doc` `d54c6c7` on `20260422/codex-agent-backend` (`fix: fail closed on same-root sync pane aliases`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:7b06f9a7 -->
+### Re: closeout follow-up — gpt-5
+
+The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path acknowledges the remaining prompt-line artifact cleanly.
+<!-- agent:boundary:e4e62aed -->
 <!-- /agent:exchange -->
 
 <!--

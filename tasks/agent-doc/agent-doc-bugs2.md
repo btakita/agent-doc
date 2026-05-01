@@ -538,7 +538,6 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
-    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -621,8 +620,38 @@ Plan: `tasks/agent-doc/plan-run-template-backlog-normalization-validation.md`
 The added `Then nothing.` detail is consistent with the same direct run-path failure I fixed above: the route focused the live session, but the later direct `agent-doc run` closeout still died in `src/run.rs` before backlog normalization completed.
 
 So the pushed `73f27e8` fix is aimed at exactly that follow-on shape. The remaining follow-up is still the live rerun captured in the backlog validation plan, to confirm the direct `monsterrodholders.md` flow now reaches a normal closeout instead of stopping after `Route Already In Progress`.
+❯ do [#mrunfix] + [#mrreplay] + [#mrbusy]
 
-<!-- agent:boundary:3e677602 -->
+❯ If I cancel a run then clear...`Run Agent Doc` thinks Codex is busy. spec-test-benchmarks-news-commit-push
+### Re: cancel + `/clear` busy reroute follow-up — gpt-5
+
+
+I fixed the remaining routed Codex busy false-positive behind this cancel + `/clear` repro in `src/agent-doc/src/route.rs`.
+
+Root cause:
+- after cancel + `/clear`, route could reach the healthy same-document busy-pane path and retry the bare `agent-doc <FILE>` reopen once
+- if that reopen never cleared command acceptance in the live Codex pane, route still surfaced the old `Codex is busy` failure even though the real issue was a stuck routed reopen, not an actually busy session
+
+What changed:
+- the healthy same-document Codex busy-pane branch now gets one bounded fresh-supervisor restart retry when the routed reopen never clears command acceptance
+- route waits for the authoritative pane handoff/readiness after that fresh restart, resends the reopen once, and still requires the normal routed cycle ack before success
+- if the retry still does not recover, route keeps the existing fail-closed path instead of silently succeeding
+- added regression coverage for the fresh-restart handoff retry and recorded the fix in `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test` -> pass (`1705` unit tests plus integration suites, `0` failed) when run on its own
+- `cargo build` -> pass
+- `cargo install --path . --force` -> pass
+
+Code commit and push:
+- `src/agent-doc`: `18d1059` (`fix: retry stuck codex busy-pane reroutes`) pushed to `origin/20260422/codex-agent-backend`
+
+Backlog status:
+- `#mrunfix` is still open: I did not rerun the direct monsterrodholders flow in this cycle
+- `#mrreplay` is still open: I did not perform the live startup-miss replay validation in this cycle
+- `#mrbusy` is still open: I fixed the shared route bug, but I did not run the live monsterrodholders reroute validation in this cycle
+- no new follow-up item is needed because the remaining live validation work is already tracked in those existing plan-backed backlog items
+<!-- agent:boundary:fe7bbdac -->
 <!-- /agent:exchange -->
 
 <!--
@@ -634,7 +663,7 @@ So the pushed `73f27e8` fix is aimed at exactly that follow-on shape. The remain
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
-- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
+- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Reported symptoms now include dropped file/SSH access and blocked DNS resolution to hosts like `github.com` immediately after `/clear`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md

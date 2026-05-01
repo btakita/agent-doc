@@ -144,16 +144,43 @@ Verification:
 - `cargo build` → pass
 - `cargo install --path . --force` → pass
 - `/usr/bin/zsh -lc GRADLE_USER_HOME=/tmp/agent-doc-gradle
-<!-- agent:boundary:5c676ea2 -->
-<!-- /agent:exchange -->
-
-<!--
-The agent-doc tmux window has an unused pane. The bound tmux pane is in the stash tmux window. spec-test-build-install-commit-push
+❯ The agent-doc tmux window had an unused pane. The bound tmux pane is in the stash tmux window. Please identify and fix the root cause(s). I recovered by closing the bad pane then navigating away + back to the document. spec-test-build-install-commit-push
 ```
 ❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
 Error: registered pane %341 for tasks/agent-doc/agent-doc-bugs2.md is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance
 ```
----
+### Re: tmux stash pane recovery — gpt-5
+
+I fixed the `agent-doc start` failure shape behind this repro.
+
+Root cause:
+- `start.rs` treated an alive registered pane with no provable live owner and no supervisor as a hard fail-closed state even when that pane had already drifted into a `stash` window and both recovery provenance sources (`startup-miss` + session log) already showed the old owner was closed.
+- That left manual/editor recovery stuck behind a dead stash binding while the newly opened workspace pane stayed unused.
+
+Fix:
+- `start.rs` now detects that stranded-stash shape and clears the stale registration before claiming the current pane.
+- The fail-closed guard still stays in place for the unsafe cases: non-stash panes, live startup-miss ownership, or an open session-log owner still block replacement.
+- I updated `specs/07-commands.md` and `VERSIONS.md` to document the stash exception explicitly.
+
+Verification:
+- `cargo test --bin agent-doc start::tests::stash_registration_with_unavailable_supervisor_can_be_cleared_when_proven_closed -- --exact`
+- `cargo test --bin agent-doc start::tests::stash_registration_with_open_session_log_still_blocks_rebind -- --exact`
+- `cargo test --bin agent-doc start::tests::non_stash_registration_still_fails_closed_when_supervisor_is_unavailable -- --exact`
+- `cargo build`
+- `cargo install --path . --force`
+
+All five passed.
+
+Full-suite note:
+- `cargo test` is still red on this branch because of an unrelated existing failure in `route::tests::auto_start_reuses_other_file_pane_only_as_split_anchor`.
+- I did not touch `route.rs`, and I added that follow-up to backlog so it does not get lost.
+
+Code commit and push:
+- `src/agent-doc`: `ac9a2fd` (`fix: recover start from dead stash bindings`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:66e98ebb -->
+<!-- /agent:exchange -->
+
+<!--
 Can we isolate the parallel tmux test from each other?
 > •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
   session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
@@ -166,6 +193,7 @@ If I restart codex with the supervisor, the real-time the next session process h
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rtanch] [recommended] Investigate the unrelated full-suite failure in route::tests::auto_start_reuses_other_file_pane_only_as_split_anchor on branch 20260422/codex-agent-backend after the stash-start recovery fix.
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a 24deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

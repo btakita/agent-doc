@@ -110,7 +110,6 @@ Verification I reran now against current `main`:
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
 ❯ do #8w9n. spec-test-build-install-commit-push
-❯ do #8w9n. spec-test-build-install-commit-push
 ### Re: #8w9n spec-test-build-install-commit-push — gpt-5
 
 `#8w9n` was already complete in `src/tsift` on `main` as commit `30b60d8` (`fix: harden summary read-only paths`), and that commit is already pushed to `origin/main`.
@@ -151,7 +150,23 @@ Extract writes cache keys as root-relative paths like `src/lib.rs` (`src/tsift/s
 - Reproduced the literal-path cache miss for `summarize --file` with a temp `summaries.db`.
 
 Follow-up items added to backlog. Top remaining backlog item: `#ubhd`.
-<!-- agent:boundary:ef604ab5 -->
+❯ do #ubhd. spec-test-build-install-commit-push
+### Re: #ubhd spec-test-build-install-commit-push — gpt-5
+
+Implemented `#ubhd` in `src/tsift` so `tsift summarize --diff --extract` no longer hard-fails on an unborn `HEAD`. The summarize diff path now checks whether the repo has a committed `HEAD`; if not, it skips tracked/deleted `git diff` queries and treats the run as untracked-only within the requested extract scope.
+
+Added regression coverage in `src/main.rs` and `tests/exit_code.rs`, and updated `SPEC.md` to document the unborn-`HEAD` fallback.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`428` unit tests and `43` integration tests)
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `eabc640` (`fix: tolerate summarize diff on unborn HEAD`).
+
+Top remaining backlog item: `#stle`.
+<!-- agent:boundary:425b1c74 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -161,7 +176,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ubhd] [recommended] Make `tsift summarize --diff --extract` tolerate unborn HEAD and treat fresh repos as untracked-only instead of failing on `git diff ... HEAD`.
 - [ ] [#stle] [recommended] Reap deleted summary rows during full `tsift summarize --extract` runs so query mode cannot return summaries for files that no longer exist.
 - [ ] [#fqry] [recommended] Normalize `tsift summarize --file` inputs to the canonical root-relative cache key so `src/lib.rs`, `./src/lib.rs`, and nested-path spellings hit the same row.
 <!-- /agent:backlog -->

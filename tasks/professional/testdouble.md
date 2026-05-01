@@ -84,7 +84,82 @@ What I would push on first:
 4. If relevant, get written confirmation on whether you may perform/invoice through your LLC and whether any client-specific insurance requirements apply.
 
 Residual risk: I am reading this as a business-risk review, not giving a legal opinion on enforceability under Ohio law. If you expect meaningful revenue here or any chance of dispute, this is worth a quick attorney pass because the biggest risks are economic rather than technical.
-<!-- agent:boundary:247a6265 -->
+❯ Please help me with these 4 items?
+### Re: help with the 4 items — gpt-5
+
+Yes. The practical way to handle these is to send one short markup / business-points note rather than a long legal memo. I would keep it direct and framed as cleanup, not confrontation.
+
+1. Payment / termination
+
+Ask for: payment for all approved work performed through the termination date, even if the relationship ends early.
+
+Fallback: if they will not delete the forfeiture concept entirely, limit it to a narrow, material, uncured breach by you, and never to already-earned approved invoices.
+
+Suggested language:
+
+> On payment/termination, I’d like to clarify that any work performed and approved through the termination date remains payable in the ordinary course. I’m not comfortable with forfeiting outstanding earned invoices based solely on early termination or a breach provision that is broader than actual unpaid damages.
+
+Redline concept:
+
+> Replace any forfeiture of outstanding invoices with: “Company will pay Subcontractor for all Services properly performed through the effective date of termination, subject to ordinary invoice review and any specific offset required by law or finally determined damages.”
+
+2. Liability cap / indemnity
+
+Ask for: an aggregate liability cap, and exclusion of indirect, incidental, special, and consequential damages.
+
+Good target: total fees paid or payable under the SOW. Moderate fallback: 2x fees paid under the SOW. Also narrow indemnity to third-party claims only.
+
+Suggested language:
+
+> I’d also like a standard contractor-side liability structure: a reasonable aggregate cap on my liability, no consequential or indirect damages, and indemnity limited to third-party claims arising from my negligence, willful misconduct, or material breach.
+
+Redline concept:
+
+> “Except for fraud, willful misconduct, confidentiality breach, or infringement arising from Subcontractor materials provided in breach of this Agreement, each party’s aggregate liability under this Agreement will not exceed the fees paid or payable under the applicable Statement of Work. Neither party will be liable for consequential, incidental, indirect, special, exemplary, or punitive damages.”
+
+3. IP carveout
+
+Ask for: explicit retention of ownership in your preexisting materials, generic tools, libraries, templates, know-how, and improvements to those materials, while granting them a license only as needed to use the deliverables.
+
+Suggested language:
+
+> On IP, I want to make sure the assignment covers the deliverables created for the engagement, but not my preexisting materials, reusable libraries, templates, tools, or general know-how that I may use while performing the work.
+
+Redline concept:
+
+> “Notwithstanding anything to the contrary, Subcontractor retains all right, title, and interest in and to any preexisting materials, generic tools, libraries, templates, routines, processes, ideas, concepts, know-how, and other technology developed or owned by Subcontractor outside the scope of this Agreement (‘Background Technology’). To the extent any Background Technology is incorporated into a deliverable, Subcontractor grants Company and its client a non-exclusive, perpetual, worldwide license to use such Background Technology solely as incorporated in the deliverable.”
+
+4. LLC / insurance / engagement logistics
+
+Ask for two written confirmations:
+
+- Whether they are comfortable with you invoicing / performing through your LLC, while you remain the named individual actually doing the work.
+- Whether this engagement has any client-specific insurance requirements before you start.
+
+Suggested language:
+
+> I’d also like written confirmation on two operational points: first, whether I may invoice and perform through my LLC while remaining the individual providing the services; second, whether there are any client-specific insurance requirements for this engagement beyond what is already stated in the agreement.
+
+If you want one combined note, I would send this:
+
+> Thanks — I reviewed the agreement and had four cleanup items I’d like to confirm before signing:
+>
+> 1. Payment on termination: I want to confirm that all approved work performed through termination remains payable in the ordinary course, and that I do not forfeit already-earned outstanding invoices.
+> 2. Liability: I’d like a standard liability cap tied to fees under the SOW, no consequential or indirect damages, and indemnity limited to third-party claims arising from my negligence, willful misconduct, or material breach.
+> 3. IP: I’d like an express carveout confirming I retain ownership of my preexisting materials, reusable tools, libraries, templates, and general know-how, with a license only to the extent incorporated into deliverables.
+> 4. Logistics: Please confirm whether I may invoice/perform through my LLC while remaining the individual service provider, and whether there are any engagement-specific insurance requirements.
+>
+> If helpful, I can mark these as redlines directly in the agreement language.
+
+Negotiation priority, if they push back:
+
+1. Do not concede on already-earned invoice forfeiture.
+2. Push hard for the liability cap and consequential-damages exclusion.
+3. Get the IP carveout if you use any of your own reusable code/tools.
+4. Get the LLC / insurance answer in writing even if they refuse to amend the main form.
+
+If you want, I can turn this into tighter redline-ready contract text clause by clause against the actual markdown agreement.
+<!-- agent:boundary:f963343e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -95,10 +170,10 @@ Residual risk: I am reading this as a business-risk review, not giving a legal o
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#td-payment-termination] [recommended] Ask Test Double to revise the payment/termination terms so you do not forfeit outstanding invoices for early termination or unrelated breach after cure failure.
-- [ ] [#td-liability-cap] [recommended] Ask for a reasonable liability cap and narrower indemnity, since the agreement currently has uncapped indemnity and no contractor-side cap.
-- [ ] [#td-ip-carveout] [recommended] If you plan to reuse preexisting tools, libraries, or templates, get a written carveout so §5 does not sweep them into work-for-hire ownership.
-- [ ] [#td-subcontract-consent] [recommended] Get written confirmation from Test Double before performing through an LLC or using any substitute, because §10.1 requires prior written consent for further subcontractors/subconsultants.
+- [ ] [#td-payment-termination] Ask Test Double to revise the payment/termination terms so you do not forfeit outstanding invoices for early termination or unrelated breach after cure failure.
+- [ ] [#td-liability-cap] Ask for a reasonable liability cap and narrower indemnity, since the agreement currently has uncapped indemnity and no contractor-side cap.
+- [ ] [#td-ip-carveout] If you plan to reuse preexisting tools, libraries, or templates, get a written carveout so §5 does not sweep them into work-for-hire ownership.
+- [ ] [#td-subcontract-consent] Get written confirmation from Test Double before performing through an LLC or using any substitute, because §10.1 requires prior written consent for further subcontractors/subconsultants.
 <!-- /agent:backlog -->
 
 ## Icebox

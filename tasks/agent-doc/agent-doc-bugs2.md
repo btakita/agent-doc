@@ -735,8 +735,14 @@ Noted on the residual post-closeout edits:
 - the removed `❯` prefix on the `Run Agent Doc` question line is expected once that prompt is considered answered; it is normalization, not a new unresolved prompt.
 
 No new backlog item is needed.
+I answered in [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md) and added the two plan-backed recommendations you asked for: [plan-run-agent-doc-routed-simplification.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-run-agent-doc-routed-simplification.md) and [plan-component-parser-utf8-boundaries.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-component-parser-utf8-boundaries.md). I also committed those plan files in `b996bbbf5`.
 
-<!-- agent:boundary:437d17a1 -->
+The main recommendation is to simplify the routed reopen/ack path first, not keep patching more rerun edge cases. The second issue is a concrete parser bug at `src/agent-doc/src/component.rs:443` where byte-based slicing crosses the UTF-8 `❯` glyph.
+
+What did not fully settle is the live working-tree copy of [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md): `session-check` kept failing on editor-side post-commit drift, specifically a duplicated `patch:backlog` warning line and the answered prompt line losing its `❯` prefix. The response itself is committed in `HEAD` (`ae9e56f7b`, `49d04048a`), but the file is still locally modified in the working tree.
+
+If you want the next turn to be implementation, use `do [#runsm]` first.
+<!-- agent:boundary:4b304f7e -->
 <!-- /agent:exchange -->
 
 <!--

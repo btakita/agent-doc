@@ -263,7 +263,25 @@ Negotiation floor
 - Operationally important: get LLC and insurance confirmation in writing even if the contract form stays mostly intact.
 
 If you want, the next step can be a tighter minimal-markup version that assumes Test Double will only accept a few sentence-level edits rather than full clause replacements.
-<!-- agent:boundary:f8575528 -->
+❯ Is there any language on the frequency of invoices?
+### Re: invoice frequency — gpt-5
+
+Yes. The agreement does speak to invoice frequency, and it is fairly specific.
+
+The operative language is in [Test_Double_Subcontractor_Agreement_Brian_Takita.md](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:23): you `shall submit to Company semi-monthly invoices` for the prior invoicing period, defined as `1st to the 15th` and `16th to the last day of the month`. It also says all invoices must be delivered within `ten (10) days` after completion of the invoiced work, and payment is due within `30 days` after receipt of each invoice ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:25)).
+
+Exhibit A repeats the cadence: `Please invoice Test Double semi-monthly, clearly indicating the client and project name on the invoice` ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:315)).
+
+So the practical read is:
+
+- Invoice twice per month.
+- One invoice covers the `1st-15th` period.
+- The next covers the `16th-end of month` period.
+- Each invoice should be sent within 10 days after that billing period’s work is completed.
+- Test Double then has 30 days from receipt to pay.
+
+The only mild ambiguity is that Section 2.1 says `number of days worked`, while Exhibit A prices the work at `$100/hr @ 40hrs week`. That is not fatal, but it is worth making sure your invoice format matches how they actually expect time to be reported: hours with period totals, not just day counts.
+<!-- agent:boundary:dfa59fa0 -->
 <!-- /agent:exchange -->
 
 ## Queue

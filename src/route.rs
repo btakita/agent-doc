@@ -1423,6 +1423,7 @@ fn send_command_unchecked(
         .unwrap_or_else(|| file_path.to_string());
     let trigger = harness.trigger_command(file_path);
     let payload = routed_trigger_payload(&trigger);
+    validate_routed_trigger_payload(harness, &trigger, &payload)?;
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
     if let Err(e) = tmux
         .cmd()
@@ -1564,6 +1565,22 @@ fn send_command_checked(
 
 fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
+}
+
+fn validate_routed_trigger_payload(
+    harness: &HarnessConfig,
+    trigger: &str,
+    payload: &str,
+) -> Result<()> {
+    if harness.binary == "codex"
+        && (payload != trigger || payload.contains('\n') || payload.contains('\r'))
+    {
+        anyhow::bail!(
+            "internal route bug: Codex reroute payload must stay the bare `agent-doc <FILE>` reopen; refusing to inject {:?}",
+            payload
+        );
+    }
+    Ok(())
 }
 
 fn existing_pane_ready_timeout() -> Duration {
@@ -3753,6 +3770,31 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    fn validate_routed_trigger_payload_accepts_bare_codex_reopen() {
+        let harness = HarnessConfig::codex();
+        let trigger = harness.trigger_command("test.md");
+        let payload = routed_trigger_payload(&trigger);
+        validate_routed_trigger_payload(&harness, &trigger, &payload)
+            .expect("bare Codex reopen should remain dispatchable");
+    }
+
+    #[test]
+    fn validate_routed_trigger_payload_rejects_multiline_codex_payload() {
+        let harness = HarnessConfig::codex();
+        let trigger = harness.trigger_command("test.md");
+        let err = validate_routed_trigger_payload(
+            &harness,
+            &trigger,
+            "agent-doc test.md\nfollow-up text",
+        )
+        .expect_err("Codex reroute payload must fail before injecting extra lines");
+        assert!(
+            err.to_string().contains("bare `agent-doc <FILE>` reopen"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
     fn send_keys_delivers_claude_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send");
         let session = "test";
@@ -4622,7 +4664,7 @@ Body\n\
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         crate::snapshot::save(&doc, snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
@@ -4674,6 +4716,84 @@ Body\n\
         assert!(
             content.contains("GOT:agent-doc "),
             "route should dispatch the trigger before observing the ack: {content}"
+        );
+        assert!(
+            !content.contains("EXTRA:"),
+            "route should not append follow-up prompt text onto the Codex reopen payload: {content}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-ack-content-edit");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 401 from this endpoint\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 503 from this endpoint\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-content-edit-ok", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-content-edit-ok",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should accept the new cycle ack for content edits");
+        assert_eq!(resolved, pane);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should dispatch the bare Codex reopen before observing the content-edit ack: {content}"
+        );
+        assert!(
+            !content.contains("EXTRA:"),
+            "route must not append content-edit text onto the Codex reopen payload: {content}"
         );
     }
 

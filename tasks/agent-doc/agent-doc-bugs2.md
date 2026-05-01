@@ -273,7 +273,13 @@ No follow-up backlog items from this fix.
 ### Re: closeout follow-up — gpt-5
 
 The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path acknowledges the remaining prompt-line artifact cleanly.
-<!-- agent:boundary:47537a98 -->
+❯ `Sync: --col tasks/agent-doc/agent-doc-bugs2.md --col src/session-share/tasks/claudescore-3.md [focus: src/session-share/tasks/claudescore-3.md]` does not autostart a tmux session. Why? Please investigate all tmux autostart and planes not switching in src/session-share/.
+
+❯ spec-test-build-install-commit-push
+### Re: pending-capture closeout — gpt-5
+
+No additional backlog items beyond the existing backlog. This follow-up only satisfies the explicit pending-capture closeout guard for the already-completed response above.
+<!-- agent:boundary:05cf0b8e -->
 <!-- /agent:exchange -->
 
 <!--

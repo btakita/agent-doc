@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 ## Status
 
 <!-- agent:status patch=replace -->
-Review blocked on source access. PandaDoc URL was not readable from this environment; need document text or PDF for a substantive review.
+Reviewed converted agreement. No clause bars Brian personally performing the work, but §10.1 prohibits using further subcontractors or subconsultants without prior written consent.
 <!-- /agent:status -->
 
 ## Exchange
@@ -38,7 +38,21 @@ Anything to be wary of, even before content review:
 
 If you want an actual clause-by-clause review, paste the text here or export the document as PDF/plain text and I’ll mark specific risks instead of giving a generic checklist.
 I’m checking whether that PandaDoc link is accessible from here and whether there’s enough visible content to review it directly. If the document is gated or requires interactive access, I’ll state that explicitly and keep the response scoped to what can be verified.
-<!-- agent:boundary:715a0f6a -->
+❯ The agreement was converted to md at /home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md
+
+❯ Is there any claude about me not being able to subcontract myself?
+### Re: subcontracting clause — gpt-5
+
+Assuming you meant `clause`: I do not see a clause that says you cannot personally perform the work yourself. The agreement is actually written as though **you personally** are the subcontractor: it names `Brian Kenji Takita` as the `Subcontractor` in the opening paragraph and again in Exhibit A / the SOW.
+
+The restrictive clause is [Test_Double_Subcontractor_Agreement_Brian_Takita.md](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:207): `The Subcontractor may not use further subcontractors or subconsultants to perform any of the Services without prior written consent of the Company.` Read together with the engagement language in [the same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:7) and the independent-contractor section at [lines 147-165](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:147), the practical reading is:
+
+- You can perform the services yourself.
+- You cannot delegate the work to another person, subconsultant, or downstream contractor unless Test Double consents in writing.
+- If by `subcontract myself` you mean doing the work through your own LLC/corporation rather than as Brian individually, the agreement does not clearly authorize that. Since the contract is with you by name, the safer reading is that Test Double hired **you personally**, not an interchangeable entity or substitute.
+
+So the narrow answer is: **no clause forbids you from doing the work yourself; the clause forbids you from having someone else do it without written consent.** If you want to invoice or perform through an entity, I would get that confirmed in writing before relying on it.
+<!-- agent:boundary:b88a7c45 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -49,6 +63,7 @@ I’m checking whether that PandaDoc link is accessible from here and whether th
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#td-subcontract-consent] [recommended] Get written confirmation from Test Double before performing through an LLC or using any substitute, because §10.1 requires prior written consent for further subcontractors/subconsultants.
 <!-- /agent:backlog -->
 
 ## Icebox

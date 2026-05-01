@@ -279,7 +279,40 @@ The `spec-test-build-install-commit-push` request is complete in the response ab
 ### Re: pending-capture closeout — gpt-5
 
 No additional backlog items beyond the existing backlog. This follow-up only satisfies the explicit pending-capture closeout guard for the already-completed response above.
-<!-- agent:boundary:05cf0b8e -->
+❯ There are still issues with the sync behavior. Please look at the logs of switching between:
+❯ - docs.md
+❯ - claudescore-3.md
+❯ - claudescore.md
+
+❯ At first a new pane was being created even though the previous time I visited a file already had a pane created. 
+
+❯ Eventually `Sync: --col tasks/agent-doc/agent-doc-bugs2.md --col src/session-share/tasks/claudescore-3.md [focus: src/session-share/tasks/claudescore-3.md]` failed to switch the Tmux Pane.
+
+❯ spec-test-build-install-commit-push
+### Re: cross-root stash-loss sync churn — gpt-5
+
+Root cause was the automatic stash-prune path, not tmux-router pane ordering. The `/tmp/agent-doc-sync.log` trace showed the pattern clearly: `sync` would auto-start a child pane for `docs.md` / `claudescore.md` / `claudescore-3.md`, tmux-router would temporarily stash one of those sibling-repo panes during reconcile, and then the next prune pass from the workspace root would kill that stashed pane as "unregistered" because `resync::prune()` only consulted the current root's `.agent-doc/sessions.json` plus current-root supervisor sockets. Once that valid `src/session-share` pane was killed, the next sync recorded `supervisor_exit code=missing_pane` and spawned a replacement, which is why the pane seemed to swap out if you waited too long.
+
+Implemented:
+
+- `resync.rs` now resolves each stash pane's own nearest project root from `#{pane_current_path}` before deciding it is orphaned.
+- Automatic stash prune now consults that pane-root registry and that pane-root live supervisor set, so a stashed sibling-repo pane is preserved when it is still registered, still owns a live file there, or still hosts a live supervisor there.
+- Added a regression for the exact cross-root shape: current cwd at a root workspace, live supervisor only under `src/session-share`, pane stashed into the shared tmux window, bulk prune must not kill it.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the cross-root stash-preservation rule.
+
+Verification completed:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+
+- `src/agent-doc` `235f1df` on `20260422/codex-agent-backend` (`fix: preserve cross-root stash panes during prune`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:e315e669 -->
 <!-- /agent:exchange -->
 
 <!--

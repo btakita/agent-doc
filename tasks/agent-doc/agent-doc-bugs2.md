@@ -1021,7 +1021,28 @@ This fixes false positives from files found under `node_modules` or `.venv`, but
 This is the one that actually avoids walking `node_modules`, `.venv`, `target`, `.git`, and similar trees.
 
 So if the goal is specifically to stop the CPU burn, the right implementation is not “ignore after match”; it is “never descend into skipped directories in the first place.” A `walkdir`-style traversal for the recursive patterns is the cleanest way to do that, while keeping the root-level direct checks and fixed `.agent` runbook paths as they are.
-<!-- agent:boundary:305eadfc -->
+
+❯ Implement Option 2. spec-test-build-install-commit-push
+### Re: skip vendored dirs in audit-docs discovery — gpt-5
+
+Implemented Option 2.
+
+- `src/agent-kit/src/audit_common.rs` no longer uses raw recursive globs for `src/**/...`, `.claude/**/...`, and `.agents/**/...` instruction discovery. It now walks those trees explicitly and prunes `AuditConfig.skip_dirs` before descending, so `audit-docs` skips `node_modules`, `.venv`, `target`, `vendor`, `.git`, `.next`, `dist`, and similar directories during discovery itself instead of traversing them first.
+- Added regression coverage proving skipped descendants under `src`, `.claude`, `.claude/skills/**/runbooks`, and `.agents` are not discovered.
+- Updated `src/agent-kit/SPEC.md`, `src/agent-kit/VERSIONS.md`, `src/agent-doc/specs/07-commands.md`, and `src/agent-doc/VERSIONS.md`.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-kit/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-kit` `9c3e60a` on `main` (`fix: prune skipped dirs during audit discovery`)
+- `src/agent-doc` `f84a1d3` on `20260422/codex-agent-backend` (`docs: note audit-docs skip-dir pruning`)
+
+No follow-up backlog item is needed from this fix.
+<!-- agent:boundary:8e3acb66 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -505,7 +505,33 @@ Pushed commits:
 Final status: `git status --short` is clean in the workspace root, `src/agent-doc`, `src/boost-client`, `src/corky`, and `src/session-share`.
 
 I did not rerun project test/build suites in this cycle; this pass was limited to committing and pushing the changes already present on disk.
-<!-- agent:boundary:a9204edf -->
+❯ I have seen this error surfaced by JB. Please ensure this issue is fixed. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %151 is registered in its own project root — skipping kill resync: stash pane %297 is registered in its own project root — skipping kill resync: stash pane %298 is registered in its own project root — skipping kill resync: stash pane %295 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 3835930) in pane %293 for tasks/claudescore-3.md [route] codex ready after 0.5s (1 polls) [route] Pane %293 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %293 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %293 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending content_edit: agent: codex Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %293, but no new document cycle started for pending content_edit: agent: codex after waiting 30s (startup_miss_timestamp=2026-05-01T04:06:30Z)
+```
+### Re: routed `content_edit: agent: codex` startup-miss — gpt-5
+
+Root cause was not the routed reopen payload this time. `route` was correctly reopening Codex with bare `agent-doc <FILE>`, but `session-check::first_unstarted_prompt_bearing_change()` was diffing the full document, including YAML frontmatter. A metadata-only edit like `agent: codex` therefore surfaced as a fake `content_edit`, so route waited for a new cycle ack for work that did not exist and eventually failed closed with `pending content_edit: agent: codex`.
+
+Implemented:
+- `src/session_check.rs` now strips frontmatter and classifies prompt-bearing drift from the document body only.
+- Added regression coverage in both `session_check.rs` and `route.rs` so frontmatter-only churn no longer triggers routed-cycle ack waits.
+- Updated `specs/05-agent-backend.md`, `specs/07-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the body-only rule.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml first_unstarted_prompt_bearing_change_ignores_frontmatter_only_drift -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `1e6e11f` on `20260422/codex-agent-backend` (`fix: ignore frontmatter-only route drift`)
+
+I left `#wcrp` in backlog. That is a separate repair-path issue around bare `do #...` transcript drift, not the routed `agent: codex` false-positive that JB hit here.
+
+No new follow-up backlog items from this fix.
+<!-- agent:boundary:ebb9a50f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -514,6 +540,7 @@ I did not rerun project test/build suites in this cycle; this pass was limited t
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

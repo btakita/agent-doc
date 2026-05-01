@@ -899,6 +899,7 @@ fn resolve_or_create_pane(
         harness,
         created_panes,
         true,
+        true,
         false,
     )
 }
@@ -915,6 +916,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
     allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
     auto_fix_attempted: bool,
 ) -> Result<String> {
     tracing::debug!(
@@ -1182,6 +1184,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 harness,
                                 created_panes,
                                 allow_auto_fix_retry,
+                                allow_busy_interrupt_retry,
                                 auto_fix_attempted,
                                 &owner,
                                 &provenance,
@@ -1356,6 +1359,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             harness,
                             created_panes,
                             allow_auto_fix_retry,
+                            allow_busy_interrupt_retry,
                             auto_fix_attempted,
                             &registered_pane,
                             &provenance,
@@ -1459,6 +1463,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     harness,
                     created_panes,
                     allow_auto_fix_retry,
+                    allow_busy_interrupt_retry,
                     auto_fix_attempted,
                     existing,
                     &provenance,
@@ -1515,6 +1520,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     harness,
                     created_panes,
                     allow_auto_fix_retry,
+                    allow_busy_interrupt_retry,
                     auto_fix_attempted,
                     &new_pane,
                     &provenance,
@@ -1573,6 +1579,7 @@ fn retry_route_after_busy_pane_auto_fix(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
     allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
     auto_fix_attempted: bool,
     busy_pane: &str,
     provenance: &str,
@@ -1592,6 +1599,7 @@ fn retry_route_after_busy_pane_auto_fix(
                     harness,
                     created_panes,
                     false,
+                    allow_busy_interrupt_retry,
                     true,
                 );
             }
@@ -1608,6 +1616,7 @@ fn retry_route_after_busy_pane_auto_fix(
                     harness,
                     created_panes,
                     false,
+                    allow_busy_interrupt_retry,
                     true,
                 );
             }
@@ -1650,11 +1659,36 @@ fn retry_route_after_busy_pane_auto_fix(
                     harness,
                     created_panes,
                     false,
+                    allow_busy_interrupt_retry,
                     true,
                 );
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
         }
+    }
+    if allow_busy_interrupt_retry
+        && attempt_busy_existing_pane_interrupt_recovery(
+            tmux,
+            file,
+            busy_pane,
+            harness,
+            blocker_reason,
+        )?
+    {
+        return resolve_or_create_pane_with_auto_fix_retry(
+            tmux,
+            file,
+            pane,
+            col_args,
+            session_id,
+            file_path,
+            target_session,
+            harness,
+            created_panes,
+            false,
+            false,
+            true,
+        );
     }
     anyhow::bail!(format_busy_existing_pane_error(
         file,
@@ -1983,7 +2017,9 @@ fn dispatch_routed_reopen(
     }
 
     let stage = match status {
-        CommandDispatchStatus::Accepted => "accepted in tmux but Codex never showed any routed submission proof for",
+        CommandDispatchStatus::Accepted => {
+            "accepted in tmux but Codex never showed any routed submission proof for"
+        }
         CommandDispatchStatus::TimedOut => {
             "left drafted in tmux and Codex never showed any routed submission proof for"
         }
@@ -2085,6 +2121,32 @@ fn maybe_run_test_busy_auto_fix_hook(_tmux: &Tmux, _file: &Path, _pane: &str) ->
     Ok(false)
 }
 
+#[cfg(test)]
+fn maybe_run_test_busy_interrupt_hook(tmux: &Tmux, file: &Path, pane: &str) -> Result<bool> {
+    let Some(project_root) = snapshot::find_project_root(file)
+        .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
+    else {
+        return Ok(false);
+    };
+    let hook_path = project_root.join(".agent-doc/route-busy-interrupt.txt");
+    if !hook_path.exists() {
+        return Ok(false);
+    }
+    let command = std::fs::read_to_string(&hook_path)
+        .with_context(|| format!("failed to read {}", hook_path.display()))?;
+    let command = command.trim();
+    if command.is_empty() {
+        return Ok(false);
+    }
+    tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, command])?;
+    Ok(true)
+}
+
+#[cfg(not(test))]
+fn maybe_run_test_busy_interrupt_hook(_tmux: &Tmux, _file: &Path, _pane: &str) -> Result<bool> {
+    Ok(false)
+}
+
 fn attempt_busy_existing_pane_auto_fix(
     tmux: &Tmux,
     file: &Path,
@@ -2162,6 +2224,63 @@ fn busy_existing_pane_auto_fix_outcome(
         Some(SupervisorHealth::Healthy) => BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart,
         _ => BusyPaneAutoFixOutcome::FailClosed,
     }
+}
+
+fn attempt_busy_existing_pane_interrupt_recovery(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    blocker_reason: Option<&str>,
+) -> Result<bool> {
+    if harness.binary != "codex" {
+        return Ok(false);
+    }
+    if blocker_reason == Some("active permission prompt") {
+        return Ok(false);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_interrupt_started file={} pane={} harness={} blocker={}",
+            file.display(),
+            pane,
+            harness.binary,
+            blocker_reason.unwrap_or("timeout")
+        ),
+    );
+    eprintln!(
+        "[route] live {} pane {} for {} is still busy after the scoped recovery path — sending one interrupt sequence before the final reroute attempt",
+        harness.binary,
+        pane,
+        file.display()
+    );
+
+    let _ = tmux.send_keys_raw(pane, "Escape");
+    std::thread::sleep(Duration::from_millis(100));
+    let _ = tmux.send_keys_raw(pane, "C-c");
+    std::thread::sleep(Duration::from_millis(100));
+    let _ = maybe_run_test_busy_interrupt_hook(tmux, file, pane)?;
+
+    let ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    let recovered = ready.is_ready();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered={} outcome={}",
+            file.display(),
+            pane,
+            harness.binary,
+            recovered,
+            match ready {
+                AgentReadyWaitOutcome::Ready => "ready",
+                AgentReadyWaitOutcome::Blocked { .. } => "blocked",
+                AgentReadyWaitOutcome::TimedOut => "timed_out",
+            }
+        ),
+    );
+    Ok(recovered)
 }
 
 fn ensure_existing_pane_ready_for_dispatch(
@@ -4064,6 +4183,23 @@ mod tests {
         script
     }
 
+    fn write_mock_busy_registered_agent_doc_ignores_interrupt(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-busy-ignore-int");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ntrap '' INT\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn write_mock_start_agent_doc(base: &Path) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -4350,8 +4486,7 @@ mod tests {
         );
 
         let harness = HarnessConfig::codex();
-        let ready =
-            wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
         assert!(
             !ready,
             "reverse-i-search must not count as an idle Codex prompt"
@@ -5368,6 +5503,84 @@ Body\n\
         assert!(
             !after.contains("EARLY:agent-doc "),
             "route should not inject a trigger before the pane becomes idle: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_interrupt_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-interrupt-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        std::fs::write(
+            dir.path().join(".agent-doc/route-busy-interrupt.txt"),
+            format!("exec {} {}\n", ready_agent.display(), doc.display()),
+        )
+        .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy-interrupt-retry", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy-interrupt-retry",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+            false,
+            true,
+            true,
+        )
+        .expect("route should retry once after interrupting a still-busy live Codex pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should dispatch the reopen after the interrupt recovery retry: {after}"
         );
     }
 

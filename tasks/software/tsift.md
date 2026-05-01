@@ -258,7 +258,21 @@ The `agent-doc` skill was auto-updated from `0.33.12` to `0.33.16`, and the bina
 Run `/compact`, then re-invoke:
 
 `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-<!-- agent:boundary:a217a3ba -->
+#code-review
+### Re: code review — gpt-5
+
+#### Findings
+
+1. Windows summary cache lookups still disagree with the path format written during extract (`src/tsift/src/main.rs:2675`, `src/tsift/src/main.rs:3100-3105`, `src/tsift/src/summarize.rs:557-591`, `src/tsift/src/summarize.rs:624-677`, `src/tsift/src/main.rs:2775-2780`). Extraction derives `rel_path` with OS-native separators and persists it unchanged into `Summary.file_path`, while query mode normalizes every `--file` lookup candidate to forward slashes before calling `get_by_file()`. On Windows that means extracted rows land as `src\\lib.rs`, but lookups ask for `src/lib.rs`, so valid cached summaries can still miss even after the new symlink canonicalization fix.
+
+#### Verification
+
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`434` unit tests and `45` integration tests).
+- `cargo test --manifest-path src/tsift/Cargo.toml summarize_file_query -- --nocapture` passed on this Linux workspace, which confirms the Unix/symlink flow but also shows the relevant regression coverage is Unix-only today.
+- I did not reproduce the finding end-to-end because this workspace is Linux; the issue comes from the current read/write path mismatch in source.
+
+Top remaining backlog item: `#wsep`.
+<!-- agent:boundary:e3c9e1b2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -268,6 +282,7 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#wsep] [recommended] Normalize summary cache file_path storage to '/' separators so Windows summarize --file lookups match extracted rows
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

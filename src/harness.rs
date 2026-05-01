@@ -185,25 +185,48 @@ impl HarnessConfig {
     /// Return true when recent pane output indicates the harness is present but
     /// not actually idle for a routed trigger yet.
     pub fn has_busy_cue(&self, output: &str) -> bool {
+        self.dispatch_blocker_reason(output).is_some()
+    }
+
+    /// Return a short reason when recent pane output shows that route should
+    /// not inject a new trigger yet.
+    pub fn dispatch_blocker_reason(&self, output: &str) -> Option<String> {
         if crate::prompt::parse_prompt(output).active {
-            return true;
+            return Some("active permission prompt".to_string());
         }
 
         if self.binary != "codex" {
-            return false;
+            return None;
         }
 
-        output
+        let recent = output
             .lines()
             .rev()
             .take(8)
             .map(crate::prompt::strip_ansi)
             .map(|line| line.trim().to_ascii_lowercase())
-            .any(|line| {
-                line == "tab to queue message"
-                    || line.starts_with("tab to queue message ")
-                    || line.contains(" tab to queue message")
-            })
+            .collect::<Vec<_>>();
+
+        if recent.iter().any(|line| {
+            line == "tab to queue message"
+                || line.starts_with("tab to queue message ")
+                || line.contains(" tab to queue message")
+        }) {
+            return Some("queued draft in composer".to_string());
+        }
+
+        recent.iter().find_map(|line| {
+            if line.contains("reverse-i-search") {
+                Some("interactive shell reverse-i-search".to_string())
+            } else if line.contains("i-search")
+                && line.contains("accept")
+                && line.contains("cancel")
+            {
+                Some("interactive shell history search".to_string())
+            } else {
+                None
+            }
+        })
     }
 
     /// Return the most recent non-empty, non-footer line from a captured transcript.
@@ -594,6 +617,19 @@ tab to queue message
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
 ";
         assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_reverse_history_search() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+reverse-i-search: bugs enter accept · esc cancel
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("interactive shell reverse-i-search")
+        );
     }
 
     #[test]

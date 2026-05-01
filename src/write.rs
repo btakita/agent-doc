@@ -8921,10 +8921,7 @@ mod pending_patch_normalization_tests {
     #[test]
     fn normalize_pending_patch_allows_existing_alias_tag_items() {
         let tmp = TempDir::new().unwrap();
-        let backlog = concat!(
-            "### Active\n",
-            "- [ ] [#yckq] [#ss01] ShipStation fix\n"
-        );
+        let backlog = concat!("### Active\n", "- [ ] [#yckq] [#ss01] ShipStation fix\n");
         let (doc, content) = doc_with_backlog(&tmp, backlog);
         let patches = vec![crate::template::PatchBlock::new(
             "backlog",

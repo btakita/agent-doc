@@ -150,7 +150,10 @@ enum CommandDispatchStatus {
 enum ExistingPaneDispatchReadiness {
     Ready,
     BusyAlreadyRunning,
-    BusyNeedsAutoFix { provenance: String },
+    BusyNeedsAutoFix {
+        provenance: String,
+        blocker_reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,7 +189,50 @@ struct RoutedDispatchStartTracker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RoutedDispatchStartProof {
     CommandAcceptedOnly,
-    HarnessConsumed,
+    HookPromptMatched,
+    HookStateAdvanced,
+}
+
+impl RoutedDispatchStartProof {
+    fn proven_dispatch(self) -> bool {
+        !matches!(self, Self::CommandAcceptedOnly)
+    }
+
+    fn dispatch_stage_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => "accepted",
+            Self::HookPromptMatched => "consumed",
+            Self::HookStateAdvanced => "submitted",
+        }
+    }
+
+    fn startup_miss_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => "acceptance",
+            Self::HookPromptMatched => "consumption",
+            Self::HookStateAdvanced => "submission",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AgentReadyWaitOutcome {
+    Ready,
+    Blocked { reason: String },
+    TimedOut,
+}
+
+impl AgentReadyWaitOutcome {
+    fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    fn blocker_reason(&self) -> Option<&str> {
+        match self {
+            Self::Blocked { reason } => Some(reason.as_str()),
+            _ => None,
+        }
+    }
 }
 
 fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
@@ -246,14 +292,10 @@ fn routed_dispatch_start_timeout() -> Duration {
     }
 }
 
-fn codex_consumed_routed_trigger(
+fn codex_state_advanced(
     tracker: &RoutedDispatchStartTracker,
     state: &crate::codex_hook::ActiveSessionState,
 ) -> bool {
-    if state.last_prompt.trim() != tracker.trigger.trim() {
-        return false;
-    }
-
     match (
         tracker.previous_session_id.as_deref(),
         tracker.previous_turn_id.as_deref(),
@@ -268,24 +310,39 @@ fn codex_consumed_routed_trigger(
     }
 }
 
+fn codex_routed_dispatch_start_proof(
+    tracker: &RoutedDispatchStartTracker,
+    state: &crate::codex_hook::ActiveSessionState,
+) -> Option<RoutedDispatchStartProof> {
+    if !codex_state_advanced(tracker, state) {
+        return None;
+    }
+
+    if state.last_prompt.trim() == tracker.trigger.trim() {
+        Some(RoutedDispatchStartProof::HookPromptMatched)
+    } else {
+        Some(RoutedDispatchStartProof::HookStateAdvanced)
+    }
+}
+
 fn wait_for_routed_dispatch_start(
     file: &Path,
     tracker: &RoutedDispatchStartTracker,
     timeout: Duration,
-) -> Result<bool> {
+) -> Result<Option<RoutedDispatchStartProof>> {
     let start = std::time::Instant::now();
     let poll = Duration::from_millis(200);
 
     while start.elapsed() < timeout {
         if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
-            && codex_consumed_routed_trigger(tracker, &state)
+            && let Some(proof) = codex_routed_dispatch_start_proof(tracker, &state)
         {
-            return Ok(true);
+            return Ok(Some(proof));
         }
         std::thread::sleep(poll);
     }
 
-    Ok(false)
+    Ok(None)
 }
 
 fn format_associated_pane_resolution_error(
@@ -1114,7 +1171,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                             return Ok(owner.to_string());
                         }
-                        ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                        ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                            provenance,
+                            blocker_reason,
+                        } => {
                             return retry_route_after_busy_pane_auto_fix(
                                 tmux,
                                 file,
@@ -1129,6 +1189,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 auto_fix_attempted,
                                 &owner,
                                 &provenance,
+                                blocker_reason.as_deref(),
                             );
                         }
                     }
@@ -1146,7 +1207,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             .as_ref()
                             .map(|context| context.marker.as_str()),
                         true,
-                        dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
+                        dispatch_start,
                     )?;
                     return Ok(owner);
                 }
@@ -1284,7 +1345,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                         return Ok(registered_pane);
                     }
-                    ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                    ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                        provenance,
+                        blocker_reason,
+                    } => {
                         return retry_route_after_busy_pane_auto_fix(
                             tmux,
                             file,
@@ -1299,6 +1363,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             auto_fix_attempted,
                             &registered_pane,
                             &provenance,
+                            blocker_reason.as_deref(),
                         );
                     }
                 }
@@ -1317,7 +1382,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         .as_ref()
                         .map(|context| context.marker.as_str()),
                     true,
-                    dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
+                    dispatch_start,
                 )?;
                 return Ok(registered_pane);
             }
@@ -1383,7 +1448,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                 return Ok(existing.to_string());
             }
-            ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+            ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                provenance,
+                blocker_reason,
+            } => {
                 return retry_route_after_busy_pane_auto_fix(
                     tmux,
                     file,
@@ -1398,6 +1466,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     existing,
                     &provenance,
+                    blocker_reason.as_deref(),
                 );
             }
         }
@@ -1414,7 +1483,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 .as_ref()
                 .map(|context| context.marker.as_str()),
             true,
-            dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
+            dispatch_start,
         )?;
         return Ok(existing.to_string());
     }
@@ -1435,7 +1504,10 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         )? {
             ExistingPaneDispatchReadiness::Ready => {}
             ExistingPaneDispatchReadiness::BusyAlreadyRunning => return Ok(new_pane),
-            ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+            ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                provenance,
+                blocker_reason,
+            } => {
                 return retry_route_after_busy_pane_auto_fix(
                     tmux,
                     file,
@@ -1450,6 +1522,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     auto_fix_attempted,
                     &new_pane,
                     &provenance,
+                    blocker_reason.as_deref(),
                 );
             }
         }
@@ -1466,7 +1539,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 .as_ref()
                 .map(|context| context.marker.as_str()),
             false,
-            dispatch_start == RoutedDispatchStartProof::HarnessConsumed,
+            dispatch_start,
         )?;
         return Ok(new_pane);
     }
@@ -1507,6 +1580,7 @@ fn retry_route_after_busy_pane_auto_fix(
     auto_fix_attempted: bool,
     busy_pane: &str,
     provenance: &str,
+    blocker_reason: Option<&str>,
 ) -> Result<String> {
     if allow_auto_fix_retry {
         match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
@@ -1560,7 +1634,12 @@ fn retry_route_after_busy_pane_auto_fix(
                 if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
                     emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
                     anyhow::bail!(format_busy_existing_pane_error(
-                        file, busy_pane, harness, provenance, true
+                        file,
+                        busy_pane,
+                        harness,
+                        provenance,
+                        blocker_reason,
+                        true
                     ));
                 }
                 wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
@@ -1586,6 +1665,7 @@ fn retry_route_after_busy_pane_auto_fix(
         busy_pane,
         harness,
         provenance,
+        blocker_reason,
         auto_fix_attempted || allow_auto_fix_retry
     ));
 }
@@ -1891,23 +1971,26 @@ fn dispatch_routed_reopen(
     };
 
     let timeout = routed_dispatch_start_timeout();
-    if wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+    if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_dispatch_start_proven file={} pane={} harness={} timeout_secs={}",
+                "route_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
                 file.display(),
                 pane,
                 harness.binary,
+                proof.dispatch_stage_label(),
                 timeout.as_secs()
             ),
         );
-        return Ok(RoutedDispatchStartProof::HarnessConsumed);
+        return Ok(proof);
     }
 
     let stage = match status {
-        CommandDispatchStatus::Accepted => "accepted in tmux but Codex never consumed",
-        CommandDispatchStatus::TimedOut => "left drafted in tmux and Codex never consumed",
+        CommandDispatchStatus::Accepted => "accepted in tmux but Codex never showed any routed submission proof for",
+        CommandDispatchStatus::TimedOut => {
+            "left drafted in tmux and Codex never showed any routed submission proof for"
+        }
     };
     anyhow::bail!(
         "routed {} trigger for {} was {} the bare reopen in pane {} after waiting {}s",
@@ -1952,23 +2035,29 @@ fn format_busy_existing_pane_error(
     pane: &str,
     harness: &HarnessConfig,
     provenance: &str,
+    blocker_reason: Option<&str>,
     auto_fix_attempted: bool,
 ) -> String {
+    let blocker_clause = blocker_reason
+        .map(|reason| format!(" while it still shows {}", reason))
+        .unwrap_or_default();
     if auto_fix_attempted {
         format!(
-            "registered pane {} for {} is still not showing an idle {} prompt after automatically applying `agent-doc fix {}` once; refusing to inject a routed trigger into a busy session ({})",
+            "registered pane {} for {} is still not showing an idle {} prompt{} after automatically applying `agent-doc fix {}` once; refusing to inject a routed trigger into a busy session ({})",
             pane,
             file.display(),
             harness.binary,
+            blocker_clause,
             file.display(),
             provenance
         )
     } else {
         format!(
-            "registered pane {} for {} is not showing an idle {} prompt; refusing to inject a routed trigger into a busy session ({})",
+            "registered pane {} for {} is not showing an idle {} prompt{}; refusing to inject a routed trigger into a busy session ({})",
             pane,
             file.display(),
             harness.binary,
+            blocker_clause,
             provenance
         )
     }
@@ -2086,11 +2175,14 @@ fn ensure_existing_pane_ready_for_dispatch(
     harness: &HarnessConfig,
     prompt_bearing_marker: Option<&str>,
 ) -> Result<ExistingPaneDispatchReadiness> {
-    if wait_for_agent_ready(tmux, pane, existing_pane_ready_timeout(), harness) {
+    let ready_outcome =
+        wait_for_agent_ready_outcome(tmux, pane, existing_pane_ready_timeout(), harness);
+    if ready_outcome.is_ready() {
         return Ok(ExistingPaneDispatchReadiness::Ready);
     }
 
     let provenance = pane_route_provenance(tmux, pane);
+    let blocker_reason = ready_outcome.blocker_reason().map(str::to_string);
     if prompt_bearing_marker.is_none() {
         crate::ops_log::log_op(
             file,
@@ -2116,14 +2208,18 @@ fn ensure_existing_pane_ready_for_dispatch(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_existing_pane_not_idle file={} pane={} harness={} {}",
+            "route_existing_pane_not_idle file={} pane={} harness={} blocker={} {}",
             file.display(),
             pane,
             harness.binary,
+            blocker_reason.as_deref().unwrap_or("timeout"),
             provenance
         ),
     );
-    Ok(ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance })
+    Ok(ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+        provenance,
+        blocker_reason,
+    })
 }
 
 fn cycle_state_advances_start_ack(
@@ -2328,7 +2424,7 @@ fn require_routed_cycle_ack(
     baseline: Option<&crate::cycle_state::CycleState>,
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
-    dispatch_start_proven: bool,
+    dispatch_start: RoutedDispatchStartProof,
 ) -> Result<()> {
     if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
         return Ok(());
@@ -2399,11 +2495,7 @@ fn require_routed_cycle_ack(
                 baseline_id,
             )?;
             let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
-            let dispatch_stage = if dispatch_start_proven {
-                "consumed"
-            } else {
-                "accepted"
-            };
+            let dispatch_stage = dispatch_start.dispatch_stage_label();
             emit_startup_miss_diagnostic(
                 tmux,
                 pane,
@@ -3221,21 +3313,16 @@ fn auto_start_in_session(
                     tmux,
                     &dispatch_pane,
                     file,
-                    if dispatch_start == RoutedDispatchStartProof::HarnessConsumed {
-                        "fresh start: trigger consumed but no document cycle started"
-                    } else {
-                        "fresh start: trigger accepted but no document cycle started"
-                    },
+                    &format!(
+                        "fresh start: trigger {} but no document cycle started",
+                        dispatch_start.dispatch_stage_label()
+                    ),
                 );
                 anyhow::bail!(
                     "fresh {} start for {} never acknowledged with a document cycle after trigger {}",
                     harness.binary,
                     file.display(),
-                    if dispatch_start == RoutedDispatchStartProof::HarnessConsumed {
-                        "consumption"
-                    } else {
-                        "acceptance"
-                    }
+                    dispatch_start.startup_miss_label()
                 );
             }
         }
@@ -3274,14 +3361,49 @@ fn wait_for_agent_ready(
     timeout: std::time::Duration,
     harness: &HarnessConfig,
 ) -> bool {
+    wait_for_agent_ready_outcome(tmux, pane_id, timeout, harness).is_ready()
+}
+
+fn wait_for_agent_ready_outcome(
+    tmux: &Tmux,
+    pane_id: &str,
+    timeout: std::time::Duration,
+    harness: &HarnessConfig,
+) -> AgentReadyWaitOutcome {
     let start = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(500);
     let mut poll_count = 0u32;
     let mut ready_streak = 0u32;
     let mut last_ready_line: Option<String> = None;
+    let mut blocker_streak = 0u32;
+    let mut last_blocker: Option<String> = None;
 
     while start.elapsed() < timeout {
         if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
+            if let Some(reason) = harness.dispatch_blocker_reason(&content) {
+                ready_streak = 0;
+                last_ready_line = None;
+                if last_blocker.as_deref() == Some(reason.as_str()) {
+                    blocker_streak += 1;
+                } else {
+                    blocker_streak = 1;
+                    last_blocker = Some(reason.clone());
+                }
+                if blocker_streak >= 2 {
+                    eprintln!(
+                        "[route] {} blocked after {:.1}s in pane {}: {}",
+                        harness.binary,
+                        start.elapsed().as_secs_f64(),
+                        pane_id,
+                        reason
+                    );
+                    return AgentReadyWaitOutcome::Blocked { reason };
+                }
+            } else {
+                blocker_streak = 0;
+                last_blocker = None;
+            }
+
             match ready_prompt_candidate(&content, harness) {
                 Some(line) => {
                     if last_ready_line.as_deref() == Some(line.as_str()) {
@@ -3297,7 +3419,7 @@ fn wait_for_agent_ready(
                             start.elapsed().as_secs_f64(),
                             poll_count
                         );
-                        return true;
+                        return AgentReadyWaitOutcome::Ready;
                     }
                 }
                 None => {
@@ -3324,7 +3446,7 @@ fn wait_for_agent_ready(
         }
         std::thread::sleep(poll_interval);
     }
-    false
+    AgentReadyWaitOutcome::TimedOut
 }
 
 fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
@@ -4207,6 +4329,40 @@ mod tests {
     }
 
     #[test]
+    fn wait_for_agent_ready_rejects_codex_reverse_history_search() {
+        let _tmux_guard = tmux_start_lock();
+        let iso = IsolatedTmux::new("route-test-codex-reverse-search");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock codex launch"
+        );
+
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "reverse-i-search: bugs enter accept · esc cancel\n"; cat'"#;
+        send_keys_with_retry(&iso, &pane, script);
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting codex...",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting codex..."),
+            "mock codex never started in pane: {content}"
+        );
+
+        let harness = HarnessConfig::codex();
+        let ready =
+            wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(3), &harness);
+        assert!(
+            !ready,
+            "reverse-i-search must not count as an idle Codex prompt"
+        );
+    }
+
+    #[test]
     fn ready_prompt_candidate_accepts_codex_idle_placeholder_prompt() {
         let harness = HarnessConfig::codex();
         let content = "\
@@ -4298,6 +4454,27 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert!(
             recent_lines_contain_trigger(content, trigger),
             "wrapped Codex composer lines must still count as pending input"
+        );
+    }
+
+    #[test]
+    fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
+        let tracker = RoutedDispatchStartTracker {
+            trigger: "agent-doc /tmp/task.md".to_string(),
+            previous_session_id: Some("codex-session".to_string()),
+            previous_turn_id: Some("turn-1".to_string()),
+            previous_updated_at: Some(10),
+        };
+        let state = crate::codex_hook::ActiveSessionState {
+            session_id: "codex-session".to_string(),
+            doc_path: "/tmp/task.md".to_string(),
+            last_turn_id: "turn-2".to_string(),
+            last_prompt: "/review current changes".to_string(),
+            updated_at: 11,
+        };
+        assert_eq!(
+            codex_routed_dispatch_start_proof(&tracker, &state),
+            Some(RoutedDispatchStartProof::HookStateAdvanced)
         );
     }
 

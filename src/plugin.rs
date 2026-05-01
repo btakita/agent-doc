@@ -53,6 +53,18 @@ fn fetch_latest_release() -> Result<Value> {
     Ok(body)
 }
 
+fn fetch_releases() -> Result<Vec<Value>> {
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
+    let resp = build_agent()
+        .get(&url)
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", "agent-doc")
+        .call()
+        .context("Failed to fetch releases from GitHub")?;
+    let body: Vec<Value> = resp.into_json().context("Failed to parse releases JSON")?;
+    Ok(body)
+}
+
 fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a str, &'a str)> {
     let assets = release["assets"]
         .as_array()
@@ -85,6 +97,31 @@ fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a st
     }
 
     bail!("No {prefix}*.{ext} asset found in latest release");
+}
+
+fn has_asset(release: &Value, prefix: &str, ext: &str) -> bool {
+    find_asset(release, prefix, ext).is_ok()
+}
+
+fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
+    let latest = fetch_latest_release()?;
+    if has_asset(&latest, prefix, ext) {
+        return Ok(latest);
+    }
+
+    let latest_tag = release_version(&latest).to_string();
+    eprintln!(
+        "Latest release {latest_tag} has no {prefix}*.{ext} asset; checking older releases..."
+    );
+
+    let releases = fetch_releases()?;
+    for release in releases {
+        if has_asset(&release, prefix, ext) {
+            return Ok(release);
+        }
+    }
+
+    bail!("No {prefix}*.{ext} asset found in latest release or any recent GitHub release");
 }
 
 fn download_to_temp(url: &str) -> Result<tempfile::NamedTempFile> {
@@ -257,10 +294,15 @@ fn install_vscode(release: &Value) -> Result<()> {
 // --- Public API ---
 
 pub fn install(editor: &str) -> Result<()> {
-    let release = fetch_latest_release()?;
     match editor {
-        "jetbrains" | "jb" | "idea" => install_jetbrains(&release),
-        "vscode" | "code" | "vscodium" | "codium" | "cursor" => install_vscode(&release),
+        "jetbrains" | "jb" | "idea" => {
+            let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
+            install_jetbrains(&release)
+        }
+        "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            let release = fetch_release_for_asset("agent-doc", "vsix")?;
+            install_vscode(&release)
+        }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     }
 }
@@ -401,11 +443,10 @@ fn find_local_zip(dist_dir: &std::path::Path, signed: bool) -> Option<PathBuf> {
 }
 
 pub fn update(editor: &str) -> Result<()> {
-    let release = fetch_latest_release()?;
-    let version = release_version(&release);
-
     match editor {
         "jetbrains" | "jb" | "idea" => {
+            let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
+            let version = release_version(&release);
             // Check if already installed at this version
             let dirs = jetbrains_plugin_dirs();
             for d in &dirs {
@@ -424,10 +465,56 @@ pub fn update(editor: &str) -> Result<()> {
             install_jetbrains(&release)
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            let release = fetch_release_for_asset("agent-doc", "vsix")?;
             // VS Code/Cursor handles update-in-place via --install-extension
             install_vscode(&release)
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_asset, has_asset, release_version};
+    use serde_json::json;
+
+    #[test]
+    fn find_asset_prefers_signed_variant() {
+        let release = json!({
+            "tag_name": "v0.33.11",
+            "assets": [
+                {"name": "agent-doc-jetbrains-0.2.75.zip", "browser_download_url": "https://example.com/unsigned.zip"},
+                {"name": "agent-doc-jetbrains-signed.zip", "browser_download_url": "https://example.com/signed.zip"}
+            ]
+        });
+
+        let (name, url) = find_asset(&release, "agent-doc-jetbrains", "zip").unwrap();
+        assert_eq!(name, "agent-doc-jetbrains-signed.zip");
+        assert_eq!(url, "https://example.com/signed.zip");
+    }
+
+    #[test]
+    fn has_asset_returns_false_for_assetless_release() {
+        let release = json!({
+            "tag_name": "v0.33.16",
+            "assets": []
+        });
+
+        assert!(!has_asset(&release, "agent-doc-jetbrains", "zip"));
+        assert!(!has_asset(&release, "agent-doc", "vsix"));
+        assert_eq!(release_version(&release), "v0.33.16");
+    }
+
+    #[test]
+    fn has_asset_matches_versioned_vsix_name() {
+        let release = json!({
+            "tag_name": "v0.33.11",
+            "assets": [
+                {"name": "agent-doc-0.2.8.vsix", "browser_download_url": "https://example.com/agent-doc.vsix"}
+            ]
+        });
+
+        assert!(has_asset(&release, "agent-doc", "vsix"));
     }
 }
 

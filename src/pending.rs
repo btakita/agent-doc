@@ -640,44 +640,45 @@ fn parse_bracketed_custom_id_prefix(trimmed: &str) -> Result<(Option<String>, St
     Ok((Some(raw_id.to_lowercase()), remainder.to_string()))
 }
 
-    fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
-        let trimmed = text.trim();
-        if let Some(rest) = trimmed.strip_prefix("id=") {
-            return parse_explicit_custom_id_prefix(rest);
-        }
-        parse_bracketed_custom_id_prefix(trimmed)
+fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("id=") {
+        return parse_explicit_custom_id_prefix(rest);
     }
+    parse_bracketed_custom_id_prefix(trimmed)
+}
 
-    #[test]
-    fn existing_item_may_keep_leading_alias_tag() {
-        let mut existing_ids = HashSet::new();
-        existing_ids.insert("yckq".to_string());
+#[test]
+fn existing_item_may_keep_leading_alias_tag() {
+    let mut existing_ids = HashSet::new();
+    existing_ids.insert("yckq".to_string());
 
-        ensure_no_new_leading_custom_id_prefix(
-            "yckq",
-            "[#ss01] ShipStation fix",
-            &existing_ids,
-            "pending/backlog patch",
-        )
-        .expect("existing alias tag should not be rejected");
-    }
+    ensure_no_new_leading_custom_id_prefix(
+        "yckq",
+        "[#ss01] ShipStation fix",
+        &existing_ids,
+        "pending/backlog patch",
+    )
+    .expect("existing alias tag should not be rejected");
+}
 
-    #[test]
-    fn new_item_still_rejects_leading_alias_tag() {
-        let existing_ids = HashSet::new();
-        let err = ensure_no_new_leading_custom_id_prefix(
-            "yckq",
-            "[#ss01] ShipStation fix",
-            &existing_ids,
-            "pending/backlog patch",
-        )
-        .expect_err("new item alias tag should still be rejected");
-        assert!(
-            err.to_string().contains("duplicate leading custom id prefix"),
-            "unexpected error: {}",
-            err
-        );
-    }
+#[test]
+fn new_item_still_rejects_leading_alias_tag() {
+    let existing_ids = HashSet::new();
+    let err = ensure_no_new_leading_custom_id_prefix(
+        "yckq",
+        "[#ss01] ShipStation fix",
+        &existing_ids,
+        "pending/backlog patch",
+    )
+    .expect_err("new item alias tag should still be rejected");
+    assert!(
+        err.to_string()
+            .contains("duplicate leading custom id prefix"),
+        "unexpected error: {}",
+        err
+    );
+}
 
 /// Serialize items back to a body string.
 #[allow(dead_code)]

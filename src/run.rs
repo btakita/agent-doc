@@ -374,13 +374,8 @@ fn apply_template_response(
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     write::sanitize_patches(&mut patches);
-    let normalized = write::normalize_backlog_patch_response(
-        file,
-        &current_content,
-        patches,
-        unmatched,
-        false,
-    )?;
+    let normalized =
+        write::normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
     write::enforce_no_replace_pending(&patches, false)?;

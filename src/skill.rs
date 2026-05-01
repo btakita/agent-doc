@@ -44,6 +44,8 @@ const CLAUDE_DESCRIPTION: &str = "Interactive document session — respond to us
 
 const CODEX_DESCRIPTION: &str = "Interactive document session for Codex — respond to user edits in a markdown file. TRIGGER: user writes agent-doc <file> as a normal Codex message. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception. Do not use slash commands; Codex rejects project-defined /agent-doc.";
 
+const GENERIC_DESCRIPTION: &str = "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes the harness-native agent-doc entrypoint for the current environment. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception.";
+
 const CLAUDE_INVOCATION_SECTION: &str = r#"## Invocation
 
 ```
@@ -76,11 +78,23 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 "#;
 
-const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` (or equivalent) and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+const GENERIC_INVOCATION_SECTION: &str = r#"## Invocation
 
-const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+Use the harness-native `agent-doc` entrypoint for the environment you are in:
 
-const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness codex --reload restart`; if output contains `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+- Claude Code: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
+- Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
+
+Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+
+**Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
+"#;
+
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run the install command for the active harness: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; other harnesses `agent-doc skill install`. If the install output says the active harness instructions are already up to date, treat this file as stale duplicate instructions, use the installed harness-specific instructions as authoritative for the rest of the turn, and continue with the task. Only stop when the command prints a real `SKILL_RELOAD=...` marker for the active harness. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+
+const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness claude --reload compact`; if output contains `SKILL_RELOAD=compact`, prompt the user to run `/compact` and re-invoke the skill, then stop. If the command instead reports that the Claude instructions are already up to date, treat the current prompt as stale instruction drift, continue this turn, and use the installed Claude skill as authoritative. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
+
+const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Run `agent-doc --version` and compare against `agent-doc-version` in this file's frontmatter. If the binary is newer, run `agent-doc skill install --harness codex --reload restart`; if output contains `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If the command instead reports that the Codex instructions are already up to date, treat the current prompt as stale instruction drift, continue this turn, and use the installed Codex instructions as authoritative. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness-specific prompting.";
 
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
@@ -146,6 +160,7 @@ fn content_for_env(env: agent_kit::detect::Environment) -> String {
     use agent_kit::detect::Environment;
     let (description, invocation_section) = match env {
         Environment::Codex => (CODEX_DESCRIPTION, CODEX_INVOCATION_SECTION),
+        Environment::Generic => (GENERIC_DESCRIPTION, GENERIC_INVOCATION_SECTION),
         _ => (CLAUDE_DESCRIPTION, CLAUDE_INVOCATION_SECTION),
     };
     render_skill(env, description, invocation_section)
@@ -222,8 +237,45 @@ fn auto_update_line_for_env(env: agent_kit::detect::Environment) -> &'static str
     use agent_kit::detect::Environment;
     match env {
         Environment::Codex => CODEX_AUTO_UPDATE_LINE,
+        Environment::Generic => AUTO_UPDATE_LINE,
         _ => CLAUDE_AUTO_UPDATE_LINE,
     }
+}
+
+fn looks_like_managed_root_agents(content: &str) -> bool {
+    content.contains("user-invocable: true")
+        && content.contains("agent-doc-version:")
+        && content.contains("# agent-doc")
+        && content.contains("## Harness Compatibility")
+        && content.contains("## Workflow")
+}
+
+fn sync_managed_root_agents(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let path = base.join(agent_kit::detect::Environment::Generic.skill_rel_path("agent-doc"));
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let existing =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    if !looks_like_managed_root_agents(&existing) {
+        return Ok(());
+    }
+
+    let rendered = content_for_env(agent_kit::detect::Environment::Generic);
+    if existing == rendered {
+        return Ok(());
+    }
+
+    std::fs::write(&path, rendered).with_context(|| format!("write {}", path.display()))?;
+    eprintln!(
+        "[Generic] refreshed managed AGENTS.md mirror → {}",
+        path.display()
+    );
+    Ok(())
 }
 
 fn detect_install_env() -> agent_kit::detect::Environment {
@@ -470,7 +522,8 @@ pub fn install_at(root: Option<&Path>) -> Result<()> {
     let env = agent_kit::detect::Environment::detect();
     config().install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
-    install_env_artifacts(env, resolved.as_deref())
+    install_env_artifacts(env, resolved.as_deref())?;
+    sync_managed_root_agents(resolved.as_deref())
 }
 
 /// Public entry point (resolves to superproject root, called from main).
@@ -494,6 +547,7 @@ pub fn install_and_check_updated() -> Result<bool> {
     cfg.install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
     install_env_artifacts(detect_install_env(), resolved.as_deref())?;
+    sync_managed_root_agents(resolved.as_deref())?;
     Ok(!was_current)
 }
 
@@ -502,7 +556,8 @@ pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
     let resolved = resolve_root();
     config_for_env(env).install_for(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
-    install_env_artifacts(env, resolved.as_deref())
+    install_env_artifacts(env, resolved.as_deref())?;
+    sync_managed_root_agents(resolved.as_deref())
 }
 
 /// Install the skill for all supported harnesses.
@@ -512,7 +567,8 @@ pub fn install_all() -> Result<()> {
         config_for_env(env).install_for(env, resolved.as_deref())?;
     }
     install_runbooks_all(resolved.as_deref())?;
-    install_env_artifacts_all(resolved.as_deref())
+    install_env_artifacts_all(resolved.as_deref())?;
+    sync_managed_root_agents(resolved.as_deref())
 }
 
 /// Check if the installed skill matches the bundled version.
@@ -781,8 +837,49 @@ mod tests {
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
         assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains("stale instruction drift"));
+        assert!(content.contains("continue this turn"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+    }
+
+    #[test]
+    fn install_for_codex_refreshes_managed_root_agents_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        let stale_root = super::content_for_env(Environment::Generic).replace(
+            &format!("agent-doc-version: \"{VERSION}\""),
+            "agent-doc-version: \"0.33.12\"",
+        );
+        std::fs::write(dir.path().join("AGENTS.md"), stale_root).unwrap();
+
+        super::config_for_env(Environment::Codex)
+            .install_for(Environment::Codex, Some(dir.path()))
+            .unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
+        super::sync_managed_root_agents(Some(dir.path())).unwrap();
+
+        let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
+        assert_eq!(root, super::content_for_env(Environment::Generic));
+        assert!(codex.contains("agent-doc skill install --harness codex --reload restart"));
+    }
+
+    #[test]
+    fn install_for_codex_preserves_custom_root_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom = "# Custom Project Instructions\n\nKeep this file untouched.\n";
+        std::fs::write(dir.path().join("AGENTS.md"), custom).unwrap();
+
+        super::config_for_env(Environment::Codex)
+            .install_for(Environment::Codex, Some(dir.path()))
+            .unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
+        super::sync_managed_root_agents(Some(dir.path())).unwrap();
+
+        let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert_eq!(root, custom);
     }
 
     #[test]
@@ -994,6 +1091,8 @@ mod tests {
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
         assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains("stale instruction drift"));
+        assert!(content.contains("continue this turn"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(content.contains("agent-doc session-check <FILE>"));
         assert!(content.contains("final document-mutation boundary for the cycle"));
@@ -1016,6 +1115,20 @@ mod tests {
         assert!(content.contains("TRIGGER: user invokes /agent-doc <file>"));
         assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
         assert!(content.contains("SKILL_RELOAD=compact"));
+        assert!(content.contains("stale instruction drift"));
+        assert!(content.contains("continue this turn"));
+    }
+
+    #[test]
+    fn generic_content_handles_stale_duplicate_instructions() {
+        let content = super::content_for_env(Environment::Generic);
+
+        assert!(content.contains("Claude Code: `/agent-doc <FILE>`"));
+        assert!(content.contains("Codex: `agent-doc <FILE>`"));
+        assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
+        assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
+        assert!(content.contains("stale duplicate instructions"));
+        assert!(content.contains("continue with the task"));
     }
 
     #[test]

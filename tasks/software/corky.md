@@ -551,8 +551,7 @@ I closed `#gmail-send-token-key`.
 
 Top remaining backlog item is `#gsc-sa-cache-keying`.
 ❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
-❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
-### Re: gsc service-account cache keying — gpt-5 (HEAD)
+### Re: gsc service-account cache keying — gpt-5
 
 Implemented and pushed in `src/corky`.
 
@@ -571,12 +570,29 @@ Delivery:
 I closed `#gsc-sa-cache-keying`.
 
 Top remaining backlog item is `#release-v028`.
-<!-- agent:boundary:249c36ae -->
-do [#release-v028]
+❯ do [#release-v028]
+### Re: release v0.28.0 — gpt-5
+
+Implemented and shipped in `src/corky`.
+
+I verified the release boundary after the version bump:
+- `make check` (310 Rust tests passed)
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Release delivery:
+- version bumped to `0.28.0` in `Cargo.toml`, `pyproject.toml`, `Cargo.lock`, and `VERSIONS.md`
+- branch release commit already existed and was pushed on `20260413/corky-gsc`: `45937fe` — `chore: release v0.28.0`
+- shipped to `main` with squash-release commit `1e787bd` — `release: v0.28.0`
+- pushed `main` to `origin`
+- tagged and pushed `v0.28.0`
+
+I closed `#release-v028`.
+<!-- agent:boundary:2c666798 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#release-v028] Cut the next corky release: update VERSIONS.md, pick the post-v0.27.0 version, and ship the 8 commits currently only on 20260413/corky-gsc.
 <!-- /agent:pending -->

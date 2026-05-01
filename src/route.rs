@@ -4214,6 +4214,42 @@ Body\n\
     }
 
     #[test]
+    fn pending_prompt_bearing_context_for_route_detects_plain_exchange_tail_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-boundary-plain-tail.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("plain exchange-tail prompt should force routed ack gating");
+        assert_eq!(
+            ctx.marker,
+            "prompt_target: When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
+    }
+
+    #[test]
     fn resolve_or_create_pane_fails_closed_when_live_child_does_not_start_new_cycle() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

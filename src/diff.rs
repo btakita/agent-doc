@@ -297,7 +297,7 @@ pub fn annotate_diff(diff_text: &str) -> Option<String> {
 /// excluded from the "agent lines after" check to avoid false positives where
 /// end-of-exchange user input is followed only by closing markers.
 pub fn extract_inline_annotations(annotated_diff: &str) -> Vec<String> {
-    classify_prompt_bearing_changes_from_annotated(annotated_diff)
+    classify_prompt_bearing_changes_from_annotated_internal(annotated_diff, false)
         .into_iter()
         .filter_map(|change| match change.kind {
             PromptBearingChangeKind::PromptTarget | PromptBearingChangeKind::ContentEdit => {
@@ -349,6 +349,10 @@ fn is_recovery_artifact_line(content: &str) -> bool {
         || trimmed.starts_with("<!-- /patch:")
 }
 
+fn is_exchange_close_marker_line(content: &str) -> bool {
+    content.trim() == "<!-- /agent:exchange -->"
+}
+
 fn line_looks_like_prompt_target(line: &str) -> bool {
     let trimmed = line.trim();
     !trimmed.is_empty()
@@ -372,6 +376,7 @@ fn block_looks_like_prompt_target(block: &str) -> bool {
 fn classify_prompt_bearing_block(
     block_text: &str,
     has_substantive_agent_after: bool,
+    closes_exchange_tail: bool,
 ) -> Option<PromptBearingChangeKind> {
     let trimmed = block_text.trim();
     if trimmed.is_empty() {
@@ -397,34 +402,13 @@ fn classify_prompt_bearing_block(
     if block_looks_like_prompt_target(trimmed) {
         return Some(PromptBearingChangeKind::PromptTarget);
     }
+    if closes_exchange_tail {
+        return Some(PromptBearingChangeKind::PromptTarget);
+    }
     if has_substantive_agent_after {
         return Some(PromptBearingChangeKind::ContentEdit);
     }
     None
-}
-
-pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
-    let mut changes = annotate_diff(diff)
-        .map(|annotated| classify_prompt_bearing_changes_from_annotated(&annotated))
-        .unwrap_or_default();
-
-    // Annotated classification is the ordered source of truth because it preserves
-    // mixed prompt/edit/artifact encounter order across the changed tail. Keep the
-    // older prompt-block extractor as a safety net for prompt-target-only consumers
-    // and append only truly-missing prompt blocks.
-    for text in extract_prompt_target_blocks(diff) {
-        if changes.iter().any(|existing| {
-            existing.kind == PromptBearingChangeKind::PromptTarget && existing.text == text
-        }) {
-            continue;
-        }
-        changes.push(PromptBearingChange {
-            kind: PromptBearingChangeKind::PromptTarget,
-            text,
-        });
-    }
-
-    changes
 }
 
 /// Return the prompt-bearing exchange lines that must carry a `❯ ` prefix.
@@ -468,6 +452,13 @@ pub fn first_bare_prompt_prefix_target(diff: &str) -> Option<String> {
 
 fn classify_prompt_bearing_changes_from_annotated(
     annotated_diff: &str,
+) -> Vec<PromptBearingChange> {
+    classify_prompt_bearing_changes_from_annotated_internal(annotated_diff, true)
+}
+
+fn classify_prompt_bearing_changes_from_annotated_internal(
+    annotated_diff: &str,
+    promote_exchange_tail_prompts: bool,
 ) -> Vec<PromptBearingChange> {
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
@@ -555,11 +546,49 @@ fn classify_prompt_bearing_changes_from_annotated(
         let has_substantive_agent_after = lines[i..]
             .iter()
             .any(|line| is_substantive_agent_line(line));
+        let closes_exchange_tail = lines[i..]
+            .iter()
+            .find_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                line.strip_prefix("[agent] ")
+            })
+            .is_some_and(is_exchange_close_marker_line);
         let text = block.join("\n");
-        let Some(kind) = classify_prompt_bearing_block(&text, has_substantive_agent_after) else {
+        let Some(kind) = classify_prompt_bearing_block(
+            &text,
+            has_substantive_agent_after,
+            promote_exchange_tail_prompts && closes_exchange_tail,
+        ) else {
             continue;
         };
         changes.push(PromptBearingChange { kind, text });
+    }
+
+    changes
+}
+
+pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
+    let mut changes = annotate_diff(diff)
+        .map(|annotated| classify_prompt_bearing_changes_from_annotated(&annotated))
+        .unwrap_or_default();
+
+    // Annotated classification is the ordered source of truth because it preserves
+    // mixed prompt/edit/artifact encounter order across the changed tail. Keep the
+    // older prompt-block extractor as a safety net for prompt-target-only consumers
+    // and append only truly-missing prompt blocks.
+    for text in extract_prompt_target_blocks(diff) {
+        if changes.iter().any(|existing| {
+            existing.kind == PromptBearingChangeKind::PromptTarget && existing.text == text
+        }) {
+            continue;
+        }
+        changes.push(PromptBearingChange {
+            kind: PromptBearingChangeKind::PromptTarget,
+            text,
+        });
     }
 
     changes
@@ -3051,6 +3080,21 @@ Please fix the bug.\n\
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].kind, PromptBearingChangeKind::PromptTarget);
         assert_eq!(changes[0].text, "Why was the `❯` prefix omitted here?");
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_promotes_plain_exchange_tail_to_prompt_target() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            Done.\n\
+            +When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::PromptTarget);
+        assert_eq!(
+            changes[0].text,
+            "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
     }
 
     #[test]

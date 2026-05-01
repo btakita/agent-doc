@@ -1521,6 +1521,45 @@ Body\n\
         );
     }
 
+    #[test]
+    fn first_unstarted_prompt_bearing_change_detects_plain_exchange_tail_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let change = first_unstarted_prompt_bearing_change(&doc)
+            .unwrap()
+            .expect("plain exchange-tail prompt should remain actionable");
+        assert_eq!(
+            change.kind,
+            crate::diff::PromptBearingChangeKind::PromptTarget
+        );
+        assert_eq!(
+            change.text,
+            "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
+    }
+
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             if let Some(value) = &self.prev {

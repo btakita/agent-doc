@@ -162,7 +162,33 @@ If your intent is “continue the interrupted document cycle”, run the same co
 agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
 ```
 Or tell me to rerun it here and I’ll pick up from the current file state.
-<!-- agent:boundary:b265b3bc -->
+do [#rbgap]. spec-test-build-install-commit-push
+### Re: #rbgap routed Codex nested-root hook proof — gpt-5
+
+I advanced `#rbgap` and pushed `b0ce214` (`fix: keep routed codex proof across nested roots`) to `origin/20260422/codex-agent-backend`.
+
+One concrete root cause is fixed:
+- `route.rs` only enabled Codex hook-backed dispatch-start proof when the nearest `.agent-doc` root also had `.codex/hooks.json`.
+- Child repos like `src/session-share` and `src/boost-client` have their own `.agent-doc` roots but no local `.codex/hooks.json`, while the workspace root does.
+- That meant routed follow-ups in those child repos could silently downgrade from `accepted` / `submitted` / `consumed` staging back to plain acceptance-only routing, which matches part of the remaining May 1 failure family.
+
+What changed:
+- `src/route.rs` now scans every tracked `.agent-doc` ancestor for `.codex/hooks.json` before deciding whether routed Codex submission proof is available, matching the cross-root storage already used by `codex_hook.rs`.
+- Added direct regressions for the nested-root positive case and the no-hook negative case.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test -q codex_dispatch_start_tracking_enabled`
+- `cargo test -q route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`
+- `cargo test -q resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`
+- `cargo test` hit 9 existing tmux-heavy `route` / `resync` failures when run under full-suite load; the representative route and resync failures above both passed in isolated reruns.
+- `cargo build`
+- `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force`
+
+Plan: `tasks/agent-doc/plan-routed-codex-busy-substate-and-ack-gap.md`
+
+`#rbgap` stays open. This response records one verified sub-fix, but the remaining live reroute replay items already in backlog still need to prove the May 1 failure family is fully gone end-to-end.
+<!-- agent:boundary:c91b5f71 -->
 <!-- /agent:exchange -->
 
 <!--

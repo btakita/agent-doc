@@ -985,7 +985,23 @@ Code commit/push:
 
 No new backlog item is needed from this fix.
 
-<!-- agent:boundary:2267bed1 -->
+❯ Why is an agent-doc process using up my CPU?
+❯ `3358814 brian     16  -4   90228  15796   7720 R  99.7   0.0  21:20.48 agent-doc`
+### Re: audit-docs CPU usage — gpt-5
+
+That PID is not your session worker. It is `agent-doc audit-docs --root /home/brian/work/btakita/agent-loop`, started as a child of the current Codex process, and it is burning CPU in instruction-file discovery rather than normal document handling.
+
+Evidence:
+- `ps -fp 3358814` shows `agent-doc audit-docs --root /home/brian/work/btakita/agent-loop`.
+- `/proc/3358814/io` shows only about `344 KB` of actual file reads, so this is not heavy document-content parsing.
+- A fresh `timeout 5s agent-doc audit-docs --root /home/brian/work/btakita/agent-loop` also never got past `Auditing docs...`, so the slowdown reproduces before any audit results are printed.
+- The discovery path in [audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:335) walks broad globs like `src/**/AGENTS.md` and `src/**/CLAUDE.md` with no skip-dir filtering in that stage ([audit_common.rs](/home/brian/work/btakita/agent-loop/src/agent-kit/src/audit_common.rs:350)). `instruction_files::run()` invokes that discovery before any per-file checks ([lib.rs](/home/brian/work/btakita/agent-loop/src/instruction-files/src/lib.rs:67), [audit_docs.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/audit_docs.rs:30)).
+- This workspace has very large vendored trees under `src`, especially `src/prescience-notes-dev/node_modules/...`, so `src/**/...` discovery is far more expensive than the actual markdown audit.
+
+So the short answer is: `agent-doc` is almost certainly chewing through a huge `src/**` subtree for `audit-docs`, not looping on your active session document.
+
+If you just want the CPU back, kill PID `3358814`. If you want the root cause fixed, the right code change is to make instruction-file discovery skip heavy directories such as `node_modules`, `target`, `.git`, and similar vendor/cache trees instead of globbing all of `src/**`.
+<!-- agent:boundary:8ca2c86d -->
 <!-- /agent:exchange -->
 
 <!--

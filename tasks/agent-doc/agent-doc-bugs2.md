@@ -312,7 +312,10 @@ Code commit/push:
 - `src/agent-doc` `235f1df` on `20260422/codex-agent-backend` (`fix: preserve cross-root stash panes during prune`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:e315e669 -->
+### Re: closeout follow-up — gpt-5
+
+The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path acknowledges the remaining prompt-line artifact cleanly.
+<!-- agent:boundary:5bc6dedf -->
 <!-- /agent:exchange -->
 
 <!--

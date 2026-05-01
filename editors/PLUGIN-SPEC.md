@@ -86,7 +86,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Behavior:**
   1. Save the active document to disk.
   2. Run `agent-doc route <relative-path>` via subprocess from project root.
-  3. Show inline hint on success, persistent error notification on failure.
+  3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure.
   4. Register the file for prompt polling (Section 2.6).
 - **Concurrency guard:** Use an atomic boolean to prevent rapid double-invocation. Subsequent calls while a route is in-flight are silently skipped with a hint.
 - **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
@@ -149,6 +149,7 @@ Cache the resolved path for the session lifetime.
 
 ### 2.10 Notifications
 
+- **In flight:** Lightweight information notification while the route/fix command is still running; clear it when the subprocess exits.
 - **Success:** Lightweight inline hint near cursor, auto-dismissing after ~2 seconds.
 - **Error:** Persistent notification (balloon/error message). Never auto-dismiss errors.
 - **Logging:** Use the editor's built-in logging facility (`Logger` for JB, `OutputChannel` for VSCode). No temp files.

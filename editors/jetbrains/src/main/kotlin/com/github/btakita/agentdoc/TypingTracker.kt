@@ -14,7 +14,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
  */
 object TypingTracker : DocumentListener {
 
-    const val DEBOUNCE_MS = 1500L
+    const val DEBOUNCE_MS = 500L
     private const val TIMEOUT_MS = 30000L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
 

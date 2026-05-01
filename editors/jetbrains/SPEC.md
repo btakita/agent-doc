@@ -36,6 +36,11 @@ Two strategies for detecting the file's position in the editor split:
 - `PromptPoller` saves tracked files via `FileDocumentManager` before each poll cycle.
 - 3-way merge via `git merge-file` when both disk and editor have changed.
 
+### Run Feedback
+
+- `Run Agent Doc` uses the shared typing debounce with a 500ms window before manual route dispatch.
+- The action shows a persistent in-flight information notification while `agent-doc route` is still running, then expires it and shows an inline success hint on completion.
+
 ### Action Promoter
 
 - `AgentDocActionPromoter` ensures `AgentDocPopupAction` (Alt+Enter) takes priority over the built-in `ShowIntentionActions`.

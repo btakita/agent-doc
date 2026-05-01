@@ -40,6 +40,6 @@ Enable debug output: IDEA → `Help > Diagnostic Tools > Debug Log Settings` →
 
 - Plugin is a thin wrapper — business logic lives in the `agent-doc` CLI.
 - All CLI calls run from the project root directory.
-- Success feedback uses inline hints (`HintManager`), not balloon notifications.
+- Submit/route shows a short-lived in-flight information notification while the CLI is still running, then finishes with an inline hint (`HintManager`) on success.
 - Error feedback uses persistent balloon notifications.
 - `plugin.xml` action IDs are stable — only change `text` attributes for renames.

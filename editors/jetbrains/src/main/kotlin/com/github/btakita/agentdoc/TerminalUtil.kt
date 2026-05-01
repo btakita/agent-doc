@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.codeInsight.hint.HintManager
+import com.intellij.notification.Notification
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -123,19 +124,27 @@ object TerminalUtil {
                 .redirectErrorStream(true)
                 .start()
 
-            showHint(project, "Routed $relativePath")
+            val startedAt = System.currentTimeMillis()
+            val progress = startProgressNotification(project, "Routing $relativePath...")
+            showHint(project, "Routing $relativePath...")
 
             Thread {
                 try {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
+                    val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
                     if (exitCode != 0) {
                         LOG.warn("[route] FAILED (exit $exitCode): $output")
-                        notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
+                        notifyError(
+                            project,
+                            "agent-doc route failed for $relativePath after $elapsed (exit $exitCode):\n$output"
+                        )
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
+                        showHint(project, "Routed $relativePath in $elapsed")
                     }
                 } finally {
+                    progress?.expire()
                     onComplete?.invoke()
                 }
             }.start()
@@ -336,6 +345,28 @@ object TerminalUtil {
             }.start()
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
+        }
+    }
+
+    fun startProgressNotification(project: Project, content: String): Notification? {
+        return try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(content, NotificationType.INFORMATION)
+            notification.notify(project)
+            notification
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $content")
+            null
+        }
+    }
+
+    private fun formatElapsedMillis(elapsedMs: Long): String {
+        val seconds = elapsedMs / 1000.0
+        return if (seconds >= 10.0) {
+            String.format("%.0fs", seconds)
+        } else {
+            String.format("%.1fs", seconds)
         }
     }
 

@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings).
  * Only enabled when the active editor has a .md file open.
  *
- * **Conditional debounce:** If the user was typing within 1.5s of Run,
+ * **Conditional debounce:** If the user was typing within 500ms of Run,
  * waits for typing to settle (via FFI `await_idle`) before routing.
  * Otherwise routes immediately with zero delay.
  *

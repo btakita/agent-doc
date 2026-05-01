@@ -508,13 +508,32 @@ Delivery:
 - pushed `20260413/corky-gsc` to `origin`
 
 I closed `#oauth-listener-race`.
-<!-- agent:boundary:930a436b -->
+❯ do [#state-write-locking]. spec-test-build-install-commit-push
+### Re: state write locking — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+I added a shared `src/file_store.rs` persistence helper that takes an exclusive sibling lock file, writes through a temp-file replace, and centralizes JSON load/save handling. `TokenStore` now saves by merging the latest on-disk `tokens.json` under lock, so concurrent OAuth flows preserve unrelated token keys instead of last-writer-wins clobbering them.
+
+For `.sync-state.json`, `corky sync`, `corky watch`, and contact sync now save through a baseline-aware merge path. Concurrent account/contact updates preserve untouched sections, and same-label cursor conflicts keep the highest observed `last_uid` / `last_history_id` from a shared baseline. I added regression tests for concurrent token writes and sync-state merge cases, and updated README/SPEC plus the local instruction/runbook surfaces to document the locked atomic-write contract.
+
+Verification passed end to end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Delivery:
+- commit `33bb836` — `fix: lock and merge shared state writes`
+- pushed `20260413/corky-gsc` to `origin`
+
+I closed `#state-write-locking`.
+<!-- agent:boundary:f1b234ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#state-write-locking] Add atomic write + file locking + reload/merge semantics for `tokens.json` and `.sync-state.json` so concurrent corky processes cannot clobber each other.
 - [ ] [#gmail-send-token-key] Route `corky draft send` through the dedicated Gmail send-token path and fix the 401 remediation text so it points to compose-scope re-auth, not `corky filter auth`.
 - [ ] [#gsc-sa-cache-keying] Key the in-process GSC service-account cache by account/config fingerprint, or remove it until correctness is proven across multi-account runs.
 - [ ] [#release-v028] Cut the next corky release: update VERSIONS.md, pick the post-v0.27.0 version, and ship the 8 commits currently only on 20260413/corky-gsc.

@@ -325,7 +325,24 @@ Top remaining backlog item: `#stct`.
 Implemented `#scop` in `src/tsift` and pushed `main` as `323e73c` (`fix: normalize summarize extract scopes`). The summarize extract path now canonicalizes existing scope paths and collapses lexical `.` / `..` segments before diff filtering and cache-key derivation, so `src/../src` and symlinked scope spellings no longer yield false `No files to extract.` results or malformed `src/../src/...` keys.
 
 Updated `SPEC.md`, added regressions in `src/main.rs` and `tests/exit_code.rs`, and ran the full requested flow: `cargo test` (`438` unit tests, `47` integration tests), `cargo clippy --all-targets --all-features -- -D warnings`, `cargo build`, `cargo install --path src/tsift`, and `tsift --version` (`0.1.21`). The session document was finalized successfully and `agent-doc session-check` passed. Top remaining backlog item is `#stct`.
-<!-- agent:boundary:08453754 -->
+❯ do #stct. spec-test-build-install-commit-push
+### Re: #stct spec-test-build-install-commit-push — gpt-5
+
+Implemented `#stct` in `src/tsift` so `tsift summarize --stats` now computes a real stale-file count from the project root instead of hard-coding `stale_count: 0`. The stats path now treats both missing source files and content-hash mismatches as stale, deduplicates canonical file keys before counting, and surfaces the stale count in compact and human-readable CLI output.
+
+Added regression coverage in `src/summarize.rs` and `tests/exit_code.rs`, and updated `SPEC.md` to document the stale-count contract.
+
+Verification:
+- `cargo test` passed (`439` unit tests and `48` integration tests)
+- `cargo clippy --all-targets --all-features -- -D warnings` passed
+- `cargo build` passed
+- `cargo install --path .` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `caa135b` (`fix: report summarize stale stats`).
+
+The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:b7b78f29 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -335,7 +352,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stct] Make `tsift summarize --stats` compute real stale summary counts (missing files and hash-mismatched files) instead of hard-coding `stale_count: 0`, and align the CLI/spec contract.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

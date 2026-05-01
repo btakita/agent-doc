@@ -1566,11 +1566,14 @@ fn require_routed_cycle_ack(
 }
 
 fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
-    content
+    let recent_lines: Vec<String> = content
         .lines()
         .rev()
-        .take(5)
-        .any(|line| line_contains_trigger(&prompt::strip_ansi(line), trigger))
+        .take(8)
+        .map(prompt::strip_ansi)
+        .collect();
+    recent_lines.iter().any(|line| line_contains_trigger(line, trigger))
+        || recent_lines_contain_wrapped_trigger(&recent_lines, trigger)
 }
 
 fn line_contains_trigger(line: &str, trigger: &str) -> bool {
@@ -1592,6 +1595,60 @@ fn line_contains_trigger(line: &str, trigger: &str) -> bool {
             return true;
         }
         offset = start + 1;
+    }
+    false
+}
+
+fn compact_trigger_text(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+fn strip_leading_prompt_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    for prompt in ["❯", ">", "›", "⏵"] {
+        if let Some(rest) = trimmed.strip_prefix(prompt) {
+            return rest.trim_start();
+        }
+    }
+    trimmed
+}
+
+fn shares_trigger_prefix(fragment: &str, trigger: &str) -> bool {
+    let mut frag = fragment.chars();
+    let mut trig = trigger.chars();
+    loop {
+        match (frag.next(), trig.next()) {
+            (Some(left), Some(right)) if left == right => {}
+            (Some(_), Some(_)) => return false,
+            (None, _) | (_, None) => return true,
+        }
+    }
+}
+
+fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], trigger: &str) -> bool {
+    let compact_trigger = compact_trigger_text(trigger);
+    if compact_trigger.is_empty() {
+        return false;
+    }
+    let lines: Vec<&String> = recent_lines_rev.iter().rev().collect();
+    for start in 0..lines.len() {
+        let first = compact_trigger_text(strip_leading_prompt_prefix(lines[start]));
+        if first.is_empty() || !shares_trigger_prefix(&first, &compact_trigger) {
+            continue;
+        }
+        let mut joined = first;
+        if joined.contains(&compact_trigger) {
+            return true;
+        }
+        for next in lines.iter().skip(start + 1).take(3) {
+            joined.push_str(&compact_trigger_text(next));
+            if joined.contains(&compact_trigger) {
+                return true;
+            }
+            if joined.len() > compact_trigger.len() + 32 {
+                break;
+            }
+        }
     }
     false
 }
@@ -2385,7 +2442,7 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     }
     harness
         .last_prompt_candidate(content)
-        .filter(|line| harness.is_prompt_line(line))
+        .filter(|line| harness.is_dispatch_ready_prompt_line(line))
 }
 
 /// After a lazy claim, sync tmux layout for all files in the same window.
@@ -3216,6 +3273,39 @@ mod tests {
     }
 
     #[test]
+    fn wait_for_agent_ready_rejects_codex_prompt_with_drafted_text() {
+        let _tmux_guard = tmux_start_lock();
+        let iso = IsolatedTmux::new("route-test-codex-drafted-prompt");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready before mock codex launch"
+        );
+
+        let script = r#"exec /bin/sh -c 'printf "Starting codex...\n"; sleep 0.5; printf "› Run /review on my current changes\n"; printf "gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n"; cat'"#;
+        send_keys_with_retry(&iso, &pane, script);
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Starting codex...",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("Starting codex..."),
+            "mock codex never started in pane: {content}"
+        );
+
+        let harness = HarnessConfig::codex();
+        let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(2), &harness);
+        assert!(
+            !ready,
+            "a Codex prompt with drafted text must not count as an idle dispatch target"
+        );
+    }
+
+    #[test]
     fn recent_lines_contain_trigger_matches_claude_trigger() {
         let content = "\
 history line
@@ -3233,6 +3323,21 @@ history line
 ";
         assert!(recent_lines_contain_trigger(content, "agent-doc test.md"));
         assert!(!recent_lines_contain_trigger(content, "/agent-doc test.md"));
+    }
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_wrapped_codex_trigger() {
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
+        let content = "\
+› agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claud
+escore-3.md
+gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
+";
+        assert!(
+            recent_lines_contain_trigger(content, trigger),
+            "wrapped Codex composer lines must still count as pending input"
+        );
     }
 
     #[test]

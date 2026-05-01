@@ -141,6 +141,7 @@ impl HarnessConfig {
 
     /// Check if a line (potentially with ANSI codes) matches a prompt pattern.
     /// Used by route.rs for pane prompt detection.
+    #[cfg(test)]
     pub fn is_prompt_line(&self, line: &str) -> bool {
         let stripped = crate::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
@@ -150,6 +151,23 @@ impl HarnessConfig {
             || (self.binary == "claude"
                 && trimmed.starts_with("⏵⏵ ")
                 && trimmed.contains("(shift+tab to cycle)"))
+    }
+
+    /// Return true when the line represents an empty composer that route may
+    /// safely inject into. Prompt lines with drafted user text are not idle for
+    /// dispatch even if they still begin with the harness prompt glyph.
+    pub fn is_dispatch_ready_prompt_line(&self, line: &str) -> bool {
+        let stripped = crate::prompt::strip_ansi(line);
+        let trimmed = stripped.trim();
+        match self.binary.as_str() {
+            "claude" => {
+                matches!(trimmed, "❯" | "⏵")
+                    || (trimmed.starts_with("⏵⏵ ")
+                        && trimmed.contains("(shift+tab to cycle)"))
+            }
+            "codex" => matches!(trimmed, "❯" | ">" | "›"),
+            _ => self.matches_prompt(trimmed),
+        }
     }
 
     /// Return true when the line is harness UI chrome that should not be treated as
@@ -367,6 +385,25 @@ mod tests {
         assert!(h.is_prompt_line("  >  "));
         assert!(h.is_prompt_line("›"));
         assert!(h.is_prompt_line("› "));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_rejects_drafted_codex_text() {
+        let h = HarnessConfig::codex();
+        assert!(h.is_dispatch_ready_prompt_line("›"));
+        assert!(h.is_dispatch_ready_prompt_line("> "));
+        assert!(!h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
+        assert!(!h.is_dispatch_ready_prompt_line("> agent-doc /tmp/session.md"));
+    }
+
+    #[test]
+    fn is_dispatch_ready_prompt_line_accepts_claude_composer_hint() {
+        let h = HarnessConfig::claude();
+        assert!(h.is_dispatch_ready_prompt_line("❯"));
+        assert!(h.is_dispatch_ready_prompt_line(
+            "⏵⏵ bypass permissions on (shift+tab to cycle)"
+        ));
+        assert!(!h.is_dispatch_ready_prompt_line("❯ investigate this issue"));
     }
 
     #[test]

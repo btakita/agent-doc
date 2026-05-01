@@ -551,7 +551,6 @@ I closed `#gmail-send-token-key`.
 
 Top remaining backlog item is `#gsc-sa-cache-keying`.
 ❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
-❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
 ### Re: gsc service-account cache keying — gpt-5
 
 Implemented and pushed in `src/corky`.
@@ -608,10 +607,36 @@ Release delivery:
 - tagged and pushed `v0.28.0`
 
 I closed `#release-v028`.
-<!-- agent:boundary:7303e6fe -->
+❯ #code-review
+### Re: corky code review — gpt-5
+
+Findings, ordered by severity:
+
+1. High: the new Google loopback-port fallback can reintroduce `redirect_uri_mismatch` for the exact client shape this repo already uses. `src/oauth_loopback.rs:45-49` and `src/oauth_loopback.rs:111-122` silently switch to an arbitrary port when `8484` is busy, and every Google flow opts into that path (`src/filter/gmail_auth.rs:352`, `src/cal/auth.rs:146`, `src/contact/push.rs:144`, `src/gsc/auth.rs:375`). The session history already shows a real `redirect_uri_mismatch` when GSC used `8485`, so this fallback is only safe for desktop-app clients that accept any loopback port. Root cause: port selection is being inferred from the provider, but the real constraint lives in the user’s registered OAuth client.
+
+2. Medium: concurrent token saves can resurrect tokens that another process deliberately deleted. `TokenStore::save_to()` merges the caller’s entire in-memory map back onto disk (`src/social/token_store.rs:67-71`), while delete-on-401 uses a separate persisted removal path (`src/social/token_store.rs:95-103`, `src/filter/gmail_auth.rs:300-303`, `src/draft/send.rs:135-147`). If one process clears a bad `gmail:<account>:send` token and another stale process later calls `save()`, the deleted token is written back and the user can get stuck reusing the same bad credential. Root cause: the new lock/merge contract preserves additions, but it has no tombstone or versioning story for deletions.
+
+3. Medium: `corky watch` still misses new mail for `gmail-api` accounts. The notification path snapshots only IMAP `labels.last_uid` (`src/watch.rs:16-44`) and decides "new messages" from that snapshot (`src/watch.rs:204-215`), but Gmail API sync advances `gmail_labels.last_history_id` instead (`src/sync/gmail_api_sync.rs:377-395`). Result: a pure `gmail-api` setup can ingest new mail, then still print `No new messages`, skip mailbox sync, and skip desktop notifications. Root cause: the watch loop still assumes IMAP cursors even though sync state now has a second cursor family.
+
+4. Medium: OAuth callback parsing is protocol-incomplete because it never URL-decodes callback params. `src/oauth_loopback.rs:64-67` hands the raw query string to `src/social/auth.rs:182-211`, which splits on `&` and `=` and returns raw `code` and `state` values; only `error_description` gets a partial `+` replacement. Any provider that percent-encodes `code`, `state`, or error text can fail token exchange or trip a false CSRF mismatch. The existing tests (`tests/test_social_auth.rs:13-70`) only cover raw ASCII query strings, so this edge stays invisible.
+
+`cargo test -q` passes on the current tree, so these are uncovered workflow bugs rather than already-failing paths.
+
+Recommended backlog, in priority order:
+1. `oauth-google-fixed-port`: [recommended] Keep Google OAuth on fixed `8484` by default, or make arbitrary-port fallback opt-in only for credentials known to support loopback wildcard redirects.
+2. `tokenstore-delete-preservation`: [recommended] Add a deletion-safe token-store merge strategy so stale writers cannot restore tokens cleared by another process.
+3. `watch-gmail-history-notify`: [recommended] Teach `watch` to count Gmail API `last_history_id` movement and trigger mailbox sync and notify for `gmail-api` accounts.
+4. `oauth-callback-url-decode`: [recommended] URL-decode OAuth callback params before state comparison and token exchange.
+
+Top backlog item id: `oauth-google-fixed-port`.
+<!-- agent:boundary:db96b5b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#oauth-google-fixed-port] [recommended] Keep Google OAuth on fixed 8484 by default, or make arbitrary-port fallback opt-in only for credentials known to support loopback wildcard redirects
+- [ ] [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
+- [ ] [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
+- [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 <!-- /agent:pending -->

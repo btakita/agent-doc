@@ -757,15 +757,43 @@ Committed and pushed in `src/agent-doc` on `20260422/codex-agent-backend`:
 - `fd0e0a5` `fix: prove routed codex reopen consumption`
 
 I left the unrelated pre-existing dirty files in that worktree untouched.
-<!-- agent:boundary:8a73ebc8 -->
+❯ Yet another JB Plugin error surfaced due to `Agent Doc Run` pipeline. Just to set expectations, `Agent Doc Run` needs to be "snappy" fast and it needs to "just work". There should be no failure modes. Any "failure mode" needs an automatic remediation:
+```
+agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 36s (exit 1): resync: stash pane %356 is registered in its own project root — skipping kill resync: stash pane %358 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 4104446) in pane %351 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %351 for session b26b9957 via supervisor pid 4104446 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: reverse-i-search: bugs enter accept · esc cancel [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] registered pane %351 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once before failing closed [sync] recovered live pane %351 for session b26b9957 via supervisor pid 4104446 [sync] found alive agent-doc child (pid 4104446) in pane %351 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md [route] scoped fix left pane %351 authoritative for tasks/agent-doc/agent-doc-bugs2.md with a healthy supervisor — restarting the live codex session fresh once before one final reroute [sync] found alive agent-doc child (pid 4104446) in pane %351 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %351 for session b26b9957 via supervisor pid 4104446 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: registered pane %351 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%351 pane_pid=4102876 pane_session=0 current_command=agent-doc)
+```
+```
+agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 17s (exit 1): resync: stash pane %356 is registered in its own project root — skipping kill resync: stash pane %358 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 4104446) in pane %351 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %351 for session b26b9957 via supervisor pid 4104446 [route] Still waiting for codex (5s)... last line: Tip: New Use /fast to enable our fastest inference with in [route] codex ready after 6.0s (12 polls) [route] Pane %351 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %351 [route] Command accepted (0.3s, 0 Enter retries) Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in tmux but Codex never consumed the bare reopen in pane %351 after waiting 10s
+```
+### Re: Run Agent Doc snappy auto-remediation gap — gpt-5
+
+I traced the new logs to two remaining routed Codex gaps, both after the earlier `#runsm` hardening rather than a regression back to the older broader routing work.
+
+1. The first failure is still in route readiness, not dispatch. `wait_for_agent_ready()` / `ready_prompt_candidate()` only know about empty Codex composers, placeholder prompts, and a narrow busy-cue set in `src/agent-doc/src/harness.rs`. A pane stuck in an interactive shell substate like `reverse-i-search` is not classified as a recoverable non-dispatch state, so route burns the idle timeout, then falls into `agent-doc fix`, then only later decides whether to restart.
+2. The second failure is in routed consumption proof. `dispatch_routed_reopen()` now relies on Codex `UserPromptSubmit` state from `src/codex_hook.rs` to prove that the bare `agent-doc <FILE>` reopen was actually consumed. In the latest repro tmux accepted the send, but route never observed that exact hook advancement, so the flow still collapses into the "accepted in tmux but Codex never consumed" bucket.
+
+I created a focused follow-up plan for this narrower gap instead of reopening the old broad routing-simplification work.
+
+Plan: `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`
+
+I added a recommended backlog item `#snrun` for the next implementation turn. Scope:
+- teach readiness/auto-recovery to recognize interactive shell substates like reverse search
+- add a second post-send proof path so routed reopen failures are separated into drafted, unconsumed, and consumed-without-cycle-start
+- re-run the JetBrains `Run Agent Doc` repro after the route changes land
+
+I did not start code changes in this cycle because this edit was a new bug report / expectation update rather than a `do #...` implementation turn.
+<!-- agent:boundary:65580f72 -->
 <!-- /agent:exchange -->
 
 <!--
+do [#utf8p]. spec-test-build-install-commit-push
+---
+Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#snrun] [recommended] Implement snappy auto-remediation for routed Codex failures: recognize interactive terminal states like reverse-i-search earlier, add a second post-send consumption proof, and rerun the JetBrains repro. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#utf8p] [recommended] Fix the UTF-8 byte-boundary panic in component parsing triggered near `❯`. Plan: tasks/agent-doc/plan-component-parser-utf8-boundaries.md
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

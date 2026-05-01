@@ -369,14 +369,26 @@ fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     write::sanitize_patches(&mut patches);
+    let normalized = write::normalize_backlog_patch_response(
+        file,
+        &current_content,
+        patches,
+        unmatched,
+        false,
+    )?;
+    let patches = normalized.patches;
+    let unmatched = normalized.unmatched;
     write::enforce_no_replace_pending(&patches, false)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
+    write::ensure_template_response_write_proof(&patches, &unmatched)?;
 
     let doc_lock = acquire_doc_lock(file)?;
     snapshot::save_pre_response(file, baseline)?;
@@ -529,6 +541,45 @@ mod tests {
         assert!(prompt.contains(
             "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
         ));
+    }
+
+    #[test]
+    fn apply_template_response_normalizes_legacy_backlog_patch_before_enforcement() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] existing item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: backlog follow-up — gpt-5\n\n",
+            "Captured the requested backlog update.\n",
+            "<!-- /patch:exchange -->\n\n",
+            "<!-- patch:backlog -->\n",
+            "- [ ] [#new1] added item\n",
+            "- [ ] [#keep1] existing item\n",
+            "<!-- /patch:backlog -->\n",
+        );
+
+        apply_template_response(&doc, baseline, response, false)
+            .expect("run path should normalize legacy backlog patches before enforcement");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("### Re: backlog follow-up — gpt-5"));
+        assert!(updated.contains("- [ ] [#new1] added item"));
+        assert!(updated.contains("- [ ] [#keep1] existing item"));
     }
 
     #[test]

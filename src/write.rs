@@ -1632,10 +1632,10 @@ pub(crate) fn enforce_no_destructive_todo_patch(
     Ok(())
 }
 
-struct NormalizedTemplateResponse {
-    response_for_capture: Option<String>,
-    patches: Vec<template::PatchBlock>,
-    unmatched: String,
+pub(crate) struct NormalizedTemplateResponse {
+    pub(crate) response_for_capture: Option<String>,
+    pub(crate) patches: Vec<template::PatchBlock>,
+    pub(crate) unmatched: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1666,7 +1666,7 @@ fn template_response_write_proof(
     }
 }
 
-fn ensure_template_response_write_proof(
+pub(crate) fn ensure_template_response_write_proof(
     patches: &[template::PatchBlock],
     unmatched: &str,
 ) -> Result<()> {
@@ -1728,7 +1728,7 @@ fn serialize_template_response(patches: &[template::PatchBlock], unmatched: &str
     out
 }
 
-fn normalize_backlog_patch_response(
+pub(crate) fn normalize_backlog_patch_response(
     file: &Path,
     current_content: &str,
     mut patches: Vec<template::PatchBlock>,

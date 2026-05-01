@@ -747,10 +747,48 @@ Code commit/push:
 - `src/agent-doc` `554ff0b` on `20260422/codex-agent-backend` (`fix: accept idle codex composer suggestions`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:ba33653e -->
+do [#bdryc]. spec-test-build-install-commit-push
+### Re: #bdryc — gpt-5
+
+Implemented the deterministic stale-boundary repair.
+
+Root cause:
+- The earlier `#bdryc` fix taught `route` and `session-check` to stop treating an answered prompt below a stale `agent:boundary` as new pending work, but `repair` still had no no-pending recovery path that actually moved the boundary. That left documents visually stale until some later manual/editor action rewrote them.
+
+Implemented:
+- `repair.rs` now detects the safe completed-turn shape: a template doc with no pending capture, a stale boundary, an answered prompt/response tail after that boundary, and no later unresolved prompt-bearing drift.
+- In that shape, `repair` reuses the existing boundary id, moves it to the true end of the completed turn, updates the snapshot, and lets `preflight` commit the cleanup on the next cycle.
+- The broader already-applied/template normalization path also picks up the same boundary repair helper, so replay/dedup recovery keeps the document canonical too.
+- `session_check.rs` exposes the answered-turn predicate to that repair path.
+- Updated `specs/07-commands.md`, `VERSIONS.md`, and added regressions for both the answered-turn repair and the unanswered-prompt no-op guard.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_repositions_stale_boundary_after_answered_turn -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_does_not_move_boundary_past_unanswered_prompt -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml repair_completed_backlog_reap_preserves_live_prompt_outside_snapshot -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_completed_backlog_reap_does_not_swallow_live_prompt -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `b8b61cd` on `20260422/codex-agent-backend` (`fix: repair completed-turn stale boundaries`)
+
+I marked `#bdryc` done and added a recommended follow-up to validate the original live JB/tmux rerun end-to-end.
+<!-- agent:boundary:81063aa4 -->
 <!-- /agent:exchange -->
 
 <!--
+Fix flaky tests
+---
+This error happened after a successful `Run Agent Doc` turn initition. Please investigate and fix the root cause of the following error. spec-test-build-install-commit-push 
+```
+agent-doc route failed (exit 1): resync: stash pane %316 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1108722) in pane %320 for tasks/monsterrodholders.md [route] codex ready after 0.5s (1 polls) [route] Pane %320 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %320 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %320 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: Please try #u8p3-fy9a again. Are we able to connect via ssh? Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %320, but no new document cycle started for pending prompt_target: Please try #u8p3-fy9a again. Are we able to connect via ssh? after waiting 30s (startup_miss_timestamp=2026-05-01T06:22:29Z)
+```
+```
+agent-doc route failed (exit 1): [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md resync: stash pane %320 is registered in its own project root — skipping kill resync: purged 1 orphaned stash pane(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 349032) in pane %316 for tasks/claudescore-3.md [route] codex ready after 0.5s (1 polls) [route] Pane %316 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %316 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %316 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending content_edit: The session surface has now moved through the full follow-up calibration tranche: `#outcome`, `#slabel`, `#sdigest`, `#sfound`, `#sconduct`, `#soverscore`, `#sconfcal`, `#sclaudemd`, `#srootfit`, `#sdoccov`, `#snewtool`, and `#sdig2fx` are recorded complete here in addition to the earlier raw-stabilization items. The accepted raw internal-testing reference remains `missfit-raw-contract-20260428T000000Z` (`rubric MAE 1.68`, `composite MAE 23.3`). `#sdig2fx` closed with targeted extractor regressions across long structured sessions, sparse sessions, correction-heavy sessions, markdown/plaintext dialogue, JSONL-derived summaries, and explicit `session_doc` loads; the direct loader now preserves visible session-doc provenance instead of appending a raw synthetic JSON line into the digest surface. Digest parity is now parked under `#sredact` plus a later retained-fixture raw-vs-digest rerun; the dominant remaining transcript-backed miss on this session surface is still `brian-takita-claudescore / assumption-surfacing`. Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %316, but no new document cycle started for pending content_edit: The session surface has now moved through the full follow-up calibration tranche: `#outcome`, `#slabel`, `#sdigest`, `#sfound`, `#sconduct`, `#soverscore`, `#sconfcal`, `#sclaudemd`, `#srootfit`, `#sdoccov`, `#snewtool`, and `#sdig2fx` are recorded complete here in addition to the earlier raw-stabilization items. The accepted raw internal-testing reference remains `missfit-raw-contract-20260428T000000Z` (`rubric MAE 1.68`, `composite MAE 23.3`). `#sdig2fx` closed with targeted extractor regressions across long structured sessions, sparse sessions, correction-heavy sessions, markdown/plaintext dialogue, JSONL-derived summaries, and explicit `session_doc` loads; the direct loader now preserves visible session-doc provenance instead of appending a raw synthetic JSON line into the digest surface. Digest parity is now parked under `#sredact` plus a later retained-fixture raw-vs-digest rerun; the dominant remaining transcript-backed miss on this session surface is still `brian-takita-claudescore / assumption-surfacing`. after waiting 30s (startup_miss_timestamp=2026-05-01T06:25:49Z)
+```
+---
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->
@@ -758,7 +796,7 @@ If I restart codex with the supervisor, the real-time the next session process h
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bdryc] Completed-turn boundary stale after response patchback: if an assistant response lands in `agent:exchange` but the `agent:boundary` marker stays above that answered prompt, route and session-check keep treating the prompt as pending and reruns fail closed on `pending prompt_target` even though the turn is visibly complete. Repro from `src/session-share/tasks/claudescore-3.md` on May 1, 2026 after `Can we run specific rubrics for fine tuning?`. Expected fix: deterministic auto-repair first; interactive prompt only if multiple safe repairs are genuinely ambiguous. Plan: tasks/agent-doc/plan-boundary-completion-recovery.md
+- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 <!-- /agent:backlog -->

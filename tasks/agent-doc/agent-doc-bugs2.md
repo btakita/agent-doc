@@ -243,7 +243,34 @@ Code commit/push:
 - `src/agent-doc` `30bba2b` on `20260422/codex-agent-backend` (`fix: reject duplicate cross-root sync pane writes`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:b2531adb -->
+❯ When I select the following documents, it seems they use the exact same tmux pane:
+❯ - /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+❯ - /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md
+
+❯ spec-test-build-install-commit-push
+### Re: same-root `claudescore` pane aliasing — gpt-5
+
+Root cause was in the synthetic tmux-router registry that `sync.rs` builds before layout reconcile. If two visible documents from the same child repo both pointed at the same stale pane, we passed both session ids through to tmux-router unchanged. That let tmux-router treat one live pane as the backing pane for both `src/session-share/tasks/claudescore.md` and `src/session-share/tasks/claudescore-3.md`, so editor selection could appear to reuse or swap the exact same tmux pane instead of rehydrating a distinct one.
+
+Implemented:
+- `sync.rs` now filters duplicate pane ids out of the synthetic tmux-router registry before reconcile.
+- A duplicate pane is kept only when exactly one claimant still proves live ownership, or, failing that, exactly one claimant uniquely matches the pane's project root.
+- Ambiguous same-root duplicates now fail closed and are dropped from the synthetic registry entirely, forcing tmux-router to treat that document as unresolved and rehydrate/start a separate pane instead of aliasing both docs onto one live pane.
+- Added regression coverage for the exact ambiguous same-root duplicate shape plus the unique-live-owner keep path.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml filter_duplicate_synthetic_registry_candidates_drops_ambiguous_same_root_duplicate_pane`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml filter_duplicate_synthetic_registry_candidates_keeps_unique_live_owner`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `d54c6c7` on `20260422/codex-agent-backend` (`fix: fail closed on same-root sync pane aliases`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:7b06f9a7 -->
 <!-- /agent:exchange -->
 
 <!--

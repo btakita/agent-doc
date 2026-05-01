@@ -854,7 +854,30 @@ So for this document, I do **not** see evidence that `Run Agent Doc` launched in
 The hidden/stashed pane that exists right now is a different session (`%320` in the `stash` window), so it is not the explanation for this document's current binding.
 
 No new backlog item is needed from this inspection.
-<!-- agent:boundary:de4ed2b5 -->
+❯ When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push
+### Re: `Run Agent Doc` no-op on plain exchange-tail follow-up — gpt-5
+
+Root cause was the prompt-bearing diff classifier, not tmux routing. For this document the new user line landed below a stale `agent:boundary` and immediately before `&lt;!-- /agent:exchange --&gt;`, but it was plain prose: no `❯ ` prefix yet, no trailing `?`, and no imperative lead verb. Route therefore classified the document as having no pending prompt-bearing drift, hit the `route_existing_pane_already_running` path, focused the live pane, and injected nothing.
+
+Implemented in `src/agent-doc`:
+- `diff.rs` now promotes a non-artifact user block at the live exchange tail to `prompt_target` when it sits immediately before `&lt;!-- /agent:exchange --&gt;`.
+- Kept that promotion out of the legacy inline-annotation projection so section/component markers still do not masquerade as inline edits.
+- Added regressions in `diff.rs`, `session_check.rs`, and `route.rs`.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml classify_prompt_bearing_changes_promotes_plain_exchange_tail_to_prompt_target -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml first_unstarted_prompt_bearing_change_detects_plain_exchange_tail_prompt -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml pending_prompt_bearing_context_for_route_detects_plain_exchange_tail_prompt -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `238aea0` on `20260422/codex-agent-backend` (`fix: detect plain exchange tail prompts`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:bfbae903 -->
 <!-- /agent:exchange -->
 
 <!--

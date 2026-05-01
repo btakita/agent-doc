@@ -830,7 +830,31 @@ Code commit/push:
 - `src/agent-doc` `b208787` on `20260422/codex-agent-backend` (`fix: guard codex reroute payload`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:92f8a342 -->
+❯ `Run Agent Doc` does not seem to run in a tmux window that is visible at least. I don't know what happened with `Run Agent Doc` on this document.
+### Re: `Run Agent Doc` visibility on this document — gpt-5
+
+I checked the live tmux state, the root `sessions.json`, and this document's session log.
+
+Current live binding for `tasks/agent-doc/agent-doc-bugs2.md` is **visible**, not hidden:
+- root registry maps this file to pane `%328`
+- `%328` is in tmux session `0`, window `0:agent-doc`, left column of the active split
+- the current active window layout is `0:0 { left=%328, right=%316 }`
+- the separate stash window is `0:1`, but its pane is `%320` and belongs to a different document/root, not this file
+
+What changed is that this document's prior live pane was `%300`, and that older session ended cleanly:
+- session log shows `codex_exit code=0`
+- then `restart_eval ... ctrl_d=true ... action=prompt_user`
+- then `user_quit_after_ctrl_d`
+- then `supervisor_exit reason=user_quit_after_ctrl_d`
+- then `session_end`
+- six seconds later the same document/session id started fresh on `%328`
+
+So for this document, I do **not** see evidence that `Run Agent Doc` launched into a hidden stash pane. The evidence points to a visible-pane replacement: the earlier `%300` session died after the Ctrl-D prompt path, and the document was then restarted into the current visible `%328` pane in the main `agent-doc` window.
+
+The hidden/stashed pane that exists right now is a different session (`%320` in the `stash` window), so it is not the explanation for this document's current binding.
+
+No new backlog item is needed from this inspection.
+<!-- agent:boundary:de4ed2b5 -->
 <!-- /agent:exchange -->
 
 <!--

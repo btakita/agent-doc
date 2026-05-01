@@ -529,7 +529,7 @@ Delivery:
 
 I closed `#state-write-locking`.
 ❯ do [#gmail-send-token-key]. spec-test-build-install-commit-push
-### Re: gmail send token key — gpt-5
+### Re: gmail send token key — gpt-5 (HEAD)
 
 Implemented and pushed in `src/corky`.
 
@@ -551,6 +551,7 @@ I closed `#gmail-send-token-key`.
 
 Top remaining backlog item is `#gsc-sa-cache-keying`.
 <!-- agent:boundary:a5ca7a22 -->
+do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

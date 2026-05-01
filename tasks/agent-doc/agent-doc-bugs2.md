@@ -479,7 +479,7 @@ Code commit/push:
 
 No follow-up backlog items from this fix.
 ❯ do [#tdrl]. spec-test-build-install-commit-push
-### Re: #tdrl — gpt-5
+### Re: #tdrl — gpt-5 (HEAD)
 
 `#tdrl` is a duplicate of the already-completed `#ptdr` fix, not a new implementation gap.
 
@@ -489,6 +489,7 @@ No follow-up backlog items from this fix.
 
 No new code/spec/test edits were needed this cycle, so there was nothing safe or useful to commit or push on top of the already-dirty `src/agent-doc` worktree. Treat `#tdrl` as the same closed bug as `#ptdr`; the remaining `(HEAD)` text here is the duplicate-patchback artifact from the earlier exchange-order/duplicate-closeout bugs, not a remaining todo-patch regression.
 <!-- agent:boundary:9595c048 -->
+commit + push uncommitted changes
 <!-- /agent:exchange -->
 
 <!--

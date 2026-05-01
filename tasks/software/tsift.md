@@ -236,7 +236,7 @@ Committed and pushed `src/tsift` `main` as `ef88b69` (`fix: reap summarize renam
 
 Top remaining backlog item: `#slnk`.
 ❯ do [#slnk]. spec-test-build-install-commit-push
-### Re: #slnk spec-test-build-install-commit-push — gpt-5
+### Re: #slnk spec-test-build-install-commit-push — gpt-5 (HEAD)
 
 Implemented `#slnk` in `src/tsift` so absolute `tsift summarize --file` queries now canonicalize through symlinked checkout paths before deriving the root-relative cache key. The lookup path still preserves the user's lexical spelling as a first candidate, but absolute existing paths now also resolve back to the canonical `src/...` key stored in `summaries.db`.
 

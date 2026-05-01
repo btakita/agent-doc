@@ -414,18 +414,21 @@ Code commit/push:
 - `src/agent-doc` `12b9715` on `20260422/codex-agent-backend` (`fix: fail loudly on uncommitted closeout drift`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:d914b65b -->
+### Re: no changes detected — gpt-5
+
+No actionable document diff was detected for this cycle.
+
+- The prior `#codcommit` response is already committed.
+- The remaining working-tree drift is in HTML comments, which preflight does not treat as a prompt-bearing exchange/status/backlog edit.
+- If you want me to respond to the JB plugin routing/startup-miss errors next cycle, move that note into visible document content (for example a `## User` block or plain exchange text) instead of an HTML comment.
+<!-- agent:boundary:aa4f7e95 -->
 <!-- /agent:exchange -->
 
 <!--
-The claudescore-3.md pane kept on being swapped out of the `agent-doc` tmux window during the last agent-doc turn on this document.
-If I quickly switched back to claudescore-3.md, I retrieved the running pane.
-If I waited too long, I lost the running pane.
-
-Note this was using the pre-#pathprov fix. Would this issue still occur or should #pathprov incidently fix this issue?
-Even if #pathprov would incidently fix this case, I'm still concerned that it's possible for a tmux pane to be swapped out while the editor has the document open. Why is this even possible?
-
-spec-test-build-install-commit-push
+I'm getting some errors surfaced by the JB plugin.
+```
+agent-doc route failed (exit 1): resync: stash pane %298 is registered in its own project root — skipping kill resync: stash pane %297 is registered in its own project root — skipping kill resync: stash pane %293 is registered in its own project root — skipping kill resync: stash pane %290 is registered in its own project root — skipping kill resync: stash pane %291 is registered in its own project root — skipping kill resync: stash pane %294 is registered in its own project root — skipping kill resync: stash pane %292 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 3845244) in pane %295 for tasks/monsterrodholders.md [route] registered pane %295 still owns /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md but startup-miss 2026-05-01T02:47:55Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %295 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %295 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %295 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: do #wcup1. spec-test-commit-push Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %295, but no new document cycle started for pending prompt_target: do #wcup1. spec-test-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T02:51:44Z)
+```
 -->
 
 ## Pending / Not Built

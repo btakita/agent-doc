@@ -156,6 +156,7 @@ enum ExistingPaneDispatchReadiness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BusyPaneAutoFixOutcome {
     RetryRoute,
+    RetryRouteAfterSupervisorRestart,
     FocusBusySameDocument,
     FailClosed,
 }
@@ -1352,6 +1353,22 @@ fn retry_route_after_busy_pane_auto_fix(
                     true,
                 );
             }
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return resolve_or_create_pane_with_auto_fix_retry(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    false,
+                    true,
+                );
+            }
             BusyPaneAutoFixOutcome::FocusBusySameDocument => {
                 crate::ops_log::log_op(
                     file,
@@ -1386,6 +1403,52 @@ fn retry_route_after_busy_pane_auto_fix(
         provenance,
         auto_fix_attempted || allow_auto_fix_retry
     ));
+}
+
+fn wait_for_busy_restart_handoff(
+    tmux: &Tmux,
+    file: &Path,
+    file_path: &str,
+    session_id: &str,
+    previous_pane: &str,
+) {
+    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
+    let timeout = if cfg!(test) {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(5)
+    };
+    let poll = Duration::from_millis(100);
+    let start = std::time::Instant::now();
+    let mut handed_off_pane: Option<String> = None;
+    while start.elapsed() < timeout {
+        if let Ok(registry) = sessions::load_in(&registry_base_dir)
+            && let Some(entry) = registry.values().find(|entry| entry.session_id == session_id)
+            && !entry.pane.is_empty()
+        {
+            if entry.pane != previous_pane {
+                handed_off_pane = Some(entry.pane.clone());
+                if crate::sync::find_live_owner_pane(tmux, file, session_id).as_deref()
+                    == Some(entry.pane.as_str())
+                {
+                    eprintln!(
+                        "[route] supervisor restart handed {} from pane {} to authoritative pane {} before retry",
+                        file_path, previous_pane, entry.pane
+                    );
+                    return;
+                }
+            } else {
+                handed_off_pane = None;
+            }
+        }
+        std::thread::sleep(poll);
+    }
+    if let Some(pane) = handed_off_pane {
+        eprintln!(
+            "[route] supervisor restart handed {} from pane {} to authoritative pane {} before retry, but live-owner proof is still catching up",
+            file_path, previous_pane, pane
+        );
+    }
 }
 
 /// Rescue a pane from a stash window back to the agent-doc window.
@@ -1785,7 +1848,10 @@ fn busy_existing_pane_auto_fix_outcome(
     supervisor_health: Option<SupervisorHealth>,
     restarted_supervisor: bool,
 ) -> BusyPaneAutoFixOutcome {
-    if test_hook_changed || fix_made_changes || restarted_supervisor {
+    if restarted_supervisor {
+        return BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart;
+    }
+    if test_hook_changed || fix_made_changes {
         return BusyPaneAutoFixOutcome::RetryRoute;
     }
     match supervisor_health {
@@ -4670,6 +4736,144 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-busy-restart-handoff");
+        let session = "claude";
+        let cwd = test_cwd();
+        let busy_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-busy-restart-handoff.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &busy_pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &busy_pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-busy-restart-handoff";
+        sessions::register(session_id, &busy_pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": false,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { .. } => {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let registry_root = dir.path().to_path_buf();
+        let file_for_thread = file_path.clone();
+        let doc_for_thread = doc.clone();
+        let ack_current = current.clone();
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let restart_called_for_thread = restart_called.clone();
+        let busy_pane_for_thread = busy_pane.clone();
+        let replacement = std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let replacement_pane = iso_for_thread.auto_start(session, &cwd).unwrap();
+            iso_for_thread
+                .send_keys(
+                    &replacement_pane,
+                    &format!("exec {} {}", ready_agent.display(), doc_for_thread.display()),
+                )
+                .unwrap();
+            let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &busy_pane_for_thread]);
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                session_id,
+                &replacement_pane,
+                &file_for_thread,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&ack_current)).unwrap();
+            replacement_pane
+        });
+
+        let routed = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should wait for the restarted session to hand off to the new authoritative pane");
+
+        let replacement_pane = replacement.join().unwrap();
+        assert!(restart_called.load(Ordering::Relaxed));
+        assert_eq!(routed, replacement_pane);
+
+        let replacement_after = wait_for_pane_contains(
+            &iso,
+            &replacement_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            replacement_after.contains("GOT:agent-doc "),
+            "route should dispatch into the replacement pane after restart handoff: {replacement_after}"
+        );
+
+        let busy_after = sessions::capture_pane(&iso, &busy_pane).unwrap_or_default();
+        assert!(
+            !busy_after.contains("GOT:agent-doc "),
+            "route must not keep dispatching into the stale busy pane after restart handoff: {busy_after}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
     fn busy_existing_pane_auto_fix_outcome_focuses_healthy_authoritative_session_without_changes() {
         assert_eq!(
             busy_existing_pane_auto_fix_outcome(
@@ -4696,7 +4900,7 @@ Body\n\
                 Some(SupervisorHealth::Restartable),
                 true,
             ),
-            BusyPaneAutoFixOutcome::RetryRoute
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
         );
     }
 

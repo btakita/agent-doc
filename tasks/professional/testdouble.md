@@ -491,7 +491,39 @@ So the leanest version of your asks is probably just:
 4. Clarify the hours language in Exhibit A.
 
 That is the set most likely to matter economically and most worth pushing first.
-<!-- agent:boundary:42b31499 -->
+❯ It feels somewhat uncomfortable to talk about termination terms. Is this worth worth treading lightly on or being direct?
+### Re: termination tone — gpt-5
+
+Polite in tone, direct on substance.
+
+I would **not** be aggressive about it, but I also would not be vague. The termination/payment forfeiture language is the single clause most likely to cost you real money, so it is worth raising clearly.
+
+The right posture is:
+
+- Do not frame it as `I’m worried I might quit early`.
+- Frame it as a basic fairness / earned-compensation issue.
+- Keep the ask narrow: work already performed should still be paid.
+
+So I would tread lightly in style, but not in the actual ask.
+
+Something like this is about right:
+
+> `One item I would like to clean up is the payment language around termination. I want to make sure that if the engagement ends for any reason, services already performed through the termination date remain payable in the ordinary course.`
+
+That reads much better than:
+
+> `I’m not comfortable with the termination clause because I may want to leave.`
+
+Why this one is worth being clear about:
+
+- It is economically significant.
+- It is easy to explain as a normal contractor protection.
+- It does not accuse them of bad intent; it just says earned work should be paid.
+
+If you want the shortest practical advice: **be soft in tone, firm in content.**
+
+If you want, I can rewrite the draft email one more time in a `lighter-touch but still direct` style so it feels easier to send.
+<!-- agent:boundary:4c426119 -->
 <!-- /agent:exchange -->
 
 ## Queue

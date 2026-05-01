@@ -491,7 +491,7 @@ So the leanest version of your asks is probably just:
 4. Clarify the hours language in Exhibit A.
 
 That is the set most likely to matter economically and most worth pushing first.
-❯ It feels somewhat uncomfortable to talk about termination terms. Is this worth worth treading lightly on or being direct?
+❯ It feels somewhat uncomfortable to talk about termination terms. Is this worth treading lightly on or being direct?
 ### Re: termination tone — gpt-5
 
 Polite in tone, direct on substance.
@@ -523,7 +523,35 @@ Why this one is worth being clear about:
 If you want the shortest practical advice: **be soft in tone, firm in content.**
 
 If you want, I can rewrite the draft email one more time in a `lighter-touch but still direct` style so it feels easier to send.
-<!-- agent:boundary:4c426119 -->
+Please redraft the email response.
+### Re: lighter-touch email draft — gpt-5
+
+On the tone question: I would still be light in style and direct in content. The key is to make the payment-on-termination point sound like normal contract cleanup, not like you are planning an exit.
+
+Here is the version I would send:
+
+> Subject: A few edits / clarifications before signing
+>
+> Todd,
+>
+> Thanks for sending this over. I reviewed the subcontractor agreement and had a few proposed edits / clarifications before signing.
+>
+> 1. **Payment on termination / breach.** I’d like to confirm that services properly performed through the termination date remain payable in the ordinary course, and that already-earned outstanding invoices are not forfeited.
+> 2. **Liability / indemnity.** I’d like to add a standard limitation of liability, including a reasonable aggregate cap and exclusion of consequential / indirect damages, and to narrow indemnity to third-party claims.
+> 3. **IP carveout.** I’d like to clarify that my preexisting tools, libraries, templates, code, and general know-how remain mine, with a license only to the extent incorporated into deliverables.
+> 4. **Weekly time commitment.** Please confirm whether the `40 hours/week` reference is intended as an expected cadence, a maximum cap, or a minimum required commitment.
+>
+> I’ve included proposed redline language below to make review easier.
+>
+> Best,
+> Brian
+
+If you want it even softer, change item 1 to:
+
+> `I’d like to clarify the payment language around termination so that services already performed through the termination date remain payable in the ordinary course.`
+
+That version is a little less pointed, but still protects the issue that matters.
+<!-- agent:boundary:f37c7b3c -->
 <!-- /agent:exchange -->
 
 ## Queue

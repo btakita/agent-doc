@@ -923,15 +923,43 @@ Code commit/push:
 - `src/agent-doc` `3c5ff18` on `20260422/codex-agent-backend` (`fix: refresh no-op closeout sidecars`)
 
 There are no actionable follow-up items to capture.
-<!-- agent:boundary:a287c53e -->
-<!-- /agent:exchange -->
-
-<!--
-JB Plugin surfaced an error. Identify and fix the root cause(s). spec-test-build-install-commit-push
+❯ JB Plugin surfaced an error. Identify and fix the root cause(s). spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): resync: stash pane %331 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %316 is registered in its own project root — skipping kill resync: stash pane %329 is registered in its own project root — skipping kill resync: stash pane %330 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2709786) in pane %332 for tasks/software/tsift.md [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] Still waiting for codex (5s)... last line: reverse-i-search: t enter accept · esc cancel [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] registered pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is busy with pending document drift — applying scoped `agent-doc fix tasks/software/tsift.md` once before failing closed [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [resync] pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is in stash window, deregistering [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] No pane registered for session tsift-v0 [route] No active pane found, auto-starting... [route] split-window -dbh alongside registered pane %328 in session '0' → new pane %335 [route] Started codex for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md in pane %335 (session tsift-v0) [route] Waiting for codex to initialize... [route] codex ready after 2.0s (4 polls) [route] codex is ready, sending command [route] cleaning up orphaned pane %335 (created during failed route) Error: route dispatch target %335 is not registered for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; refusing unbound dispatch
 ```
----
+### Re: JB Plugin routed auto-start unbound dispatch — gpt-5
+
+I fixed the routed auto-start failure behind this JB Plugin error.
+
+Root cause:
+- After route auto-fixed the stale `%332` binding and started a fresh pane `%335`, `route.rs` still relied on the early fresh-pane registration surviving all the way through harness boot. Recovery churn during the ready-wait could clear that temporary geometry-only binding, so the first guarded `send_command_checked()` saw `%335` as unbound and failed closed with `route dispatch target %335 is not registered ...`, even though the new Codex pane was alive and ready.
+- I also found adjacent test-only registry/CWD races in the tmux route/sync coverage. Those did not cause the JB production failure, but they were masking the route fix under parallel suite runs, so I hardened the affected tests to use explicit registry roots and canonical absolute file paths instead of process-global cwd assumptions.
+
+Implemented in `src/agent-doc`:
+- `route.rs` now re-checks the fresh pane binding immediately before the first guarded trigger injection and re-registers it only when the pane is still safe to claim.
+- The rebind still fails closed for cross-file ownership or when a different pane already owns the same session, so the existing dispatch safety guard remains intact.
+- Added a regression that clears the fresh-pane registration during the ready wait and proves the first routed trigger still succeeds.
+- Hardened the route/sync tmux tests that were depending on shared cwd state, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification completed:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml auto_start_reuses_other_file_pane_only_as_split_anchor -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml concurrent_provision_pane_serializes_same_session_auto_start -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `5b2d461` on `20260422/codex-agent-backend` (`fix: rebind fresh route pane before dispatch`)
+
+No new backlog item is needed from this fix.
+
+<!-- agent:boundary:793b8d2b -->
+<!-- /agent:exchange -->
+
+<!--
 I keep on seeing. How can this be fixed?:
 ```
 • The installed agent-doc binary is newer than the session instructions (0.33.16 vs 0.33.12). I’m reloading the skill

@@ -488,13 +488,32 @@ The current automated suite does not catch these because they are mostly process
 On the release question: yes, there is a pending release. `src/corky` is on branch `20260413/corky-gsc`, `v0.27.0` is still the latest tag and top entry in `VERSIONS.md`, and `HEAD` is 8 commits past that tag (`cf63185`, `e84e38e`, `f8aff38`, `7b3a95c`, and later branch commits are not released yet).
 
 I added the follow-up backlog in priority order. The top backlog item id is `oauth-listener-race`.
-<!-- agent:boundary:df54a6a3 -->
+❯ do [#oauth-listener-race]. spec-test-build-install-commit-push
+### Re: oauth listener race — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+I added a shared `src/oauth_loopback.rs` helper that binds the loopback callback listener before browser launch, parses the callback centrally, supports `CORKY_OAUTH_CALLBACK_PORT` as a per-session override, and automatically falls back to an available loopback port for Google desktop-app flows when `127.0.0.1:8484` is busy. Gmail, Calendar, Contacts, GSC, and social auth now use that helper. For fixed-redirect providers like LinkedIn, corky now fails with explicit guidance instead of racing the browser against a late bind.
+
+I also updated the spec and the relevant skill/runbook docs so the auth flow, callback-port behavior, and Gmail reply-threading guidance match the current code.
+
+Verification passed end to end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install`
+
+Delivery:
+- commit `cadc035` — `fix: harden oauth loopback flows`
+- pushed `20260413/corky-gsc` to `origin`
+
+I closed `#oauth-listener-race`.
+<!-- agent:boundary:930a436b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#oauth-listener-race] Extract a shared OAuth helper that binds the callback listener before opening the browser, handles busy-port collisions, and supports per-session callback port selection.
 - [ ] [#state-write-locking] Add atomic write + file locking + reload/merge semantics for `tokens.json` and `.sync-state.json` so concurrent corky processes cannot clobber each other.
 - [ ] [#gmail-send-token-key] Route `corky draft send` through the dedicated Gmail send-token path and fix the 401 remediation text so it points to compose-scope re-auth, not `corky filter auth`.
 - [ ] [#gsc-sa-cache-keying] Key the in-process GSC service-account cache by account/config fingerprint, or remove it until correctness is proven across multi-account runs.

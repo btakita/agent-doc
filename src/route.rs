@@ -146,10 +146,11 @@ enum CommandDispatchStatus {
     TimedOut,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ExistingPaneDispatchReadiness {
     Ready,
     BusyAlreadyRunning,
+    BusyNeedsAutoFix { provenance: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -641,6 +642,35 @@ fn resolve_or_create_pane(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
 ) -> Result<String> {
+    resolve_or_create_pane_with_auto_fix_retry(
+        tmux,
+        file,
+        pane,
+        col_args,
+        session_id,
+        file_path,
+        target_session,
+        harness,
+        created_panes,
+        true,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_or_create_pane_with_auto_fix_retry(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    allow_auto_fix_retry: bool,
+    auto_fix_attempted: bool,
+) -> Result<String> {
     tracing::debug!(
         session_id = &session_id[..8.min(session_id.len())],
         file = file_path,
@@ -888,6 +918,23 @@ fn resolve_or_create_pane(
                         ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                             return Ok(owner.to_string());
                         }
+                        ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                            return retry_route_after_busy_pane_auto_fix(
+                                tmux,
+                                file,
+                                pane,
+                                col_args,
+                                session_id,
+                                file_path,
+                                target_session,
+                                harness,
+                                created_panes,
+                                allow_auto_fix_retry,
+                                auto_fix_attempted,
+                                owner,
+                                &provenance,
+                            );
+                        }
                     }
                     register_dispatch_target(session_id, owner, file_path)?;
                     send_command(tmux, owner, file_path, harness)?;
@@ -1030,6 +1077,23 @@ fn resolve_or_create_pane(
                     ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                         return Ok(registered_pane.clone());
                     }
+                    ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                        return retry_route_after_busy_pane_auto_fix(
+                            tmux,
+                            file,
+                            pane,
+                            col_args,
+                            session_id,
+                            file_path,
+                            target_session,
+                            harness,
+                            created_panes,
+                            allow_auto_fix_retry,
+                            auto_fix_attempted,
+                            registered_pane,
+                            &provenance,
+                        );
+                    }
                 }
                 register_dispatch_target(session_id, registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
@@ -1110,6 +1174,23 @@ fn resolve_or_create_pane(
             ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                 return Ok(existing.to_string());
             }
+            ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                return retry_route_after_busy_pane_auto_fix(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    allow_auto_fix_retry,
+                    auto_fix_attempted,
+                    existing,
+                    &provenance,
+                );
+            }
         }
         register_dispatch_target(session_id, existing, file_path)?;
         send_command(tmux, existing, file_path, harness)?;
@@ -1144,6 +1225,23 @@ fn resolve_or_create_pane(
         )? {
             ExistingPaneDispatchReadiness::Ready => {}
             ExistingPaneDispatchReadiness::BusyAlreadyRunning => return Ok(new_pane),
+            ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance } => {
+                return retry_route_after_busy_pane_auto_fix(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    allow_auto_fix_retry,
+                    auto_fix_attempted,
+                    &new_pane,
+                    &provenance,
+                );
+            }
         }
         register_dispatch_target(session_id, &new_pane, file_path)?;
         send_command(tmux, &new_pane, file_path, harness)?;
@@ -1181,6 +1279,48 @@ fn resolve_or_create_pane(
         harness,
         Some(created_panes),
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retry_route_after_busy_pane_auto_fix(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    allow_auto_fix_retry: bool,
+    auto_fix_attempted: bool,
+    busy_pane: &str,
+    provenance: &str,
+) -> Result<String> {
+    if allow_auto_fix_retry
+        && attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)?
+    {
+        return resolve_or_create_pane_with_auto_fix_retry(
+            tmux,
+            file,
+            pane,
+            col_args,
+            session_id,
+            file_path,
+            target_session,
+            harness,
+            created_panes,
+            false,
+            true,
+        );
+    }
+    anyhow::bail!(format_busy_existing_pane_error(
+        file,
+        busy_pane,
+        harness,
+        provenance,
+        auto_fix_attempted || allow_auto_fix_retry
+    ));
 }
 
 /// Rescue a pane from a stash window back to the agent-doc window.
@@ -1403,6 +1543,114 @@ fn existing_pane_ready_timeout() -> Duration {
     }
 }
 
+fn format_busy_existing_pane_error(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    provenance: &str,
+    auto_fix_attempted: bool,
+) -> String {
+    if auto_fix_attempted {
+        format!(
+            "registered pane {} for {} is still not showing an idle {} prompt after automatically applying `agent-doc fix {}` once; refusing to inject a routed trigger into a busy session ({})",
+            pane,
+            file.display(),
+            harness.binary,
+            file.display(),
+            provenance
+        )
+    } else {
+        format!(
+            "registered pane {} for {} is not showing an idle {} prompt; refusing to inject a routed trigger into a busy session ({})",
+            pane,
+            file.display(),
+            harness.binary,
+            provenance
+        )
+    }
+}
+
+#[cfg(test)]
+fn maybe_run_test_busy_auto_fix_hook(tmux: &Tmux, file: &Path, pane: &str) -> Result<bool> {
+    let Some(project_root) =
+        snapshot::find_project_root(file).or_else(|| file.parent().map(|parent| parent.to_path_buf()))
+    else {
+        return Ok(false);
+    };
+    let hook_path = project_root.join(".agent-doc/route-busy-auto-fix.txt");
+    if !hook_path.exists() {
+        return Ok(false);
+    }
+    let command = std::fs::read_to_string(&hook_path)
+        .with_context(|| format!("failed to read {}", hook_path.display()))?;
+    let command = command.trim();
+    if command.is_empty() {
+        return Ok(false);
+    }
+    tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, command])?;
+    Ok(true)
+}
+
+#[cfg(not(test))]
+fn maybe_run_test_busy_auto_fix_hook(_tmux: &Tmux, _file: &Path, _pane: &str) -> Result<bool> {
+    Ok(false)
+}
+
+fn attempt_busy_existing_pane_auto_fix(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane: &str,
+    file_path: &str,
+) -> Result<bool> {
+    eprintln!(
+        "[route] registered pane {} for {} is busy with pending document drift — applying scoped `agent-doc fix {}` once before failing closed",
+        pane,
+        file_path,
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_auto_fix_started file={} pane={}",
+            file_path, pane
+        ),
+    );
+    let test_hook_changed = maybe_run_test_busy_auto_fix_hook(tmux, file, pane)?;
+    let fix_outcome = resync::apply_targeted_fix_for_route(tmux, file)?;
+    let mut restarted = false;
+    if sessions::lookup(session_id)?.as_deref() == Some(pane) {
+        match query_supervisor_health(file, session_id) {
+            SupervisorHealth::Healthy | SupervisorHealth::Restartable => {
+                restarted = restart_via_supervisor(file, session_id);
+                if restarted {
+                    eprintln!(
+                        "[route] scoped fix left pane {} authoritative for {} — restarted the supervisor once before retrying route",
+                        pane, file_path
+                    );
+                }
+            }
+            SupervisorHealth::Halted { .. }
+            | SupervisorHealth::Unreachable
+            | SupervisorHealth::NoSocket => {}
+        }
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_auto_fix_finished file={} pane={} pruned_dead_entries={} reregistered_owner={} killed_redundant_stash_panes={} fixed_issues={} restarted_supervisor={}",
+            file_path,
+            pane,
+            fix_outcome.pruned_dead_entries,
+            fix_outcome.reregistered_owner,
+            fix_outcome.killed_redundant_stash_panes,
+            fix_outcome.fixed_issues,
+            restarted
+        ),
+    );
+    Ok(test_hook_changed || fix_outcome.made_changes() || restarted)
+}
+
 fn ensure_existing_pane_ready_for_dispatch(
     tmux: &Tmux,
     file: &Path,
@@ -1447,13 +1695,7 @@ fn ensure_existing_pane_ready_for_dispatch(
             provenance
         ),
     );
-    anyhow::bail!(
-        "registered pane {} for {} is not showing an idle {} prompt; refusing to inject a routed trigger into a busy session ({})",
-        pane,
-        file.display(),
-        harness.binary,
-        provenance
-    );
+    Ok(ExistingPaneDispatchReadiness::BusyNeedsAutoFix { provenance })
 }
 
 fn cycle_state_advances_start_ack(
@@ -3969,7 +4211,7 @@ Body\n\
         .expect_err("route should fail closed instead of injecting into a busy live pane");
         assert!(
             err.to_string()
-                .contains("is not showing an idle codex prompt"),
+                .contains("is still not showing an idle codex prompt after automatically applying `agent-doc fix"),
             "unexpected error: {err:#}"
         );
 
@@ -3977,6 +4219,82 @@ Body\n\
         assert!(
             !after.contains("EARLY:agent-doc "),
             "route should not inject a trigger before the pane becomes idle: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-auto-fix");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-auto-fix.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let hook_command = format!("exec {} {}", ready_agent.display(), doc.display());
+        std::fs::write(
+            dir.path().join(".agent-doc/route-busy-auto-fix.txt"),
+            format!("{hook_command}\n"),
+        )
+        .unwrap();
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy-auto-fix", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy-auto-fix",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should retry once after the scoped auto-fix recovers the busy pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should inject the reopen after the scoped fix retry: {after}"
         );
     }
 

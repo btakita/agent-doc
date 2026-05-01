@@ -352,9 +352,26 @@ fn kill_redundant_associated_stash_panes(
     killed
 }
 
-fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TargetDocumentFixOutcome {
+    pub(crate) pruned_dead_entries: usize,
+    pub(crate) reregistered_owner: bool,
+    pub(crate) killed_redundant_stash_panes: usize,
+    pub(crate) fixed_issues: usize,
+}
+
+impl TargetDocumentFixOutcome {
+    pub(crate) fn made_changes(self) -> bool {
+        self.pruned_dead_entries > 0
+            || self.reregistered_owner
+            || self.killed_redundant_stash_panes > 0
+            || self.fixed_issues > 0
+    }
+}
+
+fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<TargetDocumentFixOutcome> {
     let Some(session_id) = frontmatter::read_session_id(target) else {
-        return Ok(());
+        return Ok(TargetDocumentFixOutcome::default());
     };
 
     let preferred_window = config::project_tmux_session()
@@ -362,8 +379,9 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
         .and_then(|session| tmux.active_window(session));
     let candidates = crate::sync::find_associated_panes(tmux, target, &session_id);
     match crate::sync::resolve_associated_panes(candidates, preferred_window.as_deref()) {
-        crate::sync::AssociatedPaneResolution::None => Ok(()),
+        crate::sync::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
         crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
+            let mut outcome = TargetDocumentFixOutcome::default();
             if sessions::lookup(&session_id)?.as_deref() != Some(winner.pane_id.as_str()) {
                 crate::sync::reregister_recovered_owner(
                     tmux,
@@ -371,6 +389,7 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
                     &session_id,
                     &winner.pane_id,
                 )?;
+                outcome.reregistered_owner = true;
                 eprintln!(
                     "resync: re-registered {} to pane {}",
                     target.display(),
@@ -378,6 +397,7 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
                 );
             }
             let killed = kill_redundant_associated_stash_panes(tmux, &redundant);
+            outcome.killed_redundant_stash_panes = killed;
             if killed > 0 {
                 eprintln!(
                     "resync: removed {} redundant stash pane(s) for {}",
@@ -385,7 +405,7 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<()> {
                     target.display()
                 );
             }
-            Ok(())
+            Ok(outcome)
         }
         crate::sync::AssociatedPaneResolution::Ambiguous(candidates) => {
             anyhow::bail!(format_associated_pane_fix_error(
@@ -429,6 +449,27 @@ fn prune_targeted(tmux: &Tmux, target: &Path) -> Result<Vec<(String, sessions::S
         sessions::save(&registry)?;
     }
     Ok(removed)
+}
+
+pub(crate) fn apply_targeted_fix_for_route(
+    tmux: &Tmux,
+    target_file: &Path,
+) -> Result<TargetDocumentFixOutcome> {
+    let target = resolve_target_file(target_file)?;
+    let removed = prune_targeted(tmux, &target)?;
+    let mut outcome = TargetDocumentFixOutcome {
+        pruned_dead_entries: removed.len(),
+        ..TargetDocumentFixOutcome::default()
+    };
+    let recovered = recover_target_document_pane(tmux, &target)?;
+    outcome.reregistered_owner = recovered.reregistered_owner;
+    outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
+    let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+    let issues = detect_issues_in_registry(tmux, &scoped_registry);
+    if !issues.is_empty() {
+        outcome.fixed_issues = apply_fixes(tmux, &issues, None)?;
+    }
+    Ok(outcome)
 }
 
 /// Quietly prune dead panes and deduplicate entries.
@@ -2095,7 +2136,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         }
 
         if fix {
-            recover_target_document_pane(&tmux, &target)?;
+            let _ = recover_target_document_pane(&tmux, &target)?;
         }
 
         let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);

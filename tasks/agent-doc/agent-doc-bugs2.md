@@ -781,10 +781,16 @@ I added a recommended backlog item `#snrun` for the next implementation turn. Sc
 - re-run the JetBrains `Run Agent Doc` repro after the route changes land
 
 I did not start code changes in this cycle because this edit was a new bug report / expectation update rather than a `do #...` implementation turn.
-<!-- agent:boundary:65580f72 -->
+### Re: closeout normalization — gpt-5
+
+The only remaining live-file delta after the prior closeout was prompt normalization: the newly answered `Yet another JB Plugin error...` line no longer carries a leading `❯` in the working copy. I am reopening closeout only to persist that normalization through the binary-owned commit path. No new plan or backlog change beyond `#snrun`.
+<!-- agent:boundary:7658e262 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+```
+---
 do [#utf8p]. spec-test-build-install-commit-push
 ---
 Add a Plugin Editor command to clear the context

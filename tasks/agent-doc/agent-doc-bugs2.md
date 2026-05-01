@@ -315,7 +315,28 @@ No follow-up backlog items from this fix.
 ### Re: closeout follow-up — gpt-5
 
 The `spec-test-build-install-commit-push` request is complete in the response above. This follow-up only reopens and closes the current document cycle so the binary-owned closeout path acknowledges the remaining prompt-line artifact cleanly.
-<!-- agent:boundary:5bc6dedf -->
+❯ do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Root cause was in the template retry path, not the commit layer. The strict dedup/adopt-current check ran only after the concurrent-edit branches, so a replay of the same response against an unchanged baseline (`content_current == base`) still took the no-edit fast path and appended a second `### Re:` block. That is the shape that produced the duplicate closeout-follow-up response in this document.
+
+Implemented:
+- `src/write.rs` now runs the already-present-response adopt/current normalization path before every template-mode `content_current == base` fast path that participates in strict closeout/replay (`run_template`, `run_stream`, IPC-timeout replay, and `apply_template_from_string`).
+- The adopted-current helper now recognizes both exact already-visible response blocks and the existing plugin-applied partial-line detection, so retries still repair missing `❯ ` prefixes without replaying the response body.
+- Added a regression for the exact same-base retry shape behind `#duppb`, and updated `specs/07-commands.md` plus `VERSIONS.md` to lock the ordering invariant.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml apply_template_from_string_same_base_retry_adopts_existing_response`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml adopt_current_response_without_duplication_repairs_bare_prompt_prefix`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `631a7a8` on `20260422/codex-agent-backend` (`fix: dedup same-base template retries`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:908f1a32 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -332,7 +353,6 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#duppb] Duplicate response patchback in this document: the same assistant response was appended twice in agent:exchange, with the later copy showing a (HEAD) suffix. Repro from tasks/agent-doc/agent-doc-bugs2.md on Apr 30, 2026. Fix should prevent already-committed assistant output from being replayed into the same exchange.
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.

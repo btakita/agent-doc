@@ -240,7 +240,9 @@ fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
 fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
     let body = trimmed.strip_prefix('›')?.trim();
     if body.is_empty()
-        || body.chars().any(|c| matches!(c, ':' | ';' | '"' | '\'' | '`' | '\\' | '|' | '&'))
+        || body
+            .chars()
+            .any(|c| matches!(c, ':' | ';' | '"' | '\'' | '`' | '\\' | '|' | '&'))
         || matches!(body.chars().last(), Some('.' | '!' | '?' | ',' | ':' | ';'))
     {
         return None;
@@ -261,12 +263,15 @@ fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
         return None;
     }
 
-    if !words.iter().all(|word| is_safe_codex_placeholder_token(word)) {
+    if !words
+        .iter()
+        .all(|word| is_safe_codex_placeholder_token(word))
+    {
         return None;
     }
 
-    let has_placeholder_target = normalized.ends_with("in @filename")
-        || normalized.ends_with("on my current changes");
+    let has_placeholder_target =
+        normalized.ends_with("in @filename") || normalized.ends_with("on my current changes");
     if !has_placeholder_target {
         return None;
     }
@@ -286,8 +291,7 @@ fn is_safe_codex_placeholder_token(word: &str) -> bool {
                 .all(|ch| ch.is_ascii_lowercase() || ch == '-' || ch == '_');
     }
 
-    word.chars()
-        .all(|ch| ch.is_ascii_alphabetic() || ch == '-')
+    word.chars().all(|ch| ch.is_ascii_alphabetic() || ch == '-')
 }
 
 fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {

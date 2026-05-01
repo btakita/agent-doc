@@ -285,7 +285,7 @@ fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
     }
 }
 
-fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
+fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -> bool {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
         Err(_) => return false,
@@ -296,12 +296,16 @@ fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
     };
     let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
     let method = IpcMethod::Restart {
-        mode: "continue".to_string(),
+        mode: mode.to_string(),
     };
     match crate::supervisor::ipc::send_command(&sock, &method) {
         Ok(resp) => resp.ok,
         Err(_) => false,
     }
+}
+
+fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
+    restart_via_supervisor_with_mode(file, session_id, "continue")
 }
 
 fn startup_miss_requires_fresh_start(
@@ -1423,7 +1427,9 @@ fn wait_for_busy_restart_handoff(
     let mut handed_off_pane: Option<String> = None;
     while start.elapsed() < timeout {
         if let Ok(registry) = sessions::load_in(&registry_base_dir)
-            && let Some(entry) = registry.values().find(|entry| entry.session_id == session_id)
+            && let Some(entry) = registry
+                .values()
+                .find(|entry| entry.session_id == session_id)
             && !entry.pane.is_empty()
         {
             if entry.pane != previous_pane {
@@ -1675,14 +1681,11 @@ fn resolve_fresh_dispatch_target_after_ready_wait(
             requested.display()
         );
     }
-    if let Some(entry) = registry
-        .values()
-        .find(|entry| {
-            entry.session_id == session_id
-                && entry.pane != pane
-                && canonical_registered_file(entry) == requested
-        })
-    {
+    if let Some(entry) = registry.values().find(|entry| {
+        entry.session_id == session_id
+            && entry.pane != pane
+            && canonical_registered_file(entry) == requested
+    }) {
         return Ok(entry.pane.clone());
     }
 
@@ -1942,6 +1945,91 @@ fn wait_for_start_ack(
     None
 }
 
+fn retry_routed_cycle_ack_after_fresh_restart(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    harness: &HarnessConfig,
+    baseline: Option<&crate::cycle_state::CycleState>,
+    marker: &str,
+    ack_timeout: Duration,
+) -> Result<bool> {
+    if harness.binary != "codex" {
+        return Ok(false);
+    }
+    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+        return Ok(false);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_cycle_start_retry_after_fresh_restart file={} pane={} harness={} marker={} timeout_secs={}",
+            file.display(),
+            pane,
+            harness.binary,
+            marker,
+            ack_timeout.as_secs()
+        ),
+    );
+    eprintln!(
+        "[route] routed {} trigger for {} never started a new cycle in pane {} — restarting the live session fresh once before failing closed",
+        harness.binary,
+        file.display(),
+        pane
+    );
+
+    if !wait_for_agent_ready(tmux, pane, fresh_route_start_ack_timeout(), harness) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_cycle_start_retry_fresh_restart_not_ready file={} pane={} harness={}",
+                file.display(),
+                pane,
+                harness.binary
+            ),
+        );
+        return Ok(false);
+    }
+
+    if send_command_checked(tmux, pane, &file.display().to_string(), harness)?
+        != CommandDispatchStatus::Accepted
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_cycle_start_retry_fresh_restart_send_timeout file={} pane={} harness={}",
+                file.display(),
+                pane,
+                harness.binary
+            ),
+        );
+        return Ok(false);
+    }
+
+    match wait_for_start_ack(file, baseline, ack_timeout) {
+        Some(state) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_cycle_start_acknowledged_after_fresh_restart file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    state.cycle_id,
+                    cycle_phase_name(state.phase),
+                    marker,
+                    ack_timeout.as_secs()
+                ),
+            );
+            let _ = crate::startup_miss::clear(file);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
 fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     match phase {
         crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
@@ -2052,6 +2140,20 @@ fn require_routed_cycle_ack(
             Ok(())
         }
         None => {
+            if live_child_for_file
+                && retry_routed_cycle_ack_after_fresh_restart(
+                    tmux,
+                    file,
+                    pane,
+                    session_id,
+                    harness,
+                    baseline,
+                    marker,
+                    ack_timeout,
+                )?
+            {
+                return Ok(());
+            }
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -2663,9 +2765,8 @@ fn auto_start_in_session(
         } else {
             window_panes.into_iter().last() // rightmost by screen position
         };
-        positional.or_else(|| {
-            find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
-        })
+        positional
+            .or_else(|| find_registered_pane_in_session(tmux, &registry_base_dir, session_name, ""))
     } else {
         find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
     };
@@ -4518,6 +4619,123 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-codex-fresh-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let stale_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-codex-fresh-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let restart_called_for_thread = restart_called.clone();
+        std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            iso_for_thread
+                .raw_cmd(&[
+                    "respawn-pane",
+                    "-k",
+                    "-t",
+                    &pane_for_thread,
+                    &format!(
+                        "exec {} {}",
+                        ready_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                ])
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should retry once after a fresh Codex supervisor restart");
+        assert_eq!(resolved, pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "route should request a fresh supervisor restart before the retry"
+        );
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should resend the reopen after the fresh restart: {content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
     fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists()
      {
         let dir = tempfile::tempdir().unwrap();
@@ -4774,8 +4992,12 @@ Body\n\
             &busy_pane,
             &format!("exec {} {}", busy_agent.display(), doc.display()),
         );
-        let content =
-            wait_for_pane_contains(&iso, &busy_pane, "Working...", std::time::Duration::from_secs(5));
+        let content = wait_for_pane_contains(
+            &iso,
+            &busy_pane,
+            "Working...",
+            std::time::Duration::from_secs(5),
+        );
         assert!(
             content.contains("Working..."),
             "busy mock session should be active in pane: {content}"
@@ -4831,7 +5053,11 @@ Body\n\
             iso_for_thread
                 .send_keys(
                     &replacement_pane,
-                    &format!("exec {} {}", ready_agent.display(), doc_for_thread.display()),
+                    &format!(
+                        "exec {} {}",
+                        ready_agent.display(),
+                        doc_for_thread.display()
+                    ),
                 )
                 .unwrap();
             let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &busy_pane_for_thread]);
@@ -4861,7 +5087,9 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should wait for the restarted session to hand off to the new authoritative pane");
+        .expect(
+            "route should wait for the restarted session to hand off to the new authoritative pane",
+        );
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
@@ -5651,13 +5879,13 @@ Body\n\
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
-        send_keys_with_retry(&iso, &existing_pane, &format!("exec {}", mock_agent.display()));
-        let owner_ready = wait_for_pane_contains(
+        send_keys_with_retry(
             &iso,
             &existing_pane,
-            ">",
-            std::time::Duration::from_secs(5),
+            &format!("exec {}", mock_agent.display()),
         );
+        let owner_ready =
+            wait_for_pane_contains(&iso, &existing_pane, ">", std::time::Duration::from_secs(5));
         assert!(
             owner_ready.contains(">"),
             "existing owner pane should be idle before the handoff: {owner_ready}"
@@ -5719,7 +5947,11 @@ Body\n\
         ack.join().unwrap();
 
         assert_eq!(routed_pane, existing_pane);
-        assert_eq!(created_panes.len(), 1, "fresh auto-start should still create one pane");
+        assert_eq!(
+            created_panes.len(),
+            1,
+            "fresh auto-start should still create one pane"
+        );
 
         let owner_after = wait_for_pane_contains(
             &iso,

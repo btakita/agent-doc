@@ -336,7 +336,27 @@ Code commit/push:
 - `src/agent-doc` `631a7a8` on `20260422/codex-agent-backend` (`fix: dedup same-base template retries`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:908f1a32 -->
+❯ do #splpend. spec-test-build-install-commit-push
+### Re: #splpend — gpt-5
+
+Root cause matched the plan: when `finalize --stream` had already applied `--pending-*` mutations to the on-disk doc, the sidecar-normalization divergence path still saved raw `content_ours`, which had been built from the pre-mutation baseline. That meant a missing `❯ ` prefix in the ack-content sidecar could silently drop backlog changes even though the response itself committed.
+
+Implemented:
+- `src/write.rs` now routes both normalization-divergence IPC fallback branches through `content_ours_with_pending_from_disk()`, which re-splices the tracked backlog/pending component from the current on-disk file before saving the fallback snapshot.
+- Added regression coverage for the exact `#splpend` shape: bad ack-content sidecar normalization plus a pending item already present on disk must preserve both the normalized prompt prefix and the backlog mutation.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the strengthened fallback contract.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml normalization_fallback_splices_pending_mutations_from_disk -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `22f16b6` on `20260422/codex-agent-backend` (`fix: preserve pending mutations in normalization fallback`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:f2118529 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -354,7 +374,6 @@ spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
-- [ ] [#splpend] finalize --stream with --pending-add drops pending mutations when sidecar normalization diverges. content_ours fallback lacks pending mutations because it is computed from baseline + patches, not from on-disk file. splice_pending_component() exists but is only called on IPC timeout path, not normalization divergence path. Repro: tasks/claudescore-3.md Apr 29, 2026 — 13 pending-add flags, all lost. Fix: call splice_pending_component(content_ours, on_disk_content) in normalization-divergence fallback branches. Plan: tasks/agent-doc/plan-sidecar-pending-mutation-loss.md
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 - [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.

@@ -456,7 +456,7 @@ agent-doc route failed (exit 1): resync: stash pane %338 is registered in its ow
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [x] [#xthm] Closed as a malformed duplicate backlog id from closeout recovery. Canonical replacement: `#jberr`.
+- [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 <!-- /agent:icebox -->
 

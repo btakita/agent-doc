@@ -236,7 +236,9 @@ impl HarnessConfig {
 fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
     matches!(
         trimmed,
-        "› Run /review on my current changes" | "› Find and fix a bug in @filename"
+        "› Run /review on my current changes"
+            | "› Find and fix a bug in @filename"
+            | "› Improve documentation in @filename"
     )
 }
 
@@ -261,6 +263,7 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
     [
         "› Run /review on my current changes",
         "› Find and fix a bug in @filename",
+        "› Improve documentation in @filename",
     ]
     .into_iter()
     .find(|placeholder| normalized.contains(placeholder))
@@ -441,6 +444,7 @@ mod tests {
         let h = HarnessConfig::codex();
         assert!(h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
         assert!(h.is_dispatch_ready_prompt_line("› Find and fix a bug in @filename"));
+        assert!(h.is_dispatch_ready_prompt_line("› Improve documentation in @filename"));
     }
 
     #[test]
@@ -486,6 +490,19 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 20% used
         assert_eq!(
             h.last_prompt_candidate(output).as_deref(),
             Some("› Run /review on my current changes")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_new_codex_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Improve documentation in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Improve documentation in @filename")
         );
     }
 

@@ -2115,6 +2115,17 @@ fn register_synced_files(
         let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
             continue;
         };
+        let live_owner_matches =
+            find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
+                == Some(pane_id);
+        let fail_closed_binding_guard = crate::startup_miss::load(file_path)
+            .ok()
+            .flatten()
+            .is_some()
+            || crate::startup_miss::recent_session_loss_window(file_path, session_id)
+                .ok()
+                .flatten()
+                .is_some();
         let Some((canonical_file, project_root, registry_key)) =
             registry_location_for_file(file_path)
         else {
@@ -2127,11 +2138,32 @@ fn register_synced_files(
         let Ok(mut registry) = sessions::load_in(&project_root) else {
             continue;
         };
+        if fail_closed_binding_guard && !live_owner_matches {
+            if let Some(entry) = registry.get(&registry_key)
+                && entry.pane == pane_id
+            {
+                eprintln!(
+                    "[sync] removing fail-closed geometry-only pane binding for {} → {}",
+                    file_path.display(),
+                    pane_id
+                );
+                registry.remove(&registry_key);
+                let _ = sessions::save_in(&project_root, &registry);
+            }
+            eprintln!(
+                "[sync] refusing geometry-only pane assignment {} for {} while fail-closed recovery is active",
+                pane_id,
+                file_path.display()
+            );
+            sync_log(&format!(
+                "register_synced_files_skip_unowned_fail_closed file={} pane={} guard_active=true",
+                file_path.display(),
+                pane_id
+            ));
+            continue;
+        }
         let duplicate_claim_count = pane_claim_counts.get(pane_id).copied().unwrap_or(0);
         if duplicate_claim_count > 1 {
-            let live_owner_matches =
-                find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
-                    == Some(pane_id);
             let claim_acceptable =
                 pane_assignment_matches_document_root(tmux, pane_id, &project_root)
                     || live_owner_matches;
@@ -5063,6 +5095,84 @@ mod tests {
         assert!(
             child_registry.is_empty(),
             "duplicate cross-root pane binding should be pruned instead of preserved"
+        );
+    }
+
+    #[test]
+    fn register_synced_files_skips_geometry_only_binding_during_fail_closed_recovery() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(subroot.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        std::fs::write(
+            subroot.join(".agent-doc/logs/child-session.log"),
+            format!(
+                "[{}] session_start file=tasks/claudescore-3.md pane=%261 session=child-session\n[{}] codex_start mode=fresh restart_count=0\n[{}] supervisor_exit code=missing_pane pane=%261 reason=registered_pane_missing\n[{}] session_end origin=sync_missing_pane\n[{}] session_start file=tasks/claudescore-3.md pane=%261 session=child-session\n[{}] codex_start mode=fresh restart_count=0\n[{}] supervisor_exit code=missing_pane pane=%261 reason=registered_pane_missing\n[{}] session_end origin=sync_missing_pane\n",
+                now.saturating_sub(8),
+                now.saturating_sub(7),
+                now.saturating_sub(6),
+                now.saturating_sub(5),
+                now.saturating_sub(4),
+                now.saturating_sub(3),
+                now.saturating_sub(2),
+                now.saturating_sub(1),
+            ),
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-fail-closed-geometry-binding");
+        let child_pane = iso.new_session("test", &subroot).unwrap();
+
+        let child_key = sessions::canonical_registry_key_in(
+            &subroot,
+            child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        let mut child_registry = sessions::SessionRegistry::new();
+        child_registry.insert(
+            child_key,
+            sessions::SessionEntry {
+                pane: child_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+                cwd: subroot.to_string_lossy().to_string(),
+                started: "2026-05-01T01:12:43Z".to_string(),
+                session_id: "child-session".to_string(),
+                file: "tasks/claudescore-3.md".to_string(),
+                window: iso.pane_window(&child_pane).unwrap(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(&subroot, &child_registry).unwrap();
+
+        let _cwd = ScopedCurrentDir::set(root);
+        register_synced_files(
+            &iso,
+            &[(
+                "child-session".to_string(),
+                PathBuf::from("src/session-share/tasks/claudescore-3.md"),
+            )],
+            &[(
+                PathBuf::from("src/session-share/tasks/claudescore-3.md"),
+                child_pane.clone(),
+            )],
+        );
+
+        let child_registry = sessions::load_in(&subroot).unwrap();
+        assert!(
+            child_registry.is_empty(),
+            "fail-closed recovery should not let sync rebind a geometry-only pane assignment"
         );
     }
 

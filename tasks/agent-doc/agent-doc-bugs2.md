@@ -356,7 +356,25 @@ Code commit/push:
 - `src/agent-doc` `22f16b6` on `20260422/codex-agent-backend` (`fix: preserve pending mutations in normalization fallback`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:20b1cd3c -->
+❯ do [#lvls]. spec-test-build-install-commit-push
+### Re: #lvls — gpt-5
+
+Implemented the formatting-directive carry-forward path.
+
+- `prompt_contract.rs` now extracts active document-level formatting / structure requirements from earlier `❯` prompt blocks and renders them back into later agent prompts.
+- `run.rs`, `stream.rs`, and `orchestrate.rs` now include that carried-forward requirement section on every subsequent turn, with an explicit fallback instruction to say so when harness/chat formatting rules prevent an exact structural match instead of silently flattening the response.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added regression coverage for prompt-contract extraction plus run/stream/orchestrate prompt construction.
+
+Verification completed:
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `ac3eeef` on `20260422/codex-agent-backend` (`fix: carry forward formatting directives`)
+
+No follow-up backlog items are needed from this fix.
+<!-- agent:boundary:3dd23f42 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -373,9 +391,9 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#lvls] Preserve explicit user formatting directives such as "Please organize the backlog into a 2-level list" across follow-up bug-handling and transfer flows. Repro from `src/boost-client/tasks/monsterrodholders.md` on Apr 29, 2026: the document carries a live 2-level-list instruction near the backlog request, but subsequent bug-handling responses ignored that requirement and fell back to flat output without acknowledging the constraint boundary. The fix should carry active formatting requirements forward in the prompt contract or make the responder explicitly state when chat-level formatting rules prevent exact reproduction.
 - [ ] [#ptdr] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc and Spec Refinement, and Expansion Phases (8 items lost). Fix: add granular --todo-done flag analogous to --pending-done, or add validation guard rejecting todo patches that reduce total item count.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
+- [ ] [#c3ps] The html-style comments should have coloring. The contents of Elements `<!-- agent:exchange -->` should have a muted background color.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

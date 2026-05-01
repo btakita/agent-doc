@@ -721,7 +721,33 @@ Code commit/push:
 - `src/agent-doc` `a74c273` on `20260422/codex-agent-backend` (`fix: avoid reroute restarts for healthy panes`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:a4246ecf -->
+❯ The `Run Agent Doc` workflow is broken. Please investigate and fix root causes. spec-test-build-install-commit-push
+### Re: Run Agent Doc workflow — gpt-5
+
+I reproduced the current JetBrains `Run Agent Doc` failure from the live tmux panes and traced it to Codex idle-prompt detection, not another ownership or boundary bug.
+
+Root cause:
+- Recent Codex builds can render an *idle* composer as canned suggestion text such as `› Run /review on my current changes` or `› Find and fix a bug in @filename` above the footer.
+- `route` treated those lines as drafted user text, so routed reopen attempts waited for an “empty” prompt that never appeared and then failed closed even though the session was actually ready to accept `agent-doc <FILE>`.
+- The live panes in tmux matched that exact shape.
+
+Implemented in `src/agent-doc`:
+- `harness.rs` now recognizes the observed Codex idle placeholder suggestions as dispatch-ready prompt chrome.
+- Wrapped/footer-adjacent placeholder captures are normalized before prompt-candidate selection so the ready check still works when tmux wraps the line.
+- Real drafted text is still rejected; the stricter busy-pane protection for actual user input remains in place.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `make check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `554ff0b` on `20260422/codex-agent-backend` (`fix: accept idle codex composer suggestions`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:ba33653e -->
 <!-- /agent:exchange -->
 
 <!--

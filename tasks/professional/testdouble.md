@@ -281,7 +281,31 @@ So the practical read is:
 - Test Double then has 30 days from receipt to pay.
 
 The only mild ambiguity is that Section 2.1 says `number of days worked`, while Exhibit A prices the work at `$100/hr @ 40hrs week`. That is not fatal, but it is worth making sure your invoice format matches how they actually expect time to be reported: hours with period totals, not just day counts.
-<!-- agent:boundary:dfa59fa0 -->
+❯ Can I work less than 40 hours/week by choice?
+### Re: working less than 40 hours — gpt-5
+
+Not clearly as a contract right.
+
+The agreement does **not** say, in direct terms, `you must work 40 hours per week minimum`. What it does say is:
+
+- In the SOW, `Price: $100/hr @ 40hrs week, prorated to the nearest half day` ([Test_Double_Subcontractor_Agreement_Brian_Takita.md](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:309)).
+- Also in the SOW, `Budget constraints: No more than 40hrs/week without prior written consent` ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:313)).
+- In Section 1, you agree to devote `such portion of [your] professional time, attention, energy, loyalty, and skill as may be necessary to fully perform the Services` ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita.md:10)).
+
+My reading is:
+
+- `No more than 40hrs/week without prior written consent` is a **cap**, not a guaranteed minimum.
+- `@ 40hrs week` looks like an expected working cadence or planning assumption, not a clean promise by Test Double to give you 40 hours or a clean promise by you to always provide 40 hours.
+- But Section 1 gives them an argument that you must put in whatever time is necessary to perform the services properly. So if the work actually requires near-full-time availability, choosing to work materially less could create friction even if there is no explicit `minimum 40` sentence.
+
+So the practical answer is: **the contract does not clearly give you a right to unilaterally decide to work less than 40 hours/week if that would impair performance, but it also does not clearly impose a hard 40-hour minimum as written.**
+
+If your real question is `can I intentionally treat this as part-time`, I would not rely on the current wording. I would get it confirmed in writing with something like:
+
+> `Please confirm whether the 40 hours/week reference is only an upper cap / planning assumption, or whether the engagement requires a minimum weekly time commitment. If there is a minimum expected weekly commitment, please specify it explicitly.`
+
+If you want, I can also draft a short clarification note asking them to define expected weekly availability and whether hours are guaranteed, capped, or just estimated.
+<!-- agent:boundary:c71c8ade -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -3128,13 +3128,20 @@ pub fn run_template(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let final_content = if content_current == base {
-        content_ours.clone()
-    } else if crate::repair::response_already_applied(&content_current, &response) {
+    let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
+        file,
+        base,
+        &content_ours,
+        &content_current,
+        snapshot_doc.as_deref(),
+        &response,
+    )? {
         eprintln!(
             "[write] response already present in current file; adopting normalized current content"
         );
-        content_current.clone()
+        repaired_current
+    } else if content_current == base {
+        content_ours.clone()
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
@@ -3520,16 +3527,15 @@ pub fn run_stream(
             // preserve all concurrent changes.
             let content_current =
                 std::fs::read_to_string(file).unwrap_or_else(|_| content_at_start.clone());
-            let (final_content, crdt_state) = if content_current == base {
-                let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-                (content_ours.clone(), doc.encode_state())
-            } else if let Some(repaired_current) = adopt_current_response_without_duplication(
-                file,
-                base,
-                &content_ours,
-                &content_current,
-                snapshot_doc.as_deref(),
-            )? {
+            let (final_content, crdt_state) = if let Some(repaired_current) =
+                adopt_current_response_without_duplication(
+                    file,
+                    base,
+                    &content_ours,
+                    &content_current,
+                    snapshot_doc.as_deref(),
+                    &response,
+                )? {
                 // Plugin already applied the response before the sidecar ack
                 // arrived. Re-normalize the current transcript so a retry can
                 // still restore missing `❯ ` prefixes without duplicating the
@@ -3543,6 +3549,9 @@ pub fn run_stream(
                 );
                 let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
                 (repaired_current, doc.encode_state())
+            } else if content_current == base {
+                let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+                (content_ours.clone(), doc.encode_state())
             } else {
                 eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
                 let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
@@ -3678,28 +3687,24 @@ pub fn run_stream(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, crdt_state) = if content_current == base {
-        // No edits — build CRDT state from result
-        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours.clone(), doc.encode_state())
-    } else if crate::repair::response_already_applied(&content_current, &response) {
-        eprintln!(
-            "[write] response already present in current file; adopting normalized current content"
-        );
-        let doc = crate::crdt::CrdtDoc::from_text(&content_current);
-        (content_current.clone(), doc.encode_state())
-    } else if let Some(repaired_current) = adopt_current_response_without_duplication(
-        file,
-        base,
-        &content_ours,
-        &content_current,
-        snapshot_doc.as_deref(),
-    )? {
+    let (final_content, crdt_state) = if let Some(repaired_current) =
+        adopt_current_response_without_duplication(
+            file,
+            base,
+            &content_ours,
+            &content_current,
+            snapshot_doc.as_deref(),
+            &response,
+        )? {
         eprintln!(
             "[write] response already present in current file; adopting normalized current content"
         );
         let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
         (repaired_current, doc.encode_state())
+    } else if content_current == base {
+        // No edits — build CRDT state from result
+        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+        (content_ours.clone(), doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
         // Use baseline as CRDT base instead of stored state from previous cycle.
@@ -4072,13 +4077,20 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let final_content = if content_current == content {
-        content_ours.clone()
-    } else if crate::repair::response_already_applied(&content_current, response) {
+    let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
+        file,
+        &content,
+        &content_ours,
+        &content_current,
+        snapshot_doc.as_deref(),
+        response,
+    )? {
         eprintln!(
             "[write] response already present in current file; adopting normalized current content"
         );
-        content_current.clone()
+        repaired_current
+    } else if content_current == content {
+        content_ours.clone()
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
@@ -5192,8 +5204,11 @@ fn adopt_current_response_without_duplication(
     content_ours: &str,
     content_current: &str,
     snapshot: Option<&str>,
+    response: &str,
 ) -> Result<Option<String>> {
-    if !response_already_in_current(base, content_ours, content_current) {
+    if !crate::repair::response_already_applied(content_current, response)
+        && !response_already_in_current(base, content_ours, content_current)
+    {
         return Ok(None);
     }
 
@@ -5422,6 +5437,47 @@ mod tests {
         assert!(result.contains("Compacted summary.\n"));
         assert!(!result.contains("Old progress."));
         assert!(!result.contains("compact exchange"));
+    }
+
+    #[test]
+    fn apply_template_from_string_same_base_retry_adopts_existing_response() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "do #duppb. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: closeout follow-up — gpt-5\n\n",
+            "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            result.matches("### Re: closeout follow-up — gpt-5").count(),
+            1,
+            "same-base retry must not append a duplicate response block"
+        );
+        assert!(result.contains("❯ do #duppb. spec-test-build-install-commit-push"));
+        assert!(!result.contains("\ndo #duppb. spec-test-build-install-commit-push\n"));
     }
 
     #[test]
@@ -7683,6 +7739,7 @@ Implemented.
             content_ours,
             content_current,
             Some(snapshot),
+            "### Re: #scpd retry — gpt-5\n\nImplemented.\n",
         )
         .unwrap()
         .expect("response should be adopted from current");

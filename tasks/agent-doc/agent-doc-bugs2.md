@@ -349,7 +349,20 @@ Follow-up:
 - the immediate reroute bug is fixed
 - I added a recommended backlog item to generalize Codex idle-placeholder detection beyond exact-string matching, since the current readiness heuristic is still brittle against future placeholder text churn
 - Plan: `tasks/agent-doc/plan-codex-idle-placeholder-generalization.md`
-<!-- agent:boundary:79a8935b -->
+❯ Even if Codex is busy, should we send the command and let Codex figure out how to process it?
+### Re: busy Codex dispatch policy — gpt-5
+
+Not by default.
+
+If Codex is actually busy, blindly sending another command is unsafe because the injected text can land in the middle of an in-progress thought, partially overwrite staged input, or create ambiguous ownership over which task the pane is executing. That is exactly the class of failure the current fail-closed route behavior is trying to avoid.
+
+The better policy is:
+- if the pane is confidently idle, send immediately
+- if the pane is confidently busy, do not inject; surface that state and require an explicit recovery path
+- if the pane is ambiguous, improve the readiness detector or add a queue/ack protocol instead of pretending ambiguity is safe
+
+So for this specific bug, the right fix was to improve idle detection, not to weaken the busy guard. If we want a future improvement, it should be an explicit routed queue or reopen mailbox with acknowledgement semantics, not fire-and-hope injection into a live busy composer.
+<!-- agent:boundary:9af2541c -->
 <!-- /agent:exchange -->
 
 <!--

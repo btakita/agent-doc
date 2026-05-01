@@ -110,7 +110,6 @@ Verification I reran now against current `main`:
 
 Separate follow-up from the pane crash is already logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#tmuxcrash`, using `tasks/agent-doc/plan-tmux-pane-crash-stability.md`.
 ❯ do #8w9n. spec-test-build-install-commit-push
-❯ do #8w9n. spec-test-build-install-commit-push
 ### Re: #8w9n spec-test-build-install-commit-push — gpt-5
 
 `#8w9n` was already complete in `src/tsift` on `main` as commit `30b60d8` (`fix: harden summary read-only paths`), and that commit is already pushed to `origin/main`.
@@ -172,7 +171,22 @@ Top remaining backlog item: `#stle`.
 `#8w9n` was already completed earlier in this session as `src/tsift` commit `30b60d8` (`fix: harden summary read-only paths`), so the duplicated prompt line did not require any new code, verification, or git changes.
 
 Top remaining backlog item stays `#stle`.
-<!-- agent:boundary:d75f1707 -->
+❯ do [#stle]. spec-test-build-install-commit-push
+### Re: #stle spec-test-build-install-commit-push — gpt-5
+
+Implemented `#stle` in `src/tsift` so normal `tsift summarize --extract <path>` runs now reap cached summary rows for files that no longer exist inside the requested extract scope, including the empty-scope case where the last live file was removed before re-extract. The extract path now computes stale cached file keys inside the scope before deciding there is no work to do, and `SPEC.md` documents that full re-extract behavior.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`429` unit tests and `43` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `f5e6d3b` (`fix: prune stale summaries on full extract`).
+
+Top remaining backlog item: `#fqry`.
+<!-- agent:boundary:36bb7485 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -182,7 +196,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stle] [recommended] Reap deleted summary rows during full `tsift summarize --extract` runs so query mode cannot return summaries for files that no longer exist.
 - [ ] [#fqry] [recommended] Normalize `tsift summarize --file` inputs to the canonical root-relative cache key so `src/lib.rs`, `./src/lib.rs`, and nested-path spellings hit the same row.
 <!-- /agent:backlog -->
 

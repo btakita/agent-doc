@@ -96,6 +96,8 @@ Registry pruning acquires `RegistryLock` before modifying `sessions.json`.
 
 When `agent-doc audit-docs` is launched from an outer repo via a nested crate checkout (for example `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs` from a monorepo root), the default scope prefers the running `src/agent-doc` crate root over the outer repo root. That keeps discovery aligned with the crate being audited instead of the caller's larger checkout.
 
+Recursive instruction discovery also prunes `AuditConfig.skip_dirs` before descent, so heavy trees such as `node_modules`, `.venv`, `target`, `.git`, `vendor`, `.next`, or `dist` are skipped during file discovery itself instead of being traversed and filtered afterward.
+
 ## start
 
 `agent-doc start <FILE>` — start the configured harness in a new tmux pane and register the session.

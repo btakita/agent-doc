@@ -248,8 +248,8 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
             let side_effects = tracked_side_effect_note(file)?;
             let msg = format!(
                 "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed{} {}",
-                snapshot_len, head_len
-                ,
+                snapshot_len,
+                head_len,
                 side_effects,
                 closeout_recovery_hint(file)
             );
@@ -3215,7 +3215,11 @@ mod tests {
         let doc = root.join("doc.md");
         let news_index = root.join("news/README.md");
         let news_day = root.join("news/2026-05-01/README.md");
-        fs::write(&doc, "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n").unwrap();
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n",
+        )
+        .unwrap();
         fs::write(&news_index, "old news index\n").unwrap();
         fs::write(&news_day, "old daily news\n").unwrap();
         crate::snapshot::save(
@@ -3225,7 +3229,12 @@ mod tests {
         .unwrap();
         Command::new("git")
             .current_dir(root)
-            .args(["add", "doc.md", "news/README.md", "news/2026-05-01/README.md"])
+            .args([
+                "add",
+                "doc.md",
+                "news/README.md",
+                "news/2026-05-01/README.md",
+            ])
             .output()
             .unwrap();
         Command::new("git")

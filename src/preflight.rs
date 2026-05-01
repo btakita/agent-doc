@@ -2529,7 +2529,12 @@ mod tests {
         snapshot::save(&doc, old_doc).unwrap();
         Command::new("git")
             .current_dir(root)
-            .args(["add", "session.md", "news/README.md", "news/2026-05-01/README.md"])
+            .args([
+                "add",
+                "session.md",
+                "news/README.md",
+                "news/2026-05-01/README.md",
+            ])
             .output()
             .unwrap();
         Command::new("git")
@@ -2544,7 +2549,8 @@ mod tests {
         std::fs::write(&news_index, "new news index\n").unwrap();
         std::fs::write(&news_day, "new news day\n").unwrap();
 
-        let err = run(&doc).expect_err("preflight should fail before diffing hidden closeout drift");
+        let err =
+            run(&doc).expect_err("preflight should fail before diffing hidden closeout drift");
         let message = err.to_string();
         assert!(message.contains("snapshot differs from HEAD"));
         assert!(message.contains("tracked side-effect edits"));

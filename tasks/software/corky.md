@@ -550,12 +550,32 @@ Delivery:
 I closed `#gmail-send-token-key`.
 
 Top remaining backlog item is `#gsc-sa-cache-keying`.
-<!-- agent:boundary:0d64687f -->
+❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
+❯ do [#gsc-sa-cache-keying]. spec-test-build-install-commit-push
+### Re: gsc service-account cache keying — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+I replaced the single process-global GSC service-account token slot with a cache keyed by the resolved account/config fingerprint, so switching `.corky.toml` roots or accounts in one process can no longer reuse the wrong SA token. The cached SA token is still verified against visible Search Console properties before reuse and is now explicitly documented as in-process only.
+
+I also added regression coverage for account/path scoping and non-leakage across cache keys, updated the related instruction surfaces that `audit-docs` enforces, and re-ran the full delivery path:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Delivery:
+- commit `cc64704` — `fix: scope gsc service-account token cache`
+- pushed `20260413/corky-gsc` to `origin`
+
+I closed `#gsc-sa-cache-keying`.
+
+Top remaining backlog item is `#release-v028`.
+<!-- agent:boundary:249c36ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#gsc-sa-cache-keying] Key the in-process GSC service-account cache by account/config fingerprint, or remove it until correctness is proven across multi-account runs.
 - [ ] [#release-v028] Cut the next corky release: update VERSIONS.md, pick the post-v0.27.0 version, and ship the 8 commits currently only on 20260413/corky-gsc.
 <!-- /agent:pending -->

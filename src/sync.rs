@@ -374,8 +374,107 @@ fn lookup_registry_entry_for_file_session(
     (entry.session_id == session_id).then_some(entry)
 }
 
-fn build_tmux_router_sync_registry(col_args: &[String]) -> Result<Option<NamedTempFile>> {
-    let mut registry = tmux_router::Registry::new();
+#[derive(Debug, Clone)]
+struct SyntheticRegistryCandidate {
+    session_id: String,
+    file_path: PathBuf,
+    entry: sessions::SessionEntry,
+    live_owner_match: bool,
+    pane_root_match: bool,
+}
+
+fn filter_duplicate_synthetic_registry_candidates(
+    candidates: Vec<SyntheticRegistryCandidate>,
+) -> Vec<SyntheticRegistryCandidate> {
+    let mut pane_claims: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, candidate) in candidates.iter().enumerate() {
+        pane_claims
+            .entry(candidate.entry.pane.clone())
+            .or_default()
+            .push(idx);
+    }
+
+    let mut keep = vec![true; candidates.len()];
+    for (pane_id, claimants) in pane_claims {
+        if claimants.len() < 2 {
+            continue;
+        }
+
+        let live_owner_matches: Vec<usize> = claimants
+            .iter()
+            .copied()
+            .filter(|idx| candidates[*idx].live_owner_match)
+            .collect();
+        let pane_root_matches: Vec<usize> = claimants
+            .iter()
+            .copied()
+            .filter(|idx| candidates[*idx].pane_root_match)
+            .collect();
+
+        let winners = if live_owner_matches.len() == 1 {
+            live_owner_matches
+        } else if live_owner_matches.is_empty() && pane_root_matches.len() == 1 {
+            pane_root_matches
+        } else {
+            Vec::new()
+        };
+
+        if let Some(&winner_idx) = winners.first() {
+            let winner = &candidates[winner_idx];
+            eprintln!(
+                "[sync] synthetic tmux-router registry keeps pane {} for {} and drops {} duplicate claimant(s)",
+                pane_id,
+                winner.file_path.display(),
+                claimants.len() - 1
+            );
+            sync_log(&format!(
+                "router_registry_duplicate_kept pane={} winner={} duplicates={} basis={}",
+                pane_id,
+                winner.file_path.display(),
+                claimants.len() - 1,
+                if winner.live_owner_match {
+                    "live_owner"
+                } else {
+                    "pane_root"
+                }
+            ));
+            for idx in claimants {
+                keep[idx] = idx == winner_idx;
+            }
+            continue;
+        }
+
+        let duplicate_files = claimants
+            .iter()
+            .map(|idx| candidates[*idx].file_path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "[sync] synthetic tmux-router registry dropping ambiguous duplicate pane {} for {}",
+            pane_id, duplicate_files
+        );
+        sync_log(&format!(
+            "router_registry_duplicate_dropped pane={} files={}",
+            pane_id, duplicate_files
+        ));
+        for idx in claimants {
+            keep[idx] = false;
+        }
+    }
+
+    candidates
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, candidate)| keep[idx].then_some(candidate))
+        .collect()
+}
+
+fn build_tmux_router_sync_registry(
+    tmux: &Tmux,
+    col_args: &[String],
+) -> Result<Option<NamedTempFile>> {
+    let mut candidates = Vec::new();
 
     for file_path in col_args
         .iter()
@@ -401,7 +500,26 @@ fn build_tmux_router_sync_registry(col_args: &[String]) -> Result<Option<NamedTe
         let Some(entry) = lookup_registry_entry_for_file_session(path, &session_id) else {
             continue;
         };
-        registry.insert(session_id, entry);
+        let Some((_, project_root, _)) = registry_location_for_file(path) else {
+            continue;
+        };
+        let live_owner_match = find_live_owner_pane_excluding_quiet(tmux, path, &session_id, None)
+            .as_deref()
+            == Some(entry.pane.as_str());
+        let pane_root_match =
+            pane_assignment_matches_document_root(tmux, &entry.pane, &project_root);
+        candidates.push(SyntheticRegistryCandidate {
+            session_id,
+            file_path: path.to_path_buf(),
+            entry,
+            live_owner_match,
+            pane_root_match,
+        });
+    }
+
+    let mut registry = tmux_router::Registry::new();
+    for candidate in filter_duplicate_synthetic_registry_candidates(candidates) {
+        registry.insert(candidate.session_id, candidate.entry);
     }
 
     if registry.is_empty() {
@@ -1824,7 +1942,7 @@ fn run_with_options(
         ));
     }
 
-    let tmux_router_registry = match build_tmux_router_sync_registry(col_args) {
+    let tmux_router_registry = match build_tmux_router_sync_registry(tmux, col_args) {
         Ok(registry) => registry,
         Err(err) => {
             let warning = format!(
@@ -3220,6 +3338,31 @@ mod tests {
     impl Drop for ScopedCurrentDir {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
+    }
+
+    fn synthetic_registry_candidate(
+        session_id: &str,
+        file_path: &str,
+        pane_id: &str,
+        live_owner_match: bool,
+        pane_root_match: bool,
+    ) -> SyntheticRegistryCandidate {
+        SyntheticRegistryCandidate {
+            session_id: session_id.to_string(),
+            file_path: PathBuf::from(file_path),
+            entry: sessions::SessionEntry {
+                pane: pane_id.to_string(),
+                pid: 1000,
+                cwd: "/tmp/project".to_string(),
+                started: "2026-05-01T00:00:00Z".to_string(),
+                session_id: session_id.to_string(),
+                file: file_path.to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+            live_owner_match,
+            pane_root_match,
         }
     }
 
@@ -4997,7 +5140,7 @@ mod tests {
             "tasks/agent-doc-bugs2.md".to_string(),
             "src/session-share/tasks/claudescore-3.md".to_string(),
         ];
-        let synthetic_registry = build_tmux_router_sync_registry(&cols)
+        let synthetic_registry = build_tmux_router_sync_registry(&iso, &cols)
             .unwrap()
             .expect("cross-root sync should synthesize a router registry");
         let resolve_file = |path: &Path| {
@@ -5082,5 +5225,54 @@ mod tests {
             AssociatedPaneResolution::None => {}
             other => panic!("expected no available associated pane after filtering, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn filter_duplicate_synthetic_registry_candidates_drops_ambiguous_same_root_duplicate_pane() {
+        let filtered = filter_duplicate_synthetic_registry_candidates(vec![
+            synthetic_registry_candidate(
+                "claudescore",
+                "tasks/claudescore.md",
+                "%250",
+                false,
+                true,
+            ),
+            synthetic_registry_candidate(
+                "claudescore-3",
+                "tasks/claudescore-3.md",
+                "%250",
+                false,
+                true,
+            ),
+        ]);
+
+        assert!(
+            filtered.is_empty(),
+            "ambiguous same-root duplicate pane claims should be dropped before tmux-router sync"
+        );
+    }
+
+    #[test]
+    fn filter_duplicate_synthetic_registry_candidates_keeps_unique_live_owner() {
+        let filtered = filter_duplicate_synthetic_registry_candidates(vec![
+            synthetic_registry_candidate(
+                "claudescore",
+                "tasks/claudescore.md",
+                "%250",
+                false,
+                true,
+            ),
+            synthetic_registry_candidate(
+                "claudescore-3",
+                "tasks/claudescore-3.md",
+                "%250",
+                true,
+                true,
+            ),
+        ]);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].session_id, "claudescore-3");
+        assert_eq!(filtered[0].entry.pane, "%250");
     }
 }

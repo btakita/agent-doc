@@ -1251,9 +1251,14 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
         Err(_) => return Ok(None),
     };
 
+    let prompt_bearing_body = |content: &str| {
+        crate::frontmatter::parse(content)
+            .map(|(_, body)| body.to_string())
+            .unwrap_or_else(|_| content.to_string())
+    };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
-    let snap_norm = norm(&snapshot);
-    let cur_norm = norm(&current);
+    let snap_norm = norm(&prompt_bearing_body(&snapshot));
+    let cur_norm = norm(&prompt_bearing_body(&current));
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
     };
@@ -1293,6 +1298,26 @@ mod tests {
                 _lock: lock,
             }
         }
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_frontmatter_only_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = "---\nagent: claude\nagent_doc_session: test\n---\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: prior — gpt-5\n\
+Body\n\
+<!-- /agent:exchange -->\n";
+        let current = snapshot.replacen("agent: claude", "agent: codex", 1);
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "frontmatter-only metadata drift must not become prompt-bearing"
+        );
     }
 
     impl Drop for EnvGuard {

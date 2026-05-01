@@ -31,6 +31,8 @@ That section is oldest-first and uses explicit subtypes:
 - `recovery_artifact` — likely missed/uncommitted response material that should route through repair/session-check logic
 - `boundary_artifact` — transient boundary / `(HEAD)` churn that should be normalized, not answered
 
+Prompt-bearing change extraction is document-body only. YAML frontmatter metadata drift such as `agent: codex`, session ids, model tier, or other config edits must not be surfaced as `content_edit` or `prompt_target`.
+
 A turn is not complete until each `prompt_target` item is answered or explicitly grouped into one response. The prompt must also tell the agent to incorporate `content_edit` items and normalize artifact items instead of treating them as ordinary conversation.
 
 That section must preserve the diff encounter order across mixed kinds. If a `content_edit` or artifact appears before a later prompt in the changed tail, the prompt payload must keep that ordering instead of moving all `prompt_target` items to the front.

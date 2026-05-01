@@ -3620,6 +3620,27 @@ history line
     }
 
     #[test]
+    fn pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-frontmatter-only-drift.md");
+        let snapshot = "---\nagent: claude\nagent_doc_session: test\n---\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: prior — gpt-5\n\
+Body\n\
+<!-- /agent:exchange -->\n";
+        let current = snapshot.replacen("agent: claude", "agent: codex", 1);
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
+        assert!(
+            ctx.is_none(),
+            "frontmatter-only drift must not force routed cycle acknowledgment"
+        );
+    }
+
+    #[test]
     fn resolve_or_create_pane_fails_closed_when_live_child_does_not_start_new_cycle() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

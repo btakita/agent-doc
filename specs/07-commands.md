@@ -533,6 +533,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
    - fail closed before replay when a template-mode pending/captured payload looks like a transcript or full document dump rather than one assistant closeout; save the blocked payload under `.agent-doc/repair-blocked/` for diagnostics instead of appending it into `agent:exchange`
 2. If recovery work happened and `<FILE>` lives in git, immediately run `agent-doc commit <FILE>`
 3. If no pending/captured repair path exists, repair still checks for stale completed backlog items:
+   - for template docs, that no-pending path still runs the same safe transcript canonicalization used by the dedup path before backlog maintenance, including restoring missing `❯ ` prompt prefixes on already-answered prompt/response tails and repositioning a stale boundary to the real end of the completed turn when that repair is deterministic
    - if the live `agent:backlog` / `agent:pending` still contains `- [x]` items, reap them immediately, mirror the same reap into the snapshot, and archive them into `agent:pending-done` when that component exists
    - snapshot sync for that reap must stay surgical to the backlog/archive components; it must not absorb unrelated live exchange/user prompt edits into the snapshot
    - if prompt-bearing exchange drift already exists (for example plain text inserted immediately before `agent:boundary`), that drift must remain visible to the next preflight diff after the reap; `repair` must not convert it into `no_changes`

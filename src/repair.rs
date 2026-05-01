@@ -534,23 +534,6 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     Ok(repaired)
 }
 
-fn repair_completed_turn_boundary_if_safe(file: &Path, doc_content: &str) -> Result<bool> {
-    let Some(repaired) = repair_answered_stale_boundary_if_safe(file, doc_content)? else {
-        return Ok(false);
-    };
-    write::atomic_write_pub(file, &repaired)?;
-    snapshot::save(file, &repaired)?;
-    crate::ops_log::log_op(
-        file,
-        &format!("repair_completed_turn_boundary file={}", file.display()),
-    );
-    eprintln!(
-        "[repair] moved stale boundary to the end of the completed exchange turn in {}",
-        file.display()
-    );
-    Ok(true)
-}
-
 fn repair_answered_stale_boundary_if_safe(
     file: &Path,
     doc_content: &str,
@@ -778,8 +761,11 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
             return Ok(RepairOutcome::CommitBoundaryRecovered);
         }
-        if repair_completed_turn_boundary_if_safe(file, &doc_content)? {
-            return Ok(RepairOutcome::TemplateNormalized);
+        if crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_none() {
+            let repaired_doc = repair_template_doc_if_needed(file, &doc_content)?;
+            if repaired_doc != doc_content {
+                return Ok(RepairOutcome::TemplateNormalized);
+            }
         }
         return repair_completed_backlog_items(file);
     }
@@ -1490,6 +1476,52 @@ mod tests {
         assert!(
             repaired.contains("❯ Why was this missed?"),
             "repair should restore the missing prompt prefix:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\nWhy was this missed?\n"),
+            "bare prompt target should not remain after repair:\n{repaired}"
+        );
+
+        let saved_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            saved_snapshot, repaired,
+            "snapshot should advance to the canonicalized repaired document"
+        );
+    }
+
+    #[test]
+    fn repair_without_pending_canonicalizes_bare_prompt_before_existing_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "Why was this missed?\n",
+            "### Re: topic — gpt-5\n\n",
+            "Body\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::TemplateNormalized);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains("❯ Why was this missed?"),
+            "repair should restore the missing prompt prefix even without pending replay:\n{repaired}"
         );
         assert!(
             !repaired.contains("\nWhy was this missed?\n"),

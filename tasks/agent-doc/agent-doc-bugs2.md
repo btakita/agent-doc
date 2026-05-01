@@ -654,14 +654,28 @@ Code commit/push:
 - `src/agent-doc` `c647728` on `20260422/codex-agent-backend` (`fix: auto-apply scoped route repair`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:37f52a81 -->
-<!-- /agent:exchange -->
-
-<!--
 JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): resync: pruned 3 stale session(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2763081) in pane %305 for tasks/claudescore-3.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar Error: registered pane %305 for tasks/claudescore-3.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%305 pane_pid=2757392 pane_session=0 current_command=agent-doc)
 ```
+### Re: JB Fix Document action + supervisor feed — gpt-5
+
+I traced the new `claudescore-3.md` reroute failure in `src/session-share/.agent-doc/logs/ops.log`. The `%305` `not showing an idle codex prompt` failures are still the same busy-pane surface, not a fresh cross-root ownership regression: later in the same sequence the same document/pane flips to `route_existing_pane_already_running`, which means the live same-document recovery path did eventually converge.
+
+Implemented in the JB plugin:
+- added a `Fix Document` action that runs `agent-doc fix <FILE>` from the document's resolved project root after saving buffers,
+- registered it in the popup, Tools menu, editor context menu, and project-view context menu,
+- bumped the JetBrains plugin version to `0.2.81`, and updated the plugin spec plus `VERSIONS.md`.
+
+Verification:
+- `cd src/agent-doc/editors/jetbrains && GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+
+I did not fix the truncated bottom-feed/supervisor-restart issue in this turn. The screenshot plus the repeated non-idle `%305` checks look like a separate supervisor/terminal rendering bug that can leave the Codex prompt visually clipped after restart, so that still needs a dedicated repro/fix rather than being folded into the new JB command.
+<!-- agent:boundary:2ea55c64 -->
+<!-- /agent:exchange -->
+
+<!--
+None of the documents are successfully running `Agent Doc Run`. Running `agent-doc <path>` in the Codex session does work. 
 ---
 Add a `Fix Document` command to the JB Plugin...which will run `agent-doc fix <path>`.
 ---

@@ -3878,6 +3878,20 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     }
 
     #[test]
+    fn ready_prompt_candidate_accepts_future_codex_idle_placeholder_shape() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+Starting codex...
+› Explain this module in @filename
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "structurally-valid Codex idle placeholder suggestions must count as ready"
+        );
+    }
+
+    #[test]
     fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-drafted-prompt");

@@ -234,12 +234,60 @@ impl HarnessConfig {
 }
 
 fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
-    matches!(
-        trimmed,
-        "› Run /review on my current changes"
-            | "› Find and fix a bug in @filename"
-            | "› Improve documentation in @filename"
-    )
+    codex_idle_placeholder_prompt(trimmed).is_some()
+}
+
+fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
+    let body = trimmed.strip_prefix('›')?.trim();
+    if body.is_empty()
+        || body.chars().any(|c| matches!(c, ':' | ';' | '"' | '\'' | '`' | '\\' | '|' | '&'))
+        || matches!(body.chars().last(), Some('.' | '!' | '?' | ',' | ':' | ';'))
+    {
+        return None;
+    }
+
+    let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let words = normalized.split_whitespace().collect::<Vec<_>>();
+    if words.len() < 4 || words.len() > 8 {
+        return None;
+    }
+
+    let first = words[0];
+    if !first
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+    {
+        return None;
+    }
+
+    if !words.iter().all(|word| is_safe_codex_placeholder_token(word)) {
+        return None;
+    }
+
+    let has_placeholder_target = normalized.ends_with("in @filename")
+        || normalized.ends_with("on my current changes");
+    if !has_placeholder_target {
+        return None;
+    }
+
+    Some(format!("› {}", normalized))
+}
+
+fn is_safe_codex_placeholder_token(word: &str) -> bool {
+    if word == "@filename" {
+        return true;
+    }
+
+    if let Some(command) = word.strip_prefix('/') {
+        return !command.is_empty()
+            && command
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch == '-' || ch == '_');
+    }
+
+    word.chars()
+        .all(|ch| ch.is_ascii_alphabetic() || ch == '-')
 }
 
 fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
@@ -260,14 +308,13 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
-    [
-        "› Run /review on my current changes",
-        "› Find and fix a bug in @filename",
-        "› Improve documentation in @filename",
-    ]
-    .into_iter()
-    .find(|placeholder| normalized.contains(placeholder))
-    .map(str::to_string)
+
+    if let Some(index) = normalized.find('›') {
+        let candidate = normalized[index..].trim();
+        return codex_idle_placeholder_prompt(candidate);
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -445,6 +492,7 @@ mod tests {
         assert!(h.is_dispatch_ready_prompt_line("› Run /review on my current changes"));
         assert!(h.is_dispatch_ready_prompt_line("› Find and fix a bug in @filename"));
         assert!(h.is_dispatch_ready_prompt_line("› Improve documentation in @filename"));
+        assert!(h.is_dispatch_ready_prompt_line("› Explain this module in @filename"));
     }
 
     #[test]
@@ -504,6 +552,33 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
             h.last_prompt_candidate(output).as_deref(),
             Some("› Improve documentation in @filename")
         );
+    }
+
+    #[test]
+    fn last_prompt_candidate_detects_future_codex_idle_placeholder_shape() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Explain this module in @filename")
+        );
+    }
+
+    #[test]
+    fn last_prompt_candidate_rejects_codex_drafted_filename_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› investigate this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› investigate this module in @filename")
+        );
+        assert!(!h.is_dispatch_ready_prompt_line("› investigate this module in @filename"));
     }
 
     #[test]

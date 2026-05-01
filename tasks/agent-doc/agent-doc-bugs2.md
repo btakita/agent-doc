@@ -32,7 +32,7 @@ prompt_presets:
 
 Active backlog:
 - [ ] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
-- [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
+- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - 1 more active item(s)
 
@@ -194,7 +194,7 @@ The earlier full-suite failure was not the general socket-isolation layer breaki
 
 So the short answer is: yes, parallel isolation is the right model here, and the fix path should stay targeted at the specific shared surface or bad test assumption that flakes rather than broad serial execution.
 ❯ do [#rtanch]. spec-test-build-install-commit-push
-### Re: #rtanch tmux full-suite stability — gpt-5 (HEAD)
+### Re: #rtanch tmux full-suite stability — gpt-5
 
 `#rtanch` is complete.
 
@@ -220,11 +220,7 @@ All six passed.
 
 Code commit and push:
 - `src/agent-doc`: `225ee74` (`fix: stabilize parallel tmux registry roots`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:984b96a8 -->
-JB is surfacing an error. Please find + fix root cause(s). spec-test-build-install-commit-push
-```
-agent-doc route failed (exit 1): resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2869550) in pane %334 for tasks/claudescore-2.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] codex ready after 8.5s (17 polls) [route] Pane %334 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md → pane %334 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %334 for tasks/claudescore-2.md — waiting up to 30s for a new cycle ack for pending prompt_target: Please evaluate the the project plan. What steps that are currently marked as Not Started are started or complete? Error: routed codex trigger for tasks/claudescore-2.md was accepted in pane %334, but no new document cycle started for pending prompt_target: Please evaluate the the project plan. What steps that are currently marked as Not Started are started or complete? after waiting 30s (startup_miss_timestamp=2026-05-01T15:25:59Z)
-```
+<!-- agent:boundary:dbc131e6 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1553,6 +1553,46 @@ fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()
     );
 }
 
+fn rebind_fresh_dispatch_target_if_safe(
+    session_id: &str,
+    pane: &str,
+    file_path: &str,
+) -> Result<()> {
+    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
+    let registry = sessions::load_in(&registry_base_dir).with_context(|| {
+        format!(
+            "failed to load route registry before fresh-dispatch validation from {}",
+            registry_base_dir.display()
+        )
+    })?;
+    if pane_registration_matches_file(&registry, pane, file_path) {
+        return Ok(());
+    }
+
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
+        anyhow::bail!(
+            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+            pane,
+            canonical_registered_file(entry).display(),
+            requested.display()
+        );
+    }
+    if let Some(entry) = registry
+        .values()
+        .find(|entry| entry.session_id == session_id && entry.pane != pane)
+    {
+        anyhow::bail!(
+            "fresh route pane {} for {} lost ownership to registered pane {}; refusing to dispatch into an unbound replacement",
+            pane,
+            requested.display(),
+            entry.pane
+        );
+    }
+
+    register_dispatch_target(session_id, pane, file_path)
+}
+
 fn send_command_checked(
     tmux: &Tmux,
     pane: &str,
@@ -2619,17 +2659,13 @@ fn auto_start_in_session(
         );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
-        // Reassert the fresh pane binding immediately before the first guarded
-        // dispatch. Recovery paths can clear or rewrite the registry between
-        // early registration and the later ready-to-send moment, and the
-        // guarded send must validate against the current registry state.
-        register_dispatch_target(session_id, &new_pane, file_path)?;
-        let dispatch = if wait_for_agent_ready(
-            tmux,
-            &new_pane,
-            std::time::Duration::from_secs(30),
-            harness,
-        ) {
+        let ready =
+            wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness);
+        // Fresh-start recovery can clear the early geometry-only binding while
+        // the harness is still booting. Reassert it only when the pane is
+        // still otherwise safe to claim before the first guarded dispatch.
+        rebind_fresh_dispatch_target_if_safe(session_id, &new_pane, file_path)?;
+        let dispatch = if ready {
             eprintln!("[route] {} is ready, sending command", harness.binary);
             send_command_checked(tmux, &new_pane, file_path, harness)?
         } else {
@@ -3435,6 +3471,26 @@ mod tests {
         std::fs::write(
             &script,
             "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '❯ \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
+    fn write_mock_delayed_start_agent_doc(base: &Path, delay_secs: u64) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-start-delayed");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nsleep {}\nprintf 'Starting agent...\\n'\nprintf '❯ \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+                delay_secs
+            ),
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -5095,7 +5151,11 @@ Body\n\
             "existing pane for another document must stay a split anchor only: {anchor_content}"
         );
 
-        let lookup = sessions::lookup("route-cross-file-target").unwrap();
+        let lookup = sessions::load_in(dir.path())
+            .unwrap()
+            .values()
+            .find(|entry| entry.session_id == "route-cross-file-target")
+            .map(|entry| entry.pane.clone());
         assert_eq!(
             lookup.as_deref(),
             Some(new_pane.as_str()),
@@ -5173,6 +5233,99 @@ Body\n\
         assert_eq!(
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-reregister-before-dispatch");
+        let session = "claude";
+        let cwd = test_cwd();
+        let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-reregister-before-dispatch.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
+
+        let registry_root = dir.path().to_path_buf();
+        let clear_handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            let registry_path = sessions::registry_path_in(&registry_root);
+            let _lock = sessions::RegistryLock::acquire(&registry_path).unwrap();
+            let mut registry = sessions::load_in(&registry_root).unwrap();
+            let key = registry
+                .iter()
+                .find(|(_, entry)| {
+                    entry.session_id == "route-fresh-start-reregister-before-dispatch"
+                })
+                .map(|(key, _)| key.clone());
+            if let Some(key) = key {
+                registry.remove(&key);
+                sessions::save_in(&registry_root, &registry).unwrap();
+            }
+        });
+
+        let doc_for_thread = doc.clone();
+        let ack_handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-fresh-start-reregister-before-dispatch",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("fresh auto-start should rebind the pane before the first guarded dispatch");
+
+        clear_handle.join().unwrap();
+        ack_handle.join().unwrap();
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "fresh auto-start should still dispatch after the initial binding is cleared during ready-wait: {content}"
+        );
+
+        let lookup = sessions::lookup("route-fresh-start-reregister-before-dispatch").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "fresh auto-start should restore the new pane as the registered owner"
         );
     }
 
@@ -6488,16 +6641,17 @@ Body\n\
             "both provisioned panes should remain visible in the shared window"
         );
 
+        let registry = sessions::load_in(dir.path()).unwrap();
         assert!(
-            sessions::lookup("route-test-concurrent-provision-session-a")
-                .unwrap()
-                .is_some(),
+            registry
+                .values()
+                .any(|entry| entry.session_id == "route-test-concurrent-provision-session-a"),
             "first provisioned document should be registered"
         );
         assert!(
-            sessions::lookup("route-test-concurrent-provision-session-b")
-                .unwrap()
-                .is_some(),
+            registry
+                .values()
+                .any(|entry| entry.session_id == "route-test-concurrent-provision-session-b"),
             "second provisioned document should be registered"
         );
     }

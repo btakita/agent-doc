@@ -5246,10 +5246,17 @@ mod tests {
         sessions::save_in(&subroot, &child_registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
-        let cols = vec![
-            "tasks/agent-doc-bugs2.md".to_string(),
-            "src/session-share/tasks/claudescore-3.md".to_string(),
-        ];
+        let root_col = root_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let child_col = child_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let cols = vec![root_col.clone(), child_col.clone()];
         let synthetic_registry = build_tmux_router_sync_registry(&iso, &cols)
             .unwrap()
             .expect("cross-root sync should synthesize a router registry");
@@ -5264,7 +5271,7 @@ mod tests {
         tmux_router::sync(
             &cols,
             Some(window.as_str()),
-            Some("src/session-share/tasks/claudescore-3.md"),
+            Some(child_col.as_str()),
             &iso,
             synthetic_registry.path(),
             &resolve_file,

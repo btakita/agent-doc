@@ -1221,6 +1221,138 @@ fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> boo
         .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
 }
 
+fn is_exchange_response_heading(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+fn normalized_prompt_preview_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || !crate::diff::text_line_looks_like_prompt_target(trimmed) {
+        return None;
+    }
+    Some(trimmed.trim_start_matches('❯').trim().to_string())
+}
+
+fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
+    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
+    trimmed.starts_with('❯')
+        || trimmed.ends_with('?')
+        || lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
+fn prompt_change_is_already_answered(change_text: &str) -> bool {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    let mut in_fence = false;
+    let mut fence_char = '\0';
+    let mut fence_len = 0usize;
+    let mut saw_prompt = false;
+    let mut saw_response = false;
+
+    for segment in change_text.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                continue;
+            }
+        } else {
+            if fence_close(trimmed, fence_char, fence_len) {
+                in_fence = false;
+            }
+            continue;
+        }
+
+        if is_exchange_response_heading(trimmed) {
+            if saw_prompt {
+                saw_response = true;
+            }
+            continue;
+        }
+
+        if normalized_prompt_preview_line(trimmed).is_some() {
+            if saw_response && line_looks_like_fresh_prompt_after_response(trimmed) {
+                return false;
+            }
+            saw_prompt = true;
+        }
+    }
+
+    saw_prompt && saw_response
+}
+
+fn prompt_change_is_answered_by_later_response(
+    changes: &[crate::diff::PromptBearingChange],
+    idx: usize,
+) -> bool {
+    if changes
+        .get(idx)
+        .is_none_or(|change| change.kind != crate::diff::PromptBearingChangeKind::PromptTarget)
+    {
+        return false;
+    }
+
+    for later in changes.iter().skip(idx + 1) {
+        match later.kind {
+            crate::diff::PromptBearingChangeKind::PromptTarget => return false,
+            crate::diff::PromptBearingChangeKind::RecoveryArtifact => {
+                let heading = later
+                    .text
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or(later.text.as_str())
+                    .trim();
+                if is_exchange_response_heading(heading) {
+                    return true;
+                }
+            }
+            crate::diff::PromptBearingChangeKind::ContentEdit
+            | crate::diff::PromptBearingChangeKind::BoundaryArtifact => {}
+        }
+    }
+
+    false
+}
+
 pub(crate) fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
     let Some(change) = first_unstarted_prompt_bearing_change(file)? else {
         return Ok(None);
@@ -1262,16 +1394,41 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
     let Some(diff_text) = crate::diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
     };
-
-    Ok(crate::diff::classify_prompt_bearing_changes(&diff_text)
-        .into_iter()
-        .find(|change| {
-            matches!(
-                change.kind,
-                crate::diff::PromptBearingChangeKind::PromptTarget
-                    | crate::diff::PromptBearingChangeKind::ContentEdit
-            )
-        }))
+    let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
+    let mut skip_answered_response_run = false;
+    for (idx, change) in changes.iter().enumerate() {
+        match change.kind {
+            crate::diff::PromptBearingChangeKind::RecoveryArtifact
+            | crate::diff::PromptBearingChangeKind::BoundaryArtifact => continue,
+            crate::diff::PromptBearingChangeKind::PromptTarget => {
+                if skip_answered_response_run {
+                    let preview = change
+                        .text
+                        .lines()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or(change.text.as_str())
+                        .trim();
+                    if !line_looks_like_fresh_prompt_after_response(preview) {
+                        continue;
+                    }
+                }
+                if prompt_change_is_already_answered(&change.text)
+                    || prompt_change_is_answered_by_later_response(&changes, idx)
+                {
+                    skip_answered_response_run = true;
+                    continue;
+                }
+                return Ok(Some(change.clone()));
+            }
+            crate::diff::PromptBearingChangeKind::ContentEdit => {
+                if skip_answered_response_run {
+                    continue;
+                }
+                return Ok(Some(change.clone()));
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -1317,6 +1474,50 @@ Body\n\
         assert!(
             change.is_none(),
             "frontmatter-only metadata drift must not become prompt-bearing"
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_answered_prompt_after_stale_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "Can we run specific rubrics for fine tuning?\n",
+            "### Re: specific rubrics — gpt-5\n\n",
+            "Yes.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        assert!(crate::diff::text_line_looks_like_prompt_target(
+            "Can we run specific rubrics for fine tuning?"
+        ));
+        assert!(
+            prompt_change_is_already_answered(
+                "Can we run specific rubrics for fine tuning?\n### Re: specific rubrics — gpt-5\n\nYes.\n"
+            ),
+            "fixture block should be recognized as already answered"
+        );
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "answered prompt after a stale boundary must not stay actionable"
         );
     }
 

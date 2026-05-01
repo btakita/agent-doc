@@ -60,7 +60,9 @@
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
 //!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when
-//!   prompt found, false on timeout. Logs progress every 10 polls.
+//!   prompt found, false on timeout. Logs progress every 10 polls. Existing-pane reroutes only
+//!   fail closed on timeout when the document still has prompt-bearing drift; otherwise route
+//!   just focuses the already-running pane without injecting a duplicate reopen.
 //! - **`sync_after_claim(tmux, pane_id)`**: After a lazy claim, re-runs `sync::run` for all
 //!   registered files in the same window to keep the tmux layout mirroring the editor split.
 //!   Skipped when fewer than 2 files share the window.
@@ -142,6 +144,12 @@ use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 enum CommandDispatchStatus {
     Accepted,
     TimedOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingPaneDispatchReadiness {
+    Ready,
+    BusyAlreadyRunning,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -867,7 +875,20 @@ fn resolve_or_create_pane(
                         target_session,
                         is_first_column(file, col_args),
                     );
-                    ensure_existing_pane_ready_for_dispatch(tmux, file, owner, harness)?;
+                    match ensure_existing_pane_ready_for_dispatch(
+                        tmux,
+                        file,
+                        owner,
+                        harness,
+                        pending_prompt_context
+                            .as_ref()
+                            .map(|context| context.marker.as_str()),
+                    )? {
+                        ExistingPaneDispatchReadiness::Ready => {}
+                        ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
+                            return Ok(owner.to_string());
+                        }
+                    }
                     register_dispatch_target(session_id, owner, file_path)?;
                     send_command(tmux, owner, file_path, harness)?;
                     require_routed_cycle_ack(
@@ -996,7 +1017,20 @@ fn resolve_or_create_pane(
                     is_first_column(file, col_args),
                 );
                 register_dispatch_target(session_id, registered_pane, file_path)?;
-                ensure_existing_pane_ready_for_dispatch(tmux, file, registered_pane, harness)?;
+                match ensure_existing_pane_ready_for_dispatch(
+                    tmux,
+                    file,
+                    registered_pane,
+                    harness,
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                )? {
+                    ExistingPaneDispatchReadiness::Ready => {}
+                    ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
+                        return Ok(registered_pane.clone());
+                    }
+                }
                 register_dispatch_target(session_id, registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 send_command(tmux, registered_pane, file_path, harness)?;
@@ -1063,7 +1097,20 @@ fn resolve_or_create_pane(
             existing, file_path
         );
         register_dispatch_target(session_id, existing, file_path)?;
-        ensure_existing_pane_ready_for_dispatch(tmux, file, existing, harness)?;
+        match ensure_existing_pane_ready_for_dispatch(
+            tmux,
+            file,
+            existing,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+        )? {
+            ExistingPaneDispatchReadiness::Ready => {}
+            ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
+                return Ok(existing.to_string());
+            }
+        }
         register_dispatch_target(session_id, existing, file_path)?;
         send_command(tmux, existing, file_path, harness)?;
         require_routed_cycle_ack(
@@ -1086,7 +1133,18 @@ fn resolve_or_create_pane(
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         register_dispatch_target(session_id, &new_pane, file_path)?;
-        ensure_existing_pane_ready_for_dispatch(tmux, file, &new_pane, harness)?;
+        match ensure_existing_pane_ready_for_dispatch(
+            tmux,
+            file,
+            &new_pane,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+        )? {
+            ExistingPaneDispatchReadiness::Ready => {}
+            ExistingPaneDispatchReadiness::BusyAlreadyRunning => return Ok(new_pane),
+        }
         register_dispatch_target(session_id, &new_pane, file_path)?;
         send_command(tmux, &new_pane, file_path, harness)?;
         require_routed_cycle_ack(
@@ -1350,12 +1408,35 @@ fn ensure_existing_pane_ready_for_dispatch(
     file: &Path,
     pane: &str,
     harness: &HarnessConfig,
-) -> Result<()> {
+    prompt_bearing_marker: Option<&str>,
+) -> Result<ExistingPaneDispatchReadiness> {
     if wait_for_agent_ready(tmux, pane, existing_pane_ready_timeout(), harness) {
-        return Ok(());
+        return Ok(ExistingPaneDispatchReadiness::Ready);
     }
 
     let provenance = pane_route_provenance(tmux, pane);
+    if prompt_bearing_marker.is_none() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_existing_pane_already_running file={} pane={} harness={} {}",
+                file.display(),
+                pane,
+                harness.binary,
+                provenance
+            ),
+        );
+        if let Err(e) = tmux.select_pane(pane) {
+            eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
+        }
+        eprintln!(
+            "[route] registered pane {} for {} is busy but has no pending prompt-bearing drift — focusing the live {} session instead of injecting a duplicate reopen",
+            pane,
+            file.display(),
+            harness.binary
+        );
+        return Ok(ExistingPaneDispatchReadiness::BusyAlreadyRunning);
+    }
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1572,7 +1653,9 @@ fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
         .take(8)
         .map(prompt::strip_ansi)
         .collect();
-    recent_lines.iter().any(|line| line_contains_trigger(line, trigger))
+    recent_lines
+        .iter()
+        .any(|line| line_contains_trigger(line, trigger))
         || recent_lines_contain_wrapped_trigger(&recent_lines, trigger)
 }
 
@@ -3327,8 +3410,7 @@ history line
 
     #[test]
     fn recent_lines_contain_trigger_matches_wrapped_codex_trigger() {
-        let trigger =
-            "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
+        let trigger = "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
         let content = "\
 › agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claud
 escore-3.md
@@ -3746,6 +3828,42 @@ Body\n\
     }
 
     #[test]
+    fn pending_prompt_bearing_context_for_route_ignores_answered_prompt_after_stale_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-boundary-answered-tail.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "Can we run specific rubrics for fine tuning?\n",
+            "### Re: specific rubrics — gpt-5\n\n",
+            "Yes.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
+        assert!(
+            ctx.is_none(),
+            "answered prompt after a stale boundary must not force routed cycle acknowledgment"
+        );
+    }
+
+    #[test]
     fn resolve_or_create_pane_fails_closed_when_live_child_does_not_start_new_cycle() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -3803,7 +3921,8 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch() {
+    fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists()
+     {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -3858,6 +3977,60 @@ Body\n\
         assert!(
             !after.contains("EARLY:agent-doc "),
             "route should not inject a trigger before the pane becomes idle: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_focuses_busy_registered_pane_without_prompt_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-no-drift");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-owner-supervisor-pid.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot).unwrap();
+        let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", mock_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy-no-drift", &pane, &file_path).unwrap();
+
+        let reused = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy-no-drift",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should focus the already-running pane when there is no new drift");
+        assert_eq!(reused, pane);
+
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "route should not inject a duplicate reopen into a busy live pane: {after}"
         );
     }
 

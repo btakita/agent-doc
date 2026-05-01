@@ -2510,6 +2510,146 @@ pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[Str
     true
 }
 
+fn exchange_user_region(content: &str) -> &str {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut boundary_pos = content.len();
+    let mut offset = 0;
+    for line in content.lines() {
+        if line.trim().starts_with(boundary_prefix) {
+            boundary_pos = offset;
+        }
+        offset += line.len() + 1;
+    }
+    &content[..boundary_pos]
+}
+
+/// Compare the committed/snapshot document against the working tree and return
+/// exchange user-region lines that should regain a missing `❯ ` prefix.
+pub fn extract_post_commit_normalization_targets(committed: &str, working: &str) -> Vec<String> {
+    let committed_comps = component::parse(committed).unwrap_or_default();
+    let working_comps = component::parse(working).unwrap_or_default();
+
+    let committed_exc = committed_comps
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|c| c.content(committed))
+        .unwrap_or("");
+    let working_exc = working_comps
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|c| c.content(working))
+        .unwrap_or("");
+
+    if committed_exc == working_exc {
+        return vec![];
+    }
+
+    let committed_user_region = exchange_user_region(committed_exc);
+    let working_user_region = exchange_user_region(working_exc);
+
+    let mut working_prefixed = std::collections::HashSet::<String>::new();
+    let mut working_unprefixed = std::collections::HashSet::<String>::new();
+    for line in working_user_region.lines() {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(stripped) = trimmed.strip_prefix("❯ ") {
+            working_prefixed.insert(stripped.to_string());
+        } else {
+            working_unprefixed.insert(trimmed.to_string());
+        }
+    }
+
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut targets = Vec::new();
+    for line in committed_user_region.lines() {
+        let Some(stripped) = line.strip_prefix("❯ ") else {
+            continue;
+        };
+        let normalized = stripped.trim_end();
+        if normalized.is_empty() {
+            continue;
+        }
+        if working_unprefixed.contains(normalized)
+            && !working_prefixed.contains(normalized)
+            && seen.insert(normalized.to_string())
+        {
+            targets.push(stripped.to_string());
+        }
+    }
+
+    targets
+}
+
+/// Apply `❯ ` prefix normalization to matching lines in the exchange user
+/// region of a full document.
+pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String]) -> String {
+    if prefix_lines.is_empty() {
+        return doc.to_string();
+    }
+
+    let open_tag = "<!-- agent:exchange";
+    let close_tag = "<!-- /agent:exchange -->";
+    let boundary_prefix = "<!-- agent:boundary:";
+
+    let Some(open_match) = doc.find(open_tag) else {
+        return doc.to_string();
+    };
+    let Some(close_idx) = doc[open_match..]
+        .find(close_tag)
+        .map(|idx| open_match + idx)
+    else {
+        return doc.to_string();
+    };
+    let Some(open_end) = doc[open_match..]
+        .find("-->")
+        .map(|idx| open_match + idx + 3)
+    else {
+        return doc.to_string();
+    };
+
+    let before_exchange = &doc[..open_end];
+    let exchange_content = &doc[open_end..close_idx];
+    let after_exchange = &doc[close_idx..];
+
+    let mut user_region_end = exchange_content.len();
+    let mut offset = 0;
+    for line in exchange_content.lines() {
+        if line.trim().starts_with(boundary_prefix) {
+            user_region_end = offset;
+        }
+        offset += line.len() + 1;
+    }
+    let user_region = &exchange_content[..user_region_end];
+    let agent_region = &exchange_content[user_region_end..];
+
+    let target_lines: std::collections::HashSet<String> = prefix_lines
+        .iter()
+        .map(|line| line.trim_end())
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    if target_lines.is_empty() {
+        return doc.to_string();
+    }
+
+    let normalized_user_region = user_region
+        .split('\n')
+        .map(|doc_line| {
+            let normalized = doc_line.trim_end();
+            if normalized.starts_with("❯ ") || !target_lines.contains(normalized) {
+                doc_line.to_string()
+            } else {
+                format!("❯ {doc_line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("{before_exchange}{normalized_user_region}{agent_region}{after_exchange}")
+}
+
 fn enforce_orchestrate_template_patch_contract(
     origin: Option<&str>,
     patches: &[crate::template::PatchBlock],
@@ -4445,30 +4585,60 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Err(_) => return false,
     };
     let project_root = resolve_ipc_project_root(&canonical);
-    let boundary_id = crate::snapshot::load(file)
-        .ok()
-        .flatten()
+    let snapshot_doc = crate::snapshot::load(file).ok().flatten();
+    let working_doc = std::fs::read_to_string(file).ok();
+    let boundary_id = snapshot_doc
         .as_deref()
         .and_then(|doc| find_boundary_id(doc, "exchange"))
         .or_else(|| {
-            std::fs::read_to_string(file)
-                .ok()
+            working_doc
                 .as_deref()
                 .and_then(|doc| find_boundary_id(doc, "exchange"))
         });
+    let normalize_prefix_lines = match (snapshot_doc.as_deref(), working_doc.as_deref()) {
+        (Some(committed), Some(working)) => {
+            extract_post_commit_normalization_targets(committed, working)
+        }
+        _ => vec![],
+    };
 
     if !crate::ipc_socket::is_listener_active(&project_root) {
         return false;
     }
 
-    match crate::ipc_socket::send_reposition(
-        &project_root,
-        &canonical.to_string_lossy(),
-        boundary_id.as_deref(),
-        true, // preserve (HEAD) in editor buffer
-    ) {
+    let result = if normalize_prefix_lines.is_empty() {
+        crate::ipc_socket::send_reposition(
+            &project_root,
+            &canonical.to_string_lossy(),
+            boundary_id.as_deref(),
+            true, // preserve (HEAD) in editor buffer
+        )
+    } else {
+        let mut message = serde_json::json!({
+            "type": "patch",
+            "file": canonical.to_string_lossy(),
+            "patches": [],
+            "unmatched": "",
+            "reposition_boundary": true,
+            "preserve_head": true,
+            "normalize_prefix_lines": normalize_prefix_lines.clone(),
+        });
+        if let Some(boundary_id) = boundary_id.as_deref() {
+            message["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+        }
+        crate::ipc_socket::send_message(&project_root, &message).map(|_| true)
+    };
+
+    match result {
         Ok(true) => {
-            eprintln!("[commit] IPC reposition boundary signal sent");
+            if normalize_prefix_lines.is_empty() {
+                eprintln!("[commit] IPC reposition boundary signal sent");
+            } else {
+                eprintln!(
+                    "[commit] IPC prefix repair + boundary signal sent ({} lines)",
+                    normalize_prefix_lines.len()
+                );
+            }
             true
         }
         Ok(false) => {
@@ -6896,6 +7066,58 @@ original
         assert_eq!(
             result, target,
             "target should be returned unchanged when target has no pending"
+        );
+    }
+}
+
+#[cfg(test)]
+mod post_commit_prefix_repair_tests {
+    use super::*;
+
+    #[test]
+    fn extract_post_commit_normalization_targets_finds_missing_working_tree_prefix() {
+        let committed = "\
+<!-- agent:exchange -->
+❯ do #spfxnorm. spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5
+Implemented.
+<!-- agent:boundary:clean123 -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange -->
+do #spfxnorm. spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5 (HEAD)
+Implemented.
+<!-- agent:boundary:dirty123 -->
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(
+            extract_post_commit_normalization_targets(committed, working),
+            vec!["do #spfxnorm. spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_only_updates_exchange_user_region() {
+        let working = "\
+<!-- agent:exchange -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- agent:boundary:dirty123 -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &["do #spfxnorm. spec-test-build-install-commit-push".to_string()],
+        );
+
+        assert!(repaired.contains("❯ do #spfxnorm. spec-test-build-install-commit-push"));
+        assert!(
+            repaired.contains("<!-- agent:boundary:dirty123 -->\ndo #spfxnorm. spec-test-build-install-commit-push"),
+            "agent region after the boundary must remain untouched: {repaired}"
         );
     }
 }

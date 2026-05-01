@@ -1927,11 +1927,31 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let repositioned = crate::template::reposition_boundary_to_end_preserve_head(&working);
+        let normalize_prefix_lines = crate::snapshot::load(file)
+            .ok()
+            .flatten()
+            .map(|snapshot| {
+                crate::write::extract_post_commit_normalization_targets(&snapshot, &working)
+            })
+            .unwrap_or_default();
+        let prefix_repaired = if normalize_prefix_lines.is_empty() {
+            working.clone()
+        } else {
+            crate::write::normalize_exchange_prefixes_for_targets(&working, &normalize_prefix_lines)
+        };
+        let repositioned =
+            crate::template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
         if repositioned != working {
             match crate::write::atomic_write_pub(file, &repositioned) {
                 Ok(()) => {
-                    eprintln!("[commit] repositioned boundary in working tree");
+                    if normalize_prefix_lines.is_empty() {
+                        eprintln!("[commit] repositioned boundary in working tree");
+                    } else {
+                        eprintln!(
+                            "[commit] repaired {} prefix lines and repositioned boundary in working tree",
+                            normalize_prefix_lines.len()
+                        );
+                    }
                     changed = true;
                 }
                 Err(e) => {
@@ -5984,6 +6004,71 @@ mod tests {
             working.matches("(HEAD)").count(),
             1,
             "working tree should retain exactly one (HEAD) marker; got:\n{working}"
+        );
+    }
+
+    #[test]
+    fn reposition_repairs_missing_working_tree_prompt_prefix_without_listener() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let snapshot_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ❯ do #spfxnorm. spec-test-build-install-commit-push\n\
+            ### Re: #spfxnorm — opus-4-6\n\
+            Implemented.\n\
+            <!-- agent:boundary:clean789 -->\n\
+            <!-- /agent:exchange -->\n";
+        let working_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            do #spfxnorm. spec-test-build-install-commit-push\n\
+            ### Re: #spfxnorm — opus-4-6 (HEAD)\n\
+            Implemented.\n\
+            <!-- agent:boundary:dirty789 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, working_content).unwrap();
+
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        crate::snapshot::save(&doc, snapshot_content).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        reposition_boundary_in_snapshot(&doc);
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("❯ do #spfxnorm. spec-test-build-install-commit-push"),
+            "working tree should regain the missing prompt prefix:\n{working}"
+        );
+        assert!(
+            !working.contains("<!-- agent:boundary:dirty789 -->"),
+            "working tree boundary should also be repositioned:\n{working}"
         );
     }
 

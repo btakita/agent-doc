@@ -409,7 +409,7 @@ I did not make another code change for this prompt because the fix is already pr
 
 All four passed.
 ❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is not working. The JB plugin surfaced an error that I was not able to copy in time. spec-test-build-install-commit-push
-### Re: claudescore-3 routed failure — gpt-5 (HEAD)
+### Re: claudescore-3 routed failure — gpt-5
 
 I investigated the `claudescore-3.md` report. The current state points to an already-fixed `src/agent-doc` route bug, not a new unfixed path.
 
@@ -434,7 +434,7 @@ I did not make another `src/agent-doc` code change in this cycle because I could
 
 I did add the follow-up that still looks real here:
 - `#jberr` `[recommended]` Keep JetBrains `Run Agent Doc` route failures copyable/persistent instead of transient-only. Plan: `tasks/agent-doc/plan-jb-route-error-capture.md`
-<!-- agent:boundary:c079fb7f -->
+<!-- agent:boundary:23598286 -->
 <!-- /agent:exchange -->
 
 <!--

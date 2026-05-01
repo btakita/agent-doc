@@ -430,7 +430,7 @@ If you want, I can next convert this into a `minimal redline package` with only 
 
 ❯ I don't have a LLC. Please remove.
 > 5. **LLC invoicing / entity use.** Please confirm that I may invoice through my LLC while remaining the individual performing the services, and that doing so is not considered use of a further subcontractor or subconsultant under Section 10.1.
-### Re: insurance benefit and removing LLC item — gpt-5 (HEAD)
+### Re: insurance benefit and removing LLC item — gpt-5
 
 On insurance: the benefit is mostly defensive clarity, not leverage for its own sake.
 
@@ -491,6 +491,7 @@ So the leanest version of your asks is probably just:
 4. Clarify the hours language in Exhibit A.
 
 That is the set most likely to matter economically and most worth pushing first.
+<!-- agent:boundary:42b31499 -->
 <!-- /agent:exchange -->
 
 ## Queue

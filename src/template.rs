@@ -78,6 +78,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component::{self, Component, find_comment_end, is_backlog_component};
@@ -592,6 +593,301 @@ pub(crate) fn strip_trailing_caret_lines(content: &str) -> String {
     out
 }
 
+#[derive(Debug, Clone)]
+struct PromptTailBlock {
+    text: String,
+    end: usize,
+    pending_ids: HashSet<String>,
+}
+
+fn is_exchange_response_heading(trimmed: &str) -> bool {
+    trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+}
+
+fn extract_pending_ids(text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        if chars[idx] != '#' {
+            idx += 1;
+            continue;
+        }
+        let start = idx + 1;
+        let mut end = start;
+        while end < chars.len() {
+            let ch = chars[end];
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        if end > start {
+            let id = chars[start..end].iter().collect::<String>();
+            if is_valid_pending_like_id(&id) {
+                ids.insert(id);
+            }
+        }
+        idx = end.max(idx + 1);
+    }
+    ids
+}
+
+fn is_valid_pending_like_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+fn text_line_looks_like_prompt_target(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with("<!--")
+        && !trimmed.starts_with("```")
+        && !trimmed.starts_with("~~~")
+        && !is_exchange_response_heading(trimmed)
+        && (trimmed.starts_with('❯')
+            || trimmed.ends_with('?')
+            || looks_like_prompt_directive(trimmed))
+}
+
+fn looks_like_prompt_directive(line: &str) -> bool {
+    let lower = line.trim_start_matches('❯').trim().to_ascii_lowercase();
+    lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
+fn unresolved_tail_after_boundary(doc: &str, component_name: &str) -> Option<String> {
+    let components = component::parse(doc).ok()?;
+    let comp = components.iter().find(|comp| comp.name == component_name)?;
+    let prefix = "<!-- agent:boundary:";
+    let content_region = &doc[comp.open_end..comp.close_start];
+    let code_ranges = component::find_code_ranges(doc);
+    let mut search_from = 0usize;
+    while let Some(start) = content_region[search_from..].find(prefix) {
+        let abs_start = comp.open_end + search_from + start;
+        if code_ranges
+            .iter()
+            .any(|&(cs, ce)| abs_start >= cs && abs_start < ce)
+        {
+            search_from += start + prefix.len();
+            continue;
+        }
+        let line_start = search_from + start;
+        let marker_end = content_region[line_start..]
+            .find('\n')
+            .map(|idx| line_start + idx + 1)
+            .unwrap_or(content_region.len());
+        return Some(content_region[marker_end..].to_string());
+    }
+    None
+}
+
+fn extract_prompt_tail_blocks(text: &str) -> Vec<PromptTailBlock> {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    fn block_start(line: &str) -> bool {
+        let trimmed = line.trim();
+        !trimmed.is_empty()
+            && !trimmed.starts_with("<!--")
+            && !trimmed.starts_with("```")
+            && !trimmed.starts_with("~~~")
+            && !is_exchange_response_heading(trimmed)
+            && text_line_looks_like_prompt_target(trimmed)
+    }
+
+    fn push_block(blocks: &mut Vec<PromptTailBlock>, text: &str, start: Option<usize>, end: usize) {
+        let Some(start) = start else {
+            return;
+        };
+        let raw = &text[start..end];
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        blocks.push(PromptTailBlock {
+            text: trimmed.to_string(),
+            end,
+            pending_ids: extract_pending_ids(trimmed),
+        });
+    }
+
+    let mut blocks = Vec::new();
+    let mut current_start = None;
+    let mut current_end = 0usize;
+    let mut current_has_blank = false;
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+    let mut offset = 0usize;
+
+    for segment in text.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        let starts_new = current_start.is_some()
+            && !in_fence
+            && ((current_has_blank && !trimmed.is_empty()) || trimmed.starts_with('❯'))
+            && block_start(line);
+        if starts_new {
+            push_block(&mut blocks, text, current_start.take(), current_end);
+            current_end = 0;
+            current_has_blank = false;
+        }
+
+        if current_start.is_none() {
+            if !block_start(line) {
+                offset += segment.len();
+                continue;
+            }
+            current_start = Some(offset);
+            current_has_blank = false;
+        }
+
+        current_end = offset + segment.len();
+        if trimmed.is_empty() {
+            current_has_blank = true;
+        }
+
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+        }
+
+        offset += segment.len();
+    }
+
+    push_block(&mut blocks, text, current_start, current_end);
+    blocks
+}
+
+fn find_tail_anchor_block<'a>(
+    response_content: &str,
+    prompt_blocks: &'a [PromptTailBlock],
+) -> Result<Option<&'a PromptTailBlock>> {
+    if prompt_blocks.is_empty() {
+        return Ok(None);
+    }
+
+    let response_ids = extract_pending_ids(response_content);
+    let candidate_idx = if response_ids.is_empty() {
+        0
+    } else if let Some(idx) = prompt_blocks
+        .iter()
+        .position(|block| !block.pending_ids.is_disjoint(&response_ids))
+    {
+        idx
+    } else if prompt_blocks.len() == 1 {
+        0
+    } else {
+        anyhow::bail!(
+            "exchange patchback is ambiguous: response references pending ids {:?}, but none of the unresolved prompt blocks match",
+            response_ids
+        );
+    };
+
+    if candidate_idx > 0 {
+        anyhow::bail!(
+            "exchange patchback would skip older unresolved prompt(s): oldest pending block is `{}`, but the response matches later block `{}`",
+            prompt_blocks[0].text.lines().next().unwrap_or("(empty)"),
+            prompt_blocks[candidate_idx]
+                .text
+                .lines()
+                .next()
+                .unwrap_or("(empty)")
+        );
+    }
+
+    Ok(prompt_blocks.get(candidate_idx))
+}
+
+fn append_exchange_patch_after_prompt_anchor(
+    original_doc: &str,
+    current_doc: &str,
+    comp: &Component,
+    patch_content: &str,
+) -> Result<Option<String>> {
+    let Some(original_tail) = unresolved_tail_after_boundary(original_doc, &comp.name) else {
+        return Ok(None);
+    };
+    let prompt_blocks = extract_prompt_tail_blocks(&original_tail);
+    let Some(anchor) = find_tail_anchor_block(patch_content, &prompt_blocks)? else {
+        return Ok(None);
+    };
+
+    let content_region = comp.content(current_doc);
+    let boundary_marker = find_boundary_in_component(current_doc, comp)
+        .map(|id| format!("<!-- agent:boundary:{id} -->"))
+        .context("exchange append anchor missing boundary marker")?;
+    let boundary_pos = content_region
+        .find(&boundary_marker)
+        .context("exchange append anchor boundary marker not found in current content")?;
+    let boundary_line_end = content_region[boundary_pos..]
+        .find('\n')
+        .map(|idx| boundary_pos + idx + 1)
+        .unwrap_or(content_region.len());
+    let user_region = &content_region[..boundary_pos];
+    let tail_start = user_region.rfind(&original_tail).with_context(|| {
+        format!(
+            "failed to locate unresolved prompt tail in current exchange for anchored patchback: {}",
+            anchor.text.lines().next().unwrap_or("(empty)")
+        )
+    })?;
+    let insert_at = tail_start + anchor.end;
+
+    let new_id = crate::new_boundary_id();
+    let new_marker = crate::format_boundary_marker(&new_id);
+    let mut new_content =
+        String::with_capacity(content_region.len() + patch_content.len() + new_marker.len() + 2);
+    new_content.push_str(&user_region[..insert_at]);
+    if !new_content.is_empty() && !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+    new_content.push_str(patch_content.trim_end());
+    new_content.push('\n');
+    new_content.push_str(&new_marker);
+    new_content.push('\n');
+    new_content.push_str(&user_region[insert_at..]);
+    new_content.push_str(&content_region[boundary_line_end..]);
+
+    Ok(Some(comp.replace_content(current_doc, &new_content)))
+}
+
 /// Apply patches with per-component mode overrides (e.g., stream mode forces "replace"
 /// for cumulative buffers even on append-mode components like exchange).
 pub fn apply_patches_with_overrides(
@@ -673,6 +969,20 @@ pub fn apply_patches_with_overrides(
         if mode == "append"
             && let Some(bid) = find_boundary_in_component(&result, comp)
         {
+            if patch.name == "exchange"
+                && patch_content
+                    .lines()
+                    .any(|line| is_exchange_response_heading(line.trim_start()))
+                && let Some(anchored) = append_exchange_patch_after_prompt_anchor(
+                    doc,
+                    &result,
+                    comp,
+                    &patch_content,
+                )?
+            {
+                result = anchored;
+                continue;
+            }
             result = comp.append_with_boundary(&result, &patch_content, &bid);
             continue;
         }
@@ -2865,6 +3175,77 @@ Existing answer.
             result.matches("(HEAD)").count(),
             1,
             "exactly one transient HEAD marker expected; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn apply_patches_binds_exchange_response_to_oldest_matching_unresolved_prompt() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old-anchor -->\n",
+            "❯ do #wcup1. spec-test-commit-push\n\n",
+            "❯ do #wcx1. spec-test-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: #wcup1 — gpt-5\n\nAlready complete.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result =
+            apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+                .unwrap();
+
+        let wcup1_prompt = result.find("❯ do #wcup1. spec-test-commit-push").unwrap();
+        let wcup1_response = result.find("### Re: #wcup1 — gpt-5 (HEAD)").unwrap();
+        let new_boundary = result.rfind("<!-- agent:boundary:").unwrap();
+        let wcx1_prompt = result.find("❯ do #wcx1. spec-test-commit-push").unwrap();
+
+        assert!(
+            wcup1_prompt < wcup1_response,
+            "response must land after the matched older prompt:\n{result}"
+        );
+        assert!(
+            wcup1_response < new_boundary,
+            "new boundary must move behind the response:\n{result}"
+        );
+        assert!(
+            new_boundary < wcx1_prompt,
+            "newer unresolved prompts must remain after the new boundary:\n{result}"
+        );
+    }
+
+    #[test]
+    fn apply_patches_rejects_exchange_response_that_skips_older_unresolved_prompt() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old-anchor -->\n",
+            "❯ do #wcup1. spec-test-commit-push\n\n",
+            "❯ do #wcx1. spec-test-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: #wcx1 — gpt-5\n\nNot done yet.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let err = apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+            .expect_err("later-matching response should fail closed");
+        assert!(
+            err.to_string().contains("skip older unresolved prompt"),
+            "unexpected error: {err}"
         );
     }
 

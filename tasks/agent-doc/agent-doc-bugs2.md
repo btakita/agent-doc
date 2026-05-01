@@ -457,7 +457,28 @@ The `spec-test-build-install-commit-push` request is complete in the response ab
 Root cause was the Codex reroute payload itself. `route` was pasting `agent-doc <file>` plus a follow-up prompt body into an already-live Codex pane, and Codex treated that as ordinary chat text instead of re-entering the binary-owned `agent-doc` cycle. I changed [src/route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs), [specs/07-commands.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/07-commands.md), and [VERSIONS.md](/home/brian/work/btakita/agent-loop/src/agent-doc/VERSIONS.md) so Codex reroutes now send only the bare `agent-doc <FILE>` reopen, and I added a regression test that fails if an extra follow-up line gets injected.
 
 Verification passed: the two new route tests, the full `src/agent-doc` test suite, release build, and forced local install all succeeded. I committed and pushed the code change in `src/agent-doc` as `c5b2c4c` on `20260422/codex-agent-backend` with message `fix: keep codex reroutes on bare agent-doc reopen`. The document cycle is also clean now; `agent-doc session-check` returned committed/ok.
-<!-- agent:boundary:f213aafc -->
+❯ do [#pbord]. spec-test-build-install-commit-push
+### Re: #pbord — gpt-5
+
+Root cause was the template append path, not the closeout/commit layer. `apply_patches_with_overrides()` was moving the boundary to end-of-exchange and then appending each new `patch:exchange` response after the entire unresolved prompt tail, so a later-matching response could silently leapfrog an older unresolved prompt and reverse the transcript chronology.
+
+Implemented:
+- `src/template.rs` now inspects the unresolved prompt tail that lived below the prior boundary, extracts prompt blocks plus pending ids, and binds a new exchange response to the oldest compatible unresolved prompt instead of blindly appending at the tail.
+- If a response matches a later unresolved prompt while an older unresolved prompt still exists ahead of it, the write now fails closed instead of silently reordering the exchange.
+- Added regression coverage for both the anchored insertion path and the skip-older fail-closed path, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml apply_patches_binds_exchange_response_to_oldest_matching_unresolved_prompt -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml apply_patches_rejects_exchange_response_that_skips_older_unresolved_prompt -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `d7f7920` on `20260422/codex-agent-backend` (`fix: preserve exchange prompt-response order`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:951d8ec5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -466,7 +487,6 @@ Verification passed: the two new route tests, the full `src/agent-doc` test suit
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pbord] Exchange patchback prompt-order bug: the last two patchbacks in `src/boost-client/tasks/monsterrodholders.md` landed in the wrong logical order. A `#wcx1` status reply was inserted ahead of an older unresolved `#wcup1` agent-doc prompt, then a later `#wcup1` no-op closeout attached after that newer reply, leaving reversed chronology and mismatched prompt/response pairing inside `agent:exchange`. Fix plan: (1) teach template patchback to enumerate unresolved prompt anchors in document order, (2) bind each new response to the oldest compatible unresolved prompt instead of blindly appending near the tail, (3) fail closed when an older unresolved prompt exists ahead of the chosen anchor and the new response would skip over it, and (4) add regression coverage for the exact `monsterrodholders.md` sequence with a stale older prompt plus a newer queued prompt.
 - [ ] [#tdrl] Destructive todo-section replacement via patch:todo — finalize applies patch:todo as a full replace, so a skill that sends only a subset of items silently deletes the rest. Repro from src/session-share/tasks/claudescore.md on Apr 29 2026: skill sent patch:todo with only Phase 1 items checked, deleting 8 items across Phase 2, Doc & Spec Refinement, and Expansion Phases. The fix should either (a) add granular --todo-done flag analogous to --pending-done, (b) make patch:todo do a merge/diff when existing items are missing from the patch, or (c) add a validation guard that rejects todo patches reducing total item count.
 <!-- /agent:backlog -->
 

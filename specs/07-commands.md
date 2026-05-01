@@ -34,6 +34,8 @@ Two modes:
 
 `agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]` — system-level setup.
 
+For source checkouts inside the `agent-loop` workspace, direct local installs must work without extra Cargo patch flags: `cargo install --path src/agent-doc --force` from the repo root and `cargo install --path . --force` from `src/agent-doc` must both resolve the sibling `agent-kit` crate through the manifest itself rather than requiring ad hoc `patch.crates-io.*` overrides.
+
 1. **Prerequisite check** (unless `--skip-prereqs`): verifies `tmux` and `claude` are on `PATH`; prints ok or MISSING with install hint for each. Does not fail — only warns.
 2. **Editor plugin install** (unless `--skip-plugins`):
    - If `--editor` is given, installs only that editor's plugin.

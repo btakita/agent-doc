@@ -40,7 +40,7 @@ tempfile = "3"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
 notify = "7"
-agent-kit = { version = "0.4.0", features = ["hooks"] }
+agent-kit = { path = "../agent-kit", version = "0.4.0", features = ["hooks"] }
 instruction-files = "0.2"
 tmux-router = "0.3.10"
 pulldown-cmark = "0.12"

@@ -23,9 +23,11 @@ cargo install agent-doc
 # From PyPI
 pip install agent-doc
 
-# From source
-cargo build --release
-cargo install --path .
+# From a local source checkout
+cargo install --path src/agent-doc --force
+
+# Or from inside src/agent-doc
+cargo install --path . --force
 ```
 
 ## Quick Start

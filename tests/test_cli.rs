@@ -165,6 +165,23 @@ fn test_cli_audit_docs_reports_missing_tree_path() {
 }
 
 #[test]
+fn test_manifest_uses_local_agent_kit_path_for_direct_install() {
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let manifest = fs::read_to_string(manifest_path).unwrap();
+    let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    let dependency = parsed["dependencies"]["agent-kit"].as_table().unwrap();
+
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-kit")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        Some("0.4.0")
+    );
+}
+
+#[test]
 fn test_cli_run_requires_file() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("run");

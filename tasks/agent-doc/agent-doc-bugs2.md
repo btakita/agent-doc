@@ -627,18 +627,40 @@ Code commit/push:
 - `src/agent-doc` `d8a8e73` on `20260422/codex-agent-backend` (`fix: ignore answered stale-boundary tails`)
 
 `#bdryc` stays open until a real routed rerun confirms the live `pending prompt_target` repro is gone.
-<!-- agent:boundary:382e0c53 -->
+❯ JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %305 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2916780) in pane %306 for tasks/monsterrodholders.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: reverse-i-search: monst enter accept · esc cancel [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client Error: registered pane %306 for tasks/monsterrodholders.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%306 pane_pid=2914566 pane_session=0 current_command=agent-doc)
+```
+### Re: Run Agent Doc auto-fix — gpt-5
+
+Implemented the routed busy-pane repair path JB was asking for.
+
+- `route.rs` no longer surfaces the first busy live-pane failure immediately. When the registered pane still owns the same document, the pane is non-idle, and there is real prompt-bearing drift to dispatch, route now runs the same scoped repair pass as `agent-doc fix <FILE>`, re-resolves ownership, and retries exactly once before the final fail-closed error.
+- `resync.rs` now exposes a quiet targeted-fix helper so route can reuse the existing document-scoped prune/recover/fix behavior instead of inventing a second repair path.
+- If that one-shot repair still leaves the same pane authoritative and the supervisor is reachable, route also performs a single in-place supervisor restart before the retry.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and added route regressions for both the bounded fail-closed message and the successful one-shot busy-pane recovery path.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests::resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests::resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Full-suite note: the repo-wide `cargo test` still has one existing `sync.rs` failure outside this patch:
+- `sync::tests::register_synced_files_prunes_cross_root_duplicate_pane_binding`
+
+Code commit/push:
+- `src/agent-doc` `c647728` on `20260422/codex-agent-backend` (`fix: auto-apply scoped route repair`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:37f52a81 -->
 <!-- /agent:exchange -->
 
 <!--
 JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): resync: pruned 3 stale session(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2763081) in pane %305 for tasks/claudescore-3.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar Error: registered pane %305 for tasks/claudescore-3.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%305 pane_pid=2757392 pane_session=0 current_command=agent-doc)
-```
----
-JB is surfacing an error with `Run Agent Doc`. `agent-doc fix <path>` should automatically be applied. spec-test-build-install-commit-push
-```
-agent-doc route failed (exit 1): resync: stash pane %305 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2916780) in pane %306 for tasks/monsterrodholders.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: reverse-i-search: monst enter accept · esc cancel [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client Error: registered pane %306 for tasks/monsterrodholders.md is not showing an idle codex prompt; refusing to inject a routed trigger into a busy session (pane=%306 pane_pid=2914566 pane_session=0 current_command=agent-doc)
 ```
 ---
 Add a `Fix Document` command to the JB Plugin...which will run `agent-doc fix <path>`.

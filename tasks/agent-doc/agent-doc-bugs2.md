@@ -471,7 +471,40 @@ Code commit and push:
 ### Re: closeout cleanup — gpt-5
 
 I normalized the compacted `#6btt` summary entry to closed so `session-check` no longer treats it as an orphan open backlog item outside the live `agent:backlog` component.
-<!-- agent:boundary:cb5c3190 -->
+❯ do [#cs3turn]. spec-test-benchmarks-news-commit-push
+❯ do [#stashown]
+### Re: #cs3turn + #stashown — gpt-5
+
+`#cs3turn` is complete.
+
+I fixed the successful-closeout drift gap in `src/agent-doc`: after a real git commit, if the live session file still differs from committed `HEAD` only by agent-owned transient closeout churn such as `(HEAD)` response-heading attribution or stale/fresh boundary movement, post-commit cleanup now rewrites the working tree back to the committed blob, refreshes CRDT sidecars, and leaves the owning repo worktree clean instead of reporting success with a dirty live file.
+
+Spec/docs/news updated:
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/session-share/news/2026-05-01/claudescore-3-closeout-cleanliness.md`
+- `src/session-share/news/2026-05-01/README.md`
+- `src/session-share/news/README.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc git::tests::commit_success_repairs_transient_working_tree_churn_after_real_commit -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc git::tests::commit_staged_blob_has_no_head_markers -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force` (from `src/agent-doc`)
+
+Benchmarks:
+- no dedicated benchmark harness exists for this closeout path, so I used the full build/test/install verification set instead
+
+Code commit and push:
+- `src/agent-doc`: `8abd7ac` (`fix: clean post-commit closeout drift`) pushed to `origin/20260422/codex-agent-backend`
+- `src/session-share`: `cd390a45` (`news: record claudescore-3 closeout fix`) pushed to `origin/main`
+
+`#stashown` is also complete.
+
+The originally named stash-owner failure (`resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`) is green on the current tree, and the full `cargo test --manifest-path src/agent-doc/Cargo.toml` suite also finished green on this rerun. So there is no remaining red full-suite stash-owner issue to investigate from that backlog item.
+<!-- agent:boundary:c185bf56 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -480,7 +513,6 @@ I normalized the compacted `#6btt` summary entry to closed so `session-check` no
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stashown] [recommended] Investigate why full cargo test for src/agent-doc is currently red at resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner while the routed /clear recovery fix remains green.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

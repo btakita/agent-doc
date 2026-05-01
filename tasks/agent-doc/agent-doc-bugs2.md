@@ -538,6 +538,7 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
+    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -576,7 +577,13 @@ Code commit and push:
 I added one recommended follow-up because the live repro still ended with an unrelated startup-miss warning after the successful repair/commit path:
 - `#mrreplay` validate the next live routed rerun against `monsterrodholders.md` and confirm whether pane `%320` clears its startup-miss marker under the new repair path
 - Plan: `tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md`
-<!-- agent:boundary:e1746aa0 -->
+### Re: monsterrodholders repair warning count — gpt-5
+
+Noted: that orphaned replay emitted the same `patch:backlog` deprecation warning twice before the repaired write path completed. That does not change the root cause or fix; the fatal bug was still the alias-tag item being misclassified as a duplicate custom-id prefix.
+
+No new follow-up items beyond `#mrreplay`.
+
+<!-- agent:boundary:a2bebb03 -->
 <!-- /agent:exchange -->
 
 <!--

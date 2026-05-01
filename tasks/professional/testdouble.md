@@ -848,7 +848,21 @@ Details:
 - **Local draft file**: [2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md](/home/brian/work/btakita/agent-loop/mail/drafts/2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md)
 
 One note: I inferred `anya.iverova@testdouble.com` from the PandaDoc thread metadata because the synced conversation only exposed the PandaDoc sender address directly. The Gmail draft creation succeeded using that direct address.
-<!-- agent:boundary:a73f84f8 -->
+❯ send the draft to gmail
+### Re: draft sent — gpt-5
+
+Done. I sent the Gmail draft via `corky`.
+
+Send result:
+
+- **Account**: `btak.dev@gmail.com`
+- **To**: `anya.iverova@testdouble.com`
+- **Subject**: `Re: Test Double Subcontractor Agreement - Brian Takita`
+- **Thread ID**: `19ddadbc6387a4bb`
+- **In-Reply-To**: `<20260429200849.22db2343a3e9e7c6@email.pandadoc.net>`
+- **Sent Message ID**: `19de4e6d62d5bc92`
+- **Local draft source**: [2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md](/home/brian/work/btakita/agent-loop/mail/drafts/2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md)
+<!-- agent:boundary:6cb8ba8b -->
 <!-- /agent:exchange -->
 
 ## Queue

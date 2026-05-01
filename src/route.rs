@@ -1587,11 +1587,11 @@ fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()
     );
 }
 
-fn rebind_fresh_dispatch_target_if_safe(
+fn resolve_fresh_dispatch_target_after_ready_wait(
     session_id: &str,
     pane: &str,
     file_path: &str,
-) -> Result<()> {
+) -> Result<String> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
     let registry = sessions::load_in(&registry_base_dir).with_context(|| {
         format!(
@@ -1600,7 +1600,7 @@ fn rebind_fresh_dispatch_target_if_safe(
         )
     })?;
     if pane_registration_matches_file(&registry, pane, file_path) {
-        return Ok(());
+        return Ok(pane.to_string());
     }
 
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
@@ -1614,17 +1614,17 @@ fn rebind_fresh_dispatch_target_if_safe(
     }
     if let Some(entry) = registry
         .values()
-        .find(|entry| entry.session_id == session_id && entry.pane != pane)
+        .find(|entry| {
+            entry.session_id == session_id
+                && entry.pane != pane
+                && canonical_registered_file(entry) == requested
+        })
     {
-        anyhow::bail!(
-            "fresh route pane {} for {} lost ownership to registered pane {}; refusing to dispatch into an unbound replacement",
-            pane,
-            requested.display(),
-            entry.pane
-        );
+        return Ok(entry.pane.clone());
     }
 
-    register_dispatch_target(session_id, pane, file_path)
+    register_dispatch_target(session_id, pane, file_path)?;
+    Ok(pane.to_string())
 }
 
 fn send_command_checked(
@@ -2710,25 +2710,49 @@ fn auto_start_in_session(
         let ready =
             wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness);
         // Fresh-start recovery can clear the early geometry-only binding while
-        // the harness is still booting. Reassert it only when the pane is
-        // still otherwise safe to claim before the first guarded dispatch.
-        rebind_fresh_dispatch_target_if_safe(session_id, &new_pane, file_path)?;
+        // the harness is still booting, or hand ownership back to an already
+        // running pane for the same session. Follow that authoritative owner
+        // instead of continuing to target the throwaway boot pane.
+        let dispatch_pane =
+            resolve_fresh_dispatch_target_after_ready_wait(session_id, &new_pane, file_path)?;
+        if dispatch_pane != new_pane {
+            eprintln!(
+                "[route] fresh start pane {} handed ownership for {} back to existing pane {} during startup; dispatching follow-up there",
+                new_pane, file_path, dispatch_pane
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "fresh_route_dispatch_handoff file={} fresh_pane={} dispatch_pane={} harness={}",
+                    file.display(),
+                    new_pane,
+                    dispatch_pane,
+                    harness.binary
+                ),
+            );
+            if let Err(e) = tmux.select_pane(&dispatch_pane) {
+                eprintln!(
+                    "[route] warning: failed to focus handoff pane {}: {}",
+                    dispatch_pane, e
+                );
+            }
+        }
         let dispatch = if ready {
             eprintln!("[route] {} is ready, sending command", harness.binary);
-            send_command_checked(tmux, &new_pane, file_path, harness)?
+            send_command_checked(tmux, &dispatch_pane, file_path, harness)?
         } else {
             eprintln!(
                 "[route] Timed out waiting for {} prompt; attempting one fallback trigger injection before failing closed",
                 harness.binary
             );
-            match send_command_checked(tmux, &new_pane, file_path, harness)? {
+            match send_command_checked(tmux, &dispatch_pane, file_path, harness)? {
                 CommandDispatchStatus::Accepted => {
                     crate::ops_log::log_op(
                         file,
                         &format!(
                             "fresh_route_trigger_recovered file={} pane={} harness={}",
                             file.display(),
-                            new_pane,
+                            dispatch_pane,
                             harness.binary
                         ),
                     );
@@ -2763,7 +2787,7 @@ fn auto_start_in_session(
                 &format!(
                     "fresh_route_trigger_missing file={} pane={} harness={}",
                     file.display(),
-                    new_pane,
+                    dispatch_pane,
                     harness.binary
                 ),
             );
@@ -2782,7 +2806,7 @@ fn auto_start_in_session(
                     &format!(
                         "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={} timeout_secs={}",
                         file.display(),
-                        new_pane,
+                        dispatch_pane,
                         harness.binary,
                         state.cycle_id,
                         match state.phase {
@@ -2802,7 +2826,7 @@ fn auto_start_in_session(
                     &format!(
                         "fresh_route_start_missing file={} pane={} harness={} timeout_secs={}",
                         file.display(),
-                        new_pane,
+                        dispatch_pane,
                         harness.binary,
                         ack_timeout.as_secs()
                     ),
@@ -2810,7 +2834,7 @@ fn auto_start_in_session(
                 let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
                 let _ = crate::startup_miss::record(
                     file,
-                    &new_pane,
+                    &dispatch_pane,
                     session_id,
                     &harness.binary,
                     crate::startup_miss::StartupMissOrigin::FreshStart,
@@ -2818,7 +2842,7 @@ fn auto_start_in_session(
                 );
                 emit_startup_miss_diagnostic(
                     tmux,
-                    &new_pane,
+                    &dispatch_pane,
                     file,
                     "fresh start: trigger accepted but no document cycle started",
                 );
@@ -2831,11 +2855,14 @@ fn auto_start_in_session(
         }
     }
 
-    // Reassert the final binding before returning. Startup/ack recovery paths can
-    // clear or rewrite the registry while the fresh pane is coming online.
-    register_dispatch_target(session_id, &new_pane, file_path)?;
+    let final_pane = if skip_wait {
+        register_dispatch_target(session_id, &new_pane, file_path)?;
+        new_pane
+    } else {
+        resolve_fresh_dispatch_target_after_ready_wait(session_id, &new_pane, file_path)?
+    };
     let _ = file; // suppress unused warning
-    Ok(new_pane)
+    Ok(final_pane)
 }
 
 fn agent_doc_start_bin() -> String {
@@ -5388,6 +5415,117 @@ Body\n\
             lookup.as_deref(),
             Some(new_pane.as_str()),
             "fresh auto-start should restore the new pane as the registered owner"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_follows_fresh_start_handoff_to_existing_owner() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-handoff");
+        let session = "claude";
+        let cwd = test_cwd();
+        let existing_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-handoff.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        send_keys_with_retry(&iso, &existing_pane, &format!("exec {}", mock_agent.display()));
+        let owner_ready = wait_for_pane_contains(
+            &iso,
+            &existing_pane,
+            ">",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            owner_ready.contains(">"),
+            "existing owner pane should be idle before the handoff: {owner_ready}"
+        );
+
+        let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
+        let registry_root = dir.path().to_path_buf();
+        let handoff_pane = existing_pane.clone();
+        let handoff_file = file_path.clone();
+        let handoff = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                "route-fresh-start-handoff",
+                &handoff_pane,
+                &handoff_file,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+        });
+        let doc_for_ack = doc.clone();
+        let ack = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            crate::cycle_state::start_preflight(
+                &doc_for_ack,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let routed_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-fresh-start-handoff",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("fresh auto-start should dispatch into the handed-off owner pane");
+
+        handoff.join().unwrap();
+        ack.join().unwrap();
+
+        assert_eq!(routed_pane, existing_pane);
+        assert_eq!(created_panes.len(), 1, "fresh auto-start should still create one pane");
+
+        let owner_after = wait_for_pane_contains(
+            &iso,
+            &existing_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            owner_after.contains("GOT:agent-doc "),
+            "route should dispatch into the handed-off owner pane: {owner_after}"
+        );
+
+        let new_pane = &created_panes[0];
+        let new_pane_after = sessions::capture_pane(&iso, new_pane).unwrap_or_default();
+        assert!(
+            !new_pane_after.contains("GOT:agent-doc "),
+            "route must not keep dispatching into the temporary fresh pane after ownership handoff: {new_pane_after}"
+        );
+
+        let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(existing_pane.as_str()),
+            "registry should keep the handed-off owner pane as authoritative"
         );
     }
 

@@ -508,7 +508,31 @@ agent-doc thinks monsterrodholders.md Codex is busy even though Codex is clearly
 ```
 agent-doc route failed (exit 1): resync: stash pane %347 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %330 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %349 is registered in its own project root — skipping kill resync: stash pane %331 is registered in its own project root — skipping kill resync: stash pane %329 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1108722) in pane %320 for tasks/monsterrodholders.md [route] registered pane %320 still owns /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md but startup-miss 2026-05-01T06:22:29Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] Still waiting for codex (5s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/boost-clie [route] Still waiting for codex (10s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/boost-clie [route] Still waiting for codex (15s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/boost-clie [route] registered pane %320 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md is busy with pending document drift — applying scoped `agent-doc fix tasks/monsterrodholders.md` once before failing closed [sync] recovered live pane %320 for session a9421282 via supervisor pid 1108722 [sync] found alive agent-doc child (pid 1108722) in pane %320 for tasks/monsterrodholders.md [route] scoped fix confirmed pane %320 still authoritatively owns tasks/monsterrodholders.md with a healthy supervisor, but pending prompt-bearing drift remains undispatched — focusing the live codex session and failing closed instead of falsely reporting success Error: registered pane %320 for tasks/monsterrodholders.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/monsterrodholders.md` once; refusing to inject a routed trigger into a busy session (pane=%320 pane_pid=1104088 pane_session=0 current_command=agent-doc)
 ```
-<!-- agent:boundary:c5a3da5f -->
+### Re: monsterrodholders busy reroute — gpt-5
+
+I removed the fail-closed branch that was stopping same-document Codex reroutes purely because the idle-prompt heuristic never stabilized after a no-op scoped fix.
+
+New routed behavior in `src/agent-doc/src/route.rs`:
+- if the registered pane still authoritatively owns the document,
+- `agent-doc fix` makes no changes,
+- and supervisor health is still `healthy`,
+- route now sends the same bare `agent-doc <FILE>` reopen once and still requires the normal cycle-start acknowledgment before success.
+
+So this no longer dies at `is still not showing an idle codex prompt` for the healthy same-pane shape you hit. The safety boundary is still there: if the reopen is accepted but no new cycle starts, route still records the startup-miss / fresh-restart proof path and fails closed instead of silently succeeding.
+
+I updated the route regression coverage for that exact no-op-fix + healthy-supervisor case and updated the spec/version notes.
+
+Verification I ran:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force` (from `src/agent-doc`)
+
+All four passed.
+
+I also added one recommended follow-up so this stays tracked until the live repro is rerun against `src/boost-client/tasks/monsterrodholders.md`:
+Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
+<!-- agent:boundary:0bea06f4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -517,6 +541,7 @@ agent-doc route failed (exit 1): resync: stash pane %347 is registered in its ow
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#lgppatch] fix routed Codex rerun failure when a plan/backlog response emits legacy patch:backlog or replace:pending syntax. Plan: tasks/agent-doc/plan-monsterrodholders-pending-patch-rerun-failure.md
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro

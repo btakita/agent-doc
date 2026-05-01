@@ -1200,6 +1200,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         file,
                         &owner,
                         session_id,
+                        file_path,
                         harness,
                         cycle_baseline.as_ref(),
                         pending_prompt_context
@@ -1249,6 +1250,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 file,
                                 registered_pane,
                                 session_id,
+                                file_path,
                                 harness,
                                 cycle_baseline.as_ref(),
                                 pending_prompt_context
@@ -1376,6 +1378,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     file,
                     &registered_pane,
                     session_id,
+                    file_path,
                     harness,
                     cycle_baseline.as_ref(),
                     pending_prompt_context
@@ -1478,6 +1481,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             file,
             existing,
             session_id,
+            file_path,
             harness,
             cycle_baseline.as_ref(),
             pending_prompt_context
@@ -1535,6 +1539,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             file,
             &new_pane,
             session_id,
+            file_path,
             harness,
             cycle_baseline.as_ref(),
             pending_prompt_context
@@ -2377,6 +2382,7 @@ fn retry_routed_cycle_ack_after_fresh_restart(
     file: &Path,
     pane: &str,
     session_id: &str,
+    file_path: &str,
     harness: &HarnessConfig,
     baseline: Option<&crate::cycle_state::CycleState>,
     marker: &str,
@@ -2424,7 +2430,7 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         tmux,
         file,
         pane,
-        &file.display().to_string(),
+        file_path,
         harness,
     ) {
         Ok(proof) => proof,
@@ -2535,6 +2541,7 @@ fn require_routed_cycle_ack(
     file: &Path,
     pane: &str,
     session_id: &str,
+    file_path: &str,
     harness: &HarnessConfig,
     baseline: Option<&crate::cycle_state::CycleState>,
     prompt_bearing_marker: Option<&str>,
@@ -2581,6 +2588,7 @@ fn require_routed_cycle_ack(
                     file,
                     pane,
                     session_id,
+                    file_path,
                     harness,
                     baseline,
                     marker,
@@ -5718,12 +5726,160 @@ Body\n\
             replacement_after.contains("GOT:agent-doc "),
             "route should dispatch into the replacement pane after the fresh restart retry: {replacement_after}"
         );
+        assert!(
+            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
+            "route should preserve the resolved absolute reopen path across the fresh restart retry: {replacement_after}"
+        );
 
         let busy_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !busy_after.contains("GOT:agent-doc "),
             "route must not keep dispatching into the stale busy pane after the fresh restart reroute: {busy_after}"
         );
+        ipc.stop();
+    }
+
+    #[test]
+    fn fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-fresh-reroute-relative-doc");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let relative_doc = std::path::PathBuf::from("src/session-share/tasks/claudescore-3.md");
+        let doc = dir.path().join(&relative_doc);
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-fresh-reroute-relative-doc";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let iso_for_thread = iso.clone();
+        let registry_root = dir.path().to_path_buf();
+        let file_for_thread = file_path.clone();
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let restart_called_for_thread = restart_called.clone();
+        let replacement = std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let replacement_pane = iso_for_thread.auto_start(session, &cwd).unwrap();
+            iso_for_thread
+                .send_keys(
+                    &replacement_pane,
+                    &format!(
+                        "exec {} {}",
+                        ready_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                )
+                .unwrap();
+            let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &pane_for_thread]);
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                session_id,
+                &replacement_pane,
+                &file_for_thread,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+            replacement_pane
+        });
+
+        let routed = resolve_or_create_pane(
+            &iso,
+            &relative_doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should keep using the resolved absolute reopen path after a fresh retry");
+
+        let replacement_pane = replacement.join().unwrap();
+        assert!(restart_called.load(Ordering::Relaxed));
+        assert_eq!(routed, replacement_pane);
+
+        let replacement_after = wait_for_pane_contains(
+            &iso,
+            &replacement_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
+            "route should resend the canonical absolute reopen path after the fresh retry: {replacement_after}"
+        );
+        assert!(
+            !replacement_after.contains("GOT:agent-doc src/session-share/tasks/claudescore-3.md"),
+            "route must not fall back to the caller-relative reopen path after the fresh retry: {replacement_after}"
+        );
+
         ipc.stop();
     }
 

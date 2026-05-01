@@ -56,6 +56,7 @@ Two strategies for detecting the file's position in the editor split:
 | Action | Default Shortcut |
 |--------|-----------------|
 | Run | `Ctrl+Shift+Alt+A` |
+| Fix Document | none |
 | Claim | `Ctrl+Shift+Alt+C` |
 | Sync Layout | `Ctrl+Shift+Alt+L` |
 | Popup Menu | `Alt+Enter` |
@@ -65,7 +66,7 @@ Two strategies for detecting the file's position in the editor split:
 
 ## Context Menu
 
-Run, Claim, and Sync Layout are available in:
+Run, Fix Document, Claim, and Sync Layout are available in:
 - Tools menu
 - Editor right-click context menu
-- Project view right-click context menu (Run and Claim only)
+- Project view right-click context menu (Run, Fix Document, and Claim)

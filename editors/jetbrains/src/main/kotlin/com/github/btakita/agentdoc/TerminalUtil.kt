@@ -146,6 +146,43 @@ object TerminalUtil {
     }
 
     /**
+     * Runs `agent-doc fix <path>` for the active markdown document.
+     *
+     * This is the editor-side recovery path for a document whose tmux/session
+     * ownership metadata or live pane state needs deterministic repair before
+     * another routed reopen is attempted.
+     */
+    fun fixDocument(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
+        try {
+            val process = ProcessBuilder(agentDoc, "fix", relativePath)
+                .directory(java.io.File(cwd))
+                .redirectErrorStream(true)
+                .start()
+
+            showHint(project, "Fixing $relativePath")
+
+            Thread {
+                try {
+                    val output = process.inputStream.bufferedReader().readText()
+                    val exitCode = process.waitFor()
+                    if (exitCode != 0) {
+                        notifyError(project, "agent-doc fix failed (exit $exitCode):\n$output")
+                    } else {
+                        showHint(project, output.trim().ifEmpty { "Fixed $relativePath" })
+                    }
+                } finally {
+                    onComplete?.invoke()
+                }
+            }.start()
+        } catch (e: Exception) {
+            onComplete?.invoke()
+            notifyError(project, "Failed to run agent-doc fix: ${e.message}\nLooked for: $agentDoc")
+        }
+    }
+
+    /**
      * Runs a document session via `agent-doc run --agent <agent>`.
      *
      * This calls `agent-doc run --agent <agent> <path>` which:

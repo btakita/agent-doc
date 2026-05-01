@@ -42,6 +42,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.FixDocument"
+                class="com.github.btakita.agentdoc.FixDocumentAction"
+                text="Fix Document"
+                description="Run agent-doc fix for the current markdown document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.RunWithJunie"
                 class="com.github.btakita.agentdoc.RunWithJunieAction"
                 text="Run with Junie"

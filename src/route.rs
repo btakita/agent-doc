@@ -154,6 +154,13 @@ enum ExistingPaneDispatchReadiness {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BusyPaneAutoFixOutcome {
+    RetryRoute,
+    FocusBusySameDocument,
+    FailClosed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SupervisorHealth {
     Healthy,
     Restartable,
@@ -1297,22 +1304,46 @@ fn retry_route_after_busy_pane_auto_fix(
     busy_pane: &str,
     provenance: &str,
 ) -> Result<String> {
-    if allow_auto_fix_retry
-        && attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)?
-    {
-        return resolve_or_create_pane_with_auto_fix_retry(
-            tmux,
-            file,
-            pane,
-            col_args,
-            session_id,
-            file_path,
-            target_session,
-            harness,
-            created_panes,
-            false,
-            true,
-        );
+    if allow_auto_fix_retry {
+        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
+            BusyPaneAutoFixOutcome::RetryRoute => {
+                return resolve_or_create_pane_with_auto_fix_retry(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    false,
+                    true,
+                );
+            }
+            BusyPaneAutoFixOutcome::FocusBusySameDocument => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_existing_pane_busy_focus_after_noop_fix file={} pane={} harness={}",
+                        file.display(),
+                        busy_pane,
+                        harness.binary
+                    ),
+                );
+                if let Err(e) = tmux.select_pane(busy_pane) {
+                    eprintln!("[route] warning: failed to focus pane {}: {}", busy_pane, e);
+                }
+                eprintln!(
+                    "[route] scoped fix confirmed pane {} still authoritatively owns {} with a healthy supervisor — focusing the live {} session instead of forcing a restart",
+                    busy_pane,
+                    file.display(),
+                    harness.binary
+                );
+                return Ok(busy_pane.to_string());
+            }
+            BusyPaneAutoFixOutcome::FailClosed => {}
+        }
     }
     anyhow::bail!(format_busy_existing_pane_error(
         file,
@@ -1572,8 +1603,8 @@ fn format_busy_existing_pane_error(
 
 #[cfg(test)]
 fn maybe_run_test_busy_auto_fix_hook(tmux: &Tmux, file: &Path, pane: &str) -> Result<bool> {
-    let Some(project_root) =
-        snapshot::find_project_root(file).or_else(|| file.parent().map(|parent| parent.to_path_buf()))
+    let Some(project_root) = snapshot::find_project_root(file)
+        .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
         return Ok(false);
     };
@@ -1602,7 +1633,7 @@ fn attempt_busy_existing_pane_auto_fix(
     session_id: &str,
     pane: &str,
     file_path: &str,
-) -> Result<bool> {
+) -> Result<BusyPaneAutoFixOutcome> {
     eprintln!(
         "[route] registered pane {} for {} is busy with pending document drift — applying scoped `agent-doc fix {}` once before failing closed",
         pane,
@@ -1618,37 +1649,58 @@ fn attempt_busy_existing_pane_auto_fix(
     );
     let test_hook_changed = maybe_run_test_busy_auto_fix_hook(tmux, file, pane)?;
     let fix_outcome = resync::apply_targeted_fix_for_route(tmux, file)?;
+    let pane_still_authoritative = sessions::lookup(session_id)?.as_deref() == Some(pane);
+    let supervisor_health =
+        pane_still_authoritative.then(|| query_supervisor_health(file, session_id));
     let mut restarted = false;
-    if sessions::lookup(session_id)?.as_deref() == Some(pane) {
-        match query_supervisor_health(file, session_id) {
-            SupervisorHealth::Healthy | SupervisorHealth::Restartable => {
-                restarted = restart_via_supervisor(file, session_id);
-                if restarted {
-                    eprintln!(
-                        "[route] scoped fix left pane {} authoritative for {} — restarted the supervisor once before retrying route",
-                        pane, file_path
-                    );
-                }
-            }
-            SupervisorHealth::Halted { .. }
-            | SupervisorHealth::Unreachable
-            | SupervisorHealth::NoSocket => {}
+    if !test_hook_changed
+        && !fix_outcome.made_changes()
+        && matches!(supervisor_health, Some(SupervisorHealth::Restartable))
+    {
+        restarted = restart_via_supervisor(file, session_id);
+        if restarted {
+            eprintln!(
+                "[route] scoped fix left pane {} authoritative for {} — restarted the supervisor once before retrying route",
+                pane, file_path
+            );
         }
     }
+    let outcome = busy_existing_pane_auto_fix_outcome(
+        test_hook_changed,
+        fix_outcome.made_changes(),
+        supervisor_health,
+        restarted,
+    );
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_busy_existing_pane_auto_fix_finished file={} pane={} pruned_dead_entries={} reregistered_owner={} killed_redundant_stash_panes={} fixed_issues={} restarted_supervisor={}",
+            "route_busy_existing_pane_auto_fix_finished file={} pane={} pruned_dead_entries={} reregistered_owner={} killed_redundant_stash_panes={} fixed_issues={} restarted_supervisor={} outcome={:?}",
             file_path,
             pane,
             fix_outcome.pruned_dead_entries,
             fix_outcome.reregistered_owner,
             fix_outcome.killed_redundant_stash_panes,
             fix_outcome.fixed_issues,
-            restarted
+            restarted,
+            outcome
         ),
     );
-    Ok(test_hook_changed || fix_outcome.made_changes() || restarted)
+    Ok(outcome)
+}
+
+fn busy_existing_pane_auto_fix_outcome(
+    test_hook_changed: bool,
+    fix_made_changes: bool,
+    supervisor_health: Option<SupervisorHealth>,
+    restarted_supervisor: bool,
+) -> BusyPaneAutoFixOutcome {
+    if test_hook_changed || fix_made_changes || restarted_supervisor {
+        return BusyPaneAutoFixOutcome::RetryRoute;
+    }
+    match supervisor_health {
+        Some(SupervisorHealth::Healthy) => BusyPaneAutoFixOutcome::FocusBusySameDocument,
+        _ => BusyPaneAutoFixOutcome::FailClosed,
+    }
 }
 
 fn ensure_existing_pane_ready_for_dispatch(
@@ -4223,6 +4275,98 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_focuses_busy_registered_pane_after_noop_fix_with_healthy_supervisor()
+    {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-healthy-supervisor");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir
+            .path()
+            .join("route-live-pane-busy-healthy-supervisor.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-healthy-supervisor";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { .. } => {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let reused = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should focus the authoritative busy pane instead of restarting it");
+        assert_eq!(reused, pane);
+        assert!(
+            !restart_called.load(Ordering::Relaxed),
+            "healthy supervisor path must not restart a busy same-document session"
+        );
+
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "route should focus, not inject, while the same-document session is still busy: {after}"
+        );
+        ipc.stop();
+    }
+
+    #[test]
     fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -4295,6 +4439,37 @@ Body\n\
         assert!(
             after.contains("GOT:agent-doc "),
             "route should inject the reopen after the scoped fix retry: {after}"
+        );
+    }
+
+    #[test]
+    fn busy_existing_pane_auto_fix_outcome_focuses_healthy_authoritative_session_without_changes() {
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(
+                false,
+                false,
+                Some(SupervisorHealth::Healthy),
+                false,
+            ),
+            BusyPaneAutoFixOutcome::FocusBusySameDocument
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(
+                false,
+                false,
+                Some(SupervisorHealth::Restartable),
+                false,
+            ),
+            BusyPaneAutoFixOutcome::FailClosed
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(
+                false,
+                false,
+                Some(SupervisorHealth::Restartable),
+                true,
+            ),
+            BusyPaneAutoFixOutcome::RetryRoute
         );
     }
 

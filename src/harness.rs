@@ -162,8 +162,7 @@ impl HarnessConfig {
         match self.binary.as_str() {
             "claude" => {
                 matches!(trimmed, "❯" | "⏵")
-                    || (trimmed.starts_with("⏵⏵ ")
-                        && trimmed.contains("(shift+tab to cycle)"))
+                    || (trimmed.starts_with("⏵⏵ ") && trimmed.contains("(shift+tab to cycle)"))
             }
             "codex" => matches!(trimmed, "❯" | ">" | "›"),
             _ => self.matches_prompt(trimmed),
@@ -400,9 +399,7 @@ mod tests {
     fn is_dispatch_ready_prompt_line_accepts_claude_composer_hint() {
         let h = HarnessConfig::claude();
         assert!(h.is_dispatch_ready_prompt_line("❯"));
-        assert!(h.is_dispatch_ready_prompt_line(
-            "⏵⏵ bypass permissions on (shift+tab to cycle)"
-        ));
+        assert!(h.is_dispatch_ready_prompt_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
         assert!(!h.is_dispatch_ready_prompt_line("❯ investigate this issue"));
     }
 

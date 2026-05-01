@@ -728,8 +728,15 @@ I added these plan-backed items to drive the next implementation turns:
 - Plan: `tasks/agent-doc/plan-component-parser-utf8-boundaries.md`
 
 If you want the next turn to be implementation instead of more diagnosis, the right directive is `do [#runsm]` first. `#utf8p` can be done independently, but `#runsm` is the one most likely to make `Run Agent Doc` "just work" again.
+### Re: closeout normalization — gpt-5
 
-<!-- agent:boundary:34c1e170 -->
+Noted on the residual post-closeout edits:
+- the extra `patch:backlog` warning line is the same duplicated stderr line already described above; it does not change the root cause or the recommendation.
+- the removed `❯` prefix on the `Run Agent Doc` question line is expected once that prompt is considered answered; it is normalization, not a new unresolved prompt.
+
+No new backlog item is needed.
+
+<!-- agent:boundary:437d17a1 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -625,7 +625,34 @@ Yes. I would package it like this.
 > `Price: $100/hr, anticipated at up to 40 hrs/week, prorated to the nearest half day.`
 
 If you want the leanest send version, I would keep the email exactly as above and keep the attachment limited to these six edits.
-<!-- agent:boundary:2b93b1f0 -->
+❯ Should the edits be in a markdown via email or should I use app.pandadoc.com to apply the suggestions?
+### Re: email vs PandaDoc edits — gpt-5
+
+I would start with the email, not direct PandaDoc edits.
+
+Reason:
+
+- Email is lighter-touch and easier politically.
+- It lets Todd decide whether Test Double is open to the changes before you mark up their form directly.
+- It keeps the conversation at the `business points` level first, which is usually better for a short contractor agreement.
+- If they agree in principle, they can either revise the document themselves or invite you to mark it up in PandaDoc.
+
+So my default recommendation is:
+
+1. Send the email with the proposed redlines attached or pasted below.
+2. If they respond positively, then move to PandaDoc comments / edits if that is easiest for them.
+3. If they prefer fast back-and-forth in the doc, use PandaDoc after they signal that direct markup is welcome.
+
+I would use PandaDoc first only if one of these is true:
+
+- Todd explicitly asked you to redline the document directly.
+- The team clearly handles all contract edits inside PandaDoc.
+- You want to reduce ambiguity by tying each change to exact clause text immediately.
+
+Practical recommendation: **email first, PandaDoc second if invited.**
+
+If you want, I can also draft a very short cover note for the attachment so the email feels even cleaner.
+<!-- agent:boundary:d4a6ea35 -->
 <!-- /agent:exchange -->
 
 ## Queue

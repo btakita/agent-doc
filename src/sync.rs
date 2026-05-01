@@ -1962,6 +1962,36 @@ fn register_synced_files(
         .iter()
         .map(|(p, id)| (p.as_path(), id.as_str()))
         .collect();
+    let mut pane_claim_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (_, file_path) in session_files {
+        let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
+            continue;
+        };
+        *pane_claim_counts.entry(pane_id.to_string()).or_default() += 1;
+    }
+    let mut acceptable_duplicate_claims: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (session_id, file_path) in session_files {
+        let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
+            continue;
+        };
+        if pane_claim_counts.get(pane_id).copied().unwrap_or(0) < 2 {
+            continue;
+        }
+        let Some((_, project_root, _)) = registry_location_for_file(file_path) else {
+            continue;
+        };
+        let live_owner_matches =
+            find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
+                == Some(pane_id);
+        if pane_assignment_matches_document_root(tmux, pane_id, &project_root) || live_owner_matches
+        {
+            *acceptable_duplicate_claims
+                .entry(pane_id.to_string())
+                .or_default() += 1;
+        }
+    }
 
     for (session_id, file_path) in session_files {
         let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
@@ -1979,6 +2009,41 @@ fn register_synced_files(
         let Ok(mut registry) = sessions::load_in(&project_root) else {
             continue;
         };
+        let duplicate_claim_count = pane_claim_counts.get(pane_id).copied().unwrap_or(0);
+        if duplicate_claim_count > 1 {
+            let live_owner_matches =
+                find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
+                    == Some(pane_id);
+            let claim_acceptable =
+                pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+                    || live_owner_matches;
+            let acceptable_claim_count = acceptable_duplicate_claims
+                .get(pane_id)
+                .copied()
+                .unwrap_or(0);
+            if !claim_acceptable || acceptable_claim_count != 1 {
+                if let Some(entry) = registry.get(&registry_key)
+                    && entry.pane == pane_id
+                    && !claim_acceptable
+                {
+                    eprintln!(
+                        "[sync] removing stale duplicate pane binding for {} → {}",
+                        file_path.display(),
+                        pane_id
+                    );
+                    registry.remove(&registry_key);
+                    let _ = sessions::save_in(&project_root, &registry);
+                }
+                eprintln!(
+                    "[sync] refusing duplicate pane assignment {} for {} (claims={}, acceptable={})",
+                    pane_id,
+                    file_path.display(),
+                    duplicate_claim_count,
+                    acceptable_claim_count
+                );
+                continue;
+            }
+        }
 
         let file_str = registry_relative_file_path(&project_root, &canonical_file);
         let pane_pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
@@ -2648,6 +2713,35 @@ fn pane_pid_from_tmux(tmux: &Tmux, pane_id: &str) -> Option<u32> {
         .trim()
         .parse::<u32>()
         .ok()
+}
+
+fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
+    let output = tmux
+        .cmd()
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-p",
+            "#{pane_current_path}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let current_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if current_path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(current_path);
+    crate::snapshot::find_project_root(&path).or(Some(path))
+}
+
+fn pane_assignment_matches_document_root(tmux: &Tmux, pane_id: &str, project_root: &Path) -> bool {
+    pane_project_root(tmux, pane_id)
+        .map(|pane_root| pane_root == project_root)
+        .unwrap_or(false)
 }
 
 fn pane_contains_supervisor_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> bool {
@@ -4723,6 +4817,110 @@ mod tests {
         assert_eq!(child_entry.file, "tasks/claudescore-3.md");
         assert_eq!(child_entry.cwd, subroot.to_string_lossy());
         assert_eq!(child_registry.len(), 1);
+    }
+
+    #[test]
+    fn register_synced_files_prunes_cross_root_duplicate_pane_binding() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/agentic-harness-engineering.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\n---\n\n# Root\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-cross-root-duplicate-register");
+        let root_pane = iso.new_session("test", root).unwrap();
+        let window = iso.pane_window(&root_pane).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+
+        let root_key = sessions::canonical_registry_key_in(
+            root,
+            root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        let mut root_registry = sessions::SessionRegistry::new();
+        root_registry.insert(
+            root_key,
+            sessions::SessionEntry {
+                pane: root_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
+                cwd: root.to_string_lossy().to_string(),
+                started: "2026-05-01T00:44:03Z".to_string(),
+                session_id: "root-session".to_string(),
+                file: "tasks/agent-doc-bugs2.md".to_string(),
+                window: window.clone(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(root, &root_registry).unwrap();
+
+        let child_key = sessions::canonical_registry_key_in(
+            &subroot,
+            child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        let mut child_registry = sessions::SessionRegistry::new();
+        child_registry.insert(
+            child_key,
+            sessions::SessionEntry {
+                pane: root_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
+                cwd: root.to_string_lossy().to_string(),
+                started: "2026-05-01T00:36:27Z".to_string(),
+                session_id: "child-session".to_string(),
+                file: "tasks/agentic-harness-engineering.md".to_string(),
+                window: window.clone(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(&subroot, &child_registry).unwrap();
+
+        let _cwd = ScopedCurrentDir::set(root);
+        register_synced_files(
+            &iso,
+            &[
+                (
+                    "root-session".to_string(),
+                    PathBuf::from("tasks/agent-doc-bugs2.md"),
+                ),
+                (
+                    "child-session".to_string(),
+                    PathBuf::from("src/session-share/tasks/agentic-harness-engineering.md"),
+                ),
+            ],
+            &[
+                (PathBuf::from("tasks/agent-doc-bugs2.md"), root_pane.clone()),
+                (
+                    PathBuf::from("src/session-share/tasks/agentic-harness-engineering.md"),
+                    root_pane.clone(),
+                ),
+            ],
+        );
+
+        let root_registry = sessions::load_in(root).unwrap();
+        let root_entry = root_registry
+            .values()
+            .find(|entry| entry.session_id == "root-session")
+            .expect("root document should remain registered");
+        assert_eq!(root_entry.pane, root_pane);
+
+        let child_registry = sessions::load_in(&subroot).unwrap();
+        assert!(
+            child_registry.is_empty(),
+            "duplicate cross-root pane binding should be pruned instead of preserved"
+        );
     }
 
     #[test]

@@ -479,7 +479,7 @@ Code commit/push:
 
 No follow-up backlog items from this fix.
 ❯ do [#tdrl]. spec-test-build-install-commit-push
-### Re: #tdrl — gpt-5 (HEAD)
+### Re: #tdrl — gpt-5
 
 `#tdrl` is a duplicate of the already-completed `#ptdr` fix, not a new implementation gap.
 
@@ -488,8 +488,24 @@ No follow-up backlog items from this fix.
 - I re-verified the current tree with `cargo test --manifest-path src/agent-doc/Cargo.toml destructive_todo_patch_is_rejected_when_it_drops_checklist_items -- --nocapture` and `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`; both passed.
 
 No new code/spec/test edits were needed this cycle, so there was nothing safe or useful to commit or push on top of the already-dirty `src/agent-doc` worktree. Treat `#tdrl` as the same closed bug as `#ptdr`; the remaining `(HEAD)` text here is the duplicate-patchback artifact from the earlier exchange-order/duplicate-closeout bugs, not a remaining todo-patch regression.
-<!-- agent:boundary:9595c048 -->
-commit + push uncommitted changes
+❯ commit + push uncommitted changes
+### Re: commit + push uncommitted changes — gpt-5
+
+Committed and pushed all dirty repos I found, including follow-up task/session document churn that surfaced while I was closing the pass.
+
+Pushed commits:
+- `src/agent-doc` `f40369e` on `20260422/codex-agent-backend` (`test: format closeout drift assertions`)
+- `src/session-share` `dfae3c7`, `bded2cc`, `64b533e` on `main` (`docs: refresh session task state`; `docs: sync claudescore closeout`; `docs: queue aheweight follow-up`)
+- `src/boost-client` `a9dd2e6`, `12c925d`, `ea12f42`, `7f8b8fe` on `main` (`docs: note production WooCommerce upgrade`; `chore: sync monsterrodholders submodule`; `docs: normalize monsterrodholders task spacing`; `docs: update monsterrodholders checkout follow-up`)
+- `src/corky` `cc64704`, `45937fe` on `20260413/corky-gsc` (`fix: scope gsc service-account token cache`; `chore: release v0.28.0`)
+- workspace root `449e50709`, `844c7f3d6` on `main` (`chore: sync workspace task state`; `chore: sync workspace follow-up state`)
+
+`src/boost-client/src/monsterrodholders-dev` was already at pushed commit `3f818163` on `main`; this pass only advanced the parent gitlink to that existing child revision.
+
+Final status: `git status --short` is clean in the workspace root, `src/agent-doc`, `src/boost-client`, `src/corky`, and `src/session-share`.
+
+I did not rerun project test/build suites in this cycle; this pass was limited to committing and pushing the changes already present on disk.
+<!-- agent:boundary:a9204edf -->
 <!-- /agent:exchange -->
 
 <!--

@@ -24,6 +24,10 @@
 //! - When there is no pending response/capture to replay, `run(file)` also reaps stale completed
 //!   backlog items (`- [x] ...`) that should already have been removed, synchronizing the reap
 //!   into the snapshot and `agent:pending-done` archive when present.
+//! - When there is no pending response/capture to replay, `run(file)` also normalizes safe
+//!   template drift such as a stale `agent:boundary` marker left before an already-answered
+//!   exchange turn; the repair repositions the boundary to the true end of the completed turn
+//!   and advances the snapshot through the same binary-owned path.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
 //! - `normalized_response_lines(response)` — extracts the response's non-empty, non-marker lines for dedup checking and normalizes transient ` (HEAD)` response-heading churn.
@@ -42,6 +46,7 @@
 //! - empty_pending_cleaned_up: pending file with only whitespace → run returns Ok(false), pending file removed
 //! - recover_skips_duplicate_apply: pending response already present in document → run returns Ok(false), pending file removed, document unchanged
 //! - recover_already_applied_template_canonicalizes_prompt_prefixes: template dedup still restores missing `❯ ` transcript prefixes before cleanup
+//! - repair_repositions_stale_boundary_after_answered_turn: no pending response, stale boundary left before an answered turn → boundary moved to tail, snapshot advanced
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
@@ -60,6 +65,7 @@ pub enum RepairOutcome {
     ManualTailRemovalRespected,
     StalePreflightLockRepaired,
     CommitBoundaryRecovered,
+    TemplateNormalized,
     CompletedBacklogReaped,
 }
 
@@ -469,11 +475,14 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     let tail_repaired = crate::template::repair_conversation_tail_outside_exchange(doc_content)?
         .unwrap_or_else(|| doc_content.to_string());
     let tail_changed = tail_repaired != doc_content;
+    let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
+    let boundary_changed = boundary_repaired.is_some();
+    let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
 
-    let (fm, _) = frontmatter::parse(&tail_repaired)
+    let (fm, _) = frontmatter::parse(&repaired)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
 
-    let mut repaired = tail_repaired.clone();
+    let prompt_input = repaired.clone();
     if fm.resolve_mode().is_template()
         && let Some(snapshot_content) = snapshot::load(file)?
     {
@@ -485,9 +494,9 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
         );
         repaired = write::normalize_template_structure_or_fail(&repaired, file)?;
     }
-    let prompt_changed = repaired != tail_repaired;
+    let prompt_changed = repaired != prompt_input;
 
-    if tail_changed || prompt_changed {
+    if tail_changed || boundary_changed || prompt_changed {
         write::atomic_write_pub(file, &repaired)?;
         snapshot::save(file, &repaired)?;
         if tail_changed {
@@ -497,6 +506,16 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
             );
             eprintln!(
                 "[repair] repaired escaped conversation tail in {}",
+                file.display()
+            );
+        }
+        if boundary_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_completed_turn_boundary file={}", file.display()),
+            );
+            eprintln!(
+                "[repair] moved stale boundary to the end of the completed exchange turn in {}",
                 file.display()
             );
         }
@@ -513,6 +532,73 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     }
 
     Ok(repaired)
+}
+
+fn repair_completed_turn_boundary_if_safe(file: &Path, doc_content: &str) -> Result<bool> {
+    let Some(repaired) = repair_answered_stale_boundary_if_safe(file, doc_content)? else {
+        return Ok(false);
+    };
+    write::atomic_write_pub(file, &repaired)?;
+    snapshot::save(file, &repaired)?;
+    crate::ops_log::log_op(
+        file,
+        &format!("repair_completed_turn_boundary file={}", file.display()),
+    );
+    eprintln!(
+        "[repair] moved stale boundary to the end of the completed exchange turn in {}",
+        file.display()
+    );
+    Ok(true)
+}
+
+fn repair_answered_stale_boundary_if_safe(
+    file: &Path,
+    doc_content: &str,
+) -> Result<Option<String>> {
+    let (fm, _) = frontmatter::parse(doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    if !fm.resolve_mode().is_template() || snapshot::load(file)?.is_none() {
+        return Ok(None);
+    }
+
+    let components = crate::component::parse(doc_content).with_context(|| {
+        format!(
+            "failed to parse {} for completed-turn boundary repair",
+            file.display()
+        )
+    })?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let Some(boundary_id) = crate::boundary::find_boundary_id_in_component(doc_content, exchange)
+    else {
+        return Ok(None);
+    };
+
+    let exchange_body = exchange.content(doc_content);
+    let marker = crate::boundary::format_marker(&boundary_id);
+    let Some(marker_idx) = exchange_body.find(&marker) else {
+        return Ok(None);
+    };
+    let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
+    if tail_after_boundary.trim().is_empty()
+        || !crate::session_check::prompt_change_is_already_answered(tail_after_boundary)
+        || crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some()
+    {
+        return Ok(None);
+    }
+
+    let repaired = crate::template::reposition_boundary_to_end_preserve_head_with_id(
+        doc_content,
+        Some(boundary_id.as_str()),
+    );
+    if repaired == doc_content {
+        return Ok(None);
+    }
+    Ok(Some(repaired))
 }
 
 fn same_content_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
@@ -691,6 +777,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         }
         if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
             return Ok(RepairOutcome::CommitBoundaryRecovered);
+        }
+        if repair_completed_turn_boundary_if_safe(file, &doc_content)? {
+            return Ok(RepairOutcome::TemplateNormalized);
         }
         return repair_completed_backlog_items(file);
     }
@@ -950,6 +1039,72 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\n## User\n\nHello\n").unwrap();
         assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+    }
+
+    #[test]
+    fn repair_repositions_stale_boundary_after_answered_turn() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:keep-this-id -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:keep-this-id -->\n",
+            "Can we run specific rubrics for fine tuning?\n",
+            "### Re: specific rubrics — gpt-5\n\n",
+            "Yes.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::TemplateNormalized);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("Can we run specific rubrics for fine tuning?"));
+        assert!(repaired.contains("### Re: specific rubrics — gpt-5"));
+        assert!(
+            repaired
+                .contains("Yes.\n<!-- agent:boundary:keep-this-id -->\n<!-- /agent:exchange -->"),
+            "boundary should move to the true end of the answered turn:\n{repaired}"
+        );
+
+        let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(repaired_snapshot, repaired);
+    }
+
+    #[test]
+    fn repair_does_not_move_boundary_past_unanswered_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:keep-this-id -->\n",
+            "❯ Can we run specific rubrics for fine tuning?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::Noop);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]

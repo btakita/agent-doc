@@ -680,6 +680,7 @@ Combines interrupted-cycle enforcement, repair, commit, claims-log check, diff, 
    - If the cycle still has no terminal committed state after that attempt, preflight fails closed instead of silently diffing again
 1. Repair orphaned pending/captured responses (`agent-doc repair`, legacy alias: `agent-doc recover`)
    - If a template document's current file matches the captured snapshot except that the user manually removed a safe escaped `## User` / `## Assistant` / `### Re:` tail, `repair` respects that edit: it discards the stale capture, updates the snapshot to the repaired file, and closes the cycle instead of failing hash validation or replaying the removed tail
+   - If a template document has no pending capture to replay but still shows a stale `agent:boundary` marker above a prompt/response pair that is already complete, `repair` repositions that existing boundary to the true end of the completed turn and advances the snapshot through the same binary-owned repair path. This normalization is deterministic-only: unanswered prompts below the boundary are left untouched and remain prompt-bearing drift.
    - Run backlog maintenance before the commit boundary:
      - lazy-backfill missing backlog ids / normalize checkboxes
    - reap completed `[x]` tracked-work items from backlog and icebox; if a done line is still missing an id, backfill it first so repair/archive paths can reference it instead of dropping it silently

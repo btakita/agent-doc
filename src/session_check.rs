@@ -1221,7 +1221,7 @@ fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> boo
         .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
 }
 
-fn is_exchange_response_heading(trimmed: &str) -> bool {
+pub(crate) fn is_exchange_response_heading(trimmed: &str) -> bool {
     trimmed == "## Assistant"
         || trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
@@ -1256,7 +1256,7 @@ fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
         || lower.starts_with("investigate ")
 }
 
-fn prompt_change_is_already_answered(change_text: &str) -> bool {
+pub(crate) fn prompt_change_is_already_answered(change_text: &str) -> bool {
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
         if fc != '`' && fc != '~' {

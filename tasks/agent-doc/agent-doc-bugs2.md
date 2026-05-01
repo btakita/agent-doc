@@ -252,8 +252,39 @@ Live repro status:
 
 Code commit and push:
 - `src/agent-doc`: `4ff899a` (`fix: normalize answered tails during repair`) pushed to `origin/20260422/codex-agent-backend`
+❯ `Agent Doc Run` on /home/brian/work/btakita/agent-loop/tasks/professional/testdouble.md received a message that Codex was busy in the tmux status bar. But Codex was idle. spec-test-build-install-commit-push
+### Re: JetBrains idle Codex reported as busy — gpt-5
 
-<!-- agent:boundary:709439f3 -->
+I found the routing bug behind this `testdouble.md` repro and fixed it in `src/agent-doc`.
+
+Root cause:
+- fresh `Run Agent Doc` auto-start can create a temporary boot pane, but `agent-doc start` may immediately hand the same document session back to an already-running pane
+- route was still treating the throwaway fresh pane as the dispatch target instead of following the authoritative owner handoff
+- that leaves the real idle Codex pane out of the loop and can surface a misleading busy/fail-closed path from JetBrains even though the usable session is already elsewhere
+
+What changed:
+- `src/route.rs` now re-reads the authoritative session binding after the fresh-pane ready wait
+- if startup handed ownership back to an existing pane for the same document, route now dispatches the reopen there instead of the temporary boot pane
+- the old `skip_wait=true` sync provisioning path keeps its prior register-and-return behavior
+- added a direct regression for the owner-handoff case plus kept the existing fresh-start rebind regression green
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'route::tests::resolve_or_create_pane_follows_fresh_start_handoff_to_existing_owner' -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'route::tests::resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn' -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'route::tests::provision_pane_first_col_splits_left' -- --exact`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc 'session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded' -- --exact`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force`
+
+Full-suite note:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` still hit one unrelated nondeterministic failure once: `session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded` raised `No such file or directory (os error 2)` under the full suite, but the exact test passed when rerun in isolation
+- I added a recommended follow-up for that flake with Plan: `tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md`
+
+Code commit and push:
+- `src/agent-doc`: `e450bfe` (`fix: follow fresh route owner handoffs`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:9b1355a4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -262,6 +293,7 @@ Code commit and push:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 <!-- /agent:backlog -->

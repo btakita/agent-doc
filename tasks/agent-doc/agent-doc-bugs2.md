@@ -671,12 +671,37 @@ Verification:
 - `cd src/agent-doc/editors/jetbrains && GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
 
 I did not fix the truncated bottom-feed/supervisor-restart issue in this turn. The screenshot plus the repeated non-idle `%305` checks look like a separate supervisor/terminal rendering bug that can leave the Codex prompt visually clipped after restart, so that still needs a dedicated repro/fix rather than being folded into the new JB command.
-<!-- agent:boundary:2ea55c64 -->
+❯ None of the documents are successfully running `Agent Doc Run`. Running `agent-doc <path>` in the Codex session does work.
+```
+agent-doc route failed (exit 1): resync: pruned 1 stale session(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 3908771) in pane %315 for tasks/claudescore-3.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] registered pane %315 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md is busy with pending document drift — applying scoped `agent-doc fix tasks/claudescore-3.md` once before failing closed [sync] recovered live pane %315 for session 7b453f47 via supervisor pid 3908771 [sync] found alive agent-doc child (pid 3908771) in pane %315 for tasks/claudescore-3.md [route] scoped fix left pane %315 authoritative for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md — restarted the supervisor once before retrying route [sync] found alive agent-doc child (pid 3908771) in pane %315 for tasks/claudescore-3.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar Error: registered pane %315 for tasks/claudescore-3.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/claudescore-3.md` once; refusing to inject a routed trigger into a busy session (pane=%315 pane_pid=3903921 pane_session=0 current_command=agent-doc)
+```
+### Re: JB Run Agent Doc busy-pane reroute — gpt-5
+
+Root cause was the busy-pane auto-fix follow-up, not the idle detector itself. After route ran the scoped `agent-doc fix <FILE>` path and found no repairable document/session drift, it still treated a healthy same-document Codex supervisor as a restart target. For Codex that means `resume --last`, which can simply resurrect the previous unrelated task, leave the pane busy again, and make every JB `Run Agent Doc` retry fail closed even though the pane is still the authoritative owner. The live `%315` capture matched that shape: the pane was busy with resumed Codex work, not missing ownership.
+
+Implemented:
+- `route.rs` now distinguishes busy-pane post-fix outcomes:
+  - repair/test-hook/restart made progress -> retry route once
+  - no-op fix + healthy authoritative supervisor -> focus the live pane and return success
+  - no-op fix without a healthy authoritative supervisor -> keep the fail-closed error
+- healthy same-document supervisors are no longer restarted from this busy-pane route path just to "unstick" Codex; only restartable/degraded supervisors remain eligible for the one-shot restart-and-retry path
+- updated `specs/07-commands.md` and `VERSIONS.md`, and kept the JB `Fix Document` command in the same pushed change set
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_focuses_busy_registered_pane_after_noop_fix_with_healthy_supervisor -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml busy_existing_pane_auto_fix_outcome_focuses_healthy_authoritative_session_without_changes -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `a74c273` on `20260422/codex-agent-backend` (`fix: avoid reroute restarts for healthy panes`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:79843fdc -->
 <!-- /agent:exchange -->
 
 <!--
-None of the documents are successfully running `Agent Doc Run`. Running `agent-doc <path>` in the Codex session does work. 
----
 Add a `Fix Document` command to the JB Plugin...which will run `agent-doc fix <path>`.
 ---
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.

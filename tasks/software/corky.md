@@ -8,8 +8,6 @@ codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review corky codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
-  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push
 ---
@@ -448,7 +446,7 @@ corky gsc sites --format table
 If that succeeds, then the earlier `#cgb1` framing is stale for the GSC auth path, and the remaining blocker is whatever comes after successful user OAuth, not Search Console permissions and not redirect registration.
 
 ❯ Please implement a desktop notify whenever an oauth is encountered. spec-test-build-install-commit-push
-### Re: desktop OAuth notify — gpt-5 (HEAD)
+### Re: desktop OAuth notify — gpt-5
 
 Implemented and pushed.
 
@@ -468,7 +466,7 @@ Commits now on the branch:
 - `7b3a95c` — `docs: simplify corky skill command list`
 
 You can retry `corky gsc auth` from a normal desktop shell; when OAuth is encountered, corky should now raise a desktop notification in addition to the terminal/browser output.
-<!-- agent:boundary:89ef6a67 -->
+<!-- agent:boundary:98d80213 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

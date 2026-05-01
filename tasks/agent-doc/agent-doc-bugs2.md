@@ -362,7 +362,28 @@ The better policy is:
 - if the pane is ambiguous, improve the readiness detector or add a queue/ack protocol instead of pretending ambiguity is safe
 
 So for this specific bug, the right fix was to improve idle detection, not to weaken the busy guard. If we want a future improvement, it should be an explicit routed queue or reopen mailbox with acknowledgement semantics, not fire-and-hope injection into a live busy composer.
-<!-- agent:boundary:9af2541c -->
+❯ do [#cdxidle]. spec-test-build-install-commit-push
+### Re: #cdxidle closeout — gpt-5
+
+`#cdxidle` is complete.
+
+I replaced the Codex idle-placeholder exact-string allowlist in `src/agent-doc/src/harness.rs` with a structural classifier that accepts the canned idle suggestion family by shape instead of by three hardcoded strings. The route/harness regressions now cover future variants like `› Explain this module in @filename` while still rejecting drafted prompt text and queue-only busy panes.
+
+Spec/docs updated:
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification I ran:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path . --force` (from `src/agent-doc`)
+- `cargo install --path src/agent-doc --force` (from repo root)
+
+All four passed. Cargo still emits the existing path-override warnings for `tmux-router` and `agent-kit`, but they are unchanged and non-blocking here.
+
+Code commit and push:
+- `src/agent-doc`: `96750dc` (`fix: generalize codex idle placeholder readiness`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:daedc468 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -371,7 +392,6 @@ So for this specific bug, the right fix was to improve idle detection, not to we
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cdxidle] [recommended] Generalize Codex idle placeholder detection beyond exact string allowlists. Plan: tasks/agent-doc/plan-codex-idle-placeholder-generalization.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

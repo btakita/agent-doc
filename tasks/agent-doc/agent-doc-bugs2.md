@@ -583,7 +583,28 @@ So my read is:
 - the `monsterrodholders.md` timeout is existing boundary/repair drift, not a new stash-root ownership bug.
 
 The updated `#bdryc` wording is directionally right for the deterministic repair requirement. No new backlog item is needed from this turn because the live failures here still map back to `#bdryc` and `#wcrp` rather than a distinct third defect.
-<!-- agent:boundary:79694f99 -->
+### Re: busy routed reopen vs cross-root stash warnings — gpt-5
+
+I traced the two symptoms separately.
+
+The `resync: stash pane ... is registered in its own project root — skipping kill` lines are expected cross-root protection, not the blocker. `resync` is seeing stashed panes that belong to sibling project roots and intentionally leaving them alone so one repo does not reap another repo's live pane.
+
+The actual JB failure was in `route.rs`: once route had already proven that `tasks/software/corky.md` still owned a live pane, it still required an idle prompt before doing anything. That is correct when the document has unresolved prompt-bearing drift, because injecting a second reopen would be unsafe. But when there is no new prompt/content drift, failing closed was too strict. I changed route so a proven live same-document pane now degrades to “already running”: it focuses that pane and returns success without injecting a duplicate `agent-doc <FILE>`. The fail-closed behavior stays in place for busy panes that do have unresolved prompt-bearing edits.
+
+Updated:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_focuses_busy_registered_pane_without_prompt_drift -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+No new backlog item is needed from this fix. The stash-pane lines are still noisy, but they are defensive rather than incorrect; if you want, that can be handled as a separate logging/UX cleanup.
+<!-- agent:boundary:94864079 -->
 <!-- /agent:exchange -->
 
 <!--

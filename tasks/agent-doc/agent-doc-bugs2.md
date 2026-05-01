@@ -193,18 +193,42 @@ What is already isolating them:
 The earlier full-suite failure was not the general socket-isolation layer breaking. The real issue was the test assumption inside `auto_start_reuses_other_file_pane_only_as_split_anchor()` in `src/route.rs`: it was assuming a fixed tmux session identity instead of deriving the actual anchor pane session at runtime. That is why it presented like cross-test contention even though the harness isolation was already mostly correct.
 
 So the short answer is: yes, parallel isolation is the right model here, and the fix path should stay targeted at the specific shared surface or bad test assumption that flakes rather than broad serial execution.
-<!-- agent:boundary:f8590252 -->
+❯ do [#rtanch]. spec-test-build-install-commit-push
+### Re: #rtanch tmux full-suite stability — gpt-5
+
+`#rtanch` is complete.
+
+Root causes:
+- the route split-anchor path still depended on ambient `cwd` when resolving same-session registered panes for non-git temp docs, so parallel full-suite runs could miss the existing anchor pane and create a new window instead of splitting alongside it
+- the synthetic tmux-router registry in `sync.rs` was written under a relative `.agent-doc/router-sync` path, so later `cwd` drift could make the cross-root sync test read the wrong registry and treat both live panes as dead/missing
+- the split-anchor regression test itself registered its anchor pane through ambient `cwd`, which let the anchor binding land in the wrong `.agent-doc` root under parallel pressure
+
+Fix:
+- `src/route.rs` now resolves split-anchor registry lookups from the target document's actual `.agent-doc` project root and only falls back after that
+- `src/sync.rs` now writes the synthetic tmux-router registry to an absolute path captured at creation time
+- the split-anchor regression test now registers its anchor pane against an explicit base dir, and `VERSIONS.md` records the regression surface we fixed
+
+Verification:
+- `cargo test --bin agent-doc route::tests::auto_start_reuses_other_file_pane_only_as_split_anchor -- --exact`
+- `cargo test --bin agent-doc sync::tests::tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves -- --exact`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+
+All six passed.
+
+Code commit and push:
+- `src/agent-doc`: `225ee74` (`fix: stabilize parallel tmux registry roots`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:984b96a8 -->
 <!-- /agent:exchange -->
 
 <!--
-If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
-![img_7.png](img_7.png)
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rtanch] [recommended] Investigate the unrelated full-suite failure in route::tests::auto_start_reuses_other_file_pane_only_as_split_anchor on branch 20260422/codex-agent-backend after the stash-start recovery fix.
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a 24deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

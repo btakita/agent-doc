@@ -698,12 +698,33 @@ Code commit/push:
 - `src/agent-doc` `a74c273` on `20260422/codex-agent-backend` (`fix: avoid reroute restarts for healthy panes`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:79843fdc -->
+### Re: JB Run Agent Doc busy-pane reroute — gpt-5
+
+Root cause was the busy-pane auto-fix follow-up, not the idle detector itself. After route ran the scoped `agent-doc fix <FILE>` path and found no repairable document/session drift, it still treated a healthy same-document Codex supervisor as a restart target. For Codex that means `resume --last`, which can simply resurrect the previous unrelated task, leave the pane busy again, and make every JB `Run Agent Doc` retry fail closed even though the pane is still the authoritative owner. The live `%315` capture matched that shape: the pane was busy with resumed Codex work, not missing ownership.
+
+Implemented:
+- `route.rs` now distinguishes busy-pane post-fix outcomes:
+  - repair/test-hook/restart made progress -> retry route once
+  - no-op fix + healthy authoritative supervisor -> focus the live pane and return success
+  - no-op fix without a healthy authoritative supervisor -> keep the fail-closed error
+- healthy same-document supervisors are no longer restarted from this busy-pane route path just to "unstick" Codex; only restartable/degraded supervisors remain eligible for the one-shot restart-and-retry path
+- updated `specs/07-commands.md` and `VERSIONS.md`, and kept the JB `Fix Document` command in the same pushed change set
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_focuses_busy_registered_pane_after_noop_fix_with_healthy_supervisor -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml busy_existing_pane_auto_fix_outcome_focuses_healthy_authoritative_session_without_changes -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `a74c273` on `20260422/codex-agent-backend` (`fix: avoid reroute restarts for healthy panes`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:a4246ecf -->
 <!-- /agent:exchange -->
 
 <!--
-Add a `Fix Document` command to the JB Plugin...which will run `agent-doc fix <path>`.
----
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->

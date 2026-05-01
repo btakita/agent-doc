@@ -272,7 +272,24 @@ Run `/compact`, then re-invoke:
 - I did not reproduce the finding end-to-end because this workspace is Linux; the issue comes from the current read/write path mismatch in source.
 
 Top remaining backlog item: `#wsep`.
-<!-- agent:boundary:e3c9e1b2 -->
+❯ do [#wsep]. spec-test-build-install-commit-push
+### Re: #wsep spec-test-build-install-commit-push — gpt-5
+
+Implemented `#wsep` in `src/tsift` so summary cache file keys are now normalized to `/` separators at the storage boundary, and summarize file reads, stale-row deletes, and currentness checks also tolerate legacy `\` rows. New extracts now write the canonical root-relative key on every platform, while older Windows cache rows remain readable until they are rewritten.
+
+Added regression coverage in `src/summarize.rs` and `tests/exit_code.rs`, and updated `SPEC.md` to document the canonical cache-key contract.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`436` unit tests and `46` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `5f38aa7` (`fix: normalize summary cache file keys`).
+
+The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:56a7d178 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -282,7 +299,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wsep] [recommended] Normalize summary cache file_path storage to '/' separators so Windows summarize --file lookups match extracted rows
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -375,7 +375,22 @@ Verification:
 Committed and pushed `src/tsift` `main` as `c82e464` (`fix: clamp summarize stats cache paths`).
 
 Top remaining backlog item: `#srdp`.
-<!-- agent:boundary:1200edc4 -->
+❯ do [#srdp]. spec-test-build-install-commit-push
+### Re: #srdp spec-test-build-install-commit-push — gpt-5
+
+Implemented `#srdp` in `src/tsift` so `tsift summarize --stats` no longer aborts when a cached source file exists but cannot be read. The stats walk now counts unreadable source files as stale, records warning metadata in JSON output, and emits a warning to stderr while still completing the report. `SPEC.md` now documents that degraded-read behavior.
+
+Verification:
+- `cargo test --manifest-path Cargo.toml` passed (`441` unit tests and `50` integration tests)
+- `cargo clippy --manifest-path Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path Cargo.toml` passed
+- `cargo install --path .` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `5dc9236` (`fix: degrade summarize stats unreadable files`).
+
+The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:733e9457 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -385,7 +400,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#srdp] Make summarize --stats degrade on unreadable source files by counting them stale and surfacing a warning instead of aborting the whole report.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

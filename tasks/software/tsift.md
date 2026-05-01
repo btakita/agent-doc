@@ -289,7 +289,7 @@ Verification:
 Committed and pushed `src/tsift` `main` as `5f38aa7` (`fix: normalize summary cache file keys`).
 
 The active backlog is now clear; only icebox items remain.
-#code-review
+❯ #code-review
 ### Re: code review — gpt-5
 
 #### Findings
@@ -342,7 +342,23 @@ Verification:
 Committed and pushed `src/tsift` `main` as `caa135b` (`fix: report summarize stale stats`).
 
 The active backlog is now clear; only icebox items remain.
-<!-- agent:boundary:b7b78f29 -->
+#code-review
+### Re: code review — gpt-5
+
+#### Findings
+
+1. `summarize --stats` now trusts `Summary.file_path` values from `summaries.db` as filesystem paths and can walk outside the project root (`src/tsift/src/summarize.rs:356-379`). `cached_file_paths()` only normalizes separators, then `stale_file_count()` does `root.join(cached_path)` and reads that file. A crafted row like `../secret.rs` or an absolute path will make the stats command probe files outside the repo. I reproduced this with a synthetic cache row `../secret.rs`; `tsift summarize --stats --json --path <repo>` attempted to read `<repo>/../secret.rs` and failed with `Permission denied`. This is a real trust-boundary regression because `--stats` used to stay inside the cache DB and now its filesystem walk is driven by unvalidated DB rows.
+
+2. `summarize --stats` fails hard on unreadable live files instead of counting them stale (`src/tsift/src/summarize.rs:372-381`). `stale_file_count()` propagates `std::fs::read()` failures directly, so a single `chmod 000` source file aborts the entire stats command. I reproduced this with a normal in-repo cached row for `src/lib.rs`; after removing read permission, `tsift summarize --stats --json` exited nonzero with `reading summary source ... Permission denied`. For a read-only diagnostic command, unreadable sources should be reported as stale or corrupt with a warning, not take down the whole stats report.
+
+#### Verification
+
+- Reviewed `caa135b` in `src/tsift/src/summarize.rs` and `src/tsift/tests/exit_code.rs`.
+- Reproduced finding 1 with a synthetic `summaries.db` row using `../secret.rs`.
+- Reproduced finding 2 with an unreadable `src/lib.rs` plus a cached summary row.
+
+Follow-up items added to backlog. Top remaining backlog item: `#sesc`.
+<!-- agent:boundary:319ab0e3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -352,6 +368,8 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sesc] Clamp summarize --stats file-path resolution to the project root before hashing; treat absolute or ../ cache keys as stale/corrupt instead of reading outside the repo.
+- [ ] [#srdp] Make summarize --stats degrade on unreadable source files by counting them stale and surfacing a warning instead of aborting the whole report.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

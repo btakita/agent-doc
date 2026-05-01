@@ -220,7 +220,7 @@ All six passed.
 
 Code commit and push:
 - `src/agent-doc`: `225ee74` (`fix: stabilize parallel tmux registry roots`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:dbc131e6 -->
+<!-- agent:boundary:48c2cb2b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -230,7 +230,6 @@ Code commit and push:
 
 <!-- agent:backlog -->
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
-- [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a 24deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 <!-- /agent:backlog -->
 

@@ -32,7 +32,7 @@ prompt_presets:
 
 Active backlog:
 - [ ] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
-- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
+❯ - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - 1 more active item(s)
 
@@ -220,7 +220,40 @@ All six passed.
 
 Code commit and push:
 - `src/agent-doc`: `225ee74` (`fix: stabilize parallel tmux registry roots`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:48c2cb2b -->
+❯ JB is surfacing an error. Please find + fix root cause(s). spec-test-build-install-commit-push
+```
+agent-doc route failed (exit 1): resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2869550) in pane %334 for tasks/claudescore-2.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] codex ready after 8.5s (17 polls) [route] Pane %334 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md → pane %334 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %334 for tasks/claudescore-2.md — waiting up to 30s for a new cycle ack for pending prompt_target: Please evaluate the the project plan. What steps that are currently marked as Not Started are started or complete? Error: routed codex trigger for tasks/claudescore-2.md was accepted in pane %334, but no new document cycle started for pending prompt_target: Please evaluate the the project plan. What steps that are currently marked as Not Started are started or complete? after waiting 30s (startup_miss_timestamp=2026-05-01T15:25:59Z)
+```
+### Re: JB routed startup-miss root causes — gpt-5
+
+`#wcrp` is complete.
+
+I fixed the repair-path bug that kept routed Codex reopen stuck behind an already-answered bare prompt/response tail.
+
+What changed:
+- `src/repair.rs` now lets the no-pending repair path run safe transcript canonicalization when there is no still-unstarted prompt-bearing change
+- that restores missing `❯ ` prefixes on already-answered repeated-response tails without swallowing live prompt drift or backlog-reap state
+- `specs/07-commands.md` and `VERSIONS.md` now document the repaired no-pending behavior
+- added regression coverage for the no-pending repeated-response shape plus the backlog-reap/live-prompt guard cases
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force`
+- `cargo test repair_without_pending_canonicalizes_bare_prompt_before_existing_response --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test repair_completed_backlog_reap_preserves_live_prompt_outside_snapshot --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test preflight_completed_backlog_reap_does_not_swallow_live_prompt --manifest-path src/agent-doc/Cargo.toml`
+
+Live repro status:
+- `agent-doc preflight src/session-share/tasks/claudescore-2.md` now repairs the old repeated-response drift instead of failing on the missing `❯ ` prefix
+- the remaining live rerun issue is already captured in `#8zjh` with Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
+- I did not add another backlog item because that follow-up is already tracked
+
+Code commit and push:
+- `src/agent-doc`: `4ff899a` (`fix: normalize answered tails during repair`) pushed to `origin/20260422/codex-agent-backend`
+
+<!-- agent:boundary:709439f3 -->
 <!-- /agent:exchange -->
 
 <!--

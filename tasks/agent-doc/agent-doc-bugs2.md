@@ -899,10 +899,35 @@ Code commit/push:
 - `src/agent-doc` `238aea0` on `20260422/codex-agent-backend` (`fix: detect plain exchange tail prompts`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:8efa2f92 -->
+❯ `Run Agent Doc` still does nothing on this document. Identify and fix all root cause(s). spec-test-build-install-commit-push
+### Re: committed closeout parity on this document — gpt-5
+
+I fixed the remaining closeout-parity bug in `src/agent-doc`.
+
+Root causes:
+- `git::commit()` could close as `commit_already_current` after repairing transient live drift back to `HEAD`, but that no-op path only rewrote the file/snapshot. It left stale CRDT state in place and emitted no editor refresh signal, so CRDT/plugin-backed docs could keep showing the old `compact exchange` / `(HEAD)` / boundary churn.
+- The normal post-commit cleanup path also stripped guard-marker drift on disk without refreshing CRDT state afterward.
+
+Implemented:
+- `src/git.rs` now refreshes CRDT state from the committed document whenever closeout cleanup rewrites live content.
+- The no-op transient-cleanup path now also emits the same editor/VCS refresh signal that regular committed closeouts use.
+- Updated `specs/07-commands.md` and `VERSIONS.md`, and extended the no-op closeout regression to prove CRDT + refresh-signal parity.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_already_current_repairs_transient_working_tree_churn -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `3c5ff18` on `20260422/codex-agent-backend` (`fix: refresh no-op closeout sidecars`)
+
+There are no actionable follow-up items to capture.
+<!-- agent:boundary:a287c53e -->
 <!-- /agent:exchange -->
 
 <!--
+JB Plugin surfaced an error. Identify and fix the root cause(s). spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): resync: stash pane %331 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %316 is registered in its own project root — skipping kill resync: stash pane %329 is registered in its own project root — skipping kill resync: stash pane %330 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2709786) in pane %332 for tasks/software/tsift.md [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] Still waiting for codex (5s)... last line: reverse-i-search: t enter accept · esc cancel [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] registered pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is busy with pending document drift — applying scoped `agent-doc fix tasks/software/tsift.md` once before failing closed [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [resync] pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is in stash window, deregistering [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] No pane registered for session tsift-v0 [route] No active pane found, auto-starting... [route] split-window -dbh alongside registered pane %328 in session '0' → new pane %335 [route] Started codex for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md in pane %335 (session tsift-v0) [route] Waiting for codex to initialize... [route] codex ready after 2.0s (4 polls) [route] codex is ready, sending command [route] cleaning up orphaned pane %335 (created during failed route) Error: route dispatch target %335 is not registered for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; refusing unbound dispatch
 ```
@@ -928,6 +953,7 @@ If I restart codex with the supervisor, the real-time the next session process h
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#6btt] Committed closeout parity gap for src/session-share/tasks/claudescore-2.md: a cycle can report committed after snapshot-side repair while the visible worktree/CRDT copy still carries unresolved prompt-bearing drift such as bare 'compact exchange', '(HEAD)' response heading drift, or newer boundary state. Repro from May 1, 2026. Fix should prove HEAD/snapshot/live-file parity before success or reopen the same turn automatically. Plan: tasks/agent-doc/plan-claudescore-2-compact-closeout-drift.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

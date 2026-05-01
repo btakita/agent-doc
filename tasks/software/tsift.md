@@ -235,7 +235,24 @@ Verification:
 Committed and pushed `src/tsift` `main` as `ef88b69` (`fix: reap summarize rename tombstones`).
 
 Top remaining backlog item: `#slnk`.
-<!-- agent:boundary:e84eebe5 -->
+❯ do [#slnk]. spec-test-build-install-commit-push
+### Re: #slnk spec-test-build-install-commit-push — gpt-5
+
+Implemented `#slnk` in `src/tsift` so absolute `tsift summarize --file` queries now canonicalize through symlinked checkout paths before deriving the root-relative cache key. The lookup path still preserves the user's lexical spelling as a first candidate, but absolute existing paths now also resolve back to the canonical `src/...` key stored in `summaries.db`.
+
+Added regression coverage in `src/summarize.rs` and `tests/exit_code.rs`, and updated `SPEC.md` to document that symlinked absolute paths hit the shared summary cache.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`434` unit tests and `45` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `2e25b29` (`fix: canonicalize symlinked summary file lookups`).
+
+The active backlog is now clear; only icebox items remain.
+<!-- agent:boundary:60e95c8f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -245,7 +262,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#slnk] canonicalize absolute summarize --file queries so symlinked paths hit the root-relative cache key
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

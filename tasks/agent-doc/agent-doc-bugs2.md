@@ -538,7 +538,6 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
-    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -660,10 +659,47 @@ Noted on both content edits:
 - the active `/clear` prompt for this turn is the `spec-test-build-install-commit-push` variant, and this cycle already followed that contract via spec/test/build/install/commit/push on `src/agent-doc`
 
 No new backlog item is needed from those two edits.
-<!-- agent:boundary:fe8a0c87 -->
+❯ do [#clrpr]. spec-test-build-install-commit-push
+### Re: #clrpr Codex `/clear` permissions/session regression — gpt-5
+
+`#clrpr` is complete.
+
+Root cause:
+- route trusted an already-live Codex pane after `/clear` as long as it still looked prompt-ready
+- the Codex hook state tracked the prompt text, but route was not using that signal to distinguish an ordinary reopen from a capability-reset session
+- that let the next routed `agent-doc <FILE>` run inside a post-`/clear` conversation whose effective sandbox / writable-root / network envelope could differ from the original `agent-doc start` launch contract
+
+What I changed in `src/agent-doc`:
+- `src/codex_hook.rs` now exposes the latest tracked prompt for a document and treats an exact `/clear` as a first-class capability-reset signal
+- `src/route.rs` now checks that tracked prompt before reusing a healthy live Codex pane; when the latest prompt was `/clear`, route requests one **fresh** supervisor restart before dispatching the next bare reopen so the original `codex_args`, writable roots, and network policy are reapplied
+- kept the existing fail-closed behavior when that fresh recovery session cannot be proven ready
+- updated `specs/07-commands.md`, `runbooks/harness-invocation.md`, and `VERSIONS.md` to document that ordinary Codex continue flows still use resume, but tracked `/clear` reroutes must restart fresh
+- added regressions for latest-prompt lookup, exact `/clear` detection, and a tmux-backed route case proving dispatch lands only in the fresh post-clear session
+
+Verification:
+- targeted regressions:
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml load_latest_prompt_for_file_picks_most_recent_matching_state`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml prompt_requests_clear_matches_only_exact_builtin`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml tracked_codex_clear_requires_fresh_restart_only_for_exact_clear_prompt`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear`
+- full suite: `cargo test --manifest-path src/agent-doc/Cargo.toml` -> pass (`1709` unit tests + integration suites, `0` failed)
+- build: `cargo build --manifest-path src/agent-doc/Cargo.toml` -> pass
+- install:
+  - `cargo install --path src/agent-doc --force` -> pass
+  - `cargo install --path . --force` (from `src/agent-doc`) -> pass
+
+Code commit and push:
+- `src/agent-doc`: `5de55de` (`fix: restart fresh after codex clear`) pushed to `origin/20260422/codex-agent-backend`
+
+No new backlog item is needed from this cycle.
+<!-- agent:boundary:c0d905ea -->
 <!-- /agent:exchange -->
 
 <!--
+```
+
+agent-doc route failed for tasks/monsterrodholders.md after 76s (exit 1): [sync] found alive agent-doc child (pid 849259) in pane %356 for tasks/monsterrodholders.md resync: stash pane %355 is registered in its own project root — skipping kill resync: purged 1 orphaned stash pane(s) [route] target tmux session: 0 [sync] found alive agent-doc child (pid 849259) in pane %356 for tasks/monsterrodholders.md [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] registered pane %356 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md is busy with pending document drift — applying scoped `agent-doc fix tasks/monsterrodholders.md` once before failing closed [sync] recovered live pane %356 for session a9421282 via supervisor pid 849259 [sync] found alive agent-doc child (pid 849259) in pane %356 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [route] scoped fix confirmed pane %356 still authoritatively owns tasks/monsterrodholders.md with a healthy supervisor, but prompt detection never settled — retrying the bare routed codex reopen once and requiring a fresh cycle ack before success [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %356 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %356 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: How do I enable super-bot fight mode? [route] routed codex trigger for tasks/monsterrodholders.md never started a new cycle in pane %356 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (25s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client [route] Still waiting for codex (30s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-client Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %356, but no new document cycle started for pending prompt_target: How do I enable super-bot fight mode? after waiting 30s (startup_miss_timestamp=2026-05-01T20:21:41Z)
+```
 ```
 agent-doc route failed (exit 134): resync: stash pane %332 is registered in its own project root — skipping kill resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %353 is registered in its own project root — skipping kill resync: stash pane %345 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill [route] target tmux session: 0 thread 'main' (480303) panicked at src/component.rs:443:24: byte index 12303 is not a char boundary; it is inside '❯' (bytes 12302..12305) of ` ## Status  The session surface has now moved through the full follow-up calibration tranche: `#outcome`, `#slabel`, `#sdigest`, `#sfound`, `#sconduct`, `#soverscore`, `#sconfcal`, `#sclaudemd`, `#srootfit`, `#sdoccov`,`[...] note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 ```
@@ -675,7 +711,6 @@ agent-doc route failed (exit 134): resync: stash pane %332 is registered in its 
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
-- [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Reported symptoms now include dropped file/SSH access and blocked DNS resolution to hosts like `github.com` immediately after `/clear`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md

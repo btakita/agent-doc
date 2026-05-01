@@ -862,7 +862,31 @@ Send result:
 - **In-Reply-To**: `<20260429200849.22db2343a3e9e7c6@email.pandadoc.net>`
 - **Sent Message ID**: `19de4e6d62d5bc92`
 - **Local draft source**: [2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md](/home/brian/work/btakita/agent-loop/mail/drafts/2026-05-01-re-test-double-subcontractor-agreement-brian-takita.md)
-<!-- agent:boundary:6cb8ba8b -->
+❯ The email is formatted as markdown...not as html for the email. Should I apologize and have you resend the html formatted email?
+### Re: resend or not — gpt-5
+
+Probably **do not apologize and resend immediately** unless the message is actually hard to read.
+
+My practical view:
+
+- If the email arrived as mostly readable plain text, leave it alone.
+- If the markdown syntax made it visibly awkward or confusing, send a short follow-up with a cleaner plain-text / HTML version.
+- Do not frame it as `sorry, I messed up the formatting` unless it was genuinely bad.
+
+A better recovery line would be:
+
+> `For clarity, I’m re-sending the proposed edits below in a cleaner format.`
+
+That keeps the focus on readability, not on an error.
+
+So:
+
+- **If readable:** do nothing.
+- **If awkward but understandable:** optional light follow-up.
+- **If clearly messy / unprofessional-looking:** resend in clean format, but keep the note brief and matter-of-fact.
+
+If you want, I can prepare a cleaned plain-text resend version now so it is ready in case you decide the formatting warrants it.
+<!-- agent:boundary:c8fbae84 -->
 <!-- /agent:exchange -->
 
 ## Queue

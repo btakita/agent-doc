@@ -58,7 +58,34 @@ Results:
 I also verified that plain `cargo install --path . --force` still fails against registry `agent-kit` with `unresolved import agent_kit::skill`, so I captured that as a recommended follow-up instead of treating the local install path as fully clean.
 
 I did not push the root `agent-loop` superproject from this turn because it is already `main...origin/main [ahead 3]` with unrelated local history and multiple unrelated working-tree edits. The relevant `src/agent-doc` branch already matches `origin`, so this cycle closes the task and records the remaining install-contract follow-up locally.
-<!-- agent:boundary:c0d53536 -->
+❯ do [#instcfg]. spec-test-build-install-commit-push
+### Re: #instcfg install contract — gpt-5
+
+`#instcfg` is complete.
+
+I changed `src/agent-doc/Cargo.toml` to resolve `agent-kit` through `path = "../agent-kit"` while keeping `version = "0.4.0"`, so direct source installs no longer fall back to the older crates.io copy that lacks `agent_kit::skill`.
+
+Spec and docs:
+- `specs/07-commands.md` now makes the direct-install contract explicit.
+- `README.md` now documents both supported source install commands.
+- `VERSIONS.md` records the fix.
+
+Regression coverage:
+- `tests/test_cli.rs` now asserts that the manifest keeps the local `agent-kit` path contract.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+
+All four passed.
+
+Code commit and push:
+- `src/agent-doc`: `5b9b47d` (`fix: resolve direct local cargo install`) pushed to `origin/20260422/codex-agent-backend`
+
+Cargo still prints the existing repo-level path-override warnings from `.cargo/config.toml`, but they did not block build or install in this cycle.
+<!-- agent:boundary:021c5e52 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -74,9 +101,8 @@ If I restart codex with the supervisor, the real-time the next session process h
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#instcfg] [recommended] Make local cargo install for src/agent-doc succeed without extra --config patch.crates-io.* path overrides, or document the required invocation.
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
-- [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a deterministic one-shot repair path that does not require manual document surgery.
+- [ ] [#wcrp] Repeated-response repair gap: if a session doc contains a visible `### Re:` block paired with a bare `do #...` prompt instead of `❯ do #...`, `agent-doc session-check`, `preflight`, `repair`, and `run` can all fail closed on the same typed-component-drift guard with no automatic recovery. Repro from `src/boost-client/tasks/monsterrodholders.md` on April 30-May 1, 2026 around the repeated `#wcup1` exchange. Fix should canonicalize prompt/response markers during adopt-current/repair or provide a 24deterministic one-shot repair path that does not require manual document surgery.
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 <!-- /agent:backlog -->
 

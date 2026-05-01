@@ -532,7 +532,51 @@ All four passed.
 
 I also added one recommended follow-up so this stays tracked until the live repro is rerun against `src/boost-client/tasks/monsterrodholders.md`:
 Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
-<!-- agent:boundary:0bea06f4 -->
+❯ I ran agent-doc repair on monsterrodholders.md. Got some errors and warnings.
+```
+• You ran agent-doc repair /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+  └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
+    monsterrodholders.md (5745 bytes). Applying...
+    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
+    Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
+    `id=<id>` or `[#id]` prefix
+```
+
+❯ patch:backlog is not anywhere in monsterrodholders.md. Please identify root cause and fix. spec-test-benchmarks-news-commit-push
+### Re: monsterrodholders repair backlog patch root cause — gpt-5
+
+The warning was coming from the **orphaned response body** under `src/boost-client/.agent-doc`, not from the live `monsterrodholders.md` document. `repair` was replaying a stored legacy `<!-- patch:backlog -->` response, so the deprecation warning was truthful even though the live file only has `&lt;!-- agent:backlog --&gt;`.
+
+Root cause of the hard failure:
+- backlog-patch normalization was rejecting any item text that began with a second leading `[#...]` token
+- historical backlog items like `- [ ] [#yckq] [#ss01] ...` and `- [ ] [#2gdt] [#wpmem] ...` use that second token as an alias/reference tag, not as a second custom-id declaration
+- during repair replay, that alias tag was misclassified as `duplicate leading custom id prefix`, which stranded the orphaned response before write-back
+
+What I changed in `src/agent-doc`:
+- narrowed pending/backlog normalization so **existing** backlog items may keep a leading alias/reference tag in free-form text
+- still fail closed for genuinely new malformed prefixes such as bare `[#]`, `id=...`, or newly introduced stacked custom-id prefixes
+- added regression coverage for both the allowed existing-alias case and the still-rejected new-item case
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+Verification:
+- targeted regressions for `normalize_pending_patch_allows_existing_alias_tag_items`, `normalize_pending_patch_rejects_stacked_leading_id_prefixes`, `existing_item_may_keep_leading_alias_tag`, and `new_item_still_rejects_leading_alias_tag`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml` -> pass
+- `cargo build --manifest-path src/agent-doc/Cargo.toml` -> pass
+- `cargo install --path src/agent-doc --force` / `cargo install --path . --force` -> pass
+- live repro: `agent-doc repair /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` -> pass; orphaned `5745`-byte response applied, written, and committed instead of failing on duplicate-prefix parsing
+
+Benchmarks:
+- no dedicated benchmark harness exists for this normalization/repair path, so I used the full test/build/install stack plus the live `repair` replay instead
+
+Code commit and push:
+- `src/agent-doc`: `337084c` (`fix: preserve backlog alias tags during repair`) pushed to `origin/20260422/codex-agent-backend`
+
+`#lgppatch` is complete.
+
+I added one recommended follow-up because the live repro still ended with an unrelated startup-miss warning after the successful repair/commit path:
+- `#mrreplay` validate the next live routed rerun against `monsterrodholders.md` and confirm whether pane `%320` clears its startup-miss marker under the new repair path
+- Plan: `tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md`
+<!-- agent:boundary:e1746aa0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -541,8 +585,8 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
-- [ ] [#lgppatch] fix routed Codex rerun failure when a plan/backlog response emits legacy patch:backlog or replace:pending syntax. Plan: tasks/agent-doc/plan-monsterrodholders-pending-patch-rerun-failure.md
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md
 - [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

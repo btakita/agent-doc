@@ -526,14 +526,19 @@ fn build_tmux_router_sync_registry(
         return Ok(None);
     }
 
-    let temp_dir = Path::new(".agent-doc/router-sync");
-    std::fs::create_dir_all(temp_dir).with_context(|| {
+    // Snapshot the synthetic registry under an absolute path so later cwd
+    // drift in other parallel tests cannot make tmux-router read the wrong
+    // registry file for this sync cycle.
+    let temp_dir = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".agent-doc/router-sync");
+    std::fs::create_dir_all(&temp_dir).with_context(|| {
         format!(
             "failed to create synthetic tmux-router registry dir {}",
             temp_dir.display()
         )
     })?;
-    let temp_file = NamedTempFile::new_in(temp_dir).with_context(|| {
+    let temp_file = NamedTempFile::new_in(&temp_dir).with_context(|| {
         format!(
             "failed to create synthetic tmux-router registry in {}",
             temp_dir.display()

@@ -2326,10 +2326,11 @@ fn evict_previous_stash_pane_entry(
 /// Used by auto_start to join alongside an existing agent-doc pane (not any random pane).
 fn find_registered_pane_in_session(
     tmux: &Tmux,
+    registry_base_dir: &Path,
     session_name: &str,
     exclude_pane: &str,
 ) -> Option<String> {
-    let registry = sessions::load().ok()?;
+    let registry = sessions::load_in(registry_base_dir).ok()?;
     for entry in registry.values() {
         if entry.pane == exclude_pane || entry.pane.is_empty() {
             continue;
@@ -2356,6 +2357,16 @@ fn find_registered_pane_in_session(
         }
     }
     None
+}
+
+fn registry_base_dir_for_file(file: &Path, fallback: &Path) -> std::path::PathBuf {
+    std::fs::canonicalize(file)
+        .ok()
+        .and_then(|path| {
+            crate::snapshot::find_project_root(&path)
+                .or_else(|| path.parent().map(|parent| parent.to_path_buf()))
+        })
+        .unwrap_or_else(|| fallback.to_path_buf())
 }
 
 /// Auto-start a new agent session in tmux using the default session name.
@@ -2568,6 +2579,7 @@ fn auto_start_in_session(
     // inside the correct submodule (e.g. `src/session-share`) instead of the
     // agent-loop super root where the command happened to be invoked from.
     let cwd = crate::git::resolve_pane_cwd(file);
+    let registry_base_dir = registry_base_dir_for_file(file, &cwd);
 
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = agent_doc_start_bin();
@@ -2585,9 +2597,11 @@ fn auto_start_in_session(
         } else {
             window_panes.into_iter().last() // rightmost by screen position
         };
-        positional.or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
+        positional.or_else(|| {
+            find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
+        })
     } else {
-        find_registered_pane_in_session(tmux, session_name, "")
+        find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
     };
     let split_flag = if split_before { "-dbh" } else { "-dh" };
     let new_pane = if let Some(ref target) = existing_pane {
@@ -5125,7 +5139,15 @@ Body\n\
             .to_string_lossy()
             .to_string();
 
-        sessions::register("route-cross-file-anchor", &anchor_pane, &anchor_path).unwrap();
+        sessions::register_full_in(
+            dir.path(),
+            "route-cross-file-anchor",
+            &anchor_pane,
+            &anchor_path,
+            1234,
+            &anchor_window,
+        )
+        .unwrap();
 
         let mock_start = write_mock_start_agent_doc(dir.path());
         let target_doc_for_thread = target_doc.clone();

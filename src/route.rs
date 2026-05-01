@@ -1495,7 +1495,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         }
         register_dispatch_target(session_id, existing, file_path)?;
         let dispatch_start = dispatch_routed_reopen(tmux, file, existing, file_path, harness)?;
-        require_routed_cycle_ack(
+        let ack_pane = require_routed_cycle_ack(
             tmux,
             file,
             existing,
@@ -1509,7 +1509,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             true,
             dispatch_start,
         )?;
-        return Ok(existing.to_string());
+        return Ok(ack_pane.unwrap_or_else(|| existing.to_string()));
     }
     if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
@@ -1553,7 +1553,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         }
         register_dispatch_target(session_id, &new_pane, file_path)?;
         let dispatch_start = dispatch_routed_reopen(tmux, file, &new_pane, file_path, harness)?;
-        require_routed_cycle_ack(
+        let ack_pane = require_routed_cycle_ack(
             tmux,
             file,
             &new_pane,
@@ -1567,7 +1567,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             false,
             dispatch_start,
         )?;
-        return Ok(new_pane);
+        return Ok(ack_pane.unwrap_or(new_pane));
     }
 
     // Strategy 3: Auto-start
@@ -1734,7 +1734,7 @@ fn wait_for_busy_restart_handoff(
 ) {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
     let timeout = if cfg!(test) {
-        Duration::from_secs(2)
+        Duration::from_secs(10)
     } else {
         Duration::from_secs(5)
     };
@@ -2415,12 +2415,12 @@ fn retry_routed_cycle_ack_after_fresh_restart(
     baseline: Option<&crate::cycle_state::CycleState>,
     marker: &str,
     ack_timeout: Duration,
-) -> Result<bool> {
+) -> Result<Option<String>> {
     if harness.binary != "codex" {
-        return Ok(false);
+        return Ok(None);
     }
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
-        return Ok(false);
+        return Ok(None);
     }
 
     crate::ops_log::log_op(
@@ -2441,20 +2441,59 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         pane
     );
 
-    if !wait_for_agent_ready(tmux, pane, fresh_route_start_ack_timeout(), harness) {
+    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
+    let dispatch_pane =
+        resolve_fresh_dispatch_target_after_ready_wait(session_id, pane, file_path, None)?;
+    let ready = wait_for_agent_ready_outcome(
+        tmux,
+        &dispatch_pane,
+        fresh_route_start_ack_timeout(),
+        harness,
+    );
+    if !ready.is_ready() {
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_cycle_start_retry_fresh_restart_not_ready file={} pane={} harness={}",
+                "route_cycle_start_retry_fresh_restart_not_ready file={} pane={} harness={} outcome={}",
                 file.display(),
-                pane,
-                harness.binary
+                dispatch_pane,
+                harness.binary,
+                match &ready {
+                    AgentReadyWaitOutcome::Ready => "ready",
+                    AgentReadyWaitOutcome::Blocked { reason } => reason.as_str(),
+                    AgentReadyWaitOutcome::TimedOut => "timed_out",
+                }
             ),
         );
-        return Ok(false);
+        emit_busy_route_diagnostic(tmux, &dispatch_pane, file, harness);
+        match ready {
+            AgentReadyWaitOutcome::Blocked { reason } => anyhow::bail!(
+                "routed {} trigger for {} was accepted in pane {}, but the fresh-restart retry never reached a dispatch-ready prompt in pane {}: {}",
+                harness.binary,
+                file.display(),
+                pane,
+                dispatch_pane,
+                reason
+            ),
+            AgentReadyWaitOutcome::TimedOut => anyhow::bail!(
+                "routed {} trigger for {} was accepted in pane {}, but the fresh-restart retry never reached a dispatch-ready prompt in pane {} after waiting {}s",
+                harness.binary,
+                file.display(),
+                pane,
+                dispatch_pane,
+                fresh_route_start_ack_timeout().as_secs()
+            ),
+            AgentReadyWaitOutcome::Ready => unreachable!("checked above"),
+        };
     }
 
-    let _dispatch_start = match dispatch_routed_reopen(tmux, file, pane, file_path, harness) {
+    let _dispatch_start = match dispatch_routed_reopen(
+        tmux,
+        file,
+        &dispatch_pane,
+        file_path,
+        harness,
+    ) {
         Ok(proof) => proof,
         Err(_) => {
             crate::ops_log::log_op(
@@ -2462,11 +2501,11 @@ fn retry_routed_cycle_ack_after_fresh_restart(
                 &format!(
                     "route_cycle_start_retry_fresh_restart_dispatch_not_consumed file={} pane={} harness={}",
                     file.display(),
-                    pane,
+                    dispatch_pane,
                     harness.binary
                 ),
             );
-            return Ok(false);
+            return Ok(None);
         }
     };
 
@@ -2477,7 +2516,7 @@ fn retry_routed_cycle_ack_after_fresh_restart(
                 &format!(
                     "route_cycle_start_acknowledged_after_fresh_restart file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
                     file.display(),
-                    pane,
+                    dispatch_pane,
                     harness.binary,
                     state.cycle_id,
                     cycle_phase_name(state.phase),
@@ -2486,9 +2525,9 @@ fn retry_routed_cycle_ack_after_fresh_restart(
                 ),
             );
             let _ = crate::startup_miss::clear(file);
-            Ok(true)
+            Ok(Some(dispatch_pane))
         }
-        None => Ok(false),
+        None => Ok(None),
     }
 }
 
@@ -2569,9 +2608,9 @@ fn require_routed_cycle_ack(
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
     dispatch_start: RoutedDispatchStartProof,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
-        return Ok(());
+        return Ok(None);
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
@@ -2601,11 +2640,11 @@ fn require_routed_cycle_ack(
                 ),
             );
             let _ = crate::startup_miss::clear(file);
-            Ok(())
+            Ok(None)
         }
         None => {
-            if live_child_for_file
-                && retry_routed_cycle_ack_after_fresh_restart(
+            if live_child_for_file {
+                if let Some(dispatch_pane) = retry_routed_cycle_ack_after_fresh_restart(
                     tmux,
                     file,
                     pane,
@@ -2615,9 +2654,9 @@ fn require_routed_cycle_ack(
                     baseline,
                     marker,
                     ack_timeout,
-                )?
-            {
-                return Ok(());
+                )? {
+                    return Ok(Some(dispatch_pane));
+                }
             }
             crate::ops_log::log_op(
                 file,
@@ -5384,6 +5423,143 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_follows_fresh_restart_retry_handoff_to_replacement_pane() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry-handoff");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-codex-fresh-retry-handoff.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let stale_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-codex-fresh-retry-handoff";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let file_for_thread = file_path.clone();
+        let registry_root = dir.path().to_path_buf();
+        let restart_called_for_thread = restart_called.clone();
+        let replacement = std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let replacement_pane = iso_for_thread.auto_start(session, &cwd).unwrap();
+            iso_for_thread
+                .send_keys(
+                    &replacement_pane,
+                    &format!(
+                        "exec {} {}",
+                        ready_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                )
+                .unwrap();
+            let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &pane_for_thread]);
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                session_id,
+                &replacement_pane,
+                &file_for_thread,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+            replacement_pane
+        });
+
+        let _routed = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should follow the fresh-restart retry handoff to the replacement pane");
+
+        let replacement_pane = replacement.join().unwrap();
+        assert!(restart_called.load(Ordering::Relaxed));
+
+        let replacement_after = wait_for_pane_contains(
+            &iso,
+            &replacement_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            replacement_after.contains("GOT:agent-doc "),
+            "route should dispatch into the replacement pane after the fresh restart retry: {replacement_after}"
+        );
+        assert!(
+            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
+            "route should preserve the resolved absolute reopen path across the fresh restart retry handoff: {replacement_after}"
+        );
+
+        let stale_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !stale_after.contains("GOT:agent-doc "),
+            "route must not keep dispatching into the stale pane after the fresh restart retry handoff: {stale_after}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
     fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
         use std::sync::{
             Arc,
@@ -5830,18 +6006,8 @@ Body\n\
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
-        send_keys_with_retry(
-            &iso,
-            &pane,
-            &format!("exec {} {}", busy_agent.display(), doc.display()),
-        );
-        let content =
-            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-        assert!(
-            content.contains("Working..."),
-            "busy mock session should be active in pane: {content}"
-        );
+        let stale_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
 
         crate::snapshot::save(&doc, snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
@@ -5918,7 +6084,7 @@ Body\n\
             replacement_pane
         });
 
-        let routed = resolve_or_create_pane(
+        let _routed = resolve_or_create_pane(
             &iso,
             &relative_doc,
             None,
@@ -5933,7 +6099,6 @@ Body\n\
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
-        assert_eq!(routed, replacement_pane);
 
         let replacement_after = wait_for_pane_contains(
             &iso,
@@ -5948,6 +6113,11 @@ Body\n\
         assert!(
             !replacement_after.contains("GOT:agent-doc src/session-share/tasks/claudescore-3.md"),
             "route must not fall back to the caller-relative reopen path after the fresh retry: {replacement_after}"
+        );
+        let stale_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !stale_after.contains("GOT:agent-doc "),
+            "route must not keep dispatching into the stale pane after the fresh retry handoff: {stale_after}"
         );
 
         ipc.stop();

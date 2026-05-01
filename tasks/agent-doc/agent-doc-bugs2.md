@@ -108,15 +108,31 @@ All four passed.
 
 Code commit and push:
 - `src/agent-doc`: `548c106` (`fix: fail closed on busy routed follow-ups`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:c25aea16 -->
+❯ Can we isolate the parallel tmux test from each other?
+❯ > •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
+❯ session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
+❯ this change actually regressed behavior.
+### Re: tmux test isolation — gpt-5
+
+I re-ran the tmux-heavy `src/agent-doc` test slices under normal parallelism instead of `--test-threads=1`:
+
+- `cargo test --bin agent-doc route::tests:: -- --test-threads=8`
+- `cargo test --bin agent-doc sync::tests:: -- --test-threads=8`
+
+Both passed: `111` route tests and `91` sync/resync tests, with `0` failures.
+
+So yes, these tests can already run isolated from each other in the current suite state. The isolation comes from three layers already in the harness:
+- each tmux integration test gets its own isolated tmux socket via `IsolatedTmux::new("...")`
+- tests that need repo-local `.agent-doc` state move into a temp cwd via `ScopedCurrentDir`
+- the remaining shared mutation surfaces are already serialized with targeted mutexes such as `ENV_MUTEX`, `TMUX_START_MUTEX`, `TMUX_INJECT_MUTEX`, and `ROUTE_BIN_ENV_MUTEX`
+
+The stderr lines like `error connecting to /tmp/tmux-1000/... (No such file or directory)` during the run are expected for tests that intentionally probe a missing isolated tmux server first; they are not failures.
+
+Given that result, I did not add more locking or change code in this cycle. The earlier serial run was a conservative regression check, but it does not appear to be required by the current tmux/session test harness.
+<!-- agent:boundary:28716738 -->
 <!-- /agent:exchange -->
 
 <!--
-Can we isolate the parallel tmux test from each other?
-> •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
-  session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
-  this change actually regressed behavior.
----
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->

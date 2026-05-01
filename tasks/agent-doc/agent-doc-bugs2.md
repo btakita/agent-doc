@@ -215,7 +215,35 @@ Code commit/push:
 - `src/agent-doc` `6e54e06` on `20260422/codex-agent-backend` (`fix: keep committed cycle state monotonic`)
 
 No follow-up backlog items from this fix.
-<!-- agent:boundary:9196abca -->
+❯ Why is /home/brian/work/btakita/agent-loop/src/session-share/tasks/agentic-harness-engineering.md failing to start or sync?
+❯ spec-test-build-install-commit-push
+### Re: agentic-harness-engineering start/sync — gpt-5
+
+Root cause: `src/session-share/.agent-doc/sessions.json` had drifted into a cross-root double-claim where `src/session-share/tasks/agentic-harness-engineering.md` and `tasks/agent-doc/agent-doc-bugs2.md` both pointed at the same live pane `%151`. That leaves `agentic-harness-engineering.md` unable to start or sync correctly because the child registry keeps insisting the root workspace pane already owns it.
+
+The specific bug was in `sync.rs` post-sync registration, not in the fresh-start timeout path. `register_synced_files()` trusted tmux-router's file→pane output even when the same pane was assigned to multiple documents, then mirrored that duplicate pane id back into both registries. In the live repro, the losing child entry kept `%151` even though `%151`'s pane root was `/home/brian/work/btakita/agent-loop`, not `src/session-share`. So `#pathprov` was not sufficient on its own here; the corruption happened after layout reconcile during registry write-back.
+
+Implemented:
+
+- `sync.rs` now fails closed on duplicate post-sync pane assignments. A duplicate file→pane result is only accepted when exactly one claimant matches the pane's own nearest project root or already proves live ownership.
+- If a losing claimant already had that duplicated pane recorded in its own registry, sync now prunes that stale binding instead of preserving the alias.
+- Added a regression that matches this cross-root shape: root doc plus `agentic-harness-engineering.md` both mapped to one pane, and the child binding is removed instead of being re-saved.
+- Updated `specs/07-commands.md` and `VERSIONS.md` to document the stricter post-sync registration rule.
+
+Verification completed:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml register_synced_files_prunes_cross_root_duplicate_pane_binding`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml register_synced_files_updates_each_project_registry_by_path_key`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+
+- `src/agent-doc` `30bba2b` on `20260422/codex-agent-backend` (`fix: reject duplicate cross-root sync pane writes`)
+
+No follow-up backlog items from this fix.
+<!-- agent:boundary:b2531adb -->
 <!-- /agent:exchange -->
 
 <!--

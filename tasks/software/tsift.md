@@ -358,7 +358,24 @@ The active backlog is now clear; only icebox items remain.
 - Reproduced finding 2 with an unreadable `src/lib.rs` plus a cached summary row.
 
 Follow-up items added to backlog. Top remaining backlog item: `#sesc`.
-<!-- agent:boundary:319ab0e3 -->
+❯ do [#sesc]. spec-test-build-install-commit-push
+### Re: #sesc spec-test-build-install-commit-push — gpt-5
+
+Implemented `#sesc` in `src/tsift` so `tsift summarize --stats` now clamps cached summary file paths to the resolved project root before reading live source content. Absolute cache keys and lexical escape paths like `../secret.rs` are now counted as stale/corrupt instead of being opened from the filesystem.
+
+Updated `src/summarize.rs`, added unit and CLI regression coverage, and documented the tightened stats contract in `SPEC.md`.
+
+Verification:
+- `cargo test --manifest-path src/tsift/Cargo.toml` passed (`440` unit tests and `49` integration tests)
+- `cargo clippy --manifest-path src/tsift/Cargo.toml --all-targets --all-features -- -D warnings` passed
+- `cargo build --manifest-path src/tsift/Cargo.toml` passed
+- `cargo install --path src/tsift` passed
+- `tsift --version` => `0.1.21`
+
+Committed and pushed `src/tsift` `main` as `c82e464` (`fix: clamp summarize stats cache paths`).
+
+Top remaining backlog item: `#srdp`.
+<!-- agent:boundary:1200edc4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -368,7 +385,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sesc] Clamp summarize --stats file-path resolution to the project root before hashing; treat absolute or ../ cache keys as stale/corrupt instead of reading outside the repo.
 - [ ] [#srdp] Make summarize --stats degrade on unreadable source files by counting them stale and surfacing a warning instead of aborting the whole report.
 <!-- /agent:backlog -->
 

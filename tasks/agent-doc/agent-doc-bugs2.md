@@ -538,6 +538,7 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
+    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -581,7 +582,7 @@ I added one recommended follow-up because the live repro still ended with an unr
 Noted: that orphaned replay emitted the same `patch:backlog` deprecation warning twice before the repaired write path completed. That does not change the root cause or fix; the fatal bug was still the alias-tag item being misclassified as a duplicate custom-id prefix.
 
 No new follow-up items beyond `#mrreplay`.
-❯ I ran `Agent Doc Run` on this document and the prompt said...`Route Already In Progress`. spec-test-benchmarks-news-commit-push
+❯ I ran `Agent Doc Run` on this document and the prompt said...`Route Already In Progress`. Then nothing. spec-test-benchmarks-news-commit-push
 
 ❯ The replay `Agent Doc Run` did not work on monsterrodholders.md
 ❯ I ran agent-doc .../monsterrodholders.md on the cli and the turn does not complete. spec-test-benchmarks-news-commit-push
@@ -615,7 +616,13 @@ Benchmarks:
 The remaining live check is to rerun the direct `monsterrodholders.md` flow against this branch and confirm the turn now completes through the normal closeout path.
 
 Plan: `tasks/agent-doc/plan-run-template-backlog-normalization-validation.md`
-<!-- agent:boundary:273b4903 -->
+### Re: route already in progress follow-up — gpt-5
+
+The added `Then nothing.` detail is consistent with the same direct run-path failure I fixed above: the route focused the live session, but the later direct `agent-doc run` closeout still died in `src/run.rs` before backlog normalization completed.
+
+So the pushed `73f27e8` fix is aimed at exactly that follow-on shape. The remaining follow-up is still the live rerun captured in the backlog validation plan, to confirm the direct `monsterrodholders.md` flow now reaches a normal closeout instead of stopping after `Route Already In Progress`.
+
+<!-- agent:boundary:3e677602 -->
 <!-- /agent:exchange -->
 
 <!--

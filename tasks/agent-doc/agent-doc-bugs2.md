@@ -57,7 +57,30 @@ Verification in `src/agent-doc`:
 - `cargo test`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:79f6677e -->
+❯ `Run Agent Doc` error. If I cancel a running turn then call `/clear`, `Run Agent Doc` should still work. Be Optimistic!!! spec-test-build-install-commit-push
+```
+agent-doc route failed for tasks/claudescore-3.md after 65s (exit 1): resync: stash pane %359 is registered in its own project root — skipping kill resync: stash pane %362 is registered in its own project root — skipping kill resync: stash pane %361 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 480231) in pane %364 for tasks/claudescore-3.md [route] codex ready after 0.5s (1 polls) [route] Pane %364 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md → pane %364 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %364 for tasks/claudescore-3.md — waiting up to 30s for a new cycle ack for pending prompt_target: do [#xhunt]. We should replace some of the brian-takita-* sessions. I don't have any Cursor or Open Code sessions atm. spec-test-news-commit-push [route] routed codex trigger for tasks/claudescore-3.md never started a new cycle in pane %364 — restarting the live session fresh once before failing closed [route] codex ready after 3.0s (6 polls) [route] Sent agent-doc tasks/claudescore-3.md → pane %364 [route] Command accepted (0.3s, 0 Enter retries) Error: routed codex trigger for tasks/claudescore-3.md was accepted in pane %364, but no new document cycle started for pending prompt_target: do [#xhunt]. We should replace some of the brian-takita-* sessions. I don't have any Cursor or Open Code sessions atm. spec-test-news-commit-push after waiting 30s (startup_miss_timestamp=2026-05-01T22:11:34Z)
+```
+### Re: Run Agent Doc /clear reroute — gpt-5
+
+I fixed the routed fresh-restart resend bug in `src/agent-doc` and pushed `3e5dbc6` (`fix: preserve absolute path on routed retry`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/route.rs` now threads the already-resolved `file_path` through the routed cycle-ack retry path, so the one-shot fresh-restart resend keeps the same absolute `agent-doc <FILE>` reopen instead of rebuilding it from `file.display()`.
+- Added a regression that reproduces the relative `src/session-share/tasks/claudescore-3.md` shape and proves the retry keeps the canonical absolute path after the fresh restart handoff.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` to make the retry-path absolute-path invariant explicit.
+
+Verification in `src/agent-doc`:
+- `cargo test fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs`
+- `cargo test resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix`
+- `cargo test` passed (`1713` unit tests plus integration suites)
+- `cargo build`
+- `cargo install --path . --force`
+
+Follow-up:
+- Added `#clrrt` to backlog for a live replay of the `/clear` -> `Run Agent Doc` `claudescore-3.md` repro.
+- Plan: `tasks/agent-doc/plan-claudescore-3-clear-reroute-replay-validation.md`
+<!-- agent:boundary:0e305c28 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -69,6 +92,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#clrrt] [recommended] Replay the live claudescore-3 /clear reroute after the absolute-path retry fix. Plan: tasks/agent-doc/plan-claudescore-3-clear-reroute-replay-validation.md
 - [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`

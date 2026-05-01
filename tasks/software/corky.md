@@ -528,13 +528,34 @@ Delivery:
 - pushed `20260413/corky-gsc` to `origin`
 
 I closed `#state-write-locking`.
-<!-- agent:boundary:f1b234ba -->
+❯ do [#gmail-send-token-key]. spec-test-build-install-commit-push
+### Re: gmail send token key — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+`corky draft send` now resolves the same named account as `draft push`, uses the dedicated `gmail:<account>:send` token via `get_send_access_token()`, and falls back to the resolved account user for `From:` when YAML omits `from:`. On Gmail 401, corky now clears the cached send token and tells the user to re-run `corky draft send`, which triggers `gmail.compose` re-auth instead of pointing at `corky filter auth`.
+
+I also added a persisted token-removal path in `TokenStore`, a regression test for targeted send-token deletion, and updated SPEC/README/AGENTS plus the precommit/prerelease instruction surfaces so `audit-docs` stays accurate.
+
+Verification passed end to end:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Delivery:
+- commit `32d8890` — `fix: isolate gmail draft send tokens`
+- pushed `20260413/corky-gsc` to `origin`
+
+I closed `#gmail-send-token-key`.
+
+Top remaining backlog item is `#gsc-sa-cache-keying`.
+<!-- agent:boundary:a5ca7a22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#gmail-send-token-key] Route `corky draft send` through the dedicated Gmail send-token path and fix the 401 remediation text so it points to compose-scope re-auth, not `corky filter auth`.
 - [ ] [#gsc-sa-cache-keying] Key the in-process GSC service-account cache by account/config fingerprint, or remove it until correctness is proven across multi-account runs.
 - [ ] [#release-v028] Cut the next corky release: update VERSIONS.md, pick the post-v0.27.0 version, and ship the 8 commits currently only on 20260413/corky-gsc.
 <!-- /agent:pending -->

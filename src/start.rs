@@ -26,6 +26,11 @@
 //!   place, halted supervisors may be replaced only through a later
 //!   registry-rebind that records supersession provenance, and unavailable
 //!   supervisors fail closed instead of rebinding the document to a fresh pane.
+//!   Exception: when the unavailable registered pane is stranded in a stash
+//!   window and neither the startup-miss marker nor the session log still prove
+//!   an open owner there, `start` clears that stale stash registration and
+//!   claims the current pane instead of leaving the document blocked behind the
+//!   dead stash binding.
 //!   If that alive pane still carries the active startup-miss marker for the
 //!   document, `start` must also fail closed instead of rebinding the document
 //!   to a fresh pane.
@@ -825,6 +830,23 @@ enum StaleRegisteredPaneAction {
     FailClosedUnavailable,
 }
 
+fn pane_window_name(tmux: &sessions::Tmux, pane_id: &str) -> Option<String> {
+    let window_id = tmux.pane_window(pane_id).ok()?;
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-t", &window_id, "-p", "#{window_name}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn is_stash_window_name(window_name: &str) -> bool {
+    window_name == "stash" || window_name.starts_with("stash-")
+}
+
 fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
@@ -914,6 +936,25 @@ fn should_fail_closed_for_open_session_log_rebind(
     status.is_some_and(|status| {
         status.latest_start_pane.as_deref() == Some(registered_pane) && status.latest_session_open()
     })
+}
+
+fn should_clear_stale_unavailable_stash_registration(
+    tmux: &sessions::Tmux,
+    current_pane: &str,
+    registered_pane: &str,
+    miss: Option<&crate::startup_miss::StartupMiss>,
+    status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> bool {
+    current_pane != registered_pane
+        && pane_window_name(tmux, registered_pane)
+            .as_deref()
+            .is_some_and(is_stash_window_name)
+        && !should_fail_closed_for_unresolved_startup_miss_rebind(
+            current_pane,
+            registered_pane,
+            miss,
+        )
+        && !should_fail_closed_for_open_session_log_rebind(registered_pane, status)
 }
 
 fn open_session_log_rebind_diagnostic(
@@ -1660,11 +1701,29 @@ pub fn run(file: &Path) -> Result<()> {
                         );
                     }
                     StaleRegisteredPaneAction::FailClosedUnavailable => {
-                        anyhow::bail!(
-                            "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
-                            stale_pane,
-                            file.display()
-                        );
+                        let session_log_status =
+                            crate::startup_miss::session_log_status(file, &session_id)?;
+                        if should_clear_stale_unavailable_stash_registration(
+                            &tmux,
+                            &pane_id,
+                            &stale_pane,
+                            unresolved_startup_miss.as_ref(),
+                            session_log_status.as_ref(),
+                        ) {
+                            eprintln!(
+                                "[start] registered pane {} for {} is stranded in stash with unavailable supervisor and no open provenance — clearing stale registration and starting fresh in {}",
+                                stale_pane,
+                                file.display(),
+                                pane_id
+                            );
+                            let _ = sessions::deregister(&session_id)?;
+                        } else {
+                            anyhow::bail!(
+                                "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
+                                stale_pane,
+                                file.display()
+                            );
+                        }
                     }
                 }
             }
@@ -3057,6 +3116,70 @@ mod tests {
             Some(&status)
         ));
         assert!(!should_fail_closed_for_open_session_log_rebind("%42", None));
+    }
+
+    #[test]
+    fn stash_registration_with_unavailable_supervisor_can_be_cleared_when_proven_closed() {
+        let iso = IsolatedTmux::new("start-clear-stale-stash");
+        let tmp = TempDir::new().unwrap();
+        let stashed_pane = iso.new_session("test", tmp.path()).unwrap();
+        let current_pane = iso.split_window(&stashed_pane, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&stashed_pane, "test").unwrap();
+
+        assert!(should_clear_stale_unavailable_stash_registration(
+            &iso,
+            &current_pane,
+            &stashed_pane,
+            None,
+            None
+        ));
+    }
+
+    #[test]
+    fn stash_registration_with_open_session_log_still_blocks_rebind() {
+        let iso = IsolatedTmux::new("start-block-open-stash");
+        let tmp = TempDir::new().unwrap();
+        let stashed_pane = iso.new_session("test", tmp.path()).unwrap();
+        let current_pane = iso.split_window(&stashed_pane, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&stashed_pane, "test").unwrap();
+
+        let status = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some(stashed_pane.clone()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+
+        assert!(!should_clear_stale_unavailable_stash_registration(
+            &iso,
+            &current_pane,
+            &stashed_pane,
+            None,
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn non_stash_registration_still_fails_closed_when_supervisor_is_unavailable() {
+        let iso = IsolatedTmux::new("start-non-stash-unavailable");
+        let tmp = TempDir::new().unwrap();
+        let registered_pane = iso.new_session("test", tmp.path()).unwrap();
+        let current_pane = iso
+            .split_window(&registered_pane, tmp.path(), "-dh")
+            .unwrap();
+
+        assert!(!should_clear_stale_unavailable_stash_registration(
+            &iso,
+            &current_pane,
+            &registered_pane,
+            None,
+            None
+        ));
     }
 
     #[test]

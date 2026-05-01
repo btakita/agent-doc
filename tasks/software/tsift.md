@@ -127,7 +127,7 @@ Fresh verification I reran now against current `main`:
 - `tsift --version` => `0.1.21`
 
 No new commit was needed this cycle because the requested spec/test/build/install/commit/push work was already landed and published. The active backlog is now clear; only icebox items remain.
-#code-review
+❯ #code-review
 ### Re: code review — gpt-5
 
 Reviewed `src/tsift` with `cargo test` and targeted manual repros around summarize workflows, cache lifecycle, and path normalization.
@@ -203,7 +203,22 @@ Verification:
 Committed and pushed `src/tsift` `main` as `c6a49f8` (`fix: normalize summarize file lookups`).
 
 The active backlog is now clear; only icebox items remain.
-<!-- agent:boundary:edc860b7 -->
+#code-review
+### Re: code review — gpt-5
+
+#### Findings
+
+1. `summarize --diff --extract` leaves stale summary rows behind on renames. The diff cleanup path only deletes paths gathered from `git diff --name-only --diff-filter=D HEAD`, so a `git mv` contributes the new path to `existing` but never contributes the old path to `deleted` ([summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:833), [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2608)). I reproduced this with the installed `tsift` binary: after an initial extract, `git mv src/old.rs src/new.rs` plus `tsift summarize --extract src --diff` still leaves `tsift summarize --file src/old.rs` returning the stale summary. Root cause: rename tombstones never enter `GitChangedFiles.deleted`.
+
+2. Absolute `summarize --file` queries miss when the repo is reached through a symlinked path. `resolve_extract_base()` canonicalizes `--path` to the real project root ([main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3073)), but `file_lookup_candidates()` only lexically normalizes an absolute `file_query` before `strip_prefix(project_root)` ([summarize.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/summarize.rs:658), [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2775)). If the user passes an absolute symlinked path like `/tmp/link/src/lib.rs`, the candidate stays under `/tmp/link/...`, the prefix strip against the canonical root fails, and lookup never reaches the stored root-relative cache key. I reproduced this with the installed CLI: the real-path absolute query hits, while the symlinked absolute query prints `No cached summary for file`.
+
+#### Verification
+
+- Reproduced finding 1 with the installed `tsift` binary by extracting once, renaming `src/old.rs` to `src/new.rs`, rerunning `summarize --extract --diff`, then querying both old and new paths.
+- Reproduced finding 2 with the installed `tsift` binary against a symlinked checkout path.
+
+Follow-up items added to backlog. Top remaining backlog item: `#rnme`.
+<!-- agent:boundary:d4d26006 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -213,6 +228,8 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rnme] make summarize --diff --extract reap stale summary rows for git renames
+- [ ] [#slnk] canonicalize absolute summarize --file queries so symlinked paths hit the root-relative cache key
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

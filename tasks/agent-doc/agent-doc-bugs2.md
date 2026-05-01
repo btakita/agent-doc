@@ -781,10 +781,13 @@ I added a recommended backlog item `#snrun` for the next implementation turn. Sc
 - re-run the JetBrains `Run Agent Doc` repro after the route changes land
 
 I did not start code changes in this cycle because this edit was a new bug report / expectation update rather than a `do #...` implementation turn.
+### Re: force-disk closeout repair — gpt-5
+
+The prior repair commits succeeded in `HEAD`, but the live working copy kept diverging again through the IPC listener path on the already-answered `Yet another JB Plugin error...` line. I am reopening closeout once more with `--force-disk` so the binary-owned write updates the live file directly instead of routing through IPC. No new backlog item is being added.
 ### Re: closeout normalization — gpt-5
 
 The only remaining live-file delta after the prior closeout was prompt normalization: the newly answered `Yet another JB Plugin error...` line no longer carries a leading `❯` in the working copy. I am reopening closeout only to persist that normalization through the binary-owned commit path. No new plan or backlog change beyond `#snrun`.
-<!-- agent:boundary:7658e262 -->
+<!-- agent:boundary:42a81c0e -->
 <!-- /agent:exchange -->
 
 <!--

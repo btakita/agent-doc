@@ -108,10 +108,7 @@ All four passed.
 
 Code commit and push:
 - `src/agent-doc`: `548c106` (`fix: fail closed on busy routed follow-ups`) pushed to `origin/20260422/codex-agent-backend`
-❯ Can we isolate the parallel tmux test from each other?
-❯ > •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
-❯ session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
-❯ this change actually regressed behavior.
+❯ `Run Agent Doc` is delayed in reaching the tmux pane. Please improve the latency. Please provide some sort of feedback on the JB plugin side. spec-test-build-install-commit-push
 ### Re: tmux test isolation — gpt-5
 
 I re-ran the tmux-heavy `src/agent-doc` test slices under normal parallelism instead of `--test-threads=1`:
@@ -129,10 +126,39 @@ So yes, these tests can already run isolated from each other in the current suit
 The stderr lines like `error connecting to /tmp/tmux-1000/... (No such file or directory)` during the run are expected for tests that intentionally probe a missing isolated tmux server first; they are not failures.
 
 Given that result, I did not add more locking or change code in this cycle. The earlier serial run was a conservative regression check, but it does not appear to be required by the current tmux/session test harness.
-<!-- agent:boundary:28716738 -->
+### Re: JetBrains route latency — gpt-5
+
+I found the editor-side latency source and tightened it.
+
+The delay before `Run Agent Doc` even reached tmux was the JetBrains submit debounce, not the routed send itself: `TypingTracker` was holding a manual submit for `1500ms` after the last keystroke before spawning `agent-doc route`. I reduced that window to `500ms` and changed the JB route action so it now keeps an in-flight information notification visible while the `agent-doc route` subprocess is still running, then expires that notification and shows the usual inline success hint with elapsed time when route exits.
+
+That gives two concrete improvements:
+- manual reruns reach tmux sooner after typing stops
+- the IDE no longer goes mostly silent during slower route/ack/recovery windows
+
+I updated the plugin/spec docs to match and bumped the JetBrains plugin version to `0.2.82`.
+
+Verification:
+- `cargo test --bin agent-doc route::tests:: -- --test-threads=8` → pass (`111` tests)
+- `cargo test --bin agent-doc sync::tests::register_synced_files_updates_each_project_registry_by_path_key -- --exact` → pass
+- `cargo build` → pass
+- `cargo install --path . --force` → pass
+- `/usr/bin/zsh -lc GRADLE_USER_HOME=/tmp/agent-doc-gradle
+<!-- agent:boundary:5c676ea2 -->
 <!-- /agent:exchange -->
 
 <!--
+The agent-doc tmux window has an unused pane. The bound tmux pane is in the stash tmux window. spec-test-build-install-commit-push
+```
+❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
+Error: registered pane %341 for tasks/agent-doc/agent-doc-bugs2.md is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance
+```
+---
+Can we isolate the parallel tmux test from each other?
+> •  The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
+  session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
+  this change actually regressed behavior.
+---
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->

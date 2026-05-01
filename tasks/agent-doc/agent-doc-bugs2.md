@@ -85,7 +85,30 @@ Code commit and push:
 - `src/agent-doc`: `5b9b47d` (`fix: resolve direct local cargo install`) pushed to `origin/20260422/codex-agent-backend`
 
 Cargo still prints the existing repo-level path-override warnings from `.cargo/config.toml`, but they did not block build or install in this cycle.
-<!-- agent:boundary:021c5e52 -->
+❯ `Run Agent Doc` is still not reaching the tmux pane. Please investigate the logs, find root causes, and fix root causes. spec-test-build-install-commit-push
+### Re: tmux route root cause — gpt-5
+
+I found the immediate root cause in the route logs: repeated `Run Agent Doc` attempts against this document were hitting `route_existing_pane_not_idle`, then the no-op busy-pane path returned success as `FocusBusySameDocument`. That focused the live pane but did not inject a reopen, so JetBrains showed a successful route while the follow-up stayed undispatched.
+
+I changed `src/route.rs` so that shape now:
+- keeps the no-restart behavior for a healthy same-document supervisor
+- focuses the authoritative pane for visibility
+- emits a tmux display-message diagnostic
+- fails closed instead of reporting false success while prompt-bearing drift remains pending
+
+I also fixed the tmux-suite isolation hole exposed by full verification: `auto_start_reuses_other_file_pane_only_as_split_anchor` now derives the actual anchor pane session instead of assuming a fixed session name, so the full `cargo test` run no longer flakes on cross-test tmux state.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo install --path src/agent-doc --force`
+
+All four passed.
+
+Code commit and push:
+- `src/agent-doc`: `548c106` (`fix: fail closed on busy routed follow-ups`) pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:c25aea16 -->
 <!-- /agent:exchange -->
 
 <!--

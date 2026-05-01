@@ -775,7 +775,7 @@ Code commit/push:
 - `src/agent-doc` `b8b61cd` on `20260422/codex-agent-backend` (`fix: repair completed-turn stale boundaries`)
 
 I marked `#bdryc` done and added a recommended follow-up to validate the original live JB/tmux rerun end-to-end.
-❯ This error happened after a successful `Run Agent Doc` turn initition. Please investigate and fix the root cause of the following error. spec-test-build-install-commit-push
+❯ This error happened after a successful `Run Agent Doc` turn initiation. Please investigate and fix the root cause of the following error. spec-test-build-install-commit-push
 ```
 agent-doc route failed (exit 1): resync: stash pane %316 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1108722) in pane %320 for tasks/monsterrodholders.md [route] codex ready after 0.5s (1 polls) [route] Pane %320 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md → pane %320 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %320 for tasks/monsterrodholders.md — waiting up to 30s for a new cycle ack for pending prompt_target: Please try #u8p3-fy9a again. Are we able to connect via ssh? Error: routed codex trigger for tasks/monsterrodholders.md was accepted in pane %320, but no new document cycle started for pending prompt_target: Please try #u8p3-fy9a again. Are we able to connect via ssh? after waiting 30s (startup_miss_timestamp=2026-05-01T06:22:29Z)
 ```
@@ -807,7 +807,30 @@ Code commit/push:
 - `src/agent-doc` `b208787` on `20260422/codex-agent-backend` (`fix: guard codex reroute payload`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:82dcba0b -->
+### Re: routed startup-miss after accepted `Run Agent Doc` — gpt-5
+
+Root cause was still the Codex routed reopen payload contract.
+
+The earlier fix moved reroutes to a bare `agent-doc <FILE>` reopen, which is the right behavior for the `monsterrodholders.md` / `claudescore-3.md` failures in this document: once Codex sees extra prompt/content lines in the same injected payload, it can treat them as ordinary chat, accept the trigger visually, and never enter a new binary-owned document cycle, so route fails 30 seconds later on the missing cycle ack.
+
+I hardened that path so route now fails closed **before dispatch** if a Codex reroute payload is anything other than the single-line bare reopen. That turns this class of regression into an immediate internal route error instead of a misleading delayed startup-miss. I also tightened the regression coverage:
+- direct guard coverage for rejecting multiline Codex reroute payloads
+- existing prompt-target live-child reroute now asserts no extra lines reach Codex
+- new live-child `content_edit` reroute regression asserts the same bare-reopen contract while still requiring a real cycle ack
+
+Verification completed:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml validate_routed_trigger_payload_rejects_multiline_codex_payload -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target-build cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `b208787` on `20260422/codex-agent-backend` (`fix: guard codex reroute payload`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:92f8a342 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -877,10 +877,50 @@ Code commit/push:
 - `src/agent-doc` `238aea0` on `20260422/codex-agent-backend` (`fix: detect plain exchange tail prompts`)
 
 No new backlog item is needed from this fix.
-<!-- agent:boundary:bfbae903 -->
+### Re: `Run Agent Doc` no-op on plain exchange-tail follow-up — gpt-5
+
+Root cause was the prompt-bearing diff classifier, not tmux routing. For this document the new user line landed below a stale `agent:boundary` and immediately before `&lt;!-- /agent:exchange --&gt;`, but it was plain prose: no `❯ ` prefix yet, no trailing `?`, and no imperative lead verb. Route therefore classified the document as having no pending prompt-bearing drift, hit the `route_existing_pane_already_running` path, focused the live pane, and injected nothing.
+
+Implemented in `src/agent-doc`:
+- `diff.rs` now promotes a non-artifact user block at the live exchange tail to `prompt_target` when it sits immediately before `&lt;!-- /agent:exchange --&gt;`.
+- Kept that promotion out of the legacy inline-annotation projection so section/component markers still do not masquerade as inline edits.
+- Added regressions in `diff.rs`, `session_check.rs`, and `route.rs`.
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml classify_prompt_bearing_changes_promotes_plain_exchange_tail_to_prompt_target -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml first_unstarted_prompt_bearing_change_detects_plain_exchange_tail_prompt -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml pending_prompt_bearing_context_for_route_detects_plain_exchange_tail_prompt -- --nocapture`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE CARGO_TARGET_DIR=/tmp/agent-doc-target cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-target cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `CARGO_TARGET_DIR=/tmp/agent-doc-install cargo install --path src/agent-doc --force`
+
+Code commit/push:
+- `src/agent-doc` `238aea0` on `20260422/codex-agent-backend` (`fix: detect plain exchange tail prompts`)
+
+No new backlog item is needed from this fix.
+<!-- agent:boundary:8efa2f92 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+agent-doc route failed (exit 1): resync: stash pane %331 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %316 is registered in its own project root — skipping kill resync: stash pane %329 is registered in its own project root — skipping kill resync: stash pane %330 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 2709786) in pane %332 for tasks/software/tsift.md [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] Still waiting for codex (5s)... last line: reverse-i-search: t enter accept · esc cancel [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] registered pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is busy with pending document drift — applying scoped `agent-doc fix tasks/software/tsift.md` once before failing closed [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [resync] pane %332 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md is in stash window, deregistering [sync] recovered live pane %332 for session tsift-v0 via supervisor pid 2709786 [route] No pane registered for session tsift-v0 [route] No active pane found, auto-starting... [route] split-window -dbh alongside registered pane %328 in session '0' → new pane %335 [route] Started codex for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md in pane %335 (session tsift-v0) [route] Waiting for codex to initialize... [route] codex ready after 2.0s (4 polls) [route] codex is ready, sending command [route] cleaning up orphaned pane %335 (created during failed route) Error: route dispatch target %335 is not registered for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md; refusing unbound dispatch
+```
+---
+I keep on seeing. How can this be fixed?:
+```
+• The installed agent-doc binary is newer than the session instructions (0.33.16 vs 0.33.12). I’m reloading the skill
+  definition now; if it requests compaction, I’ll stop there as required.
+
+• Ran agent-doc skill install --reload compact
+  └ Skill already up to date (v0.33.16).
+```
+---
+Can we isolate the parallel tmux test from each other?
+> • The serial full-suite run is underway. I switched to --test-threads=1 because the earlier failure set was all tmux/
+  session tests that pass in isolation and are clearly contending with each other, which would otherwise blur whether
+  this change actually regressed behavior.
+---
 If I restart codex with the supervisor, the real-time the next session process has a truncated feed at the bottom.
 ![img_7.png](img_7.png)
 -->

@@ -284,7 +284,39 @@ Full-suite note:
 
 Code commit and push:
 - `src/agent-doc`: `e450bfe` (`fix: follow fresh route owner handoffs`) pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:9b1355a4 -->
+❯ I got an error with `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md. Please do a full investigation. Find and fix root causes. spec-test-build-install-commit-push:
+```
+agent-doc route failed (exit 1): resync: stash pane %338 is registered in its own project root — skipping kill resync: stash pane %320 is registered in its own project root — skipping kill resync: stash pane %341 is registered in its own project root — skipping kill resync: stash pane %344 is registered in its own project root — skipping kill resync: stash pane %332 is registered in its own project root — skipping kill [route] target tmux session: 1 [sync] found alive agent-doc child (pid 245763) in pane %342 for tasks/claudescore-2.md [route] Pane %342 is in session '0', not target '1' — skipping stash rescue [route] Still waiting for codex (5s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] Still waiting for codex (10s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] Still waiting for codex (15s)... last line: gpt-5.4 medium · ~/work/btakita/agent-loop/src/session-sh [route] registered pane %342 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/claudescore-2.md` once before failing closed [sync] recovered live pane %342 for session 6ce173a1 via supervisor pid 245763 [sync] found alive agent-doc child (pid 245763) in pane %342 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md [route] scoped fix left pane %342 authoritative for /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-2.md — restarted the supervisor once before retrying route [sync] found alive agent-doc child (pid 245763) in pane %342 for tasks/claudescore-2.md [route] Pane %342 is in session '0', not target '1' — skipping stash rescue Error: registered pane %342 for tasks/claudescore-2.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/claudescore-2.md` once; refusing to inject a routed trigger into a busy session (pane=%342 pane_pid=? pane_session=? current_command=?)
+```
+### Re: claudescore-2 routed restart handoff — gpt-5
+
+I investigated the live `src/session-share/tasks/claudescore-2.md` repro from the session log, route ops log, and current routing code.
+
+Root cause:
+- the failing reroute was not just a stale tmux-session mismatch; the key break was the busy-pane restart handoff after `%342`
+- route could decide the busy authoritative pane was only `Restartable`, request a supervisor restart, and then retry too early
+- during that gap the authoritative binding could move to a replacement pane, but route would still re-probe the old pane mid-shutdown or immediately treat the fresh replacement as restartable again before live-owner proof had settled
+- the `src/session-share/.agent-doc/logs/6ce173a1-ab71-4fd3-9215-01f4ea3cd01a.log` trace showed exactly that: `%342` exited through the restart path, then ownership moved to `%347`
+
+What I changed in `src/agent-doc`:
+- `route.rs` now distinguishes a scoped-fix retry that came from a supervisor restart from an ordinary no-op retry
+- before retrying route in that restart case, it now waits for the document registry handoff and prefers the replacement pane only after live-owner proof catches up
+- added a regression that forces the old-pane-to-new-pane restart handoff and proves the routed trigger lands in the replacement pane instead of fail-closing against the stale pane
+- updated `specs/07-commands.md` and `VERSIONS.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+- `cargo install --path . --force` (from `src/agent-doc`)
+
+All four passed. Full `src/agent-doc` test suite finished green: `1688` unit tests plus integration/doc tests, `0` failed.
+
+Code commit and push:
+- `src/agent-doc`: `3bb5c70` (`fix: wait for busy route restart handoff`) pushed to `origin/20260422/codex-agent-backend`
+
+No new actionable backlog item remains beyond existing `#8zjh` tracking for the live rerun follow-through.
+<!-- agent:boundary:9c7dd3c8 -->
 <!-- /agent:exchange -->
 
 <!--

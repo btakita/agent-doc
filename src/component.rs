@@ -17,6 +17,8 @@
 //! - Opening markers may carry space-separated `key=value` inline attributes
 //!   (e.g., `patch=append`). `patch=` takes precedence over the legacy `mode=` alias;
 //!   `patch_mode()` encapsulates this lookup.
+//! - The non-agent comment fast path only previews comment text on UTF-8 char boundaries, so
+//!   ordinary prose comments near multibyte glyphs never panic the parser.
 //! - Marker `open_end` / `close_end` byte offsets include a trailing newline when present,
 //!   so that content slices are clean.
 //! - `replace_content(doc, new_content)` rebuilds the document preserving both markers,
@@ -349,6 +351,15 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
     }
 }
 
+fn bounded_preview(doc: &str, start: usize, max_bytes: usize) -> &str {
+    debug_assert!(doc.is_char_boundary(start));
+    let mut end = doc.len().min(start.saturating_add(max_bytes));
+    while end > start && !doc.is_char_boundary(end) {
+        end -= 1;
+    }
+    &doc[start..end]
+}
+
 /// Parse `key=value` pairs from the attribute portion of an opening marker.
 ///
 /// Given the text after `agent:NAME `, parses space-separated `key=value` pairs.
@@ -440,7 +451,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
         // Non-agent `<!--` sequences (e.g., `<!-- )` in prose) must NOT be
         // consumed — their `-->` search would eat real component close markers.
         let peek_start = pos + 4;
-        let peek = &doc[peek_start..doc.len().min(peek_start + 20)];
+        let peek = bounded_preview(doc, peek_start, 20);
         let peek_trimmed = peek.trim_start();
         if !peek_trimmed.starts_with("agent:") && !peek_trimmed.starts_with("/agent:") {
             pos += 1;
@@ -783,6 +794,19 @@ beta
     #[test]
     fn regular_comments_ignored() {
         let doc = "<!-- just a comment -->\n<!-- agent:x -->\ndata\n<!-- /agent:x -->\n";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, "x");
+    }
+
+    #[test]
+    fn regular_comments_with_multibyte_preview_boundary_ignored() {
+        let doc = "\
+<!-- 123456789012345678❯ ordinary comment -->
+<!-- agent:x -->
+data
+<!-- /agent:x -->
+";
         let ranges = parse(doc).unwrap();
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].name, "x");

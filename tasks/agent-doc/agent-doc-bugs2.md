@@ -538,7 +538,6 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
   └ [repair] Found orphaned response for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/
     monsterrodholders.md (5745 bytes). Applying...
     warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
-    warning: `<!-- patch:backlog -->` is deprecated — use `<!-- replace:backlog -->` instead (see #25ag)
     Error: ERR: pending/backlog patch: duplicate leading custom id prefix in item text — use exactly one leading
     `id=<id>` or `[#id]` prefix
 ```
@@ -582,8 +581,41 @@ I added one recommended follow-up because the live repro still ended with an unr
 Noted: that orphaned replay emitted the same `patch:backlog` deprecation warning twice before the repaired write path completed. That does not change the root cause or fix; the fatal bug was still the alias-tag item being misclassified as a duplicate custom-id prefix.
 
 No new follow-up items beyond `#mrreplay`.
+❯ I ran `Agent Doc Run` on this document and the prompt said...`Route Already In Progress`. spec-test-benchmarks-news-commit-push
 
-<!-- agent:boundary:a2bebb03 -->
+❯ The replay `Agent Doc Run` did not work on monsterrodholders.md
+❯ I ran agent-doc .../monsterrodholders.md on the cli and the turn does not complete. spec-test-benchmarks-news-commit-push
+```
+• The in-flight agent-doc run finished, and it failed again on tasks/monsterrodholders.md with the same generation bug:
+
+  - <!-- patch:backlog --> is deprecated
+  - replace:pending block forbidden — use --pending-add/done/edit/clear/reorder
+
+  I did not start a second concurrent run after your follow-up message, because the first run was still active against
+  the same file. No new response was written from this failed cycle.
+```
+### Re: run-path backlog normalization root cause — gpt-5
+
+The two failures were related, but they were not the same code path.
+
+The older `monsterrodholders.md` repair failure was a legacy orphaned `patch:backlog` replay shape. That write/repair path already normalizes backlog mutations now.
+
+The current direct `agent-doc run` failure was separate: `src/run.rs` still called `enforce_no_replace_pending()` **before** `normalize_backlog_patch_response()`. So a valid `patch:exchange` + legacy `patch:backlog` response could still die early on `replace:pending block forbidden`, even though `write` and `repair` already accepted and normalized that shape.
+
+I fixed the direct run path to reuse the same normalization and real-response-body proof contract as `write` / `repair`, added a regression for that exact response shape, and pushed `src/agent-doc` commit `73f27e8` (`fix: normalize backlog patches in run path`) to `origin/20260422/codex-agent-backend`.
+
+Verification:
+- `cargo test` — pass (`1701` unit tests plus integration suites, `0` failed)
+- `cargo build` — pass
+- `cargo install --path . --force` — pass
+
+Benchmarks:
+- no dedicated benchmark harness exists for this template backlog-normalization path, so I used the full test/build/install stack instead
+
+The remaining live check is to rerun the direct `monsterrodholders.md` flow against this branch and confirm the turn now completes through the normal closeout path.
+
+Plan: `tasks/agent-doc/plan-run-template-backlog-normalization-validation.md`
+<!-- agent:boundary:273b4903 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -592,6 +624,7 @@ No new follow-up items beyond `#mrreplay`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#clrpr] Codex `/clear` permission/session regression: after clearing a live Codex conversation, the resumed `agent-doc` turn can lose the expected file/SSH capability envelope even though the pane was launched with explicit `codex_args` such as `-s danger-full-access`. Current docs still treat Codex built-ins like `/clear` as manual-only. Fix should make `/clear`-style recovery preserve the same sandbox/write-root/network contract as the original `agent-doc start` session, or fail closed with a deterministic rebind/restart path that reapplies it. Plan: tasks/agent-doc/plan-codex-clear-permissions.md

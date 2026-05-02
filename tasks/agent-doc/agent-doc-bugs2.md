@@ -530,7 +530,35 @@ Verification:
 - `cargo build` passed
 - `cargo install --path . --force` passed
 - `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
-<!-- agent:boundary:def26ece -->
+❯ do [#jbrawack]. spec-test-build-install-commit-push
+### Re: #jbrawack buildparty stale-tail replay — gpt-5
+
+`#jbrawack` is closed.
+
+Plan: `tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md`
+
+What changed:
+- `src/diff.rs` now suppresses stale-boundary prompt runs that are already visibly answered by later raw assistant completion prose before `preflight`, `plan`, prompt builders, and other actionable-drift consumers treat them as fresh `prompt_target`s.
+- prompt-prefix normalization and bypassed-response detection still use the raw prompt-bearing view, so already-answered tails continue to repair missing `❯ ` prefixes instead of regressing transcript canonicalization.
+- `src/repair.rs`, `src/session_check.rs`, `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md` were updated to align the shared classifier contract.
+- I also committed the previously-described JetBrains plugin cleanup that removes the in-flight route progress balloon.
+
+Validation for the original repro (`src/session-share/tasks/buildparty-investor-demo/repo.md`):
+- `agent-doc preflight` now reports only one `content_edit` on the status block and no stale-tail `prompt_target`s.
+- `agent-doc plan` no longer emits any `prompt_targets` for that raw answered tail.
+- live route replay: `agent-doc route /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/repo.md` recovered the document, auto-started pane `%20`, and exited after `Command accepted` without logging `waiting up to 30s for a new cycle ack for pending prompt_target ...`.
+
+Verification:
+- `cargo test` passed (`1735` Rust unit/integration/doc tests)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+
+Commit / push:
+- `src/agent-doc`: `827d34d` (`fix: remove jetbrains route progress balloon`)
+- `src/agent-doc`: `36804c4` (`fix: suppress answered stale-tail prompt targets`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:b625324f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -541,7 +569,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#jbrawack] [recommended] Replay the JetBrains Run Agent Doc reroute on src/session-share/tasks/buildparty-investor-demo/repo.md after the stale raw-response cycle-ack fix landed. Plan: tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md

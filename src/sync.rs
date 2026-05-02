@@ -1329,6 +1329,7 @@ fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     })
 }
 
+#[cfg(test)]
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     tmux.cmd()
         .args(["display-message", "-p", "#{session_name}"])
@@ -1347,6 +1348,11 @@ fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|name| !name.is_empty())
+}
+
+fn resolve_sync_target_session(tmux: &Tmux, window: Option<&str>) -> Option<String> {
+    let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
+    crate::route::resolve_preferred_session(tmux, context_session.as_deref(), "[sync]")
 }
 
 fn resolve_agent_doc_window_id(
@@ -1477,9 +1483,7 @@ fn run_with_options(
     ));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
-    let target_session = window
-        .and_then(|w| session_name_for_target_window(tmux, w))
-        .or_else(|| current_tmux_session_name(tmux));
+    let target_session = resolve_sync_target_session(tmux, window);
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
         (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
@@ -5354,6 +5358,64 @@ mod tests {
             resolve_agent_doc_window_id(&iso, "test", "agent-doc").as_deref(),
             Some("@0"),
             "windowless sync should resolve the named agent-doc window instead of inheriting stash"
+        );
+    }
+
+    #[test]
+    fn windowless_sync_prefers_live_project_session_pin_over_current_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-windowless-project-pin");
+        let _pane0 = iso.new_session("0", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "0:0", "agent-doc"]).unwrap();
+        let _pane1 = iso.new_session("1", tmp.path()).unwrap();
+
+        assert_eq!(
+            current_tmux_session_name(&iso).as_deref(),
+            Some("1"),
+            "the current client session should be the most recently created one"
+        );
+        assert_eq!(
+            resolve_sync_target_session(&iso, None).as_deref(),
+            Some("0"),
+            "windowless sync should honor a live project tmux_session pin before the current session"
+        );
+        assert_eq!(
+            resolve_agent_doc_window_id(&iso, "0", "agent-doc").as_deref(),
+            Some("@0")
+        );
+    }
+
+    #[test]
+    fn windowless_sync_falls_back_to_current_session_when_project_pin_dead() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-windowless-dead-project-pin");
+        let _pane1 = iso.new_session("1", tmp.path()).unwrap();
+
+        assert_eq!(
+            current_tmux_session_name(&iso).as_deref(),
+            Some("1"),
+            "the live attached session should still be discoverable"
+        );
+        assert_eq!(
+            resolve_sync_target_session(&iso, None).as_deref(),
+            Some("1"),
+            "a dead project pin should fall back to the current live session"
         );
     }
 

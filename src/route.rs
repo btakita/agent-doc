@@ -3401,6 +3401,30 @@ fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     None
 }
 
+pub(crate) fn resolve_preferred_session(
+    tmux: &Tmux,
+    context_session: Option<&str>,
+    log_prefix: &str,
+) -> Option<String> {
+    if let Some(ctx) = normalize_context_session(context_session) {
+        return Some(ctx.to_string());
+    }
+
+    let configured = crate::config::project_tmux_session();
+    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
+        return configured;
+    }
+
+    if let Some(ref stale) = configured {
+        eprintln!(
+            "{log_prefix} configured tmux_session '{}' is not alive, ignoring stale pin",
+            stale
+        );
+    }
+
+    current_tmux_session(tmux)
+}
+
 /// Single source of truth for target session resolution.
 ///
 /// Priority:
@@ -3415,23 +3439,8 @@ fn resolve_target_session(
     context_session: Option<&str>,
     harness: &HarnessConfig,
 ) -> String {
-    if let Some(ctx) = normalize_context_session(context_session) {
-        return ctx.to_string();
-    }
-
-    let configured = crate::config::project_tmux_session();
-    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
-        return configured.unwrap();
-    }
-
-    if let Some(ref stale) = configured {
-        eprintln!(
-            "[route] configured tmux_session '{}' is not alive, ignoring stale pin",
-            stale
-        );
-    }
-
-    current_tmux_session(tmux).unwrap_or_else(|| harness.tmux_session_fallback.clone())
+    resolve_preferred_session(tmux, context_session, "[route]")
+        .unwrap_or_else(|| harness.tmux_session_fallback.clone())
 }
 
 fn ensure_auto_start_target_session(
@@ -9274,6 +9283,29 @@ Body\n\
         assert_eq!(
             resolved, current_session,
             "blank context_session should fall back to the live target session"
+        );
+    }
+
+    #[test]
+    fn resolve_preferred_session_prefers_live_project_pin_over_current_session() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("route-test-project-session-pin");
+        let _configured = iso.new_session("0", dir.path()).unwrap();
+        let _current = iso.new_session("1", dir.path()).unwrap();
+
+        assert_eq!(current_tmux_session(&iso).as_deref(), Some("1"));
+        assert_eq!(
+            resolve_preferred_session(&iso, None, "[test]").as_deref(),
+            Some("0"),
+            "a live project tmux_session pin should beat the caller's current session"
         );
     }
 

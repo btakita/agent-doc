@@ -85,6 +85,18 @@ The stash system preserves running Claude sessions when the user switches editor
 - Successful route replacements do not kill older stash panes unless the cleanup path has explicit provenance that the older pane is a throwaway artifact from the current recovery attempt
 - Scoped `agent-doc fix <FILE>` may kill redundant unregistered stash panes for that document, but only after it has already rebound the file to a unique provable winner
 
+**Editor-to-tmux truth table:**
+
+| Editor / session inputs | agent-doc window result | stash result |
+|---|---|---|
+| Explicit sync `--window` points at session `S` and visible docs reconcile cleanly | Reconcile in `S:agent-doc` even if another tmux session is currently attached | Leave unrelated stash panes untouched |
+| No `--window`, project `.agent-doc/config.toml` pins live session `S0`, caller is attached to session `S1` | Reconcile in `S0:agent-doc`; do not inherit `S1` just because it is current | Rescue only stash panes that already belong to `S0`; leave foreign-session stash panes alone |
+| No `--window`, project pin missing or dead, caller is attached to live session `S1` | Reconcile in `S1:agent-doc` | Use `S1` stash windows only |
+| Visible document already owns a live pane in the target session's stash window | Rescue that pane back into the target `agent-doc` window before provisioning a replacement | The rescued pane leaves stash; no duplicate replacement pane is created |
+| Visible columns include a markdown doc plus an empty/non-markdown sibling column | Keep the visible markdown doc in its requested column; remembered sibling panes may fill the empty column only when they do not duplicate a currently visible doc | No stash mutation unless a same-session pane must be rescued back to satisfy the remembered layout |
+| Visible docs span multiple project roots | Build per-root registry context, then place each doc in the target session's `agent-doc` window without aliasing two docs onto one pane | Preserve stash panes that still prove ownership inside their own project root; fail closed on ambiguous duplicates |
+| A needed pane exists only in a foreign tmux session's stash window | Fail closed / log cross-session rescue block; do not silently move it into the current target session | Keep the foreign-session stash pane where it is until an explicit session-targeting action resolves the conflict |
+
 **Commit write contract:** `commit()` always stages a clean snapshot copy (no `(HEAD)`, no stale boundaries) and normalizes the boundary to end-of-exchange. The committed blob and snapshot converge to the same clean shape. The working tree and editor buffer preserve `(HEAD)` annotations so the user can see which response headings are new.
 
 **Snapshot boundary cleanup:** After committing, `commit()` keeps the snapshot in the same clean shape as the committed blob: ALL stale boundaries are stripped, heading-level transient ` (HEAD)` markers are removed, and a single fresh 8-char boundary is inserted at end-of-exchange.

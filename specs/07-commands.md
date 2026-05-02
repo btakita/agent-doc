@@ -856,7 +856,7 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 
 ## Repair Layout
 
-`repair_layout` normalizes the tmux window layout before every sync. It receives the tmux handle, session name, and target window name (always `"agent-doc"`). The plugin always passes `--window agent-doc` as a fallback so the target window name is known.
+`repair_layout` normalizes the tmux window layout before every sync. It receives the tmux handle, session name, and target window name (always `"agent-doc"`). When sync is windowless, the session still resolves through the shared precedence contract above before layout repair runs, so a live project `tmux_session` pin keeps sync scoped to that session's `agent-doc` / `stash` windows instead of inheriting an unrelated attached session.
 
 **Phase 1 — Stash consolidation:** Merges all secondary stash windows (`stash-*` and duplicate `stash` windows) into a single primary stash window. For each secondary, all panes are joined into the primary via `join-pane -dv`, targeting the largest pane to avoid "pane too small" errors. Empty secondary windows are killed after pane migration.
 
@@ -875,7 +875,7 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 
 **Set:** Updates config.toml, then moves the `agent-doc` window and `stash` window from the old session to the new one via `tmux move-window`. If the move fails (target session doesn't exist), config is still updated — subsequent route/claim operations will target the new session.
 
-**Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) non-empty `context_session` from sync --window, (2) config.toml if alive, (3) fallback to current session. Empty/whitespace-only overrides are ignored. Config is auto-updated only when the configured session is dead.
+**Session resolution (`resolve_target_session` / `resolve_preferred_session`):** Session-targeting code paths share one precedence contract. Priority: (1) non-empty `context_session` from sync `--window`, (2) live project `.agent-doc/config.toml` `tmux_session`, (3) current tmux session, then (route/start only) harness fallback if there is no live tmux session at all. Empty/whitespace-only overrides are ignored. A live project session pin must beat the caller's currently attached tmux session for windowless sync; the current session only wins when there is no explicit context and the configured project pin is absent or dead. Config is auto-updated only when the configured session is dead and a start path intentionally rebinds to another live session.
 
 ## migrate
 

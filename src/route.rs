@@ -259,7 +259,29 @@ fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
 fn codex_dispatch_start_tracking_enabled(file: &Path) -> bool {
     codex_tracking_roots(file)
         .into_iter()
-        .any(|root| root.join(".codex/hooks.json").is_file())
+        .any(|root| codex_hooks_visible_from_file(file, &root))
+}
+
+fn codex_hooks_visible_from_file(file: &Path, hook_root: &Path) -> bool {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let mut current = if canonical.is_file() {
+        canonical.parent()
+    } else {
+        Some(canonical.as_path())
+    };
+
+    while let Some(path) = current {
+        let codex_path = path.join(".codex");
+        if codex_path.exists() {
+            return path == hook_root && codex_path.join("hooks.json").is_file();
+        }
+        if path == hook_root {
+            return hook_root.join(".codex/hooks.json").is_file();
+        }
+        current = path.parent();
+    }
+
+    false
 }
 
 fn codex_tracking_roots(file: &Path) -> Vec<PathBuf> {
@@ -4723,6 +4745,27 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert!(
             !codex_dispatch_start_tracking_enabled(&doc),
             "route should not wait for hook-backed submission proof when no tracked root has Codex hooks installed"
+        );
+    }
+
+    #[test]
+    fn codex_dispatch_start_tracking_enabled_stays_false_when_nested_codex_path_shadows_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path();
+        let nested = workspace.join("src/session-share");
+        let doc = nested.join("tasks/claudescore-3.md");
+
+        std::fs::create_dir_all(workspace.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(workspace.join(".codex")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(nested.join(".codex"), "").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        assert!(
+            !codex_dispatch_start_tracking_enabled(&doc),
+            "route should not require hook-backed submission proof when a nearer `.codex` path shadows the workspace install"
         );
     }
 

@@ -47,12 +47,31 @@ The clearest root cause is in the JetBrains tab-selection path. The plugin spec 
 
 That is exactly the wrong combination for your repro. When you switch focus to `src/boost-client/tasks/monsterrodholders.md` while `tasks/agent-doc/agent-doc-bugs2.md` is still part of the visible split, the automatic sync path is still allowed to provision/rebind panes from the boost-client root instead of just refocusing the existing owner or doing a report-only layout reconcile.
 
+❯ This is papering over the real issue. The real issue is why is agent-doc losing track over the tmux pane that is clearly running. I can briefly see it running. But it then gets replaced with a new pane. The option to autostart a pan is not the real problem. The real problem is the lack of detection on the already running pane.
+
 The session log for `src/boost-client/tasks/monsterrodholders.md` matches that explanation. In `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log`, the failure family is dominated by `session_superseded` plus `session_end origin=registry_rebind` transitions like `%529 -> %533 -> %536 -> %540`, not by child-crash provenance. Later, the same log records sync-driven `supervisor_exit code=missing_pane` on `%71`, followed immediately by fresh starts on `%72` and `%73`. So the system is churning ownership eras; it is not stably preserving and reusing the existing pane binding.
 
 Plan: `tasks/agent-doc/plan-jb-selection-sync-non-destructive.md`.
 
 I added backlog item `#jbselsync` for the concrete fix: make tab-selection handling non-destructive, split focus changes from layout changes, and reuse the workspace-root chooser on automatic sync so cross-root `monsterrodholders.md` focus changes cannot replace the live tmux pane.
-<!-- agent:boundary:d34606e3 -->
+### Re: visible pane detection is the real bug — gpt-5
+
+Yes. The JetBrains tab-switch behavior is a trigger surface, but it is not the deepest defect. The deeper defect is that `agent-doc` can see a pane that is still alive in tmux, fail to prove it owns the document, and then legally replace it.
+
+The proof gap is in the current ownership model in `src/agent-doc/src/sync.rs`. `find_live_owner_pane...` only accepts three proof paths: path provenance, process-tree file match, or supervisor-pid fallback. Then `find_associated_panes()` filters candidates down to panes with `ProcessTree` or `SupervisorPid` proof only. A merely visible/registered pane is not enough. On top of that, the process-tree path is narrow: `find_alive_pane_for_file_inner()` and `collect_process_tree_matches()` only look for `agent-doc` plus the file path in the pane pid or its direct children, and `pid_has_agent_doc_for_file()` depends on the live command line still advertising that file path.
+
+So if the pane is still visibly alive, but the file-path-bearing argv has disappeared from that narrow process-tree shape, and the supervisor socket is unavailable or stale at the same moment, the pane stops proving ownership even though it has not actually disappeared. At that point sync falls through to `repair_missing_registered_pane(...)`, records synthetic `registered_pane_missing`, and replacement becomes allowed. That matches your repro much better than "autostart was enabled."
+
+So the corrected framing is:
+
+- JetBrains selection sync is one way to trigger the replacement path.
+- The root bug is that visible-pane existence is weaker than the current owner-proof requirements.
+- When those proofs fail transiently, `agent-doc` rewrites a still-real pane as missing instead of failing closed or preserving the last open owner.
+
+I created a dedicated plan for that actual bug: `tasks/agent-doc/plan-visible-pane-owner-proof-gap.md`.
+
+I also added backlog item `#ownergap` and left `#jbselsync` in place as the mitigation/trigger-surface follow-up. The new top-priority issue is the owner-proof gap itself.
+<!-- agent:boundary:c534d8ce -->
 <!-- /agent:exchange -->
 
 <!--
@@ -66,6 +85,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ownergap] Critical: fix the visible-pane ownership-proof gap before any replacement-pane recovery. A tmux pane that is still alive and corresponds to the latest open `monsterrodholders.md` session must not fall through narrow process-tree/supervisor checks and be rewritten as `registered_pane_missing`. Plan: tasks/agent-doc/plan-visible-pane-owner-proof-gap.md
 - [ ] [#jbselsync] [recommended] Critical: Make JetBrains tab-selection handling non-destructive for cross-root sessions. Use focus-only behavior for selection changes, reserve `sync --no-autostart` for visible-layout changes, and reuse the workspace-root chooser so switching to `src/boost-client/tasks/monsterrodholders.md` cannot rebind or replace a live tmux pane. Plan: tasks/agent-doc/plan-jb-selection-sync-non-destructive.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md

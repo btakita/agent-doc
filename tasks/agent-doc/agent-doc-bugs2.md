@@ -730,7 +730,37 @@ Verification:
 - `cargo install --path . --force` passed in `src/agent-doc`
 
 I left backlog unchanged. The existing recommended replay item `#edispatch` already covers a manual live JetBrains reroute validation pass.
-<!-- agent:boundary:ada68b22 -->
+❯ re [#jbptrk]: The editor plugins should not cause a tmux pane to close. Tmux panes that close should be limited to a 1 or a few operations such as reaping duplicate panes. Keep the surface area small to reduce blowback.
+
+❯ spec-test-build-install-commit-push
+### Re: #jbptrk editor plugin tmux-close surface — gpt-5
+
+
+I reduced the editor-driven tmux mutation surface instead of letting passive plugin activity keep replacing or repairing panes aggressively.
+
+What changed:
+- `agent-doc sync` now accepts `--no-autostart`, and the JetBrains layout listeners, JetBrains claim follow-up sync, and VS Code editor-driven sync paths now use it. Passive layout churn now reconciles existing panes instead of provisioning replacement sessions.
+- JetBrains project-open now runs report-only `agent-doc resync` instead of `agent-doc resync --fix`, so startup no longer auto-enters a destructive repair path.
+- I committed the adjacent uncommitted editor-route hardening in the same branch: repeat `Run Agent Doc` clicks supersede stale plugin-spawned route processes, dispatch-only stays one-shot/fail-closed on shell blockers, and JetBrains route feedback stays out of bottom-right balloons.
+
+`#jbptrk` is not fully closed. This change removes the plugin-side blowback and narrows the remaining work to the underlying live-owner / visible-pane tracking loss during restart. I left `#jbptrk` open with that tighter scope and added follow-up `#jbnsrf` for a live replay on the original repro.
+
+Plan: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
+
+Verification:
+- `cargo test` passed (`1738` Rust tests plus integration/doc suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `editors/jetbrains`
+- `npm test` passed in `editors/vscode`
+
+Build artifact:
+- `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.85.zip`
+
+Commit / push:
+- `src/agent-doc`: `af9362c` (`fix: harden editor route and sync surfaces`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:0a04017a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -744,6 +774,9 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
+- [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
+- [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

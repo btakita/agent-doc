@@ -113,7 +113,12 @@ I also finalized and committed that answer into `tasks/agent-doc/agent-doc-bugs2
 Implemented the `required_ssh_targets` Codex capability contract from [tasks/agent-doc/plan-codex-ssh-server-access-contract.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-codex-ssh-server-access-contract.md). Frontmatter can now declare required SSH targets, Codex proves that SSH path before trusting a resumed session, resumed runs retry once fresh when the transcript shows SSH-capability drift, and the backend now fails closed with target-specific diagnostics when the required SSH path is not actually usable.
 
 I updated the Codex backend, frontmatter plumbing, orchestration/stream resolution, and the relevant specs/version notes. Verification passed with `cargo test`, `cargo build`, and `cargo install --path . --force` in `src/agent-doc`. The repo change is committed and pushed in `src/agent-doc` as `78dbf73` (`fix: prove codex ssh capability before resume`) on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:04d08b2b -->
+❯ I selected monsterrodholders.md in the editor. However, the tmux pane is not showing up in the agent-doc tmux window. spec-test-build-install-commit-push
+### Re: monsterrodholders pane missing from the agent-doc window — gpt-5
+Implemented the editor-side fix for this selection path. When more than one markdown document is visible, JetBrains and VS Code now keep tab-selection changes on `agent-doc sync --no-autostart ...` instead of downgrading to a plain `agent-doc focus <file>`. That lets the CLI run stash rescue/layout reconciliation and bring the selected `monsterrodholders.md` pane back into the visible `agent-doc` tmux window instead of leaving it hidden in stash.
+
+I updated the shared editor specs plus Kotlin/TypeScript regressions so both plugins keep the same behavior: single-document tab switches still use `focus`, but split-layout tab switches stay on the non-destructive sync path. Verification: `./gradlew test buildPlugin` in `editors/jetbrains`, `npm test` in `editors/vscode`, `cargo build`, and `cargo install --path . --force` all passed. The first full `cargo test` run hit two transient existing failures (`agent::codex::tests::send_retries_fresh_exec_after_resume_capability_drift_signal` broken pipe, and `route::tests::alive_registered_pane_without_live_owner_deregisters_and_lazy_claims` missed cycle-ack); both exact binary tests passed immediately on isolated rerun. The repo change is committed and pushed in `src/agent-doc` as `9a2d6e8` (`fix: keep split tab sync on non-destructive sync`) on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:4a3090ff -->
 <!-- /agent:exchange -->
 
 <!--

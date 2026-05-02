@@ -38,12 +38,24 @@ Active backlog:
 Icebox:
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- agent:boundary:6ce9c62d -->
+❯ Why is agent-doc losing track of the currently running tmux panes that are running agent-doc on monsterrodholders.md? This has happened whenever I switched the editor to monsterrodholders.md. CRITICAL BUG
+### Re: tmux pane tracking loss on monsterrodholders — gpt-5
+
+Short answer: this does not look like tmux randomly "forgetting" a healthy pane. The persisted evidence shows `agent-doc` repeatedly rebinding the `monsterrodholders.md` session to fresh panes during editor-driven sync/reopen paths.
+
+The clearest root cause is in the JetBrains tab-selection path. The plugin spec says a selection change should prefer `agent-doc focus <file>`, and any automatic layout sync should use `agent-doc sync --no-autostart ...`. But `EditorTabSyncListener.selectionChanged` currently does the opposite: it always runs `agent-doc sync` on every markdown tab switch, passes `noAutostart = false`, and anchors the command to the focused file's nearest root instead of the shared `chooseSyncProjectRoot(...)` workspace-root logic that manual sync already uses.
+
+That is exactly the wrong combination for your repro. When you switch focus to `src/boost-client/tasks/monsterrodholders.md` while `tasks/agent-doc/agent-doc-bugs2.md` is still part of the visible split, the automatic sync path is still allowed to provision/rebind panes from the boost-client root instead of just refocusing the existing owner or doing a report-only layout reconcile.
+
+The session log for `src/boost-client/tasks/monsterrodholders.md` matches that explanation. In `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log`, the failure family is dominated by `session_superseded` plus `session_end origin=registry_rebind` transitions like `%529 -> %533 -> %536 -> %540`, not by child-crash provenance. Later, the same log records sync-driven `supervisor_exit code=missing_pane` on `%71`, followed immediately by fresh starts on `%72` and `%73`. So the system is churning ownership eras; it is not stably preserving and reusing the existing pane binding.
+
+Plan: `tasks/agent-doc/plan-jb-selection-sync-non-destructive.md`.
+
+I added backlog item `#jbselsync` for the concrete fix: make tab-selection handling non-destructive, split focus changes from layout changes, and reuse the workspace-root chooser on automatic sync so cross-root `monsterrodholders.md` focus changes cannot replace the live tmux pane.
+<!-- agent:boundary:d34606e3 -->
 <!-- /agent:exchange -->
 
 <!--
-compact exchange
----
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
@@ -54,6 +66,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbselsync] [recommended] Critical: Make JetBrains tab-selection handling non-destructive for cross-root sessions. Use focus-only behavior for selection changes, reserve `sync --no-autostart` for visible-layout changes, and reuse the workspace-root chooser so switching to `src/boost-client/tasks/monsterrodholders.md` cannot rebind or replace a live tmux pane. Plan: tasks/agent-doc/plan-jb-selection-sync-non-destructive.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

@@ -383,16 +383,57 @@ Verification in `src/agent-doc`:
 Follow-up:
 - added recommended backlog item `#jbctrlg` for a live JetBrains replay.
 - Plan: `tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md`
-<!-- agent:boundary:fdc3e88c -->
+❯ `Run Agent Doc` surfaced a JB error:
+```
+agent-doc route failed for tasks/buildparty-investor-demo/repo.md after 88s (exit 1): resync: stash pane %1 is registered in its own project root — skipping kill resync: stash pane %13 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1132798) in pane %16 for tasks/buildparty-investor-demo/repo.md [route] Pane %16 is in stash window 'stash', rescuing to agent-doc window [route] Rescued pane %16 via join-pane [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop/src/session-shar [route] registered pane %16 for /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/repo.md is busy with pending document drift — applying scoped `agent-doc fix tasks/buildparty-investor-demo/repo.md` once before failing closed [sync] recovered live pane %16 for session 2bdd6a89 via supervisor pid 1132798 [sync] found alive agent-doc child (pid 1132798) in pane %16 for tasks/buildparty-investor-demo/repo.md [route] scoped fix left pane %16 authoritative for tasks/buildparty-investor-demo/repo.md with a healthy supervisor — restarting the live codex session fresh once before one final reroute [sync] found alive agent-doc child (pid 1132798) in pane %16 for tasks/buildparty-investor-demo/repo.md [route] codex ready after 0.5s (1 polls) [route] Pane %16 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/repo.md → pane %16 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %16 for tasks/buildparty-investor-demo/repo.md — waiting up to 30s for a new cycle ack for pending prompt_target: I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references [route] routed codex trigger for tasks/buildparty-investor-demo/repo.md never started a new cycle in pane %16 — restarting the live session fresh once before failing closed [route] codex ready after 0.5s (1 polls) [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/repo.md → pane %16 [route] Command accepted (0.3s, 0 Enter retries) Error: routed codex trigger for tasks/buildparty-investor-demo/repo.md was accepted in pane %16, but no new document cycle started for pending prompt_target: I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references after waiting 30s (startup_miss_timestamp=2026-05-02T06:08:42Z)
+```
+### Re: JB routed cycle-ack stale raw-response tail — gpt-5
+
+I fixed the stale-tail detector behind this JetBrains `Run Agent Doc` failure in `src/agent-doc`.
+
+Plan: `tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md`
+
+What changed:
+- `src/session_check.rs` now treats soft stale-tail requests like `Please update references` as a prompt anchor and recognizes a narrow set of raw assistant completion lines (`I updated ...`, follow-up bullets, `Plan:` / `Verification:` sections, etc.) as an already-answered tail.
+- `src/route.rs` inherits that through `pending_prompt_bearing_context_for_route(...)`, so routed cycle-ack gating no longer waits 30 seconds for a ghost `pending prompt_target` when the visible stale-boundary tail already contains the answer but not a formal `### Re:` block.
+- Added regressions for both `session-check` and route, and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification in `src/agent-doc`:
+- `cargo test first_unstarted_prompt_bearing_change_ignores_raw_answered_prompt_after_stale_boundary`
+- `cargo test pending_prompt_bearing_context_for_route_ignores_raw_answered_prompt_after_stale_boundary`
+- `cargo build`
+- `cargo install --path . --force`
+
+Full-suite note:
+- `cargo test` still fails in the existing tmux-heavy cluster:
+  - `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`
+  - `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`
+  - `resync::tests::purge_unregistered_dead_non_stash_pane`
+  - `resync::tests::purge_unregistered_dead_non_stash_panes_skips_last_pane`
+  - `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`
+  - `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`
+  - `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`
+  - `route::tests::alive_registered_pane_reregisters_to_live_owner`
+  - `route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`
+  - `route::tests::eviction_skipped_when_agent_process_active`
+
+Follow-up:
+- added recommended backlog item `#jbrawack` for a live JetBrains replay against `src/session-share/tasks/buildparty-investor-demo/repo.md`.
+<!-- agent:boundary:9648253f -->
 <!-- /agent:exchange -->
 
 <!--
+```
+agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 66s (exit 1): resync: stash pane %16 is registered in its own project root — skipping kill resync: stash pane %2 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] codex ready after 0.5s (1 polls) [route] Pane %3 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %3 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %3 for tasks/agent-doc/agent-doc-bugs2.md — waiting up to 30s for a new cycle ack for pending prompt_target: `Run Agent Doc` surfaced a JB error: [route] routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md never started a new cycle in pane %3 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (25s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (30s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %3, but the fresh-restart retry never reached a dispatch-ready prompt in pane %3 after waiting 30s
+```
+---
 Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbrawack] [recommended] Replay the JetBrains Run Agent Doc reroute on src/session-share/tasks/buildparty-investor-demo/repo.md after the stale raw-response cycle-ack fix landed. Plan: tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md

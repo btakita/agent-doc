@@ -45,7 +45,9 @@ Two strategies for detecting the file's position in the editor split:
 ### Safe Sync Surface
 
 - JetBrains startup uses report-only `agent-doc resync`; it does not auto-run `resync --fix`.
-- Editor-driven layout syncs report absolute file paths to `agent-doc sync`, preserve empty column placeholders for mixed markdown/non-markdown splits, and keep cross-root markdown siblings in the reported layout even when the focused file lives in a nested submodule. The Rust binary owns passive autostart, ambiguity handling, remembered-column restoration, and tmux window targeting.
+- Editor-driven layout syncs report absolute file paths to `agent-doc sync`, preserve empty column placeholders for mixed markdown/non-markdown splits, and keep cross-root markdown siblings in the reported layout even when the focused file lives in a nested submodule.
+- When the visible markdown layout spans multiple nested agent-doc roots, JetBrains runs `agent-doc sync` from the workspace root `.agent-doc/` instead of the focused file's nearest submodule root. This keeps shared column memory (`.agent-doc/last_layout.json`) stable when focus moves from a workspace session doc to an unmanaged spec/doc file inside a child repo.
+- The Rust binary owns passive autostart, ambiguity handling, remembered-column restoration, and tmux window targeting.
 
 ### Action Promoter
 

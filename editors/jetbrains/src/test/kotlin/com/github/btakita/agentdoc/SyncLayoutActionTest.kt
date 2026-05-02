@@ -211,6 +211,36 @@ class SyncLayoutActionTest {
         )
     }
 
+    @Test
+    fun `choose sync project root keeps single root sync scoped to that root`() {
+        assertEquals(
+            "/repo/src/boost-client",
+            SyncLayoutAction.chooseSyncProjectRoot(
+                basePath = "/repo",
+                fallbackRoot = "/repo/src/boost-client",
+                visibleMarkdownFiles = listOf(
+                    "/repo/src/boost-client/tasks/monsterrodholders.md",
+                    "/repo/src/boost-client/tasks/buildparty.md",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `choose sync project root uses workspace root for cross root layouts`() {
+        assertEquals(
+            "/repo",
+            SyncLayoutAction.chooseSyncProjectRoot(
+                basePath = "/repo",
+                fallbackRoot = "/repo/src/agent-doc",
+                visibleMarkdownFiles = listOf(
+                    "/repo/src/agent-doc/specs/08-session-routing.md",
+                    "/repo/src/boost-client/tasks/monsterrodholders.md",
+                ),
+            ),
+        )
+    }
+
     private class FakeVirtualFile(private val rawPath: String) :
         com.intellij.testFramework.LightVirtualFile(
             java.io.File(rawPath).name,

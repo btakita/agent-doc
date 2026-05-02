@@ -28,6 +28,34 @@ class SyncLayoutAction : AnAction() {
             .map { it.path }
             .distinct()
 
+        internal fun chooseSyncProjectRoot(
+            basePath: String?,
+            fallbackRoot: String,
+            visibleMarkdownFiles: List<String>,
+        ): String {
+            val visibleRoots = visibleMarkdownFiles
+                .mapNotNull { NativePatching.resolveProjectPath(it)?.first }
+                .distinct()
+            if (visibleRoots.size <= 1) {
+                if (
+                    visibleRoots.isEmpty() &&
+                    basePath != null &&
+                    visibleMarkdownFiles.any { file ->
+                        file != fallbackRoot && !file.startsWith("$fallbackRoot/")
+                    }
+                ) {
+                    return basePath
+                }
+                return visibleRoots.firstOrNull() ?: fallbackRoot
+            }
+
+            if (basePath != null) {
+                return basePath
+            }
+
+            return fallbackRoot
+        }
+
         internal fun normalizeEditorLayout(
             basePath: String?,
             projectRoot: String,
@@ -119,9 +147,14 @@ class SyncLayoutAction : AnAction() {
                 ?.takeIf { it.name.endsWith(".md") }
                 ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
                 ?: return
-            val (projectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
             val focusedFile = focusedVFile.path
             val visibleMdFiles = collectVisibleMarkdownFiles(manager.selectedFiles)
+            val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
+            val projectRoot = chooseSyncProjectRoot(
+                project.basePath,
+                focusedProjectRoot,
+                visibleMdFiles,
+            )
 
             if (visibleMdFiles.isEmpty()) {
                 if (notify) TerminalUtil.showHint(project, "No .md files open")

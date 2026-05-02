@@ -711,11 +711,32 @@ Verification:
 - `cargo install --path . --force` passed in `src/agent-doc`
 
 I left backlog unchanged. The existing recommended replay item `#edispatch` already covers a manual live JetBrains reroute validation pass.
-<!-- agent:boundary:757f170d -->
+### Re: JetBrains reroute after /clear — gpt-5
+
+I changed the JetBrains plugin so a repeated `Run Agent Doc` no longer waits behind an older plugin-spawned `agent-doc route --dispatch-only` process. The second click now wins: the plugin cancels the stale background route, suppresses the stale process's failure noise, and immediately launches a fresh dispatch for the same document. That matches the cancel + `/clear` behavior you asked for.
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` now tracks one in-flight route process per document and replaces it on repeat invocation.
+- added a focused Kotlin regression in `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt` for the replacement logic.
+- bumped the JetBrains plugin version to `0.2.84`.
+
+Build artifact:
+- `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.84.zip`
+
+Verification:
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+- `cargo test` passed in `src/agent-doc` (`1738` unit tests plus integration/doc suites)
+- `cargo build` passed in `src/agent-doc`
+- `cargo install --path . --force` passed in `src/agent-doc`
+
+I left backlog unchanged. The existing recommended replay item `#edispatch` already covers a manual live JetBrains reroute validation pass.
+<!-- agent:boundary:ada68b22 -->
 <!-- /agent:exchange -->
 
 <!--
-When I 
+When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
+---
+Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
 ---
 Add a Plugin Editor command to clear the context
 -->

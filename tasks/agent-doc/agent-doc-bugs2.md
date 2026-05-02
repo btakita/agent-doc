@@ -286,7 +286,25 @@ Verification in `src/agent-doc`:
 Commit / push:
 - `src/agent-doc`: `13e8717` (`docs: align guide with committed closeout flow`)
 - `origin/20260422/codex-agent-backend` is up to date with that commit
-<!-- agent:boundary:788759a9 -->
+❯ do [#8zjh]. spec-test-build-install-commit-push
+### Re: #8zjh — gpt-5
+
+`#8zjh` is closed. I fixed the visible-response closeout gap in `src/agent-doc` and pushed `a808c02` (`fix: adopt visible response closeout without replay payload`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/repair.rs` now synthesizes an adopt-current replay from a fresh visible `### Re:` / `## Assistant` block when the snapshot lacks it, but only for the git-backed/no-surviving-cycle-state shape. That lets `repair` and the Codex Stop hook reopen `write_applied` and finish the normal commit boundary instead of leaving the response as plain worktree drift.
+- `src/codex_hook.rs` now has regression coverage for the routed-no-ack / no-`last_assistant_message` case where the response is already visible in a template doc.
+- Updated `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Verification in `src/agent-doc`:
+- `cargo test` passed (`1727` unit tests, plus `codex_hook_integration`, `finalize_integration`, `pending_integration`, `run_integration`, `test_cli`, and doc tests)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+Commit / push:
+- `src/agent-doc`: `a808c02` (`fix: adopt visible response closeout without replay payload`)
+- pushed `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:d0cc0125 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -298,12 +316,10 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#sjwj] 1 more active item(s)
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
-- [ ] [#8zjh] [recommended] Validate the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 <!-- /agent:backlog -->

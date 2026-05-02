@@ -387,6 +387,10 @@ enum Commands {
     Route {
         /// Path to the session document
         file: PathBuf,
+        /// Resolve the owning pane and send the bare reopen without route-owned
+        /// busy-session recovery, startup-miss gating, or cycle-ack waiting.
+        #[arg(long)]
+        dispatch_only: bool,
         /// Tmux pane ID for lazy claiming (auto-claims if existing claim is stale)
         #[arg(long)]
         pane: Option<String>,
@@ -1246,6 +1250,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Start { file } => start::run(&file),
         Commands::Route {
             file,
+            dispatch_only,
             pane,
             cols,
             focus: _focus,
@@ -1256,7 +1261,12 @@ fn main() -> anyhow::Result<()> {
             // separately with the correct --window arg. Running sync from both route AND
             // the plugin created a double-sync glitch (panes bouncing between stash and
             // agent-doc window). The plugin's sync is authoritative for layout.
-            route::run(&file, pane.as_deref(), debounce, &cols)
+            let mode = if dispatch_only {
+                route::RouteMode::DispatchOnly
+            } else {
+                route::RouteMode::Managed
+            };
+            route::run(&file, pane.as_deref(), debounce, &cols, mode)
         }
         Commands::Prompt { file, answer, all } => {
             if all {

@@ -5,7 +5,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 1. Run (Submit)
 
 - **Trigger:** `Ctrl+Shift+Alt+A` (configurable)
-- **Behavior:** Save the active `.md` file, call `agent-doc route <relative-path>` from the project root.
+- **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only <relative-path>` from the project root.
 - **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist.
 - **Availability:** Only enabled when a `.md` file is active.
 

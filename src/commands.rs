@@ -91,7 +91,7 @@ fn all_commands() -> Vec<CommandInfo> {
     ));
     cmds.push(cmd(
         "/agent-doc route",
-        "<FILE>",
+        "[--dispatch-only] <FILE>",
         "Route command to the correct tmux pane",
     ));
     cmds.push(cmd(

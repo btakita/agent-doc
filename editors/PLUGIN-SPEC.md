@@ -85,10 +85,10 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Precondition:** Active file is `.md`.
 - **Behavior:**
   1. Save the active document to disk.
-  2. Run `agent-doc route <relative-path>` via subprocess from project root.
+  2. Run `agent-doc route --dispatch-only <relative-path>` via subprocess from project root.
   3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure.
   4. Register the file for prompt polling (Section 2.6).
-- **Concurrency guard:** Use an atomic boolean to prevent rapid double-invocation. Subsequent calls while a route is in-flight are silently skipped with a hint.
+- **Run action statelessness:** Do not block manual Run behind a plugin-local "already in progress" gate. Repeated Run presses should still dispatch the bare reopen and let the CLI own pane targeting.
 - **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
 
 ### 2.4 Layout Sync

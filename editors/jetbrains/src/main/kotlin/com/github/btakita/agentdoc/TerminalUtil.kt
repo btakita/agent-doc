@@ -60,12 +60,12 @@ object TerminalUtil {
     }
 
     /**
-     * Routes a document trigger command via `agent-doc route`.
+     * Routes a document trigger command via `agent-doc route --dispatch-only`.
      *
-     * This calls `agent-doc route <path>` which:
+     * This calls `agent-doc route --dispatch-only <path>` which:
      * 1. Reads the session UUID from the file's frontmatter
      * 2. Looks up the tmux pane for that session
-     * 3. Resolves the active harness trigger and sends it via `tmux send-keys`
+     * 3. Resolves the active harness trigger and sends the bare reopen via `tmux send-keys`
      * 4. Auto-starts a new agent session if needed
      */
     fun sendToTerminal(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
@@ -80,7 +80,7 @@ object TerminalUtil {
 
         try {
             // Build route command with optional layout args
-            val cmd = mutableListOf(agentDoc, "route", relativePath)
+            val cmd = mutableListOf(agentDoc, "route", "--dispatch-only", relativePath)
 
             // Only include visible files that live under the same project root
             // as the focused file — sibling submodules have their own sessions.

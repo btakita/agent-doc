@@ -43,13 +43,13 @@ agent-doc init session.md "My Topic"
 agent-doc claim session.md
 
 # 4. Route hotkey triggers to the correct tmux pane
-agent-doc route session.md
+agent-doc route --dispatch-only session.md
 
 # 5. Run: diff, send to agent, write response back
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route <file>` via a hotkey, and agent-doc injects the correct harness-specific trigger into the owning pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`.
+The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only <file>` via a hotkey, and agent-doc injects the correct harness-specific trigger into the owning pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`.
 
 ## Key Features
 

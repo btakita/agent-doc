@@ -1256,6 +1256,46 @@ fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
         || lower.starts_with("investigate ")
 }
 
+fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("please ")
+        || lower.contains(" please ")
+        || lower.starts_with("can you ")
+        || lower.starts_with("could you ")
+        || lower.starts_with("would you ")
+        || lower.starts_with("need you to ")
+}
+
+fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
+    if trimmed.is_empty() || normalized_prompt_preview_line(trimmed).is_some() {
+        return false;
+    }
+
+    if trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("Plan:")
+        || trimmed.starts_with("Verification")
+        || trimmed.starts_with("What changed:")
+        || trimmed.starts_with("Follow-up:")
+        || trimmed.starts_with("Commit / push:")
+        || trimmed.starts_with("Backlog:")
+        || trimmed.starts_with("`#")
+    {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("i updated ")
+        || lower.starts_with("i fixed ")
+        || lower.starts_with("i added ")
+        || lower.starts_with("i implemented ")
+        || lower.starts_with("i left ")
+        || lower.starts_with("updated ")
+        || lower.starts_with("fixed ")
+        || lower.starts_with("added ")
+        || lower.starts_with("implemented ")
+}
+
 pub(crate) fn prompt_change_is_already_answered(change_text: &str) -> bool {
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
@@ -1314,6 +1354,16 @@ pub(crate) fn prompt_change_is_already_answered(change_text: &str) -> bool {
                 return false;
             }
             saw_prompt = true;
+            continue;
+        }
+
+        if !saw_prompt && line_looks_like_soft_prompt_request(trimmed) {
+            saw_prompt = true;
+            continue;
+        }
+
+        if saw_prompt && line_looks_like_plain_response_after_prompt(trimmed) {
+            saw_response = true;
         }
     }
 
@@ -1518,6 +1568,46 @@ Body\n\
         assert!(
             change.is_none(),
             "answered prompt after a stale boundary must not stay actionable"
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_raw_answered_prompt_after_stale_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\n",
+            "I updated the repo-local references to the renamed GitHub repo.\n\n",
+            "- `.gitmodules` now uses `git@github.com:ClaudeScore/buildparty-investor-demo.git`\n",
+            "- The checked-out submodule at `buildparty-investor-demo/` now has `origin` set to the same URL\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        assert!(prompt_change_is_already_answered(
+            "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\nI updated the repo-local references to the renamed GitHub repo.\n"
+        ));
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "raw assistant completion prose after a stale-boundary prompt must not stay actionable"
         );
     }
 

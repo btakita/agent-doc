@@ -466,24 +466,16 @@ async function submitAction(): Promise<void> {
         return;
     }
 
-    if (commandRunning) {
-        showHint('Command already in progress');
-        return;
-    }
-    commandRunning = true;
-
     try {
         await editor.document.save();
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-        const output = await runCli(['route', rel], cwd);
+        const output = await runCli(['route', '--dispatch-only', rel], cwd);
         showHint(output || `Routed ${rel}`);
         // Track file for prompt polling
         trackedFiles.add(editor.document.uri.fsPath);
         ensurePromptPolling(cwd);
     } catch (err: any) {
         showError(`route failed: ${err.message}`);
-    } finally {
-        commandRunning = false;
     }
 }
 

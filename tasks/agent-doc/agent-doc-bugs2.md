@@ -862,7 +862,32 @@ On the JetBrains side: you were right, the plugin was still too smart. It was re
 On the recent `ops.log` activity: the root and submodule logs were mostly showing routed reopen events (`route_dispatch_only_sent`) and existing startup-miss / recovery provenance, not a clean binary-owned passive-sync decision trail. That is consistent with the root cause here: too much of the passive sync policy was happening in Kotlin before `agent-doc sync` got to own and log the decision. Verification passed with `./gradlew test buildPlugin`, and the new build artifact is `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`.
 
 Backlog unchanged. The existing `#jbsubroot` / `#jbptrk` items are still the right live replay follow-ups for validating this against the original nested-root repro.
-<!-- agent:boundary:376bb7fc -->
+❯ When the JB Plugin runs `Sync: --col /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [focus: /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md]`, the tmux window shows 1 pane. 2 should be shown with monsterrodholders.md on the rigth side and in focus.
+### Re: JetBrains mixed-split sync collapsed to one pane — gpt-5
+
+I fixed the layout-collapse path behind this repro. The issue was split across both sides of the handoff:
+
+- JetBrains `SyncLayoutAction` was dropping empty editor columns and only detecting a structured layout when more than one markdown file was visible.
+- `agent-doc sync` was also stripping blank `--col` placeholders before column memory had a chance to restore the remembered sibling pane.
+
+That combination meant a mixed split like `[non-md | monsterrodholders.md]` degraded to a single-column sync request, so tmux lost the left/right column identity and collapsed to one pane.
+
+What changed:
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt` now preserves empty columns through normalize/absolutize, detects split layout even when only one visible markdown file remains, and sends placeholder `--col` args so sync still sees the missing sibling column.
+- `src/agent-doc/src/sync.rs` now applies column-memory substitution before dropping blank `--col` entries, so an empty left column can restore the remembered left pane while keeping `monsterrodholders.md` on the right.
+- Added regressions in the JetBrains Kotlin tests plus a Rust sync regression for the empty-placeholder column-memory case.
+- Updated the sync/editor specs and `VERSIONS.md` to record the new contract.
+
+Verification:
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`.
+- `cargo build` passed in `src/agent-doc`.
+- `cargo install --path . --force` passed in `src/agent-doc`.
+- `cargo test column_memory_restores_empty_placeholder_columns --bin agent-doc` passed.
+- `cargo test` is still red in `src/agent-doc`, but the failures were in existing tmux-heavy `resync` / `route` tests unrelated to this sync path: `purge_preserves_unregistered_agent_in_stash_with_live_owner`, `purge_unregistered_dead_non_stash_pane`, `purge_unregistered_dead_non_stash_panes_skips_last_pane`, `purge_unregistered_stash_panes_kills_retained_dead_stash_pane`, `no_wrong_window_when_panes_in_same_window`, `purge_preserves_unregistered_agent_in_stash_with_live_supervisor`, `purge_unregistered_stash_panes_bulk_preserves_live_supervisor`, `purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`, `alive_registered_pane_reregisters_to_live_owner`, `alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`, and `eviction_skipped_when_agent_process_active`.
+
+I added the live replay follow-up as `#jbmcol`.
+Plan: `tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md`
+<!-- agent:boundary:2a8498c3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -876,6 +901,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md

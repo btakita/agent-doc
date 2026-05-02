@@ -1011,7 +1011,40 @@ Verification:
 Artifact: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.88.zip`
 Plan: `tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md`
 Pushed: `src/agent-doc` commit `041eea2` (`fix: preserve cross-root jetbrains split layout`)
-<!-- agent:boundary:b3e9ab9f -->
+❯ We need to lock down the current behavior and outcomes...To prevent regressions. Do we have a full spec with a full truth table of inputs and outputs between editor state and tmux panes in the agent-doc tmux window and stash window?
+
+❯ For some reason, we are using tmux session 1 now, even though .agent-doc/config.toml contains `tmux_session = "0"` and tmux session 0 is alive and detached.
+
+❯ spec-test-build-install-commit-push
+### Re: sync session pin + tmux truth table — gpt-5
+
+No. Before this round the behavior was documented piecemeal, but we did not have one explicit editor-state -> tmux outcome table. I added that truth table to `src/agent-doc/specs/08-session-routing.md` and tightened the shared session-resolution contract in `src/agent-doc/specs/07-commands.md`.
+
+Root cause for the session `1` drift: `src/agent-doc/src/sync.rs` was resolving its target session as `--window` or the caller's current tmux session, so an attached session `1` could override `.agent-doc/config.toml` even while `tmux_session = "0"` was alive. `sync` now shares the same precedence contract as route:
+- explicit sync window/session context
+- live project `.agent-doc/config.toml` `tmux_session`
+- current tmux session
+- harness fallback only for route/start when no live tmux session exists
+
+What changed:
+- extracted shared `resolve_preferred_session()` in `src/agent-doc/src/route.rs`
+- switched `sync` to use that shared resolution path
+- added route + sync regressions for live-pin and dead-pin cases
+- added the editor-to-tmux truth table covering `agent-doc` and `stash` window outcomes
+- recorded the change in `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test --quiet`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `347b611` (`fix: honor pinned tmux session during sync`)
+- pushed to `origin/20260422/codex-agent-backend`
+
+Backlog:
+- no new backlog item added; the existing replay items already cover the remaining live validation surface.
+<!-- agent:boundary:fb5a9fa0 -->
 <!-- /agent:exchange -->
 
 <!--

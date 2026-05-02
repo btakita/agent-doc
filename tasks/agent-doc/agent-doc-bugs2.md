@@ -207,7 +207,26 @@ Verification:
 - `cargo install --path . --force`
 
 Note: the full `cargo test` sweep still hit one suite-order tmux fallback flake in `route_falls_back_to_existing_session`, but the exact rerun passed immediately with the same code after the failing sweep. I did not fold that separate harness-level instability into `#rbgap`; the routed fresh-restart handoff and absolute-path regressions added for this issue are passing.
-<!-- agent:boundary:c2d18cdd -->
+❯ do [#cs3intr]. spec-test-build-install-commit-push
+### Re: #cs3intr claudescore-3 busy reroute validation — gpt-5
+
+`#cs3intr` is closed. I fixed a narrower routed-Codex gating bug in `src/agent-doc` and pushed `cff5ad7` (`fix: skip shadowed codex hook proof for reroutes`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/route.rs` no longer assumes a workspace-root `.codex/hooks.json` install is reachable from every nested repo. Routed Codex submission-proof gating now stays on only when the target document can actually reach that hook install on its own upward `.codex` walk.
+- This avoids the false fail-closed shape I reproduced from `src/session-share/tasks/claudescore-3.md`, where `src/session-share/.codex` shadowed the workspace install and the live Codex pane never emitted `UserPromptSubmit` state for the reroute.
+- Added a regression for the nested-shadowing case and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification:
+- `cargo test codex_dispatch_start_tracking_enabled_accepts_workspace_hook_for_nested_agent_doc_root`
+- `cargo test codex_dispatch_start_tracking_enabled_stays_false_when_nested_codex_path_shadows_hooks`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo test` still hit two tmux/resync suite-order failures under full-suite load (`detect_wrong_window_panes_in_different_windows`, `purge_preserves_unregistered_agent_in_stash_with_live_owner`), but both passed immediately in isolated reruns:
+  - `cargo test detect_wrong_window_panes_in_different_windows -- --nocapture`
+  - `cargo test purge_preserves_unregistered_agent_in_stash_with_live_owner -- --nocapture`
+- Live replay after reinstall: `agent-doc route tasks/claudescore-3.md` no longer failed at the old "accepted in tmux but Codex never showed any routed submission proof" stage. The rerun returned only a soft acceptance warning, and a follow-up `agent-doc preflight /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md` reported `no_changes: true`, so there is no remaining prompt-bearing drift to route for that document.
+<!-- agent:boundary:c83084d2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -219,7 +238,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cs3intr] [recommended] Replay the live claudescore-3 busy reroute after the bounded interrupt recovery change. Plan: tasks/agent-doc/plan-claudescore-3-busy-reroute-interrupt-validation.md
 - [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
 - [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`

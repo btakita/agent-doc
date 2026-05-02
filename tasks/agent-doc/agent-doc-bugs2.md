@@ -446,7 +446,7 @@ Verification:
 
 Follow-up:
 - added recommended backlog item `#jboptim` for a live JetBrains replay of the cancel + `/clear` workflow.
-❯ nvim keeps on starting in the tmux pane when I try to run agent-doc from the JB plugin. Please don't try to do anything fancy. Just send the keys `agent-doc <file>` + Enter quickly. I would rather we go back to the old system than to make it nearly impossible to have `Run Agent Doc` operate correctly. It is currently very broken and nothing we do seems to fix it. Even if we do come up with an inevtibly overly complex fragile solution...any change to Codex will break it...taking days to fix. Please please please make a simpler mechanism. This path has been a disaster. Make a well-architected solution. I do not want hacks. Make this solution work with JB and VSCode.
+❯ |❯ nvim keeps on starting in the tmux pane when I try to run agent-doc from the JB plugin. Please don't try to do anything fancy. Just send the keys `agent-doc <file>` + Enter quickly. I would rather we go back to the old system than to make it nearly impossible to have `Run Agent Doc` operate correctly. It is currently very broken and nothing we do seems to fix it. Even if we do come up with an inevtibly overly complex fragile solution...any change to Codex will break it...taking days to fix. Please please please make a simpler mechanism. This path has been a disaster. Make a well-architected solution. I do not want hacks. Make this solution work with JB and VSCode.
 ```
 agent-doc route failed for tasks/buildparty-investor-demo/dev.md after 66s (exit 1): resync: stash pane %1 is registered in its own project root — skipping kill resync: stash pane %13 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1379678) in pane %19 for tasks/buildparty-investor-demo/dev.md [route] registered pane %19 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md but startup-miss 2026-05-02T06:27:47Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %19 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md → pane %19 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %19 for tasks/buildparty-investor-demo/dev.md — waiting up to 30s for a new cycle ack for pending prompt_target: Create a plan file to implement buildparty-investor-demo. [route] routed codex trigger for tasks/buildparty-investor-demo/dev.md never started a new cycle in pane %19 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: ╰─────────────────── [route] Still waiting for codex (10s)... last line: ╰─────────────────── [route] Still waiting for codex (15s)... last line: ╰─────────────────── [route] Still waiting for codex (20s)... last line: ╰─────────────────── [route] Still waiting for codex (25s)... last line: ╰─────────────────── [route] Still waiting for codex (30s)... last line: ╰─────────────────── Error: routed codex trigger for tasks/buildparty-investor-demo/dev.md was accepted in pane %19, but the fresh-restart retry never reached a dispatch-ready prompt in pane %19 after waiting 30s
 ```
@@ -472,7 +472,29 @@ Plan: `tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md`
 
 Follow-up:
 - added recommended backlog item `#edispatch` for a live JetBrains + VS Code replay of the new dispatch-only Run path.
-<!-- agent:boundary:26703d47 -->
+❯ do [#edispatch]. spec-test-build-install-commit-push
+### Re: #edispatch editor dispatch-only reroute validation — gpt-5
+
+
+I finished the implementation, spec/test, build/install, commit, and push work for `#edispatch`, but the backlog item itself remains gated because this cycle did not include the plan's manual live JetBrains + VS Code replay.
+
+What changed:
+- JetBrains `Run Agent Doc` now saves and dispatches immediately; the plugin no longer waits on typing debounce or drops repeats behind a local "route already in progress" flag.
+- VS Code `Run Agent Doc` now calls `agent-doc route --dispatch-only` directly and no longer blocks on its local in-flight guard.
+- `agent-doc route --dispatch-only` now resolves the authoritative pane and sends the bare `agent-doc <FILE>` reopen without the managed route's startup-miss gating, busy-session recovery, or cycle-ack waiting.
+- The managed route/session-check path also now treats accepted live Codex reopens and stale raw-response tails more optimistically, which removes the ghost `pending prompt_target` waits that were still surfacing around these editor reroutes.
+
+Verification:
+- `cargo test` passed (`1734` Rust unit tests plus integration/doc suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+- `npm test` passed in `src/agent-doc/editors/vscode`
+
+Commit / push:
+- `src/agent-doc`: `2b8b512` (`fix: simplify editor reroute dispatch`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:7e99ef3f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -482,7 +504,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
+- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jboptim] [recommended] Replay JetBrains Run Agent Doc on tasks/agent-doc/agent-doc-bugs2.md after the optimistic cancel + /clear reroute change. Plan: tasks/agent-doc/plan-agent-doc-bugs2-optimistic-reroute-after-clear-validation.md
 - [ ] [#jbrawack] [recommended] Replay the JetBrains Run Agent Doc reroute on src/session-share/tasks/buildparty-investor-demo/repo.md after the stale raw-response cycle-ack fix landed. Plan: tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md

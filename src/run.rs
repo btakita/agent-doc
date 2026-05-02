@@ -184,7 +184,7 @@ pub fn run(
         }
     };
 
-    let backend = agent::resolve_for_file(agent_name, agent_config, expanded_env, file)?;
+    let backend = agent::resolve_for_file(agent_name, agent_config, expanded_env, file, &fm)?;
 
     let prompt = build_prompt(run_mode, &fm, &the_diff, &content_original);
 

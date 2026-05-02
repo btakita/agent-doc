@@ -160,7 +160,7 @@ pub fn run(
     };
 
     // Resolve streaming agent
-    let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env, file)?;
+    let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env, file, &fm)?;
 
     // Build prompt
     let prompt = build_prompt(&fm, &the_diff, &content_original);
@@ -531,30 +531,15 @@ fn resolve_streaming(
     config: Option<&crate::config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
+    fm: &crate::frontmatter::Frontmatter,
 ) -> Result<Box<dyn StreamingAgent>> {
-    let cmd = config.map(|ac| ac.command.clone());
-    let mut args = config
-        .map(|ac| ac.args.clone())
-        .unwrap_or_else(agent::claude::default_base_args);
-    agent::append_workspace_access_args(name, &mut args, file);
-    let args = Some(args);
-    match name {
-        "claude" => Ok(Box::new(
-            agent::claude::Claude::new(cmd, args).with_env(env),
-        )),
-        other => {
-            if config.is_some() {
-                Ok(Box::new(
-                    agent::claude::Claude::new(cmd, args).with_env(env),
-                ))
-            } else {
-                anyhow::bail!(
-                    "Unknown streaming agent backend: {} (only claude supports streaming)",
-                    other
-                )
-            }
-        }
-    }
+    let Some(agent) = agent::resolve_streaming_for_file(name, config, env, file, fm)? else {
+        anyhow::bail!(
+            "Unknown streaming agent backend: {} (only claude and codex support streaming)",
+            name
+        );
+    };
+    Ok(agent)
 }
 
 #[cfg(test)]

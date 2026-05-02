@@ -306,11 +306,16 @@ pub fn resolve_for_file(
     config: Option<&AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
+    fm: &Frontmatter,
 ) -> Result<Box<dyn Agent>> {
     let (cmd, args) = build_backend_command(name, config, Some(file));
     match name {
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
-        "codex" => Ok(Box::new(codex::Codex::new(cmd, args).with_env(env))),
+        "codex" => Ok(Box::new(
+            codex::Codex::new(cmd, args)
+                .with_env(env)
+                .with_required_ssh_targets(fm.required_ssh_targets.clone()),
+        )),
         "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
             if config.is_some() {
@@ -327,11 +332,16 @@ pub fn resolve_streaming_for_file(
     config: Option<&AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
+    fm: &Frontmatter,
 ) -> Result<Option<Box<dyn StreamingAgent>>> {
     let (cmd, args) = build_backend_command(name, config, Some(file));
     match name {
         "claude" => Ok(Some(Box::new(claude::Claude::new(cmd, args).with_env(env)))),
-        "codex" => Ok(Some(Box::new(codex::Codex::new(cmd, args).with_env(env)))),
+        "codex" => Ok(Some(Box::new(
+            codex::Codex::new(cmd, args)
+                .with_env(env)
+                .with_required_ssh_targets(fm.required_ssh_targets.clone()),
+        ))),
         "junie" => Ok(None),
         other => {
             if config.is_some() {
@@ -516,7 +526,8 @@ mod tests {
 
     #[test]
     fn resolve_streaming_skips_non_streaming_backend() {
-        let streaming = resolve_streaming_for_file("junie", None, vec![], Path::new("doc.md"));
+        let fm = Frontmatter::default();
+        let streaming = resolve_streaming_for_file("junie", None, vec![], Path::new("doc.md"), &fm);
         assert!(streaming.is_ok());
         assert!(streaming.unwrap().is_none());
     }

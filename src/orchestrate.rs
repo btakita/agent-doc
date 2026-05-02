@@ -263,7 +263,9 @@ impl FreshAgentRunner for CliAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<String> {
-        let backend = agent::resolve_for_file(agent_name, agent_config, env, file)?;
+        let content = std::fs::read_to_string(file)?;
+        let (fm, _) = crate::frontmatter::parse(&content)?;
+        let backend = agent::resolve_for_file(agent_name, agent_config, env, file, &fm)?;
         let response = send_fresh_response(backend.as_ref(), prompt, model)?;
         Ok(response.text)
     }
@@ -277,7 +279,10 @@ impl FreshAgentRunner for CliAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
-        let Some(backend) = agent::resolve_streaming_for_file(agent_name, agent_config, env, file)?
+        let content = std::fs::read_to_string(file)?;
+        let (fm, _) = crate::frontmatter::parse(&content)?;
+        let Some(backend) =
+            agent::resolve_streaming_for_file(agent_name, agent_config, env, file, &fm)?
         else {
             return Ok(None);
         };

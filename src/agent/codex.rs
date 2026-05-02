@@ -33,6 +33,9 @@
 //! - Stderr is drained in a background thread. On non-zero exit, the iterator yields a final
 //!   `Err` with the exit status and stderr content. On zero exit with non-empty stderr, the
 //!   content is logged to the parent's stderr with an `[agent]` prefix.
+//! - When a document declares `required_ssh_targets`, the backend probes those targets before
+//!   launch and treats target-specific SSH failures in resumed Codex sessions as capability drift:
+//!   retry once with fresh `codex exec`, then fail closed if the capability still is not proven.
 //!
 //! ## Evals
 //! - parse_thread_started: extracts thread_id as session_id
@@ -59,11 +62,32 @@ pub struct Codex {
     command: String,
     base_args: Vec<String>,
     env: Vec<(String, Option<String>)>,
+    required_ssh_targets: Vec<String>,
 }
 
 struct ParsedCodexResponse {
     response: AgentResponse,
     saw_resume_capability_drift: bool,
+    required_ssh_failure: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct RequiredSshCapability {
+    match_terms: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct SshProbeOutcome {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedSshTarget {
+    direct_target: String,
+    port: Option<String>,
+    identity_file: Option<String>,
 }
 
 struct StreamProcess {
@@ -88,6 +112,74 @@ fn resume_capability_drift_notice() -> &'static str {
      `codex exec` session"
 }
 
+fn lower_trimmed_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().map(str::trim).filter(|line| !line.is_empty())
+}
+
+fn looks_like_ssh_dns_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("could not resolve hostname")
+        || lower.contains("name or service not known")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("nodename nor servname provided")
+}
+
+fn looks_like_ssh_network_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("operation not permitted")
+        || lower.contains("network is unreachable")
+        || lower.contains("no route to host")
+        || lower.contains("connection timed out")
+        || lower.contains("connection refused")
+        || lower.contains("connect to host")
+}
+
+fn looks_like_ssh_auth_failure(text: &str) -> bool {
+    text.to_ascii_lowercase().contains("permission denied")
+}
+
+fn looks_like_ssh_alias_config_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("bad configuration option")
+        || lower.contains("terminating,")
+        || lower.contains("could not include")
+        || lower.contains("include ")
+        || lower.contains("no such file or directory")
+}
+
+fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Option<String> {
+    if match_terms.is_empty() {
+        return None;
+    }
+    let lowered_terms: Vec<String> = match_terms
+        .iter()
+        .map(|term| term.trim().to_ascii_lowercase())
+        .filter(|term| !term.is_empty())
+        .collect();
+    for line in lower_trimmed_lines(text) {
+        let lower = line.to_ascii_lowercase();
+        if !lowered_terms.iter().any(|term| lower.contains(term)) {
+            continue;
+        }
+        if looks_like_ssh_dns_failure(&lower)
+            || looks_like_ssh_network_failure(&lower)
+            || looks_like_ssh_auth_failure(&lower)
+            || looks_like_ssh_alias_config_failure(&lower)
+        {
+            return Some(line.to_string());
+        }
+    }
+    None
+}
+
+fn format_required_ssh_failure(targets: &[String], detail: &str) -> String {
+    format!(
+        "required SSH capability failed for target(s) {}: {}",
+        targets.join(", "),
+        detail.trim()
+    )
+}
+
 pub(crate) fn default_base_args() -> Vec<String> {
     vec![
         "exec".to_string(),
@@ -110,12 +202,39 @@ impl Codex {
             command: command.unwrap_or_else(|| "codex".to_string()),
             base_args: base_args.unwrap_or_else(default_base_args),
             env: Vec::new(),
+            required_ssh_targets: Vec::new(),
         }
     }
 
     pub fn with_env(mut self, env: Vec<(String, Option<String>)>) -> Self {
         self.env = env;
         self
+    }
+
+    pub fn with_required_ssh_targets(mut self, targets: Vec<String>) -> Self {
+        let mut normalized = Vec::new();
+        for target in targets {
+            let trimmed = target.trim();
+            if !trimmed.is_empty() && !normalized.iter().any(|existing| existing == trimmed) {
+                normalized.push(trimmed.to_string());
+            }
+        }
+        self.required_ssh_targets = normalized;
+        self
+    }
+
+    fn apply_env_overrides(&self, cmd: &mut Command) {
+        cmd.env_remove("CODEX_CLI").env_remove("CODEX");
+        for (k, v) in &self.env {
+            match v {
+                Some(val) => {
+                    cmd.env(k, val);
+                }
+                None => {
+                    cmd.env_remove(k);
+                }
+            }
+        }
     }
 
     fn append_resume_args(cmd: &mut Command, base_args: &[String]) {
@@ -166,19 +285,184 @@ impl Codex {
             cmd.arg("-m").arg(m);
         }
 
-        cmd.env_remove("CODEX_CLI").env_remove("CODEX");
-        for (k, v) in &self.env {
-            match v {
-                Some(val) => {
-                    cmd.env(k, val);
+        self.apply_env_overrides(&mut cmd);
+
+        cmd
+    }
+
+    fn run_ssh_probe(&self, args: &[String]) -> Result<SshProbeOutcome> {
+        let mut cmd = Command::new("ssh");
+        cmd.args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        self.apply_env_overrides(&mut cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow::anyhow!("failed to run ssh probe: {e}"))?;
+        Ok(SshProbeOutcome {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+
+    fn resolve_direct_target(&self, target: &str) -> Result<Option<ResolvedSshTarget>> {
+        let outcome = self.run_ssh_probe(&["-G".to_string(), target.to_string()])?;
+        if !outcome.success {
+            return Ok(None);
+        }
+
+        let mut host: Option<String> = None;
+        let mut user: Option<String> = None;
+        let mut port: Option<String> = None;
+        let mut identity_file: Option<String> = None;
+        for line in lower_trimmed_lines(&outcome.stdout) {
+            let mut parts = line.split_whitespace();
+            let key = parts.next().unwrap_or_default();
+            let value = parts.collect::<Vec<_>>().join(" ");
+            if value.is_empty() {
+                continue;
+            }
+            match key {
+                "hostname" => host = Some(value),
+                "user" => user = Some(value),
+                "port" => port = Some(value),
+                "identityfile" => {
+                    if identity_file.is_none() {
+                        identity_file = Some(value);
+                    }
                 }
-                None => {
-                    cmd.env_remove(k);
-                }
+                _ => {}
             }
         }
 
-        cmd
+        let host = match host {
+            Some(host) => host,
+            None => return Ok(None),
+        };
+        let direct_target = match user {
+            Some(user) if !user.is_empty() => format!("{user}@{host}"),
+            _ => host,
+        };
+        Ok(Some(ResolvedSshTarget {
+            direct_target,
+            port,
+            identity_file,
+        }))
+    }
+
+    fn prove_required_ssh_capability(&self) -> Result<Option<RequiredSshCapability>> {
+        if self.required_ssh_targets.is_empty() {
+            return Ok(None);
+        }
+
+        let mut match_terms = Vec::new();
+        for target in &self.required_ssh_targets {
+            match_terms.push(target.clone());
+
+            let alias_args = vec![
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                "-o".to_string(),
+                "ConnectTimeout=5".to_string(),
+                target.clone(),
+                "true".to_string(),
+            ];
+            let alias = self.run_ssh_probe(&alias_args)?;
+            let resolved = self.resolve_direct_target(target)?;
+            let direct = if let Some(resolved) = &resolved {
+                let mut args = vec![
+                    "-F".to_string(),
+                    "/dev/null".to_string(),
+                    "-o".to_string(),
+                    "BatchMode=yes".to_string(),
+                    "-o".to_string(),
+                    "ConnectTimeout=5".to_string(),
+                ];
+                if let Some(port) = &resolved.port {
+                    args.push("-p".to_string());
+                    args.push(port.clone());
+                }
+                if let Some(identity_file) = &resolved.identity_file {
+                    args.push("-i".to_string());
+                    args.push(identity_file.clone());
+                    args.push("-o".to_string());
+                    args.push("IdentitiesOnly=yes".to_string());
+                }
+                args.push(resolved.direct_target.clone());
+                args.push("true".to_string());
+                match_terms.push(resolved.direct_target.clone());
+                if let Some((_user, host)) = resolved.direct_target.split_once('@') {
+                    match_terms.push(host.to_string());
+                }
+                Some((resolved.direct_target.clone(), self.run_ssh_probe(&args)?))
+            } else {
+                None
+            };
+
+            if alias.success {
+                continue;
+            }
+
+            let alias_detail = if !alias.stderr.trim().is_empty() {
+                alias.stderr.trim()
+            } else if !alias.stdout.trim().is_empty() {
+                alias.stdout.trim()
+            } else {
+                "unknown ssh alias failure"
+            };
+            if let Some((direct_target, direct_outcome)) = &direct
+                && direct_outcome.success
+            {
+                anyhow::bail!(
+                    "required SSH capability failed for target `{}`: alias/config path is degraded (`{}`), \
+                     but direct host probe `{}` succeeded. Fix the SSH alias/config before trusting this Codex session.",
+                    target,
+                    alias_detail,
+                    direct_target
+                );
+            }
+
+            let detail = if let Some((direct_target, direct_outcome)) = &direct {
+                let direct_text = if !direct_outcome.stderr.trim().is_empty() {
+                    direct_outcome.stderr.trim()
+                } else if !direct_outcome.stdout.trim().is_empty() {
+                    direct_outcome.stdout.trim()
+                } else {
+                    "unknown direct ssh failure"
+                };
+                let classification = if looks_like_ssh_dns_failure(direct_text) {
+                    "DNS resolution failed"
+                } else if looks_like_ssh_network_failure(direct_text) {
+                    "outbound SSH/network access failed"
+                } else if looks_like_ssh_auth_failure(direct_text) {
+                    "SSH authentication failed"
+                } else if looks_like_ssh_alias_config_failure(alias_detail) {
+                    "SSH alias/config resolution failed"
+                } else {
+                    "SSH capability could not be proven"
+                };
+                format!(
+                    "{classification} for `{}` via `{}`: {}",
+                    target, direct_target, direct_text
+                )
+            } else if looks_like_ssh_alias_config_failure(alias_detail)
+                || looks_like_ssh_dns_failure(alias_detail)
+            {
+                format!(
+                    "SSH alias/config resolution failed for `{}`: {}",
+                    target, alias_detail
+                )
+            } else {
+                format!(
+                    "SSH capability could not be proven for `{}`: {}",
+                    target, alias_detail
+                )
+            };
+            anyhow::bail!("{detail}");
+        }
+
+        Ok(Some(RequiredSshCapability { match_terms }))
     }
 
     fn send_once(
@@ -186,6 +470,7 @@ impl Codex {
         prompt: &str,
         session_id: Option<&str>,
         model: Option<&str>,
+        required_ssh_match_terms: &[String],
     ) -> Result<ParsedCodexResponse> {
         let mut cmd = self.build_command(session_id, false, model);
         let output = cmd
@@ -210,6 +495,7 @@ impl Codex {
         let mut thread_id: Option<String> = None;
         let mut response_text = String::new();
         let mut saw_resume_capability_drift = false;
+        let mut required_ssh_failure = None;
 
         for line in raw.lines() {
             if line.trim().is_empty() {
@@ -217,6 +503,10 @@ impl Codex {
             }
             if looks_like_local_browser_cdp_permission_denied(line) {
                 saw_resume_capability_drift = true;
+            }
+            if required_ssh_failure.is_none() {
+                required_ssh_failure =
+                    transcript_has_required_ssh_failure(line, required_ssh_match_terms);
             }
             let json: serde_json::Value = match serde_json::from_str(line) {
                 Ok(v) => v,
@@ -258,6 +548,7 @@ impl Codex {
                 session_id: thread_id,
             },
             saw_resume_capability_drift,
+            required_ssh_failure,
         })
     }
 
@@ -385,12 +676,36 @@ impl Agent for Codex {
         model: Option<&str>,
     ) -> Result<AgentResponse> {
         let _ = fork;
-        let mut parsed = self.send_once(prompt, session_id, model)?;
-        if session_id.is_some() && parsed.saw_resume_capability_drift {
-            eprintln!("{}", resume_capability_drift_notice());
-            parsed = self.send_once(prompt, None, model).map_err(|e| {
+        let required_ssh = self.prove_required_ssh_capability()?;
+        let required_ssh_match_terms = required_ssh
+            .as_ref()
+            .map(|capability| capability.match_terms.as_slice())
+            .unwrap_or(&[]);
+        let mut parsed =
+            self.send_once(prompt, session_id, model, required_ssh_match_terms)?;
+        if session_id.is_some()
+            && (parsed.saw_resume_capability_drift || parsed.required_ssh_failure.is_some())
+        {
+            if parsed.saw_resume_capability_drift {
+                eprintln!("{}", resume_capability_drift_notice());
+            } else if let Some(detail) = parsed.required_ssh_failure.as_deref() {
+                eprintln!(
+                    "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
+                    self.required_ssh_targets.join(", "),
+                    detail
+                );
+            }
+            parsed = self
+                .send_once(prompt, None, model, required_ssh_match_terms)
+                .map_err(|e| {
                 anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
             })?;
+        }
+        if let Some(detail) = parsed.required_ssh_failure.as_deref() {
+            anyhow::bail!(format_required_ssh_failure(
+                &self.required_ssh_targets,
+                detail
+            ));
         }
 
         if parsed.response.text.is_empty() {
@@ -410,6 +725,7 @@ impl StreamingAgent for Codex {
         model: Option<&str>,
     ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>> {
         let _ = fork;
+        let required_ssh = self.prove_required_ssh_capability()?;
         let process = self.spawn_stream_process(prompt, session_id, model)?;
 
         Ok(Box::new(CodexStreamIterator {
@@ -425,6 +741,10 @@ impl StreamingAgent for Codex {
             allow_resume_capability_retry: session_id.is_some(),
             retried_fresh: false,
             yielded_agent_content: false,
+            required_ssh_match_terms: required_ssh
+                .map(|capability| capability.match_terms)
+                .unwrap_or_default(),
+            required_ssh_targets: self.required_ssh_targets.clone(),
         }))
     }
 }
@@ -442,6 +762,8 @@ struct CodexStreamIterator {
     allow_resume_capability_retry: bool,
     retried_fresh: bool,
     yielded_agent_content: bool,
+    required_ssh_match_terms: Vec<String>,
+    required_ssh_targets: Vec<String>,
 }
 
 impl CodexStreamIterator {
@@ -502,6 +824,30 @@ impl Iterator for CodexStreamIterator {
                         }
                         continue;
                     }
+                    if let Some(detail) =
+                        transcript_has_required_ssh_failure(&line, &self.required_ssh_match_terms)
+                    {
+                        if self.allow_resume_capability_retry
+                            && !self.retried_fresh
+                            && !self.yielded_agent_content
+                        {
+                            eprintln!(
+                                "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
+                                self.required_ssh_targets.join(", "),
+                                detail
+                            );
+                            if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                                self.done = true;
+                                return Some(Err(e));
+                            }
+                            continue;
+                        }
+                        self.done = true;
+                        return Some(Err(anyhow::anyhow!(format_required_ssh_failure(
+                            &self.required_ssh_targets,
+                            &detail
+                        ))));
+                    }
                     match parse_codex_line(&line) {
                         Ok(mut chunk) => {
                             if chunk.session_id.is_some() && !chunk.is_final {
@@ -548,6 +894,30 @@ impl Iterator for CodexStreamIterator {
                             }
                             continue;
                         }
+                        if let Some(detail) =
+                            transcript_has_required_ssh_failure(&stderr, &self.required_ssh_match_terms)
+                        {
+                            if self.allow_resume_capability_retry
+                                && !self.retried_fresh
+                                && !self.yielded_agent_content
+                            {
+                                eprintln!(
+                                    "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
+                                    self.required_ssh_targets.join(", "),
+                                    detail
+                                );
+                                if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                                    self.done = true;
+                                    return Some(Err(e));
+                                }
+                                continue;
+                            }
+                            self.done = true;
+                            return Some(Err(anyhow::anyhow!(format_required_ssh_failure(
+                                &self.required_ssh_targets,
+                                &detail
+                            ))));
+                        }
                         self.done = true;
                         let msg = if stderr.trim().is_empty() {
                             format!("codex subprocess exited with {status}")
@@ -583,6 +953,17 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         (dir, path.to_string_lossy().into_owned())
+    }
+
+    fn write_fake_ssh_script(script: &str) -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ssh");
+        let dir_path = dir.path().to_string_lossy().into_owned();
+        fs::write(&path, script).unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+        (dir, dir_path)
     }
 
     #[test]
@@ -954,6 +1335,38 @@ mod tests {
     }
 
     #[test]
+    fn required_ssh_capability_reports_alias_config_failure_when_direct_path_still_works() {
+        let (_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+case "$*" in
+  *monsterrodholders-server*)
+    echo "ssh: Could not resolve hostname monsterrodholders-server: Name or service not known" >&2
+    exit 255
+    ;;
+  *50.28.2.199*)
+    exit 0
+    ;;
+esac
+exit 0
+"#,
+        );
+        let codex = Codex::new(None, None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        let err = codex.prove_required_ssh_capability().unwrap_err().to_string();
+        assert!(err.contains("monsterrodholders-server"), "got: {err}");
+        assert!(err.contains("direct host probe"), "got: {err}");
+    }
+
+    #[test]
     fn send_retries_fresh_exec_after_resume_capability_drift_signal() {
         let (_dir, script) = write_fake_codex_script(
             r#"#!/bin/sh
@@ -980,6 +1393,45 @@ fi
     }
 
     #[test]
+    fn send_retries_fresh_exec_after_required_ssh_resume_drift_signal() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"ssh: connect to host 50.28.2.199 port 22: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        let response = codex
+            .send("prompt", Some("resume-123"), false, None)
+            .unwrap();
+
+        assert_eq!(response.text, "fresh response");
+        assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
+    }
+
+    #[test]
     fn streaming_retries_fresh_exec_before_yielding_stale_resume_response() {
         let (_dir, script) = write_fake_codex_script(
             r#"#!/bin/sh
@@ -996,6 +1448,51 @@ fi
 "#,
         );
         let codex = Codex::new(Some(script), None);
+
+        let chunks: Vec<_> = codex
+            .send_streaming("prompt", Some("resume-123"), false, None)
+            .unwrap()
+            .collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap().text, "fresh response");
+        assert!(chunks[1].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[1].as_ref().unwrap().session_id.as_deref(),
+            Some("fresh-thread")
+        );
+    }
+
+    #[test]
+    fn streaming_retries_fresh_exec_after_required_ssh_resume_drift_signal() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"ssh: connect to host 50.28.2.199 port 22: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
 
         let chunks: Vec<_> = codex
             .send_streaming("prompt", Some("resume-123"), false, None)

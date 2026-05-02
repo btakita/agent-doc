@@ -322,6 +322,12 @@ pub struct Frontmatter {
     /// `disabled` forces it on for the child session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_network_access: Option<CodexNetworkAccess>,
+    /// Required SSH targets that must be reachable for Codex-backed work to
+    /// proceed. When present, agent-doc probes these targets before trusting a
+    /// resumed Codex session and fails closed when the capability cannot be
+    /// proven.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_ssh_targets: Vec<String>,
     /// When true, passes `--no-mcp` to the `claude` process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_mcp: Option<bool>,
@@ -653,6 +659,11 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                         serde_yaml::from_str::<CodexNetworkAccess>(&format!("\"{}\"", s))
                 {
                     fm.codex_network_access = Some(mode);
+                }
+            }
+            "required_ssh_targets" => {
+                if let Ok(targets) = serde_yaml::from_value::<Vec<String>>(value.clone()) {
+                    fm.required_ssh_targets = targets;
                 }
             }
             "queue_active" => {
@@ -999,6 +1010,7 @@ mod tests {
             claude_args: None,
             codex_args: None,
             codex_network_access: None,
+            required_ssh_targets: Vec::new(),
             no_mcp: None,
             enable_tool_search: None,
             debounce_ms: None,
@@ -1537,7 +1549,7 @@ mod tests {
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - monsterrodholders-server\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -1546,6 +1558,10 @@ mod tests {
         );
         assert_eq!(fm.codex_args.as_deref(), Some("-s danger-full-access"));
         assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Enabled));
+        assert_eq!(
+            fm.required_ssh_targets,
+            vec!["monsterrodholders-server".to_string()]
+        );
     }
 
     #[test]
@@ -1554,6 +1570,7 @@ mod tests {
             agent_args: Some("--json -s workspace-write".to_string()),
             codex_args: Some("-s danger-full-access".to_string()),
             codex_network_access: Some(CodexNetworkAccess::Enabled),
+            required_ssh_targets: vec!["monsterrodholders-server".to_string()],
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
@@ -1561,6 +1578,10 @@ mod tests {
         assert_eq!(fm2.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert_eq!(fm2.codex_args.as_deref(), Some("-s danger-full-access"));
         assert_eq!(fm2.codex_network_access, Some(CodexNetworkAccess::Enabled));
+        assert_eq!(
+            fm2.required_ssh_targets,
+            vec!["monsterrodholders-server".to_string()]
+        );
     }
 
     #[test]
@@ -1588,6 +1609,24 @@ mod tests {
         let result = merge_fields(content, "codex_network_access: disabled").unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Disabled));
+    }
+
+    #[test]
+    fn merge_fields_required_ssh_targets() {
+        let content = "Body\n";
+        let result = merge_fields(
+            content,
+            "required_ssh_targets:\n  - monsterrodholders-server\n  - root@50.28.2.199",
+        )
+        .unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(
+            fm.required_ssh_targets,
+            vec![
+                "monsterrodholders-server".to_string(),
+                "root@50.28.2.199".to_string(),
+            ]
+        );
     }
 
     // --- resolve_harness_model tests ---

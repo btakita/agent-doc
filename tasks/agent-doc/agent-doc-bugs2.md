@@ -501,7 +501,21 @@ That is the direction I implemented in this batch. The editor hotkey path is now
 The heavier startup-miss, busy-pane, and cycle-ack recovery logic stays on the managed CLI route path instead of the editor trigger path. So the editor integrations are no longer trying to outsmart a canceled or drifted tmux session before they send the reopen.
 
 I did not run the manual live JB/VS Code replay in this cycle, which is why `#edispatch` is still gated instead of closed.
-<!-- agent:boundary:60618a53 -->
+❯ do [#jboptim]. spec-test-build-install-commit-push
+### Re: #jboptim optimistic reroute replay — gpt-5
+
+`#jboptim` is closed. The live replay objective is satisfied by the routed cycle that already hit the optimistic busy-pane path for this same document: `.agent-doc/logs/ops.log` recorded `route_busy_existing_pane_optimistic_dispatch`, then `route_dispatch_start_proven`, then `route_cycle_start_acknowledged` for `do [#jboptim]. spec-test-build-install-commit-push`.
+
+Plan: `tasks/agent-doc/plan-agent-doc-bugs2-optimistic-reroute-after-clear-validation.md`
+
+What I verified this cycle:
+- `cargo test` in `src/agent-doc` reached the relevant route coverage green, including the dispatch-only / optimistic busy-pane cases, but the full suite finished with 1 unrelated failure: `sync::tests::register_synced_files_prunes_cross_root_duplicate_pane_binding`. Re-running that exact test in isolation passed, so the remaining issue is a full-suite `sync` flake rather than a `#jboptim` replay failure.
+- `cargo build` passed.
+- `cargo install --path . --force` passed.
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`.
+
+No new source/spec/plugin edits were required after the replay evidence, so there was nothing additional to commit or push beyond the existing `2b8b512` implementation.
+<!-- agent:boundary:4e695b98 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -515,7 +529,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#jboptim] [recommended] Replay JetBrains Run Agent Doc on tasks/agent-doc/agent-doc-bugs2.md after the optimistic cancel + /clear reroute change. Plan: tasks/agent-doc/plan-agent-doc-bugs2-optimistic-reroute-after-clear-validation.md
 - [ ] [#jbrawack] [recommended] Replay the JetBrains Run Agent Doc reroute on src/session-share/tasks/buildparty-investor-demo/repo.md after the stale raw-response cycle-ack fix landed. Plan: tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

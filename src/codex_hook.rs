@@ -265,7 +265,7 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
     let mut note = String::new();
     match payload {
         crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            crate::repair::save_pending(file, response)?;
+            crate::repair::save_pending(file, response.as_ref())?;
             crate::ops_log::log_op(file, "codex_stop_capture_saved");
             note.push_str(
                 " The latest assistant text was captured into the pending/capture ledger before auto-close.",
@@ -307,7 +307,7 @@ fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
         crate::replay_guard::ReplayPayloadClassification::Empty => {
             " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string()
         }
-        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response) {
+        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response.as_ref()) {
             Ok(()) => {
                 crate::ops_log::log_op(file, "codex_stop_capture_saved");
                 " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
@@ -888,6 +888,63 @@ mod tests {
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from visible response."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_auto_closes_patch_payload_with_safe_leading_commentary() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ What are some #next-steps?\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        init_git_repo(dir.path(), &doc);
+        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let payload = concat!(
+            "Reviewing the current plan and repo conventions so I can turn `#next-steps` into concrete backlog items in the session document.\n",
+            "I have the plan context. Next I’m checking how this repo formats backlog items so the patch matches existing session-doc conventions instead of inventing a new shape.\n\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: #next-steps — gpt-5\n\n",
+            "Added prioritized follow-up items.\n",
+            "<!-- /patch:exchange -->\n\n",
+            "<!-- patch:backlog -->\n",
+            "- [ ] [#bpcontract] Write the contract first.\n",
+            "<!-- /patch:backlog -->\n"
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: payload.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: #next-steps — gpt-5"));
+        assert!(content.contains("[#bpcontract] Write the contract first."));
+        assert!(
+            !content.contains("Reviewing the current plan and repo conventions"),
+            "leading commentary should be stripped from the replayed closeout"
+        );
         match crate::session_check::inspect(&doc).unwrap() {
             crate::session_check::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));

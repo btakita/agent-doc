@@ -862,7 +862,7 @@ On the JetBrains side: you were right, the plugin was still too smart. It was re
 On the recent `ops.log` activity: the root and submodule logs were mostly showing routed reopen events (`route_dispatch_only_sent`) and existing startup-miss / recovery provenance, not a clean binary-owned passive-sync decision trail. That is consistent with the root cause here: too much of the passive sync policy was happening in Kotlin before `agent-doc sync` got to own and log the decision. Verification passed with `./gradlew test buildPlugin`, and the new build artifact is `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`.
 
 Backlog unchanged. The existing `#jbsubroot` / `#jbptrk` items are still the right live replay follow-ups for validating this against the original nested-root repro.
-❯ When the JB Plugin runs `Sync: --col /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [focus: /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md]`, the tmux window shows 1 pane. 2 should be shown with monsterrodholders.md on the rigth side and in focus.
+❯ When the JB Plugin runs `Sync: --col /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [focus: /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md]`, the tmux window shows 1 pane. 2 should be shown with monsterrodholders.md on the right side and in focus.
 ### Re: JetBrains mixed-split sync collapsed to one pane — gpt-5
 
 I fixed the layout-collapse path behind this repro. The issue was split across both sides of the handoff:
@@ -887,7 +887,11 @@ Verification:
 
 I added the live replay follow-up as `#jbmcol`.
 Plan: `tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md`
-<!-- agent:boundary:2a8498c3 -->
+### Re: wording correction and expected layout — gpt-5
+
+Yes: the intended result for this repro is two tmux panes, with `src/boost-client/tasks/monsterrodholders.md` on the right and in focus after sync. The fix above is specifically aimed at that mixed-split shape by preserving the empty sibling column long enough for column memory to restore the remembered pane.
+
+<!-- agent:boundary:81a681d7 -->
 <!-- /agent:exchange -->
 
 <!--

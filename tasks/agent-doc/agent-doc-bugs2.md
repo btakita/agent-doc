@@ -515,13 +515,25 @@ What I verified this cycle:
 - `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`.
 
 No new source/spec/plugin edits were required after the replay evidence, so there was nothing additional to commit or push beyond the existing `2b8b512` implementation.
-<!-- agent:boundary:4e695b98 -->
+❯ Please remove this notification from the JB Plugin
+❯ ![img_1.png](img_1.png)
+### Re: JetBrains routing notification — gpt-5
+
+I removed the blue in-flight `Routing ...` balloon from the JetBrains plugin. `Run Agent Doc` now keeps route progress/success in inline editor hints only, while persistent error balloons remain unchanged.
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` no longer creates the progress notification during `Run Agent Doc` dispatch.
+- `editors/jetbrains/SPEC.md` and `editors/jetbrains/AGENTS.md` now document the inline-hint-only behavior.
+
+Verification:
+- `cargo test` passed (`1734` Rust tests plus integration/doc suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+<!-- agent:boundary:def26ece -->
 <!-- /agent:exchange -->
 
 <!--
-Please remove this notification from the JB Plugin
-![img_1.png](img_1.png)
----
 Add a Plugin Editor command to clear the context
 -->
 

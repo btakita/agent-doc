@@ -167,6 +167,38 @@ fn enforce_cross_session_claim(
     }
 }
 
+fn normalize_claim_path(path: &Path) -> std::path::PathBuf {
+    let resolved = crate::git::resolve_absolute_file_path(path);
+    resolved.canonicalize().unwrap_or(resolved)
+}
+
+fn registry_entry_matches_claimed_document(
+    file: &Path,
+    registry_key: &str,
+    entry: &sessions::SessionEntry,
+    session_id: &str,
+) -> bool {
+    if entry.session_id == session_id {
+        return true;
+    }
+    if normalize_claim_path(Path::new(registry_key)) == file {
+        return true;
+    }
+    if entry.file.is_empty() {
+        return false;
+    }
+    normalize_claim_path(Path::new(&entry.file)) == file
+}
+
+fn claimed_session_label(registry_key: &str, entry: &sessions::SessionEntry) -> String {
+    let owner = if entry.session_id.is_empty() {
+        registry_key
+    } else {
+        entry.session_id.as_str()
+    };
+    owner.chars().take(8).collect()
+}
+
 pub fn run(
     file: &Path,
     position: Option<&str>,
@@ -276,13 +308,16 @@ pub fn run(
     let file_str = file.to_string_lossy();
     {
         let registry = sessions::load().unwrap_or_default();
-        for (existing_id, entry) in &registry {
-            if entry.pane == pane_id && *existing_id != session_id && tmux.pane_alive(&pane_id) {
+        for (registry_key, entry) in &registry {
+            let same_document =
+                registry_entry_matches_claimed_document(file, registry_key, entry, &session_id);
+            if entry.pane == pane_id && !same_document && tmux.pane_alive(&pane_id) {
+                let existing_label = claimed_session_label(registry_key, entry);
                 if force {
                     eprintln!(
                         "warning: overwriting claim on pane {} (was {} → {})",
                         pane_id,
-                        &existing_id[..8],
+                        existing_label,
                         &session_id[..8]
                     );
                 } else {
@@ -290,9 +325,7 @@ pub fn run(
                     // This enforces the Binding invariant: never commandeer.
                     eprintln!(
                         "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
-                        pane_id,
-                        &existing_id[..8],
-                        entry.file
+                        pane_id, existing_label, entry.file
                     );
                     route::provision_pane(&tmux, file, &session_id, &file_str, None, &[])
                         .map(|_| ())?;
@@ -504,7 +537,10 @@ fn validate_file_claim(file: &Path) {
     // Find entries pointing to this file with dead panes
     let stale_keys: Vec<(String, String)> = registry
         .iter()
-        .filter(|(_, entry)| entry.file == file_str.as_ref() && !tmux.pane_alive(&entry.pane))
+        .filter(|(registry_key, entry)| {
+            registry_entry_matches_claimed_document(file, registry_key, entry, "")
+                && !tmux.pane_alive(&entry.pane)
+        })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();
 
@@ -635,6 +671,7 @@ fn find_alive_window_in_registry(
 mod tests {
     use super::*;
     use crate::sessions::{SessionEntry, SessionRegistry};
+    use tempfile::tempdir;
 
     fn make_entry(cwd: &str, window: &str) -> SessionEntry {
         SessionEntry {
@@ -722,6 +759,65 @@ mod tests {
         let content = "---\nagent_doc_session: abc\n---\n\nJust text.\n";
         let result = strip_exchange_content(content);
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn registry_entry_matches_claimed_document_for_normalized_registry_key() {
+        let tmp = tempdir().unwrap();
+        let file = tmp.path().join("monsterrodholders.md");
+        std::fs::write(&file, "# test\n").unwrap();
+        let file = file.canonicalize().unwrap();
+        let entry = SessionEntry {
+            pane: "%75".to_string(),
+            pid: 1,
+            cwd: tmp.path().to_string_lossy().to_string(),
+            started: "2026-05-02T23:44:31Z".to_string(),
+            session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
+            file: "tasks/monsterrodholders.md".to_string(),
+            window: "@73".to_string(),
+            supervisor_instance_id: String::new(),
+        };
+
+        assert!(registry_entry_matches_claimed_document(
+            &file,
+            file.to_string_lossy().as_ref(),
+            &entry,
+            "different-session-id",
+        ));
+    }
+
+    #[test]
+    fn registry_entry_matches_claimed_document_for_relative_entry_file() {
+        let tmp = tempdir().unwrap();
+        let old_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let result = {
+            let file = tmp.path().join("tasks/monsterrodholders.md");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "# test\n").unwrap();
+            let file = file.canonicalize().unwrap();
+            let entry = SessionEntry {
+                pane: "%75".to_string(),
+                pid: 1,
+                cwd: tmp.path().to_string_lossy().to_string(),
+                started: "2026-05-02T23:44:31Z".to_string(),
+                session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
+                file: "tasks/monsterrodholders.md".to_string(),
+                window: "@73".to_string(),
+                supervisor_instance_id: String::new(),
+            };
+
+            registry_entry_matches_claimed_document(
+                &file,
+                "legacy-registry-key",
+                &entry,
+                "different-session-id",
+            )
+        };
+
+        std::env::set_current_dir(old_cwd).unwrap();
+        assert!(result);
     }
 
     #[test]

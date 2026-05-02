@@ -895,7 +895,29 @@ Do we need to bump the JB plugin and install for testing?
 
 No extra bump is needed for this exact round: the plugin is already at `0.2.87`, and `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip` already exists. For IDE testing, yes, install or reinstall that zip; because the Kotlin/plugin classes changed structurally, the local guidance is uninstall -> restart -> install -> restart. If we make another plugin change after this and want a fresh installable artifact distinct from the current `0.2.87`, then we should bump again before the next test build.
 
-<!-- agent:boundary:35d093c6 -->
+❯ Please read the specs on how the sync command works. When you caused `--no-autostart` to be added to the sync command from [#jbcap] and reverting back...the regressions starting occurring. Please take a comprehensive look at the sync command + the tmux pane window + layout.We are also in the incorrect tmux window. We should be in the `agent-doc` window, but it is not present. Instead we have the stand window which has the active tmux panes. The stash window should only show the active tmux panes.
+### Re: sync command, tmux window/layout regression — gpt-5
+
+I traced the regression to two concrete paths.
+
+- `sync` with no `--window` was still defaulting to the currently focused tmux window. In the live broken state, session `0` had only `1:zsh` and `2:stash`, while `.agent-doc/sessions.json` still bound this document to pane `%43` in window `@37`. `/tmp/agent-doc-sync.log` showed `window=None` followed by reconciliation into `target_window=@37`, so sync was literally treating `stash` as the layout target instead of restoring/scoping to `agent-doc`.
+- The JetBrains automatic `selectionChanged` path was still downgrading mixed splits to `agent-doc focus ...` instead of reporting the actual split with an empty sibling column. That meant the `[empty | monsterrodholders.md]` case never emitted the placeholder `--col` shape that `sync` needs to restore the remembered sibling pane.
+
+I fixed both sides.
+
+- In `src/agent-doc/src/sync.rs`, windowless sync now resolves to the current tmux session's `agent-doc` window contract, runs `repair_layout` even when the plugin omits `--window`, and re-resolves the visible `agent-doc` window id after repair instead of inheriting whatever window is currently focused.
+- In `editors/jetbrains/.../EditorTabSyncListener.kt`, automatic sync no longer special-cases mixed splits into `focus`; it always reports the layout through `sync --col ...`, preserving empty-column placeholders so the Rust side can restore the left/right pane identity.
+- I updated `specs/07-commands.md` to make the binary-owned windowless-sync rule explicit.
+
+Verification passed:
+
+- `cargo test` (`1742` unit tests plus integration suites)
+- `cargo build`
+- `cargo install --path . --force`
+- `./gradlew test buildPlugin`
+
+I did not bump the JetBrains plugin version in this round. The rebuilt installable artifact remains `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`.
+<!-- agent:boundary:17a96080 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -979,7 +979,39 @@ Verification:
 
 Build artifact:
 - `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`
-<!-- agent:boundary:1840ee82 -->
+❯ Look at /home/brian/work/btakita/agent-loop/tmp/screenshot.png
+❯ Notice that monsterrodholders.md is selected on the right editor side.
+❯ However, the agent-doc tmux window only has 1 pane.
+
+❯ Then, suddenly the tmux panes closed. And I saw this message.
+```
+                                                                                                   agent-loop 01:21:20
+❯ agent-doc resync --fix
+Removed 1 stale session(s):
+  tasks/agent-doc/agent-doc-bugs2.md (pane %37 removed)
+
+No session/process issues detected.
+resync: purged stash window @26 (all panes idle)
+resync: stash pane %26 (1) is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
+```
+
+❯ spec-test-build-install-commit-push
+### Re: cross-root JetBrains split collapse / stale-session cleanup — gpt-5
+
+I reproduced the collapse from the screenshot and sync log. The JetBrains plugin was filtering visible markdown files to the focused project root, so a workspace-root session doc split plus a nested `src/boost-client/.../monsterrodholders.md` split sometimes reported a one-column layout. When that single-column sync reached tmux, `agent-doc` correctly treated the other pane as stale and stashed it, which matches the `resync --fix` output you captured.
+
+I fixed the plugin so both sync and terminal routing preserve cross-root visible markdown files instead of dropping them when focus moves into a nested module. The normalization path now keeps cross-root files as absolute paths, preserves empty `--col` placeholders for mixed layouts, and uses the same layout normalization for route layout args. I added regression coverage for visible-file collection, cross-root normalization, and mixed-layout route args, updated the plugin specs, and bumped the JetBrains plugin to `0.2.88`.
+
+Verification:
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Artifact: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.88.zip`
+Plan: `tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md`
+Pushed: `src/agent-doc` commit `041eea2` (`fix: preserve cross-root jetbrains split layout`)
+<!-- agent:boundary:b3e9ab9f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -993,6 +1025,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

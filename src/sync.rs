@@ -2574,6 +2574,7 @@ pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<S
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum AssociatedPaneSource {
     Registered,
+    SessionLog,
     ProcessTree,
     SupervisorPid,
 }
@@ -2582,6 +2583,7 @@ impl AssociatedPaneSource {
     fn as_str(&self) -> &'static str {
         match self {
             Self::Registered => "registered",
+            Self::SessionLog => "session-log",
             Self::ProcessTree => "process-tree",
             Self::SupervisorPid => "supervisor-pid",
         }
@@ -2709,12 +2711,16 @@ pub(crate) fn find_associated_panes(
     let registered =
         lookup_registry_entry_for_file_session(file, session_id).map(|entry| entry.pane);
     let supervisor_match = find_alive_pane_via_supervisor_pid(tmux, file, session_id);
+    let session_log_match = find_alive_pane_via_open_session_log(tmux, file, session_id, None, false);
 
     let mut associated: Vec<AssociatedPaneCandidate> = inventory
         .into_iter()
         .filter_map(|mut candidate| {
             if registered.as_deref() == Some(candidate.pane_id.as_str()) {
                 candidate.sources.insert(AssociatedPaneSource::Registered);
+            }
+            if session_log_match.as_deref() == Some(candidate.pane_id.as_str()) {
+                candidate.sources.insert(AssociatedPaneSource::SessionLog);
             }
             if process_tree_matches.contains(&candidate.pane_id) {
                 candidate.sources.insert(AssociatedPaneSource::ProcessTree);
@@ -2726,6 +2732,9 @@ pub(crate) fn find_associated_panes(
             }
             let proves_live_ownership = candidate
                 .sources
+                .contains(&AssociatedPaneSource::SessionLog)
+                || candidate
+                    .sources
                 .contains(&AssociatedPaneSource::ProcessTree)
                 || candidate
                     .sources
@@ -3039,6 +3048,9 @@ fn find_live_owner_pane_excluding_with_logging(
             find_alive_pane_via_supervisor_pid(tmux, file, session_id)
                 .filter(|pane| excluded_pane != Some(pane.as_str()))
         })
+        .or_else(|| {
+            find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3320,6 +3332,40 @@ fn find_alive_pane_via_supervisor_pid(
     }
 
     None
+}
+
+fn find_alive_pane_via_open_session_log(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    log_hits: bool,
+) -> Option<String> {
+    let status = crate::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten()?;
+    if !status.latest_session_open() {
+        return None;
+    }
+    let pane_id = status.latest_start_pane.as_deref()?;
+    if excluded_pane == Some(pane_id) || !tmux.pane_alive(pane_id) {
+        return None;
+    }
+
+    let project_root = crate::snapshot::find_project_root(file)?;
+    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
+        return None;
+    }
+
+    if log_hits {
+        eprintln!(
+            "[sync] recovered live pane {} for session {} via latest open session-log owner",
+            pane_id,
+            &session_id[..std::cmp::min(8, session_id.len())],
+        );
+    }
+
+    Some(pane_id.to_string())
 }
 
 /// Check if a process (by PID) is running agent-doc for a specific file.
@@ -3721,6 +3767,84 @@ mod tests {
             }
             other => panic!("expected ambiguous resolution, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn find_live_owner_pane_reuses_latest_open_session_log_owner() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-log-owner\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-session-log-owner");
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/session-log-owner.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=session-log-owner\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let owner = find_live_owner_pane(&iso, &doc, "session-log-owner");
+        assert_eq!(owner.as_deref(), Some(owner_pane.as_str()));
+    }
+
+    #[test]
+    fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: associated-session-log\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-associated-session-log-owner");
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/associated-session-log.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=associated-session-log\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let recovery = recover_existing_associated_pane(
+            &iso,
+            &doc,
+            "associated-session-log",
+            Some("test"),
+            None,
+            &["tasks/owned.md".to_string()],
+            &RefCell::new(std::collections::HashMap::new()),
+        );
+
+        assert!(matches!(
+            recovery,
+            ExistingAssociatedPaneRecovery::Recovered(ref pane) if pane == &owner_pane
+        ));
+        let entry = lookup_registry_entry_for_file_session(&doc, "associated-session-log")
+            .expect("recovered pane should be registered in the document registry");
+        assert_eq!(entry.pane, owner_pane);
+        let candidates = find_associated_panes(&iso, &doc, "associated-session-log");
+        assert_eq!(candidates.len(), 1);
+        assert!(
+            candidates[0]
+                .sources
+                .contains(&AssociatedPaneSource::SessionLog),
+            "expected session-log ownership proof: {:?}",
+            candidates[0].sources
+        );
     }
 
     #[test]

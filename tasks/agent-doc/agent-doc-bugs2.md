@@ -419,13 +419,38 @@ Full-suite note:
 
 Follow-up:
 - added recommended backlog item `#jbrawack` for a live JetBrains replay against `src/session-share/tasks/buildparty-investor-demo/repo.md`.
-<!-- agent:boundary:9648253f -->
-<!-- /agent:exchange -->
-
-<!--
+❯ This happened after canceling a running job. And pressing `/clear`. Just send the command. I don't care if "Route is already in progress"...it should not stop sending the command...because it's almost always wrong and prevents the agent-doc from running. The software should not track if it thinks the turn is running because it cannot detect when the turn is canceled. Drift will always happen and there seems to no way to detect the drift. Since we are always erroring on not running agent-doc when we should run agent-doc, remove any restriction that would prevent running agent-doc. Just make sure agent-doc is run in the correct tmux pane.
 ```
 agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 66s (exit 1): resync: stash pane %16 is registered in its own project root — skipping kill resync: stash pane %2 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] codex ready after 0.5s (1 polls) [route] Pane %3 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %3 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %3 for tasks/agent-doc/agent-doc-bugs2.md — waiting up to 30s for a new cycle ack for pending prompt_target: `Run Agent Doc` surfaced a JB error: [route] routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md never started a new cycle in pane %3 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (25s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (30s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us Error: routed codex trigger for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %3, but the fresh-restart retry never reached a dispatch-ready prompt in pane %3 after waiting 30s
 ```
+```
+agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 57s (exit 1): resync: stash pane %2 is registered in its own project root — skipping kill resync: stash pane %16 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] codex blocked after 4.0s in pane %3: interactive shell reverse-i-search [route] registered pane %3 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once before failing closed [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [sync] found alive agent-doc child (pid 135178) in pane %3 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md [route] scoped fix left pane %3 authoritative for tasks/agent-doc/agent-doc-bugs2.md with a healthy supervisor — restarting the live codex session fresh once before one final reroute [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 6% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 6% us [route] live codex pane %3 for tasks/agent-doc/agent-doc-bugs2.md is still busy after the scoped recovery path — sending one interrupt sequence before the final reroute attempt [route] Still waiting for codex (5s)... last line: :q! [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 9% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 9% us [route] Still waiting for codex (20s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 9% us [route] Still waiting for codex (25s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 16% u [route] Still waiting for codex (30s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 16% u Error: registered pane %3 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle codex prompt (bounded interrupt recovery never restored a dispatch-ready prompt) after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%3 pane_pid=132630 pane_session=0 current_command=agent-doc)
+```
+### Re: JetBrains optimistic reroute after cancel + `/clear` — gpt-5
+
+I removed the JetBrains client-side `Route already in progress` block and updated `src/agent-doc` so a live Codex reroute stays optimistic once the correct pane accepts the bare reopen.
+
+Plan: `tasks/agent-doc/plan-agent-doc-bugs2-optimistic-reroute-after-clear-validation.md`
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt` no longer drops repeated `Run Agent Doc` invocations behind a local in-flight gate.
+- `src/route.rs` still validates the pane/file binding, but it now treats accepted live Codex reopens as success even when later routed-submission proof, cycle-ack, or fresh-restart retry readiness never materializes after cancel + `/clear`.
+- the same optimistic contract now covers the alive authoritative busy-pane ladder after scoped fix, fresh restart, and bounded interrupt recovery; dead panes still fail closed.
+- `src/session_check.rs` / `src/route.rs` also keep ignoring stale-boundary raw answered tails from the earlier JetBrains repro.
+- updated `specs/07-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test` passed (`1732` Rust unit/integration/doc tests)
+- `cargo build` passed
+- `cargo install --path /home/brian/work/btakita/agent-loop/src/agent-doc --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+
+Follow-up:
+- added recommended backlog item `#jboptim` for a live JetBrains replay of the cancel + `/clear` workflow.
+<!-- agent:boundary:b553635a -->
+<!-- /agent:exchange -->
+
+<!--
 ---
 Add a Plugin Editor command to clear the context
 -->
@@ -433,6 +458,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jboptim] [recommended] Replay JetBrains Run Agent Doc on tasks/agent-doc/agent-doc-bugs2.md after the optimistic cancel + /clear reroute change. Plan: tasks/agent-doc/plan-agent-doc-bugs2-optimistic-reroute-after-clear-validation.md
 - [ ] [#jbrawack] [recommended] Replay the JetBrains Run Agent Doc reroute on src/session-share/tasks/buildparty-investor-demo/repo.md after the stale raw-response cycle-ack fix landed. Plan: tasks/agent-doc/plan-buildparty-jb-raw-response-route-ack-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

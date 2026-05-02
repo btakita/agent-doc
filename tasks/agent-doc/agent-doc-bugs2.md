@@ -226,7 +226,24 @@ Verification:
   - `cargo test detect_wrong_window_panes_in_different_windows -- --nocapture`
   - `cargo test purge_preserves_unregistered_agent_in_stash_with_live_owner -- --nocapture`
 - Live replay after reinstall: `agent-doc route tasks/claudescore-3.md` no longer failed at the old "accepted in tmux but Codex never showed any routed submission proof" stage. The rerun returned only a soft acceptance warning, and a follow-up `agent-doc preflight /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md` reported `no_changes: true`, so there is no remaining prompt-bearing drift to route for that document.
-<!-- agent:boundary:c83084d2 -->
+❯ do [#xguard]. spec-test-build-install-commit-push
+### Re: #xguard — gpt-5
+
+Closed `#xguard`.
+
+I added a narrow template repair for documents that still have the real `&lt;!-- agent:exchange --&gt;` opener but end up with a duplicated `&lt;!-- /agent:exchange --&gt;` after escaped exchange content. The write path now detects that specific guard failure, folds the escaped tail back inside the exchange component, removes the duplicate close marker, and re-runs the structural guard. `repair` applies the same normalization path so recovery succeeds on already-broken docs. Spec coverage was updated in `SPEC.md`, `specs/07-commands.md`, and `VERSIONS.md`.
+
+Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Repo work completed:
+- commit `44cf1e7` (`fix: repair duplicated exchange close on template writes`)
+- pushed `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:831c040a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -238,7 +255,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#xguard] Template exchange-write guard failure on `src/session-share/tasks/claudescore-3.md`: `agent-doc` can commit the prompt-bearing turn, generate a reply, and persist it to `.agent-doc/pending`, then fail during CRDT/template write with `closing marker <!-- /agent:exchange --> without matching open`, forcing manual response recovery. This family also exposed a UTF-8 `❯` char-boundary panic in the same component parser area. Fix should make template write/repair deterministic so the reply either lands in the live file or the cycle fails closed without false success. Plan: `tasks/agent-doc/plan-claudescore-3-exchange-guard-write-failure.md`
 - [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
 - [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`
 - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`

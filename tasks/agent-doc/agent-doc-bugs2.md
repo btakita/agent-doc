@@ -243,7 +243,28 @@ Verification completed:
 Repo work completed:
 - commit `44cf1e7` (`fix: repair duplicated exchange close on template writes`)
 - pushed `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:831c040a -->
+❯ do [#cs3turn]. spec-test-build-install-commit-push
+### Re: #cs3turn — gpt-5
+
+`#cs3turn` is closed.
+
+The fix was already shipped in `src/agent-doc` as `8abd7ac` (`fix: clean post-commit closeout drift`), and the current `src/agent-doc` HEAD `44cf1e7` on `origin/20260422/codex-agent-backend` still contains it. This turn was a verification closeout, not a new code-edit cycle.
+
+What the shipped fix covers:
+- `src/git.rs` now applies the same authoritative post-commit cleanup after a real git commit that the no-op closeout path already used, so transient closeout artifacts in the live file are rewritten back to the committed `HEAD` blob.
+- The same path refreshes CRDT sidecars, so the editor state no longer reintroduces stale `(HEAD)` / boundary-only drift after the commit succeeds.
+- Regression coverage exists in `git::tests::commit_success_repairs_transient_working_tree_churn_after_real_commit`.
+
+Verification rerun on current `src/agent-doc` HEAD:
+- `cargo test commit_success_repairs_transient_working_tree_churn_after_real_commit -- --nocapture`
+- `cargo test` passed
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+Commit / push:
+- no new `src/agent-doc` commit was needed this cycle because the working tree was already clean and the fix is already in the pushed branch history
+- `origin/20260422/codex-agent-backend` contains `8abd7ac`, and current HEAD `44cf1e7` is an ancestor-containing verification target
+<!-- agent:boundary:c809e916 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -255,7 +276,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cs3turn] Completed-turn closeout drift on `src/session-share/tasks/claudescore-3.md`: the turn content, benchmark/news/spec side effects, and pushed repo commits can all land successfully, but `agent-doc commit` can still leave the live session document dirty in the worktree with boundary/closeout drift that requires a separate manual commit to actually finish the turn. Repro from May 1, 2026 after `#sqnp`. Fix should prove live-file cleanliness in the owning repo after snapshot commit, not just snapshot/head parity. Plan: `tasks/agent-doc/plan-claudescore-3-turn-complete-drift.md`
 - [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`
 - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#sjwj] 1 more active item(s)

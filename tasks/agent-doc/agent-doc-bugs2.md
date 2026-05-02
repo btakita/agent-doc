@@ -19,7 +19,6 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-
 <!-- normalization -->
 <!-- /agent:status -->
 
@@ -447,10 +446,14 @@ Verification:
 
 Follow-up:
 - added recommended backlog item `#jboptim` for a live JetBrains replay of the cancel + `/clear` workflow.
-<!-- agent:boundary:b553635a -->
+<!-- agent:boundary:bac5994d -->
 <!-- /agent:exchange -->
 
 <!--
+nvim keeps on starting in the tmux pane when I try to run agent-doc from the JB plugin. Please don't try to do anything fancy. Just send the keys quickly. I would rather we go back to the old system than to make it nearly impossible to have `Run Agent Doc` operate correctly. It is currently very broken and nothing we do seems to fix it.
+```
+agent-doc route failed for tasks/buildparty-investor-demo/dev.md after 66s (exit 1): resync: stash pane %1 is registered in its own project root — skipping kill resync: stash pane %13 is registered in its own project root — skipping kill [route] target tmux session: 0 [sync] found alive agent-doc child (pid 1379678) in pane %19 for tasks/buildparty-investor-demo/dev.md [route] registered pane %19 still owns /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md but startup-miss 2026-05-02T06:27:47Z is not superseded by a newer open harness run — keeping marker until dispatch proves recovery [route] codex ready after 0.5s (1 polls) [route] Pane %19 is alive, sending command [route] Sent agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md → pane %19 [route] Command accepted (0.3s, 0 Enter retries) [route] live agent-doc child active in pane %19 for tasks/buildparty-investor-demo/dev.md — waiting up to 30s for a new cycle ack for pending prompt_target: Create a plan file to implement buildparty-investor-demo. [route] routed codex trigger for tasks/buildparty-investor-demo/dev.md never started a new cycle in pane %19 — restarting the live session fresh once before failing closed [route] Still waiting for codex (5s)... last line: ╰─────────────────── [route] Still waiting for codex (10s)... last line: ╰─────────────────── [route] Still waiting for codex (15s)... last line: ╰─────────────────── [route] Still waiting for codex (20s)... last line: ╰─────────────────── [route] Still waiting for codex (25s)... last line: ╰─────────────────── [route] Still waiting for codex (30s)... last line: ╰─────────────────── Error: routed codex trigger for tasks/buildparty-investor-demo/dev.md was accepted in pane %19, but the fresh-restart retry never reached a dispatch-ready prompt in pane %19 after waiting 30s
+```
 ---
 Add a Plugin Editor command to clear the context
 -->

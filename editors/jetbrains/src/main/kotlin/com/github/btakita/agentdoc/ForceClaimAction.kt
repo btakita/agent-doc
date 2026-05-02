@@ -24,7 +24,6 @@ class ForceClaimAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
-        val windowId = TerminalUtil.projectWindowId(project)
 
         val layoutRelPath = TerminalUtil.relativePath(project, file)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
@@ -44,9 +43,6 @@ class ForceClaimAction : AnAction() {
             try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val cmd = mutableListOf(agentDoc, "claim", relativePath, "--force")
-                if (windowId != null) {
-                    cmd.addAll(listOf("--window", windowId))
-                }
                 if (position != null) {
                     cmd.addAll(listOf("--position", position))
                 }
@@ -63,7 +59,7 @@ class ForceClaimAction : AnAction() {
                     TerminalUtil.notifyError(project, "Force claim failed (exit $exitCode):\n$output")
                 }
 
-                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
+                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim --force: ${ex.message}")
             }

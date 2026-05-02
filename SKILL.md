@@ -131,6 +131,8 @@ Complete the requested implementation, verification, build/install, and local in
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after the edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook to do this for you.
 
+**Do not waive red suites as "unrelated" or "flaky":** when the full verification suite is failing, treat that as a real blocker even if the failing tests do not appear to touch the code you just changed. Fix the failure in the same turn or report the concrete blocker and capture the follow-up in backlog; do not declare success while the suite is red.
+
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 ```bash

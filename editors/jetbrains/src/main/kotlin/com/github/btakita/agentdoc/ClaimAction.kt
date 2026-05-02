@@ -27,7 +27,6 @@ class ClaimAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
-        val windowId = TerminalUtil.projectWindowId(project)
 
         // Determine position from editor layout so claim targets the correct tmux pane.
         // Without --position, claim falls back to the last active tmux pane (wrong).
@@ -52,9 +51,6 @@ class ClaimAction : AnAction() {
                 // Step 1: Claim the focused file (adds frontmatter if missing)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val cmd = mutableListOf(agentDoc, "claim", relativePath)
-                if (windowId != null) {
-                    cmd.addAll(listOf("--window", windowId))
-                }
                 if (position != null) {
                     cmd.addAll(listOf("--position", position))
                 }
@@ -72,7 +68,7 @@ class ClaimAction : AnAction() {
                 }
 
                 // Step 2: Sync layout to arrange tmux panes
-                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
+                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
             }

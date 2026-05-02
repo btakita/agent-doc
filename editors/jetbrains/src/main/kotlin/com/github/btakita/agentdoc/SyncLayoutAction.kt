@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import java.io.File
 import javax.swing.SwingUtilities
 
 /**
@@ -20,27 +21,78 @@ class SyncLayoutAction : AnAction() {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
 
+        internal fun normalizeEditorLayout(
+            basePath: String?,
+            projectRoot: String,
+            editorLayout: EditorLayout?,
+        ): EditorLayout? {
+            val layout = editorLayout ?: return null
+            if (basePath == null || basePath == projectRoot) {
+                return layout
+            }
+
+            val rootPrefix = projectRoot.removePrefix("$basePath/").trim('/')
+            if (rootPrefix.isEmpty()) {
+                return layout
+            }
+
+            val normalizedColumns = layout.columns.map { column ->
+                val files = column.files.mapNotNull { file ->
+                    when {
+                        file == rootPrefix -> File(file).name
+                        file.startsWith("$rootPrefix/") -> file.removePrefix("$rootPrefix/")
+                        else -> null
+                    }
+                }
+                LayoutColumn(files)
+            }
+            return if (normalizedColumns.any { it.files.isNotEmpty() }) {
+                EditorLayout(normalizedColumns)
+            } else {
+                null
+            }
+        }
+
+        internal fun absolutizeEditorLayout(
+            projectRoot: String,
+            editorLayout: EditorLayout?,
+        ): EditorLayout? {
+            val layout = editorLayout ?: return null
+            val absoluteColumns = layout.columns.map { column ->
+                val files = column.files.mapNotNull { file ->
+                    when {
+                        file.isBlank() -> null
+                        File(file).isAbsolute -> file
+                        else -> File(projectRoot, file).path
+                    }
+                }
+                LayoutColumn(files)
+            }
+            return if (absoluteColumns.any { it.files.isNotEmpty() }) {
+                EditorLayout(absoluteColumns)
+            } else {
+                null
+            }
+        }
+
         internal fun buildSyncCommand(
             agentDoc: String,
             visibleMdFiles: List<String>,
             editorLayout: EditorLayout?,
             focusedFile: String?,
-            windowId: String?,
             noAutostart: Boolean,
         ): List<String> {
-            val windowArgs = listOf("--window", windowId ?: "agent-doc")
             val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
             val noAutostartArgs = if (noAutostart) listOf("--no-autostart") else emptyList()
             return if (editorLayout != null && editorLayout.columns.size > 1) {
                 val colArgs = editorLayout.columns
-                    .filter { it.files.isNotEmpty() }
                     .flatMap { col ->
                         listOf("--col", col.files.joinToString(","))
                     }
-                listOf(agentDoc, "sync") + colArgs + focusArgs + windowArgs + noAutostartArgs
+                listOf(agentDoc, "sync") + colArgs + focusArgs + noAutostartArgs
             } else {
                 val colArg = visibleMdFiles.joinToString(",")
-                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + windowArgs + noAutostartArgs
+                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + noAutostartArgs
             }
         }
 
@@ -54,12 +106,19 @@ class SyncLayoutAction : AnAction() {
             notify: Boolean = true,
             noAutostart: Boolean = false,
         ) {
-            val basePath = project.basePath ?: return
-
             val manager = FileEditorManager.getInstance(project)
+            val focusedVFile = manager.selectedTextEditor?.virtualFile
+                ?.takeIf { it.name.endsWith(".md") }
+                ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
+                ?: return
+            val (projectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
+            val focusedFile = focusedVFile.path
+            val rootPrefix = "$projectRoot/"
+            fun underProjectRoot(path: String): Boolean =
+                path == projectRoot || path.startsWith(rootPrefix)
             val visibleMdFiles = manager.selectedFiles
-                .filter { it.name.endsWith(".md") }
-                .map { TerminalUtil.relativePath(project, it) }
+                .filter { it.name.endsWith(".md") && underProjectRoot(it.path) }
+                .map { it.path }
                 .distinct()
 
             if (visibleMdFiles.isEmpty()) {
@@ -67,30 +126,30 @@ class SyncLayoutAction : AnAction() {
                 return
             }
 
-            val windowId = TerminalUtil.projectWindowId(project)
-            // Determine the focused editor file for --focus
-            val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
-                if (it.name.endsWith(".md")) TerminalUtil.relativePath(project, it) else null
-            }
             Thread {
                 try {
-                    val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
-                    val editorLayout = if (visibleMdFiles.size > 1)
-                        LayoutDetector.detectEditorLayout(project) else null
+                    val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
+                    val editorLayout =
+                        absolutizeEditorLayout(
+                            projectRoot,
+                            normalizeEditorLayout(
+                                project.basePath,
+                                projectRoot,
+                                LayoutDetector.detectEditorLayout(project),
+                            ),
+                        )
                     val cmd = buildSyncCommand(
                         agentDoc,
                         visibleMdFiles,
                         editorLayout,
                         focusedFile,
-                        windowId,
                         noAutostart,
                     )
                     if (notify) {
-                        val summary = TerminalUtil.formatLayoutSummary(cmd)
-                        TerminalUtil.showHint(project, summary)
+                        TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
                     }
                     val process = ProcessBuilder(cmd)
-                        .directory(java.io.File(basePath))
+                        .directory(java.io.File(projectRoot))
                         .redirectErrorStream(true)
                         .start()
                     val output = process.inputStream.bufferedReader().readText().trim()

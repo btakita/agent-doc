@@ -45,7 +45,7 @@ Two strategies for detecting the file's position in the editor split:
 ### Safe Sync Surface
 
 - JetBrains startup uses report-only `agent-doc resync`; it does not auto-run `resync --fix`.
-- Editor-driven layout syncs use `agent-doc sync --no-autostart`, so plugin reopen/layout churn only reconciles existing panes and does not start replacement sessions on ambiguous ownership.
+- Editor-driven layout syncs report absolute file paths to `agent-doc sync`, preserve empty column placeholders for mixed markdown/non-markdown splits, and let the Rust binary own passive autostart, ambiguity handling, remembered-column restoration, and tmux window targeting.
 
 ### Action Promoter
 

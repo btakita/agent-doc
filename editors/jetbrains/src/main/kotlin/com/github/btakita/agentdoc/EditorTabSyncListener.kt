@@ -37,22 +37,29 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
-        val basePath = project.basePath ?: return
+        val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+        val activeFile = file.path
 
         // Collect all visible .md files across split panes.
         val manager = FileEditorManager.getInstance(project)
         val allSelected = manager.selectedFiles.toList()
+        val rootPrefix = "$projectRoot/"
+        fun underProjectRoot(path: String): Boolean =
+            path == projectRoot || path.startsWith(rootPrefix)
         val visibleMdFiles = allSelected
-            .filter { it.name.endsWith(".md") }
-            .map { TerminalUtil.relativePath(project, it) }
+            .filter { it.name.endsWith(".md") && underProjectRoot(it.path) }
+            .map { it.path }
             .distinct()
 
         log("selectionChanged: newFile=${file.name} allSelected=[${allSelected.joinToString { it.name }}] mdFiles=$visibleMdFiles")
 
         if (visibleMdFiles.isEmpty()) return
 
-        val activeFile = TerminalUtil.relativePath(project, file)
-        val editorLayout = LayoutDetector.detectEditorLayout(project)
+        val editorLayout = SyncLayoutAction.normalizeEditorLayout(
+            project.basePath,
+            projectRoot,
+            LayoutDetector.detectEditorLayout(project),
+        )
 
         // Debounce: bump generation via FFI (shared across editors), fallback to local counter.
         val lib = AgentDocLib.get()
@@ -77,33 +84,23 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
 
                 try {
-                    val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
-                    val windowId = TerminalUtil.projectWindowId(project)
-                    // Always pass --window: use resolved ID, or fall back to "agent-doc" name
-                    val windowArgs = listOf("--window", windowId ?: "agent-doc")
-                    // Always use sync --col (never focus) so that unwanted panes
-                    // are broken out and the entire window layout is managed.
-                    val mdColumns = editorLayout?.columns?.filter { it.files.isNotEmpty() }
-                    val cmd = if (mdColumns != null && mdColumns.size > 1) {
-                        // Full 2D layout — all columns have .md files
-                        val colArgs = mdColumns.flatMap { col ->
-                            listOf("--col", col.files.joinToString(","))
-                        }
-                        listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs + listOf("--no-autostart")
-                    } else if (editorLayout != null && editorLayout.columns.size > 1 && (mdColumns?.size ?: 0) < editorLayout.columns.size) {
-                        // Mixed split: some columns have non-.md files.
-                        // Don't reorganize tmux layout — just focus the active file's pane.
-                        listOf(agentDoc, "focus", activeFile)
-                    } else {
-                        // Single file or flat layout
-                        val colArg = visibleMdFiles.joinToString(",")
-                        listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs + listOf("--no-autostart")
-                    }
+                    val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
+                    val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
+                        projectRoot,
+                        editorLayout,
+                    )
+                    val cmd = SyncLayoutAction.buildSyncCommand(
+                        agentDoc = agentDoc,
+                        visibleMdFiles = visibleMdFiles,
+                        editorLayout = absoluteEditorLayout,
+                        focusedFile = activeFile,
+                        noAutostart = false,
+                    )
                     log("exec: ${cmd.joinToString(" ")}")
                     val summary = TerminalUtil.formatLayoutSummary(cmd)
                     TerminalUtil.showHint(project, summary)
                     val process = ProcessBuilder(cmd)
-                        .directory(java.io.File(basePath))
+                        .directory(java.io.File(projectRoot))
                         .redirectErrorStream(true)
                         .start()
                     val output = process.inputStream.bufferedReader().readText()

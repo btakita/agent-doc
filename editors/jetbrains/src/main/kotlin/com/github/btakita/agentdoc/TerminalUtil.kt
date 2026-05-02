@@ -320,35 +320,6 @@ object TerminalUtil {
     }
 
     /**
-     * Reads sessions.json and returns the tmux window ID from any session
-     * entry that belongs to this project (matching cwd). Returns null if
-     * no window is recorded or sessions.json doesn't exist.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun projectWindowId(project: Project): String? {
-        // Find the "agent-doc" window by name in any tmux session.
-        // This is more reliable than reading window IDs from sessions.json,
-        // which become stale when windows are recreated.
-        try {
-            val process = ProcessBuilder(
-                "tmux", "list-windows", "-a",
-                "-F", "#{window_id} #{window_name}"
-            ).redirectErrorStream(false).start()
-            val output = process.inputStream.bufferedReader().readText()
-            process.waitFor()
-            for (line in output.lines()) {
-                val parts = line.split(" ", limit = 2)
-                if (parts.size == 2 && parts[1] == "agent-doc") {
-                    return parts[0] // e.g. "@46"
-                }
-            }
-        } catch (_: Exception) {
-            // Fall through
-        }
-        return null
-    }
-
-    /**
      * Extracts a brief layout description from a command list.
      * Returns a string like "--col a.md,b.md --col c.md" or "focus a.md",
      * suitable for showing in a notification balloon.

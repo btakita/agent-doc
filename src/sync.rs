@@ -19,8 +19,13 @@
 //! post-sync registry updates, layout repair, and column memory.
 //!
 //! ## Spec
-//! - `run(col_args, window, focus)` is the primary entry point. Filters empty
-//!   col_args (phantom columns from the JetBrains plugin), repairs layout,
+//! - `run(col_args, window, focus)` is the primary entry point. Preserves empty
+//!   col_args as positional placeholders through column-memory substitution, then
+//!   drops any still-empty columns before tmux-router parsing. This lets editor
+//!   plugins represent a non-markdown sibling split without losing left/right
+//!   column identity. When `window` is omitted, sync still scopes the run to the
+//!   current tmux session's `agent-doc` window instead of inheriting the
+//!   currently focused window (which may itself be `stash`). It then repairs layout,
 //!   prunes stale sessions, auto-starts missing panes, delegates to
 //!   `tmux_router::sync`, then registers synced file→pane assignments.
 //! - `run_layout_only(col_args, window, focus)` skips auto-start; used when called
@@ -101,9 +106,10 @@
 //!   single-session-per-pane invariant and `RegistryLock` apply as normal.
 //! - **Column memory:** `.agent-doc/last_layout.json` persists a column→agent-doc mapping.
 //!   When a column has no agent doc (user switches to a non-session file), sync substitutes
-//!   the last known agent doc for that column index. This preserves the 2-pane tmux layout
-//!   when one editor column temporarily shows a non-agent file. The state file is updated
-//!   after each successful sync with any columns that contain an agent doc.
+//!   the last known agent doc for that column index. Empty `--col` placeholders from editor
+//!   split detection keep the original column position stable, so a right-hand markdown file
+//!   can still restore a remembered left-hand agent pane. The state file is updated after each
+//!   successful sync with any columns that contain an agent doc.
 //! - `write_rename_debounce` is idempotent: calling it multiple times for the same file
 //!   just refreshes the marker timestamp. No tmux dependency — pure filesystem operation.
 //! - `has_rename_debounce` self-cleans: expired markers are deleted on check, so no
@@ -159,7 +165,7 @@
 
 use anyhow::{Context, Result};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -378,6 +384,121 @@ fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -> St
         .strip_prefix(project_root)
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| canonical_file.to_string_lossy().to_string())
+}
+
+fn first_agent_doc_in_col(col: &str) -> Option<String> {
+    col.split(',').find_map(|f| {
+        let f = f.trim();
+        if f.is_empty() {
+            return None;
+        }
+        if let Ok(content) = std::fs::read_to_string(f)
+            && let Ok((fm, _)) = frontmatter::parse(&content)
+            && fm.session.is_some()
+        {
+            return Some(f.to_string());
+        }
+        None
+    })
+}
+
+fn column_has_agent_doc(col: &str) -> bool {
+    first_agent_doc_in_col(col).is_some()
+}
+
+fn apply_column_memory(col_args: &[String], saved_layout: &[String]) -> Vec<String> {
+    let visible_docs: HashSet<String> = col_args
+        .iter()
+        .filter_map(|col| first_agent_doc_in_col(col))
+        .collect();
+    let mut reserved_docs = visible_docs.clone();
+    col_args
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            if column_has_agent_doc(col) {
+                col.trim().to_string()
+            } else if let Some(remembered) = saved_layout.get(i) {
+                let remembered = remembered.trim();
+                if !remembered.is_empty() && !reserved_docs.contains(remembered) {
+                    sync_log(&format!(
+                        "column {} has no agent doc, substituting remembered: {}",
+                        i, remembered
+                    ));
+                    reserved_docs.insert(remembered.to_string());
+                    remembered.to_string()
+                } else {
+                    col.trim().to_string()
+                }
+            } else {
+                col.trim().to_string()
+            }
+        })
+        .collect()
+}
+
+fn build_layout_state(col_args: &[String], saved_layout: &[String]) -> Vec<String> {
+    let current_docs: Vec<Option<String>> = col_args
+        .iter()
+        .map(|col| first_agent_doc_in_col(col))
+        .collect();
+    let mut current_counts = HashMap::new();
+    for doc in current_docs.iter().flatten() {
+        *current_counts.entry(doc.clone()).or_insert(0usize) += 1;
+    }
+    let mut duplicate_keepers = HashMap::new();
+    for (i, current_doc) in current_docs.iter().enumerate() {
+        let Some(current_doc) = current_doc else {
+            continue;
+        };
+        if current_counts.get(current_doc).copied().unwrap_or_default() <= 1 {
+            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
+            continue;
+        }
+        if saved_layout
+            .get(i)
+            .map(|saved| saved.trim() == current_doc)
+            .unwrap_or(false)
+        {
+            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
+        }
+    }
+    for (i, current_doc) in current_docs.iter().enumerate() {
+        if let Some(current_doc) = current_doc {
+            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
+        }
+    }
+    let mut reserved_docs = HashSet::new();
+    current_docs
+        .iter()
+        .enumerate()
+        .map(|(i, current_doc)| {
+            if let Some(current_doc) = current_doc {
+                let keep_current = duplicate_keepers
+                    .get(current_doc)
+                    .copied()
+                    .is_some_and(|keeper| keeper == i);
+                if keep_current && reserved_docs.insert(current_doc.clone()) {
+                    return current_doc.clone();
+                }
+            }
+            if let Some(remembered) = saved_layout.get(i) {
+                let remembered = remembered.trim();
+                if !remembered.is_empty()
+                    && column_has_agent_doc(remembered)
+                    && reserved_docs.insert(remembered.to_string())
+                {
+                    return remembered.to_string();
+                }
+            }
+            if let Some(current_doc) = current_doc
+                && reserved_docs.insert(current_doc.clone())
+            {
+                return current_doc.clone();
+            }
+            String::new()
+        })
+        .collect()
 }
 
 fn lookup_registry_entry_for_file_session(
@@ -1208,6 +1329,51 @@ fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     })
 }
 
+fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-t", window, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn resolve_agent_doc_window_id(
+    tmux: &Tmux,
+    session_name: &str,
+    target_window_name: &str,
+) -> Option<String> {
+    let listing = tmux
+        .raw_cmd(&[
+            "list-windows",
+            "-t",
+            &format!("{}:", session_name),
+            "-F",
+            "#{window_id} #{window_name}",
+        ])
+        .ok()?;
+    listing.lines().find_map(|line| {
+        let mut parts = line.splitn(2, ' ');
+        match (parts.next(), parts.next()) {
+            (Some(window_id), Some(window_name)) if window_name == target_window_name => {
+                Some(window_id.to_string())
+            }
+            _ => None,
+        }
+    })
+}
+
 /// Check if this binary is a new build and clear stale caches if so.
 /// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
 /// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
@@ -1292,13 +1458,6 @@ fn run_with_options(
     // Check for new build and clear stale caches
     check_build_stamp();
 
-    // Filter empty col_args — the JetBrains plugin sometimes sends phantom empty columns.
-    let col_args: Vec<String> = col_args
-        .iter()
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .collect();
-
     // Column memory: for columns with non-agent files, substitute the last known
     // agent doc so the reconciler preserves the pane from the previous layout.
     let layout_state_path = std::path::Path::new(".agent-doc/last_layout.json");
@@ -1307,39 +1466,9 @@ fn run_with_options(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    let col_args: Vec<String> = col_args
-        .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            // Check if this column has an agent doc (any file with session UUID)
-            let has_agent_doc = col.split(',').any(|f| {
-                let f = f.trim();
-                if f.is_empty() {
-                    return false;
-                }
-                if let Ok(content) = std::fs::read_to_string(f)
-                    && let Ok((fm, _)) = frontmatter::parse(&content)
-                {
-                    return fm.session.is_some();
-                }
-                false
-            });
-            if has_agent_doc {
-                col.clone()
-            } else if let Some(remembered) = saved_layout.get(i) {
-                if !remembered.is_empty() {
-                    sync_log(&format!(
-                        "column {} has no agent doc, substituting remembered: {}",
-                        i, remembered
-                    ));
-                    remembered.clone()
-                } else {
-                    col.clone()
-                }
-            } else {
-                col.clone()
-            }
-        })
+    let col_args: Vec<String> = apply_column_memory(col_args, &saved_layout)
+        .into_iter()
+        .filter(|col| !col.is_empty())
         .collect();
     let col_args = col_args.as_slice();
     sync_log(&format!(
@@ -1348,51 +1477,28 @@ fn run_with_options(
     ));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
-    // Resolve session name from --window arg, or fall back to current session.
-    let mut effective_window = window.map(|s| s.to_string());
-    if let Some(ref w) = effective_window {
-        let session_name = tmux
-            .cmd()
-            .args(["display-message", "-t", w, "-p", "#{session_name}"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            // If window doesn't exist, try to get session from the window ID prefix (e.g. "@0" → session "0")
-            .or_else(|| {
-                // Fall back to current session
-                tmux.cmd()
-                    .args(["display-message", "-p", "#{session_name}"])
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            })
-            .unwrap_or_default();
-        if !session_name.is_empty() {
-            let _ = repair_layout(tmux, &session_name, "agent-doc");
-            sync_log("repair_layout completed");
-            // After repair, the window ID may have changed. Re-resolve by name.
-            let resolved = tmux.raw_cmd(&[
-                "list-windows",
-                "-t",
-                &format!("{}:", session_name),
-                "-F",
-                "#{window_id} #{window_name}",
-            ]);
-            if let Ok(ref output) = resolved {
-                for line in output.lines() {
-                    let mut parts = line.splitn(2, ' ');
-                    if let (Some(wid), Some(wname)) = (parts.next(), parts.next())
-                        && wname == "agent-doc"
-                    {
-                        if wid != w.as_str() {
-                            eprintln!("[sync] window ID changed after repair: {} → {}", w, wid);
-                            effective_window = Some(wid.to_string());
-                        }
-                        break;
-                    }
+    let target_session = window
+        .and_then(|w| session_name_for_target_window(tmux, w))
+        .or_else(|| current_tmux_session_name(tmux));
+    let mut effective_window = match (window, target_session.as_deref()) {
+        (Some(w), _) => Some(w.to_string()),
+        (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
+        (None, None) => None,
+    };
+    if let Some(ref session_name) = target_session {
+        let _ = repair_layout(tmux, session_name, "agent-doc");
+        sync_log("repair_layout completed");
+        if let Some(resolved_window_id) =
+            resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
+        {
+            if effective_window.as_deref() != Some(resolved_window_id.as_str()) {
+                if let Some(previous) = effective_window.as_deref() {
+                    eprintln!(
+                        "[sync] resolved target window after repair: {} → {}",
+                        previous, resolved_window_id
+                    );
                 }
+                effective_window = Some(resolved_window_id);
             }
         }
     }
@@ -1587,19 +1693,9 @@ fn run_with_options(
         // 1. From frontmatter tmux_session (if alive)
         // 2. From --window argument
         // 3. Falls back to None (current session)
-        let context_session: Option<String> = window.and_then(|w| {
-            let output = tmux
-                .cmd()
-                .args(["display-message", "-t", w, "-p", "#{session_name}"])
-                .output()
-                .ok()?;
-            if output.status.success() {
-                let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !name.is_empty() { Some(name) } else { None }
-            } else {
-                None
-            }
-        });
+        let context_session: Option<String> = target_session
+            .clone()
+            .or_else(|| window.and_then(|w| session_name_for_target_window(tmux, w)));
         for file_path in &all_files {
             if !file_path.exists() {
                 continue;
@@ -2158,24 +2254,7 @@ fn run_with_options(
     // Save column layout state: for each column that has an agent doc,
     // record it so future syncs can substitute it when the column has a non-agent file.
     {
-        let layout_state: Vec<String> = col_args
-            .iter()
-            .map(|col| {
-                // Find the first agent doc file in this column
-                for f in col.split(',').map(|f| f.trim()) {
-                    if f.is_empty() {
-                        continue;
-                    }
-                    if let Ok(content) = std::fs::read_to_string(f)
-                        && let Ok((fm, _)) = frontmatter::parse(&content)
-                        && fm.session.is_some()
-                    {
-                        return f.to_string();
-                    }
-                }
-                String::new()
-            })
-            .collect();
+        let layout_state = build_layout_state(col_args, &saved_layout);
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
             && let Ok(json) = serde_json::to_string(&layout_state)
@@ -4643,6 +4722,79 @@ mod tests {
     }
 
     #[test]
+    fn column_memory_restores_empty_placeholder_columns() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+
+        let remembered = vec![
+            left.canonicalize().unwrap().to_string_lossy().to_string(),
+            String::new(),
+        ];
+        let cols = vec![
+            String::new(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
+
+        assert_eq!(
+            apply_column_memory(&cols, &remembered),
+            vec![
+                left.canonicalize().unwrap().to_string_lossy().to_string(),
+                right.canonicalize().unwrap().to_string_lossy().to_string(),
+            ],
+            "blank editor columns should keep their position long enough to restore remembered panes"
+        );
+    }
+
+    #[test]
+    fn column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let right = tmp.path().join("right.md");
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+
+        let remembered = vec![
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+            String::new(),
+        ];
+        let cols = vec![
+            String::new(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
+
+        assert_eq!(
+            apply_column_memory(&cols, &remembered),
+            cols,
+            "a remembered doc should not be duplicated into an empty sibling column when it is already visible"
+        );
+    }
+
+    #[test]
+    fn build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+
+        let saved_layout = vec![
+            left.canonicalize().unwrap().to_string_lossy().to_string(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
+        let duplicate_cols = vec![
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
+
+        assert_eq!(
+            build_layout_state(&duplicate_cols, &saved_layout),
+            saved_layout,
+            "duplicate current columns should not overwrite a previously distinct remembered layout"
+        );
+    }
+
+    #[test]
     fn empty_window_arg_normalized_to_none() {
         assert_eq!(normalize_scope_arg(None), None);
         assert_eq!(normalize_scope_arg(Some("")), None);
@@ -5178,6 +5330,30 @@ mod tests {
             visible_panes.contains(&pane1),
             "rescued pane should be visible after rescue, got: {:?}",
             visible_panes
+        );
+    }
+
+    #[test]
+    fn windowless_sync_targets_current_session_agent_doc_window() {
+        let iso = IsolatedTmux::new("sync-windowless-target-agent-doc");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let pane1 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&pane1, "test").unwrap();
+        iso.raw_cmd(&["select-window", "-t", "test:stash"]).unwrap();
+
+        assert_eq!(
+            current_tmux_session_name(&iso).as_deref(),
+            Some("test"),
+            "current session lookup should still point at the owning session"
+        );
+        assert_eq!(
+            resolve_agent_doc_window_id(&iso, "test", "agent-doc").as_deref(),
+            Some("@0"),
+            "windowless sync should resolve the named agent-doc window instead of inheriting stash"
         );
     }
 

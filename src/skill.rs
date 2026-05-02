@@ -1397,6 +1397,7 @@ mod tests {
             assert!(content.contains("Imperative edits are executable directives"));
             assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
             assert!(content.contains("Agent harnesses own full-suite verification"));
+            assert!(content.contains("Do not waive red suites as \"unrelated\" or \"flaky\""));
             assert!(content.contains("Do not rely on a pre-commit hook"));
         }
         assert!(claude.contains("final document-mutation boundary for the cycle"));

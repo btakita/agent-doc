@@ -74,7 +74,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Precondition:** Active file is `.md`.
 - **Behavior:**
   1. Detect editor split position (left/right/top/bottom) by walking the editor's splitter component tree.
-  2. Run `agent-doc claim <relative-path> --position <pos>` via subprocess from project root. Include `--window <id>` if a tmux window ID is known from `sessions.json`.
+  2. Run `agent-doc claim <relative-path> --position <pos>` via subprocess from project root. Pane/window ownership remains binary-owned; plugins must not inspect `.agent-doc/sessions.json` or live tmux state to choose a target window.
   3. On success: show inline hint, then trigger a silent layout sync (Section 2.4).
   4. On failure: show persistent error notification.
 - **Position detection:** Map the file's editor group to a split position. JetBrains uses Swing `Splitter` tree traversal; VSCode uses `TabGroups` API with `viewColumn` heuristic.
@@ -97,8 +97,8 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Behavior:**
   1. Collect all visible `.md` files across editor split groups.
   2. Detect 2D columnar layout (which files are stacked vertically vs. side-by-side).
-  3. Run `agent-doc sync --col <files,...> [--col <files,...>] --focus <active-file> [--window <id>]`.
-     Automatic/editor-driven syncs must append `--no-autostart` so passive layout churn only reconciles existing panes and never provisions a replacement session.
+  3. Run `agent-doc sync --col <absolute-files,...> [--col <absolute-files,...>] --focus <absolute-active-file>`.
+     Preserve empty `--col` placeholders when a sibling editor split has no markdown file so the binary can keep left/right column identity. Plugins report layout only; window scoping, passive autostart, ambiguity handling, and cross-root owner resolution are all owned by the Rust binary.
   4. Show inline hint with layout summary on manual trigger. Silent on automatic trigger.
 
 ### 2.5 Tab-to-Pane Sync (Automatic)

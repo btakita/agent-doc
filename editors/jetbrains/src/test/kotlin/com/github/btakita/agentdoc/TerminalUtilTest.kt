@@ -33,6 +33,61 @@ class TerminalUtilTest {
         assertEquals(1, next.cancelCount)
     }
 
+    @Test
+    fun `route layout args preserve cross root split as absolute paths`() {
+        val args = TerminalUtil.buildRouteLayoutArgs(
+            visibleMdFiles = listOf(
+                "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+            ),
+            editorLayout = EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
+                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                )
+            ),
+            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+        )
+
+        assertEquals(
+            listOf(
+                "--col",
+                "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                "--col",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "--focus",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+            ),
+            args,
+        )
+    }
+
+    @Test
+    fun `route layout args preserve empty split columns for mixed layouts`() {
+        val args = TerminalUtil.buildRouteLayoutArgs(
+            visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            editorLayout = EditorLayout(
+                listOf(
+                    LayoutColumn(emptyList()),
+                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                )
+            ),
+            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+        )
+
+        assertEquals(
+            listOf(
+                "--col",
+                "",
+                "--col",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "--focus",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+            ),
+            args,
+        )
+    }
+
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {
         var cancelCount: Int = 0
             private set

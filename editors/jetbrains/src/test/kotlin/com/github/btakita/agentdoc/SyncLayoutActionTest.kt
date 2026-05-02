@@ -93,7 +93,7 @@ class SyncLayoutActionTest {
             EditorLayout(
                 listOf(
                     LayoutColumn(listOf("tasks/one.md")),
-                    LayoutColumn(listOf("tasks/two.md")),
+                    LayoutColumn(listOf("tasks/two.md", "/repo/tasks/ignored.md")),
                 )
             ),
             normalized,
@@ -117,6 +117,30 @@ class SyncLayoutActionTest {
             EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
+                    LayoutColumn(listOf("tasks/monsterrodholders.md")),
+                )
+            ),
+            normalized,
+        )
+    }
+
+    @Test
+    fun `normalize editor layout preserves cross root markdown files as absolute paths`() {
+        val normalized = SyncLayoutAction.normalizeEditorLayout(
+            basePath = "/repo",
+            projectRoot = "/repo/src/boost-client",
+            editorLayout = EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("tasks/agent-doc/agent-doc-bugs2.md")),
+                    LayoutColumn(listOf("src/boost-client/tasks/monsterrodholders.md")),
+                )
+            ),
+        )
+
+        assertEquals(
+            EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
                     LayoutColumn(listOf("tasks/monsterrodholders.md")),
                 )
             ),
@@ -168,5 +192,30 @@ class SyncLayoutActionTest {
             ),
             absolute,
         )
+    }
+
+    @Test
+    fun `collect visible markdown files keeps cross root paths`() {
+        val visible = arrayOf(
+            FakeVirtualFile("/repo/tasks/agent-doc/agent-doc-bugs2.md"),
+            FakeVirtualFile("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            FakeVirtualFile("/repo/notes/todo.txt"),
+        )
+
+        assertEquals(
+            listOf(
+                "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                "/repo/src/boost-client/tasks/monsterrodholders.md",
+            ),
+            SyncLayoutAction.collectVisibleMarkdownFiles(visible),
+        )
+    }
+
+    private class FakeVirtualFile(private val rawPath: String) :
+        com.intellij.testFramework.LightVirtualFile(
+            java.io.File(rawPath).name,
+            ""
+        ) {
+        override fun getPath(): String = rawPath
     }
 }

@@ -21,6 +21,13 @@ class SyncLayoutAction : AnAction() {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
 
+        internal fun collectVisibleMarkdownFiles(
+            files: Array<out com.intellij.openapi.vfs.VirtualFile>,
+        ): List<String> = files
+            .filter { it.name.endsWith(".md") }
+            .map { it.path }
+            .distinct()
+
         internal fun normalizeEditorLayout(
             basePath: String?,
             projectRoot: String,
@@ -39,9 +46,10 @@ class SyncLayoutAction : AnAction() {
             val normalizedColumns = layout.columns.map { column ->
                 val files = column.files.mapNotNull { file ->
                     when {
-                        file == rootPrefix -> File(file).name
+                        file.isBlank() -> null
+                        File(file).isAbsolute -> file
                         file.startsWith("$rootPrefix/") -> file.removePrefix("$rootPrefix/")
-                        else -> null
+                        else -> File(basePath, file).path
                     }
                 }
                 LayoutColumn(files)
@@ -113,13 +121,7 @@ class SyncLayoutAction : AnAction() {
                 ?: return
             val (projectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
             val focusedFile = focusedVFile.path
-            val rootPrefix = "$projectRoot/"
-            fun underProjectRoot(path: String): Boolean =
-                path == projectRoot || path.startsWith(rootPrefix)
-            val visibleMdFiles = manager.selectedFiles
-                .filter { it.name.endsWith(".md") && underProjectRoot(it.path) }
-                .map { it.path }
-                .distinct()
+            val visibleMdFiles = collectVisibleMarkdownFiles(manager.selectedFiles)
 
             if (visibleMdFiles.isEmpty()) {
                 if (notify) TerminalUtil.showHint(project, "No .md files open")

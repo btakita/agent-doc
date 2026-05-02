@@ -43,13 +43,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         // Collect all visible .md files across split panes.
         val manager = FileEditorManager.getInstance(project)
         val allSelected = manager.selectedFiles.toList()
-        val rootPrefix = "$projectRoot/"
-        fun underProjectRoot(path: String): Boolean =
-            path == projectRoot || path.startsWith(rootPrefix)
-        val visibleMdFiles = allSelected
-            .filter { it.name.endsWith(".md") && underProjectRoot(it.path) }
-            .map { it.path }
-            .distinct()
+        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
 
         log("selectionChanged: newFile=${file.name} allSelected=[${allSelected.joinToString { it.name }}] mdFiles=$visibleMdFiles")
 

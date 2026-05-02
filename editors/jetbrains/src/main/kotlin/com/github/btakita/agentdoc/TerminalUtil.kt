@@ -126,41 +126,27 @@ object TerminalUtil {
             // Build route command with optional layout args
             val cmd = mutableListOf(agentDoc, "route", "--dispatch-only", relativePath)
 
-            // Only include visible files that live under the same project root
-            // as the focused file — sibling submodules have their own sessions.
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-            val cwdPrefix = "$cwd/"
-            fun underProject(vf: VirtualFile): Boolean =
-                vf.path == cwd || vf.path.startsWith(cwdPrefix)
-            fun relTo(vf: VirtualFile): String =
-                if (vf.path == cwd) vf.name else vf.path.removePrefix(cwdPrefix)
-
-            val visibleMdFiles = manager.selectedFiles
-                .filter { it.name.endsWith(".md") && underProject(it) }
-                .map { relTo(it) }
-                .distinct()
-
-            if (visibleMdFiles.size > 1) {
-                val editorLayout = LayoutDetector.detectEditorLayout(project)
-                if (editorLayout != null && editorLayout.columns.size > 1) {
-                    for (col in editorLayout.columns) {
-                        cmd.addAll(listOf("--col", col.files.joinToString(",")))
-                    }
-                } else {
-                    cmd.addAll(listOf("--col", visibleMdFiles.joinToString(",")))
-                }
-            } else if (visibleMdFiles.size == 1) {
-                cmd.addAll(listOf("--col", visibleMdFiles[0]))
-            }
+            val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
+            val editorLayout = SyncLayoutAction.absolutizeEditorLayout(
+                cwd,
+                SyncLayoutAction.normalizeEditorLayout(
+                    project.basePath,
+                    cwd,
+                    LayoutDetector.detectEditorLayout(project),
+                ),
+            )
+            cmd.addAll(
+                buildRouteLayoutArgs(
+                    visibleMdFiles = visibleMdFiles,
+                    editorLayout = editorLayout,
+                    focusedFile = manager.selectedTextEditor?.virtualFile
+                        ?.takeIf { it.name.endsWith(".md") }
+                        ?.path,
+                )
+            )
 
             // Pass focused file
-            val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
-                if (it.name.endsWith(".md") && underProject(it)) relTo(it) else null
-            }
-            if (focusedFile != null) {
-                cmd.addAll(listOf("--focus", focusedFile))
-            }
-
             LOG.warn("[route] executing: ${cmd.joinToString(" ")}")
 
             val process = ProcessBuilder(cmd)
@@ -199,6 +185,25 @@ object TerminalUtil {
             onComplete?.invoke()
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
         }
+    }
+
+    internal fun buildRouteLayoutArgs(
+        visibleMdFiles: List<String>,
+        editorLayout: EditorLayout?,
+        focusedFile: String?,
+    ): List<String> {
+        val args = mutableListOf<String>()
+        if (editorLayout != null && editorLayout.columns.size > 1) {
+            for (col in editorLayout.columns) {
+                args.addAll(listOf("--col", col.files.joinToString(",")))
+            }
+        } else if (visibleMdFiles.isNotEmpty()) {
+            args.addAll(listOf("--col", visibleMdFiles.joinToString(",")))
+        }
+        if (focusedFile != null) {
+            args.addAll(listOf("--focus", focusedFile))
+        }
+        return args
     }
 
     /**

@@ -218,6 +218,92 @@ fn historical_committed_capture_replay(
     Ok(Some(capture))
 }
 
+fn wrap_template_exchange_patch(body: &str) -> String {
+    let mut patch = String::from("<!-- patch:exchange -->\n");
+    patch.push_str(body);
+    if !body.ends_with('\n') {
+        patch.push('\n');
+    }
+    patch.push_str("<!-- /patch:exchange -->\n");
+    patch
+}
+
+fn extract_visible_response_patch_between(
+    snapshot_doc: &str,
+    current_doc: &str,
+    template_mode: bool,
+) -> Option<String> {
+    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let snapshot_norm = norm(snapshot_doc);
+    let current_norm = norm(current_doc);
+    if current_norm == snapshot_norm
+        || crate::session_check::detect_bypassed_response_write_between(
+            &snapshot_norm,
+            &current_norm,
+        )
+        .is_none()
+    {
+        return None;
+    }
+
+    let diff = similar::TextDiff::from_lines(&snapshot_norm, &current_norm);
+    let mut collected = String::new();
+    let mut collecting = false;
+    for change in diff.iter_all_changes() {
+        let line = change.value();
+        let trimmed = line.trim_end_matches('\n').trim();
+        match change.tag() {
+            similar::ChangeTag::Insert => {
+                if !collecting && !crate::session_check::is_exchange_response_heading(trimmed) {
+                    continue;
+                }
+                collecting = true;
+                collected.push_str(line);
+            }
+            similar::ChangeTag::Equal if collecting => {
+                if trimmed.is_empty() {
+                    collected.push_str(line);
+                    continue;
+                }
+                if trimmed.starts_with("<!-- agent:boundary:")
+                    || trimmed == "<!-- /agent:exchange -->"
+                    || trimmed == "<!-- /patch:exchange -->"
+                    || crate::diff::text_line_looks_like_prompt_target(trimmed)
+                    || crate::session_check::is_exchange_response_heading(trimmed)
+                {
+                    break;
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if collected.trim().is_empty() {
+        return None;
+    }
+
+    Some(if template_mode {
+        wrap_template_exchange_patch(&collected)
+    } else {
+        collected
+    })
+}
+
+fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Result<Option<String>> {
+    let Some(snapshot_doc) = snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let template_mode = frontmatter::parse(doc_content)
+        .map(|(fm, _)| fm.resolve_mode().is_template())
+        .unwrap_or(false);
+    Ok(extract_visible_response_patch_between(
+        &snapshot_doc,
+        doc_content,
+        template_mode,
+    ))
+}
+
 pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
     "ambiguous preflight_started patchback";
 
@@ -763,12 +849,27 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
     let doc_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
+    let cycle_state = crate::cycle_state::load(file)?;
     let historical_capture = if !pending_path.exists() && capture.is_none() {
         historical_committed_capture_replay(&canonical, &doc_content)?
     } else {
         None
     };
-    if !pending_path.exists() && capture.is_none() && historical_capture.is_none() {
+    let visible_response_recovery = if !pending_path.exists()
+        && capture.is_none()
+        && historical_capture.is_none()
+        && cycle_state.is_none()
+        && crate::git::is_in_git_repo(file)
+    {
+        visible_response_patch_from_document(file, &doc_content)?
+    } else {
+        None
+    };
+    if !pending_path.exists()
+        && capture.is_none()
+        && historical_capture.is_none()
+        && visible_response_recovery.is_none()
+    {
         let outcome = repair_stale_preflight_started_cycle(file)?;
         if outcome != RepairOutcome::Noop {
             return Ok(outcome);
@@ -796,6 +897,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         .as_ref()
         .map(|r| r.response_body.clone())
         .or_else(|| historical_capture.as_ref().map(|r| r.response_body.clone()))
+        .or_else(|| visible_response_recovery.clone())
         .or(pending_response.clone())
         .unwrap_or_default();
 
@@ -2064,6 +2166,51 @@ mod tests {
             "snapshot should be advanced to the recovered response:\n{snap}"
         );
 
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn repair_adopts_visible_response_without_pending_when_cycle_never_started() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do [#8zjh]. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let current = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do [#8zjh]. spec-test-build-install-commit-push\n",
+            "### Re: #8zjh — gpt-5\n\n",
+            "Recovered from the visible exchange tail.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+
+        let outcome = repair(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            head.contains("Recovered from the visible exchange tail."),
+            "HEAD should contain the adopted response:\n{head}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("Recovered from the visible exchange tail."),
+            "snapshot should advance to the visible response:\n{snap}"
+        );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
     }

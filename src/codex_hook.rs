@@ -850,6 +850,53 @@ mod tests {
     }
 
     #[test]
+    fn stop_auto_closes_visible_template_response_without_last_assistant_message() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do [#8zjh]. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do [#8zjh]. spec-test-build-install-commit-push\n",
+            "### Re: #8zjh — gpt-5\n\n",
+            "Recovered from visible response.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, current).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: String::new(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Recovered from visible response."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn stop_auto_closes_active_session_post_commit_drift() {
         let dir = setup_project();
         let doc = write_doc(&dir);

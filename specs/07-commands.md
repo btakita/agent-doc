@@ -522,6 +522,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 1. Run the same recovery engine as `preflight` step 1:
    - replay a pending/captured response when the response still needs to be written
    - dedup and clean stale pending/capture state when the response is already present in the document
+   - when no pending/capture artifact remains but the live document already contains a new visible response heading absent from the snapshot, synthesize that visible response back through the same adopt-current repair path so the later commit boundary remains binary-owned instead of requiring a manual follow-through commit
    - already-applied detection must match the response's normalized visible lines as one contiguous block; do not treat scattered matching phrases elsewhere in the document as a replay hit just because the first few lines happen to recur
    - for template docs, that `AlreadyApplied` dedup path still runs transcript/tail canonicalization before cleanup, including restoring required `❯ ` prompt prefixes from the prompt-bearing classifier
    - when the cycle is open at `response_captured` / `write_applied`, or the logs show a write-complete/no-commit tail, `repair` may recover the missing commit boundary without replaying a response only when the current file/`HEAD` state proves the patchback already landed as exchange-only history
@@ -542,6 +543,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 **Commit-boundary contract:** For git-backed docs, `repair` must not stop after only updating the live document / pending ledger. A recovered or deduped response should cross the same snapshot+commit boundary in the same command so the next prompt does not inherit repaired-but-uncommitted assistant content. For template docs that means `AlreadyApplied` is still a document-mutation-capable repair outcome when transcript canonicalization is needed.
 
 **Already-applied reopened closeout:** When a recovery path reopens a cycle (for example from durable capture or a Codex `Stop` replay) but finds that the assistant response is already present in the live document, `repair` must still advance the snapshot / `write_applied` state if the snapshot is missing that response. Otherwise the subsequent commit step can misclassify the turn as post-commit local drift and leave the direct patchback outside the binary-owned closeout.
+
+**Visible-response fallback:** The same `AlreadyApplied` recovery contract also applies when the pending/capture ledger is empty but the current document itself already shows the new `### Re:` / `## Assistant` block that the snapshot lacks. In that shape `repair` may synthesize the visible response from the exchange tail, adopt it into snapshot / `write_applied`, and let `repair --commit` or the Codex Stop hook finish the normal commit boundary instead of blocking on a missing replay payload.
 
 ## rename
 

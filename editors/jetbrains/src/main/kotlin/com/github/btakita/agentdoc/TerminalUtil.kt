@@ -124,8 +124,6 @@ object TerminalUtil {
                 .start()
 
             val startedAt = System.currentTimeMillis()
-            showHint(project, "Routing $relativePath...")
-
             Thread {
                 try {
                     val output = process.inputStream.bufferedReader().readText()
@@ -139,7 +137,6 @@ object TerminalUtil {
                         )
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
-                        showHint(project, "Routed $relativePath in $elapsed")
                     }
                 } finally {
                     onComplete?.invoke()

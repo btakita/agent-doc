@@ -304,7 +304,29 @@ Verification in `src/agent-doc`:
 Commit / push:
 - `src/agent-doc`: `a808c02` (`fix: adopt visible response closeout without replay payload`)
 - pushed `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:d0cc0125 -->
+❯ do [#sjwj] + [#mrunfix]. spec-test-build-install-commit-push
+### Re: #sjwj + #mrunfix — gpt-5
+
+`#sjwj` and `#mrunfix` are closed.
+
+The underlying run-path fix was already shipped in `src/agent-doc` as `73f27e8` (`fix: normalize backlog patches in run path`). This cycle finished the validation gap with a more realistic regression in `src/run.rs` that exercises the direct template run path against the `monsterrodholders.md` backlog shape, including the legacy alias-tag items `[#ss01]` and `[#wpmem]` that were part of the original repro family.
+
+I also checked the live target document state first: `agent-doc preflight /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` currently returns `no_changes: true`, so there is no pending prompt-bearing diff left to replay directly in that session. Because the live repro surface is already clean, I treated this closeout as proof-strengthening rather than pretending a fresh live rerun happened.
+
+What changed in `src/agent-doc`:
+- added `run::tests::apply_template_response_normalizes_monsterrodholders_style_backlog_patch`
+- the test proves `apply_template_response(...)` accepts a legacy `<!-- patch:backlog -->` response, preserves the structured backlog headings, and keeps alias-tagged items intact while appending the exchange reply
+
+Verification in `src/agent-doc`:
+- `cargo test apply_template_response_normalizes_monsterrodholders_style_backlog_patch`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `d5d6b01` (`test: cover monsterrodholders run backlog normalization`)
+- pushed `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:34a90181 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -316,8 +338,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sjwj] 1 more active item(s)
-- [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

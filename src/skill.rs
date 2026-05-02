@@ -812,6 +812,11 @@ mod tests {
                 .unwrap();
 
         for content in [&claude, &codex] {
+            assert!(content.contains("## Harness-Native Entrypoints"));
+            assert!(content.contains("executable workflow entry"));
+            assert!(content.contains(
+                "Do **not** end a normal harness-native `agent-doc` turn with \"not committed\""
+            ));
             assert!(content.contains("## Manual Repair Default"));
             assert!(content.contains("For both **Claude Code** and **Codex**"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
@@ -1038,6 +1043,21 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_treats_harness_native_entrypoints_as_binary_owned_cycles() {
+        assert!(SKILL_TEMPLATE.contains(
+            "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "treat that as an executable workflow entry rather than a generic document-editing request"
+        ));
+        assert!(
+            SKILL_TEMPLATE
+                .contains("Do not manually patch the final assistant response into the document")
+        );
+        assert!(SKILL_TEMPLATE.contains("agent-doc write --commit <FILE>` completes"));
+    }
+
+    #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
         assert!(SKILL_TEMPLATE.contains("Manual repair / missed patchback rule (all harnesses)"));
         assert!(
@@ -1095,6 +1115,8 @@ mod tests {
         assert!(content.contains("continue this turn"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(content.contains("agent-doc session-check <FILE>"));
+        assert!(content.contains("binary-owned response cycle"));
+        assert!(content.contains("generic document-editing request"));
         assert!(content.contains("final document-mutation boundary for the cycle"));
         assert!(content.contains("do not start more long-running task work for that same turn"));
         assert!(content.contains(".codex/hooks.json"));
@@ -1117,6 +1139,8 @@ mod tests {
         assert!(content.contains("SKILL_RELOAD=compact"));
         assert!(content.contains("stale instruction drift"));
         assert!(content.contains("continue this turn"));
+        assert!(content.contains("binary-owned response cycle"));
+        assert!(content.contains("Do not manually patch the final assistant response"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 description: "Interactive document session — respond to user edits in a markdown file. TRIGGER: user invokes /agent-doc <file>. ALL-OF: (1) file is a markdown session document, (2) CLI is installed, (3) write+commit are executed every cycle without exception."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.33.13"
+agent-doc-version: "0.33.16"
 ---
 
 # agent-doc
@@ -29,6 +29,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 ## Core Principles
 
 - **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
+- **Harness-native `agent-doc` entrypoints start the binary-owned response cycle** — when the user invokes `/agent-doc <FILE>`, `agent-doc <FILE>`, or the equivalent entrypoint for the active harness, treat that as an executable workflow entry rather than a generic document-editing request. Do not manually patch the final assistant response into the document, and do not report success before `agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>` completes. For Codex/direct-exec paths, run the explicit `agent-doc session-check <FILE>` backstop before ending the turn.
 - **Imperative edits are executable directives** — when the user writes `do #id`, `go`, `fix this`, `run tests`, `build + install`, `commit + push`, or similar inside the session document, treat that as authorization to perform the requested repo work from the document context. Do not require the same instruction to be repeated in chat.
 - **Local tmux stack work spans sibling repos** — in the `agent-loop` workspace, `src/tmux-router` is a first-class development target for `src/agent-doc`. When a task moves generic tmux pane/session behavior out of `agent-doc`, update the sibling crate too and rely on the workspace cargo patch at `.cargo/config.toml` so local builds exercise the moved code.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.

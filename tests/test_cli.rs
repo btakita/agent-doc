@@ -803,6 +803,16 @@ fn test_skill_md_contains_required_steps() {
         "SKILL.md should treat document-local `do` edits as executable work directives"
     );
     assert!(
+        content.contains(
+            "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"
+        ),
+        "SKILL.md should treat harness-native agent-doc invocations as binary-owned workflow starts"
+    );
+    assert!(
+        content.contains("Do not manually patch the final assistant response into the document"),
+        "SKILL.md should forbid manual final-response patchback on harness-native agent-doc turns"
+    );
+    assert!(
         content.contains("Do not stop at the newest question"),
         "SKILL.md should require reconciling the changed exchange tail oldest-first"
     );

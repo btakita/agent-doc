@@ -3,6 +3,13 @@
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 
+## Harness-Native Entrypoints
+
+- A harness-native `agent-doc` invocation is an executable workflow entry, not a generic request to edit the markdown file by hand.
+- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
+- Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
+- Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
+
 ## Directive Semantics
 
 - Imperative user edits inside an `agent-doc` session document are executable directives, not just topics to comment on.
@@ -50,6 +57,7 @@ Identify your harness from your environment:
 
 - **Invocation:** Direct prompt injection or user instruction referencing the document. Do **not** type `/agent-doc`; Codex CLI reserves leading `/` for its own built-in slash commands and will reject project-defined `/agent-doc`.
 - **Use this form instead:** `agent-doc <FILE>` as a normal message, for example `agent-doc tasks/agent-doc/agent-doc-bugs.md`.
+- **Entry semantics:** once that message is accepted, the turn is inside the binary-owned response cycle. Do **not** downgrade it into a manual document-editing task or report a useful-but-uncommitted success state.
 - **Direct prompt body:** extra chat text after that invocation still counts. For example, `agent-doc tasks/agent-doc/agent-doc-bugs.md #agent-doc-bug` or a following-line `do #id ...` prompt is now captured by the Codex hook and reused by `preflight` / `plan` even when the document itself has no new diff. Bare `agent-doc <FILE>` with no trailing body remains a no-op until the document changes.
 - **Slash commands:** Codex has no slash commands. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
 - **Auto-update prompt:** Print a message asking the user to restart.

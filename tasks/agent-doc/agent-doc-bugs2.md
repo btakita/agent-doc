@@ -671,12 +671,30 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `baac5d0` (`docs: require closeout for harness-native agent-doc turns`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:abfd3abe -->
+❯ Please stop the JB plugin from creating this dialog in the bottom right corner. Please bump the JB Plugin version and build the JB Plugin so I can install.
+❯ ![img_2.png](img_2.png)
+### Re: JetBrains bottom-right notification — gpt-5
+
+I removed the JetBrains plugin's bottom-right notification balloons by switching the `Agent Doc` notification group off `BALLOON` delivery. `Run Agent Doc` remains silent on progress/success, and any plugin errors now go to the IDE Event Log / notification tool window instead of opening a bottom-right popup.
+
+What changed:
+- `editors/jetbrains/src/main/resources/META-INF/plugin.xml` now uses `displayType="TOOL_WINDOW"` for the `Agent Doc` notification group.
+- bumped the JetBrains plugin version to `0.2.83` in `editors/jetbrains/gradle.properties`.
+- updated `editors/jetbrains/AGENTS.md` and `editors/jetbrains/SPEC.md` to document the new non-balloon error path.
+
+Build artifact:
+- `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.83.zip`
+
+Verification:
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+- `cargo test` passed in `src/agent-doc` (`1738` tests plus integration/doc suites)
+- `cargo build` passed in `src/agent-doc`
+- `cargo install --path . --force` passed in `src/agent-doc`
+<!-- agent:boundary:16e7f758 -->
 <!-- /agent:exchange -->
 
 <!--
-Please stop the JB plugin from creating this dialog in the bottom right corner.
-![img_2.png](img_2.png)
+I used `Run Agent Doc` on this file. I noticed that there was already too much context so I cancelled the run. This I called `/clear` in the Codex Session. Then I used `Run Agent Doc` on this file. I saw a prompt that said `Route already in progress`. 
 ---
 Add a Plugin Editor command to clear the context
 -->

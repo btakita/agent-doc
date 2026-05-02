@@ -1099,7 +1099,31 @@ Backlog:
 ### Re: scenario 1 label — gpt-5
 
 Captured as `scenario 1`. The implemented `bf96280` fix above is the code/test/spec/build/install/commit/push closeout for that scenario; no additional code changes were needed in this follow-up cycle.
-<!-- agent:boundary:84036495 -->
+❯ do [#jbxroot]. spec-test-build-install-commit-push
+### Re: #jbxroot closeout — gpt-5
+
+`#jbxroot` is code/spec/test/build/install/commit/push complete, but I am gating it instead of marking it done because the remaining acceptance step in the backlog item is the external live JetBrains replay from `tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md`.
+
+What changed in `src/agent-doc`:
+- `src/resync.rs` now exposes `prune_with_tmux(...)`, so callers can prune the registry against the tmux server they are actually operating on instead of always pruning against the default server.
+- `src/route.rs` and `src/sync.rs` now use that injected-server prune path, which stops dispatch-only/custom-tmux flows from deleting a live registered pane before reuse.
+- The startup-miss shell-diagnostic route test now uses a unique tmux session name so stale isolated servers cannot trip `duplicate session: test` during verification.
+
+Verification in `src/agent-doc`:
+- `cargo test run_with_tmux_dispatch_only_ignores_startup_miss_on_alive_registered_pane -- --nocapture`
+- `cargo test startup_miss_diagnostic_does_not_queue_shell_echo_in_pane -- --nocapture`
+- `cargo test` passed (`1747` unit tests plus integration/doc tests)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `18669f7` (`fix: prune against injected tmux server`)
+- pushed to `origin/20260422/codex-agent-backend`
+
+Backlog:
+- `#jbxroot` is now `[/]` gated pending the remaining live JetBrains replay proof from `tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md`.
+- Kept your new `#adinv2` backlog item as entered.
+<!-- agent:boundary:dcac36c4 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -1113,7 +1137,8 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
+- [ ] [#adinv2] [recommended] Fix the live post-`#adcmt` regression where a direct `agent-doc /.../buildparty-investor-demo/dev.md` Codex prompt still bypasses the binary-owned closeout path, leaves `session-check` reporting "committed previous cycle + unresolved prompt-bearing changes", and yet surfaces a normal success answer. Plan: tasks/agent-doc/plan-buildparty-direct-invocation-closeout-regression.md
+- [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

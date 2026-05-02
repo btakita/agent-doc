@@ -945,7 +945,22 @@ Verification:
 - `cargo test` still has the same unrelated tmux-heavy failures already called out earlier in this session: `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`, `resync::tests::purge_unregistered_dead_non_stash_pane`, `resync::tests::purge_unregistered_dead_non_stash_panes_skips_last_pane`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`, `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`, `route::tests::alive_registered_pane_reregisters_to_live_owner`, `route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`, and `route::tests::eviction_skipped_when_agent_process_active`.
 
 The remaining gap is live replay against the already-poisoned child layout state. Plan: `tasks/agent-doc/plan-monsterrodholders-duplicate-column-memory-replay.md`
-<!-- agent:boundary:2d943e41 -->
+❯ Fix all of the "unrelated tmux-heavy failures". Make a strong development policy to not skip tests even if the tests are deemed "unrelated" or "flaky". The test failures can indicate undefined state or unknown errors.
+### Re: tmux-heavy full-suite verification and policy — gpt-5
+
+I reran the `src/agent-doc` full suite against the current workspace and the previously listed tmux-heavy failures do not reproduce anymore. The named `resync` and `route` tests are green, and the post-edit verification run completed with `1744` unit tests plus the integration suites passing.
+
+I still tightened the policy so this does not regress into "those failures are unrelated/flaky" hand-waving:
+- `src/agent-doc/SKILL.md` now says a red full-suite run is a real blocker and cannot be waived as unrelated or flaky.
+- `src/agent-doc/SPEC.md` now makes that fail-closed rule part of the product contract.
+- `src/agent-doc/src/skill.rs` now tests that the installed Claude/Codex instructions keep this rule.
+- `src/agent-doc/VERSIONS.md` records the policy change.
+
+Verification after the edits:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+<!-- agent:boundary:6558b08c -->
 <!-- /agent:exchange -->
 
 <!--

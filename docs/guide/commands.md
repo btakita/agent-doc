@@ -25,7 +25,7 @@ Flow:
 4. Send to agent
 5. Append response as `## Assistant` block
 6. 3-way merge if file was edited during response
-7. Save snapshot (no post-commit — agent response stays as uncommitted changes)
+7. Save snapshot and close out through the commit boundary. Successful runs commit the response in the same cycle and clean agent-owned post-commit drift back to `HEAD`; only genuine later local edits remain uncommitted.
 
 ## init
 

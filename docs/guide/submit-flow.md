@@ -21,7 +21,7 @@
 6. **Check for concurrent edits** — re-read the file
 7. **Merge if needed** — 3-way merge via `git merge-file` if file changed during agent response
 8. **Write** merged content back to file
-9. **Save snapshot** — no post-commit, so agent additions appear as uncommitted changes in the editor
+9. **Save snapshot and close out** — the response is committed in the same cycle, then post-commit cleanup brings the live document, snapshot, and editor-facing state back in line with committed `HEAD`. Only genuine later local edits remain uncommitted.
 
 ## Session continuity
 
@@ -46,6 +46,6 @@ The merge uses `git merge-file -p --diff3`, which handles edge cases (whitespace
 | (none) | Pre-commit user changes to current branch |
 | `--no-git` | Skip git entirely |
 
-The two-phase git flow (pre-commit user, no post-commit agent) means your editor shows green diff gutters for everything the agent added. On the next run, those changes get committed as part of the pre-commit step.
+The closeout flow still commits the user's baseline before generating a response, but a successful response turn now also crosses the binary-owned commit boundary before it exits. Agent-owned `(HEAD)` / boundary churn is cleaned up in the same cycle instead of being left behind for the next run. Only real follow-up edits after that closeout remain as uncommitted local changes.
 
 Cleanup: `agent-doc clean <file>` squashes all session commits into one.

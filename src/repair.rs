@@ -669,7 +669,7 @@ fn repair_answered_stale_boundary_if_safe(
     };
     let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
     if tail_after_boundary.trim().is_empty()
-        || !crate::session_check::prompt_change_is_already_answered(tail_after_boundary)
+        || !crate::diff::prompt_change_is_already_answered(tail_after_boundary)
         || crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some()
     {
         return Ok(None);

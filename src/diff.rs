@@ -373,6 +373,229 @@ fn block_looks_like_prompt_target(block: &str) -> bool {
     block.lines().any(line_looks_like_prompt_target)
 }
 
+fn is_exchange_response_heading(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+fn normalized_prompt_preview_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || !text_line_looks_like_prompt_target(trimmed) {
+        return None;
+    }
+    Some(trimmed.trim_start_matches('❯').trim().to_string())
+}
+
+pub(crate) fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
+    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
+    trimmed.starts_with('❯')
+        || trimmed.ends_with('?')
+        || lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
+fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("please ")
+        || lower.contains(" please ")
+        || lower.starts_with("can you ")
+        || lower.starts_with("could you ")
+        || lower.starts_with("would you ")
+        || lower.starts_with("need you to ")
+}
+
+fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
+    if trimmed.is_empty() || normalized_prompt_preview_line(trimmed).is_some() {
+        return false;
+    }
+
+    if trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("Plan:")
+        || trimmed.starts_with("Verification")
+        || trimmed.starts_with("What changed:")
+        || trimmed.starts_with("Follow-up:")
+        || trimmed.starts_with("Commit / push:")
+        || trimmed.starts_with("Backlog:")
+        || trimmed.starts_with("`#")
+    {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("i updated ")
+        || lower.starts_with("i fixed ")
+        || lower.starts_with("i added ")
+        || lower.starts_with("i implemented ")
+        || lower.starts_with("i left ")
+        || lower.starts_with("updated ")
+        || lower.starts_with("fixed ")
+        || lower.starts_with("added ")
+        || lower.starts_with("implemented ")
+}
+
+pub(crate) fn prompt_change_is_already_answered(change_text: &str) -> bool {
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char {
+            return false;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+    let mut saw_prompt = false;
+    let mut saw_response = false;
+
+    for segment in change_text.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+
+        if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                continue;
+            }
+        } else {
+            if fence_close(trimmed, fence_char, fence_len) {
+                in_fence = false;
+            }
+            continue;
+        }
+
+        if is_exchange_response_heading(trimmed) {
+            if saw_prompt {
+                saw_response = true;
+            }
+            continue;
+        }
+
+        if normalized_prompt_preview_line(trimmed).is_some() {
+            if saw_response && line_looks_like_fresh_prompt_after_response(trimmed) {
+                return false;
+            }
+            saw_prompt = true;
+            continue;
+        }
+
+        if !saw_prompt && line_looks_like_soft_prompt_request(trimmed) {
+            saw_prompt = true;
+            continue;
+        }
+
+        if saw_prompt && line_looks_like_plain_response_after_prompt(trimmed) {
+            saw_response = true;
+        }
+    }
+
+    saw_prompt && saw_response
+}
+
+pub(crate) fn prompt_change_is_answered_by_later_response(
+    changes: &[PromptBearingChange],
+    idx: usize,
+) -> bool {
+    if changes
+        .get(idx)
+        .is_none_or(|change| change.kind != PromptBearingChangeKind::PromptTarget)
+    {
+        return false;
+    }
+
+    for later in changes.iter().skip(idx + 1) {
+        match later.kind {
+            PromptBearingChangeKind::PromptTarget => return false,
+            PromptBearingChangeKind::RecoveryArtifact => {
+                let heading = later
+                    .text
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or(later.text.as_str())
+                    .trim();
+                if is_exchange_response_heading(heading) {
+                    return true;
+                }
+            }
+            PromptBearingChangeKind::ContentEdit | PromptBearingChangeKind::BoundaryArtifact => {}
+        }
+    }
+
+    false
+}
+
+fn suppress_answered_prompt_runs(changes: Vec<PromptBearingChange>) -> Vec<PromptBearingChange> {
+    let mut filtered = Vec::with_capacity(changes.len());
+    let mut skip_answered_response_run = false;
+
+    for (idx, change) in changes.iter().enumerate() {
+        match change.kind {
+            PromptBearingChangeKind::RecoveryArtifact
+            | PromptBearingChangeKind::BoundaryArtifact => {
+                filtered.push(change.clone());
+            }
+            PromptBearingChangeKind::PromptTarget => {
+                if skip_answered_response_run {
+                    let preview = change
+                        .text
+                        .lines()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or(change.text.as_str())
+                        .trim();
+                    if !line_looks_like_fresh_prompt_after_response(preview) {
+                        continue;
+                    }
+                }
+                if prompt_change_is_already_answered(&change.text)
+                    || prompt_change_is_answered_by_later_response(&changes, idx)
+                {
+                    skip_answered_response_run = true;
+                    continue;
+                }
+                filtered.push(change.clone());
+            }
+            PromptBearingChangeKind::ContentEdit => {
+                if skip_answered_response_run {
+                    continue;
+                }
+                filtered.push(change.clone());
+            }
+        }
+    }
+
+    filtered
+}
+
 fn classify_prompt_bearing_block(
     block_text: &str,
     has_substantive_agent_after: bool,
@@ -419,7 +642,7 @@ fn classify_prompt_bearing_block(
 pub fn prompt_prefix_normalization_targets(diff: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::<String>::new();
     let mut lines = Vec::new();
-    for change in classify_prompt_bearing_changes(diff) {
+    for change in classify_prompt_bearing_changes_raw(diff) {
         if change.kind != PromptBearingChangeKind::PromptTarget {
             continue;
         }
@@ -437,7 +660,7 @@ pub fn prompt_prefix_normalization_targets(diff: &str) -> Vec<String> {
 
 /// Return the first prompt-bearing line that should have had a `❯ ` prefix but did not.
 pub fn first_bare_prompt_prefix_target(diff: &str) -> Option<String> {
-    for change in classify_prompt_bearing_changes(diff) {
+    for change in classify_prompt_bearing_changes_raw(diff) {
         if change.kind != PromptBearingChangeKind::PromptTarget {
             continue;
         }
@@ -570,7 +793,7 @@ fn classify_prompt_bearing_changes_from_annotated_internal(
     changes
 }
 
-pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
+fn classify_prompt_bearing_changes_raw(diff: &str) -> Vec<PromptBearingChange> {
     let mut changes = annotate_diff(diff)
         .map(|annotated| classify_prompt_bearing_changes_from_annotated(&annotated))
         .unwrap_or_default();
@@ -592,6 +815,10 @@ pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
     }
 
     changes
+}
+
+pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
+    suppress_answered_prompt_runs(classify_prompt_bearing_changes_raw(diff))
 }
 
 fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
@@ -3168,6 +3395,52 @@ Please fix the bug.\n\
         assert_eq!(changes[2].text, "<!-- agent:boundary:test-boundary -->");
         assert_eq!(changes[3].kind, PromptBearingChangeKind::PromptTarget);
         assert_eq!(changes[3].text, "Why was the `❯` prefix omitted here?");
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_ignores_raw_answered_stale_exchange_tail() {
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -19,11 +19,11 @@\n",
+            " ---\n",
+            " \n",
+            " ## Status\n",
+            " \n",
+            " <!-- agent:status patch=replace -->\n",
+            "-Blocked on environment: GitHub is unreachable from this sandbox, so I cannot rename `ClaudeScore/BuildPartyInvestorDemo` or add the follow-up submodule here.\n",
+            "+Updated local references for the renamed `ClaudeScore/buildparty-investor-demo` repo: `.gitmodules` now points at the new SSH URL, and the checked-out submodule's `origin` remote has been synced to match.\n",
+            " <!-- /agent:status -->\n",
+            " \n",
+            " ## Exchange\n",
+            " \n",
+            " <!-- agent:exchange patch=append -->\n",
+            "@@ -60,10 +60,17 @@\n",
+            " ```bash\n",
+            " git submodule add git@github.com:ClaudeScore/buildparty-investor-demo.git buildparty-investor-demo\n",
+            " ```\n",
+            " \n",
+            " GitHub will redirect normal clone/fetch/push traffic from the old repo name, but it still recommends updating local remotes, and workflows that use the old repo as a GitHub Action reference will not redirect cleanly. Sources: [GitHub CLI `gh repo rename`](https://cli.github.com/manual/gh_repo_rename), [GitHub repo rename docs](https://docs.github.com/github/administering-a-repository/managing-repository-settings/renaming-a-repository).\n",
+            "+I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\n",
+            "+I updated the repo-local references to the renamed GitHub repo.\n",
+            "+\n",
+            "+- `.gitmodules` now uses `git@github.com:ClaudeScore/buildparty-investor-demo.git`\n",
+            "+- The checked-out submodule at `buildparty-investor-demo/` now has `origin` set to the same URL\n",
+            "+\n",
+            "+The only remaining stale reference I found is the submodule README title (`BuildPartyInvestorDemo` in `buildparty-investor-demo/README.md`). I left that untouched because it belongs to the submodule's own content rather than this parent repo's wiring.\n",
+            " <!-- /agent:exchange -->\n",
+            " \n",
+            " ## Queue\n",
+            " \n",
+            " <!-- agent:queue -->\n",
+        );
+        let changes = classify_prompt_bearing_changes(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::ContentEdit);
+        assert_eq!(
+            changes[0].text,
+            "Updated local references for the renamed `ClaudeScore/buildparty-investor-demo` repo: `.gitmodules` now points at the new SSH URL, and the checked-out submodule's `origin` remote has been synced to match."
+        );
     }
 
     // parse_slash_commands tests

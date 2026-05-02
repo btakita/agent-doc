@@ -632,17 +632,39 @@ Claude Code reaches the same risk through a different entry surface: `/agent-doc
 
 I updated the tracked `#adcmt` scope to reflect that shared rule and left the item open.
 Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
-<!-- agent:boundary:356807e6 -->
+❯ do [#adcmt]. spec-test-build-install-commit-push
+### Re: #adcmt harness-native closeout rule — gpt-5
+
+`#adcmt` is closed.
+
+Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
+
+What changed:
+- tightened the shared instruction surface so harness-native `agent-doc` entrypoints are explicitly treated as binary-owned response-cycle starts, not generic manual document-editing requests
+- updated the shared skill/runbooks/README/SPEC contract to forbid reporting a normal `agent-doc` turn as successful while also leaving it uncommitted; Codex keeps the explicit post-write `agent-doc session-check <FILE>` backstop
+- added regression coverage for the bundled skill, installed harness runbooks, and CLI-installed SKILL content so this contract cannot silently drift
+
+Verification:
+- `cargo test` passed (`1738` tests plus integration/doc suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+Commit / push:
+- `src/agent-doc`: `baac5d0` (`docs: require closeout for harness-native agent-doc turns`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:71802dec -->
 <!-- /agent:exchange -->
 
 <!--
+Please stop the JB plugin from creating 
+![img_2.png](img_2.png)
+---
 Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adcmt] Treat harness-native agent-doc entrypoints as mandatory binary-managed closeout flows so the final response cannot be reported successful without agent-doc finalize or agent-doc write --commit plus session-check. Codex direct invocation is the concrete repro. Plan: tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

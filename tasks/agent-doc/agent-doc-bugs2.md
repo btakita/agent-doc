@@ -760,10 +760,18 @@ Build artifact:
 Commit / push:
 - `src/agent-doc`: `af9362c` (`fix: harden editor route and sync surfaces`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:0a04017a -->
+### Re: #jbcap backlog capture — gpt-5
+
+
+I kept `#jbcap` as an open recommended item. Plan: `tasks/agent-doc/plan-response-captured-pane-loss-closeout.md`.
+<!-- agent:boundary:de45c420 -->
 <!-- /agent:exchange -->
 
 <!--
+On the editor plugins, why was `--no-autostart` added to the `agent-doc sync` call?
+I want the editor plugins to autostart an agent-doc session...if none is running for the document.
+I don't want to lose track of running tmux sessions. Where the sync command closes the session. What is the mechanics that cause agent-doc to lose track of the running tmux session for the document?   
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
@@ -774,6 +782,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbcap] [recommended] Critical: when a JetBrains/Codex session reaches `response_captured`, later pane loss or `sync_missing_pane` must not strand the document without `write_applied` / `commit_*` or a replayable closeout artifact. Plan: tasks/agent-doc/plan-response-captured-pane-loss-closeout.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

@@ -578,6 +578,56 @@ mod tests {
     }
 
     #[test]
+    fn apply_template_response_normalizes_monsterrodholders_style_backlog_patch() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "### 2. Revenue / Fulfillment / Store Operations\n",
+            "- [ ] [#2xcx] Verify ShipStation polling resumes after Cloudflare fix\n",
+            "- [ ] [#yckq] [#ss01] ShipStation fix\n",
+            "\n",
+            "### 4. Internal Tooling / Documentation Carry-Forward\n",
+            "- [ ] [#2gdt] [#wpmem] WP memory limits\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: monsterrodholders backlog follow-up — gpt-5\n\n",
+            "Captured the requested backlog update.\n",
+            "<!-- /patch:exchange -->\n\n",
+            "<!-- patch:backlog -->\n",
+            "### 2. Revenue / Fulfillment / Store Operations\n",
+            "- [ ] [#new1] Verify direct rerun completed cleanly\n",
+            "- [ ] [#2xcx] Verify ShipStation polling resumes after Cloudflare fix\n",
+            "- [ ] [#yckq] [#ss01] ShipStation fix\n",
+            "\n",
+            "### 4. Internal Tooling / Documentation Carry-Forward\n",
+            "- [ ] [#2gdt] [#wpmem] WP memory limits\n",
+            "<!-- /patch:backlog -->\n",
+        );
+
+        apply_template_response(&doc, baseline, response, false)
+            .expect("run path should normalize monsterrodholders-style backlog patches");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("### Re: monsterrodholders backlog follow-up — gpt-5"));
+        assert!(updated.contains("- [ ] [#new1] Verify direct rerun completed cleanly"));
+        assert!(updated.contains("- [ ] [#yckq] [#ss01] ShipStation fix"));
+        assert!(updated.contains("- [ ] [#2gdt] [#wpmem] WP memory limits"));
+    }
+
+    #[test]
     fn run_rejects_bare_compact_exchange_directive() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

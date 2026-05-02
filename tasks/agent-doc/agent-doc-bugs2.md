@@ -848,7 +848,21 @@ Verification:
 
 Follow-up:
 - I intentionally did not auto-switch tmux to a foreign partial-match pane. In that ambiguous state the safer behavior is to warn and refuse passive reuse rather than move or reuse another project's live window. I added `#jbsubroot` for the live nested-root replay so we can confirm this fix against the original `monsterrodholders.md` / `buildparty-investor-demo/dev.md` repro.
-<!-- agent:boundary:cd1ab1a6 -->
+❯ How is the registered pane getting into a "no longer alive or no longer usable" state? I saw the pane with my eyes as alive + usable. Does the agent-doc tracking have bug where the conclusion of the logic is the tmux pane "no longer alive or no longer usable" state but in realty the tmux pane is both alive and usable?
+
+❯ Why is the JB Plugin at all involved with interpreting agent-doc state? The plugins **must** be as "dumb" as possbile wrt agent-doc state. The only thing the JB Plugin needs to pass in to `agent-doc sync` is the absolute paths of the files with the layout and the file in focus. Thet's all. No .agent-doc state lookup needed at oll in the JB or VSCode plugins.
+
+❯ Please look at my recent ops.log activity. The passive `agent-doc sync ...` activity driven by the JB Plugin is broken.
+### Re: passive sync ownership, pane liveness, and plugin scope — gpt-5
+
+Yes: there is a real tracking/provenance bug surface here. The "no longer alive or no longer usable" conclusion is not literally "you could not see a pane on screen"; it is "the current owner-proof chain could not safely reuse this pane for this document." In `src/agent-doc/src/sync.rs`, a registered pane is treated as unresolved if tmux says the pane is gone, if it is stashed/cross-session and rescue cannot safely rejoin it, or if startup-miss / associated-pane recovery says ownership is ambiguous. That means a pane can still look visually alive while `agent-doc` refuses to treat it as the authoritative owner. So your suspicion is valid: this failure mode is broader than true pane death.
+
+On the JetBrains side: you were right, the plugin was still too smart. It was reading `.agent-doc/sessions.json` plus live tmux inventory to choose `--window` and to decide whether passive sync should append `--no-autostart` before it called `agent-doc sync`. I removed that duplication. JetBrains passive sync now sends only absolute layout/focus file paths to `agent-doc sync`, and claim / force-claim no longer inject a plugin-chosen `--window`. The binary now owns window targeting, passive autostart, and ambiguous-owner fail-closed behavior. The relevant changes are in `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt`, `SyncLayoutAction.kt`, `ClaimAction.kt`, and `ForceClaimAction.kt`; specs/notes were updated and the plugin version is now `0.2.87`.
+
+On the recent `ops.log` activity: the root and submodule logs were mostly showing routed reopen events (`route_dispatch_only_sent`) and existing startup-miss / recovery provenance, not a clean binary-owned passive-sync decision trail. That is consistent with the root cause here: too much of the passive sync policy was happening in Kotlin before `agent-doc sync` got to own and log the decision. Verification passed with `./gradlew test buildPlugin`, and the new build artifact is `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`.
+
+Backlog unchanged. The existing `#jbsubroot` / `#jbptrk` items are still the right live replay follow-ups for validating this against the original nested-root repro.
+<!-- agent:boundary:376bb7fc -->
 <!-- /agent:exchange -->
 
 <!--

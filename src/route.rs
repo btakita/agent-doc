@@ -56,6 +56,10 @@
 //!   input). Codex reroutes intentionally keep the payload to the bare `agent-doc <FILE>` reopen
 //!   so the harness re-enters the binary-owned document flow instead of treating a multiline pasted
 //!   prompt as ordinary chat text.
+//! - **Dispatch-only editor reroutes** bypass that acceptance loop on purpose. They send the same
+//!   bare reopen once, without Enter retries or managed-route recovery choreography, and they fail
+//!   closed up front when the pane is visibly stuck in an interactive shell blocker such as
+//!   `reverse-i-search`.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -958,44 +962,67 @@ fn dispatch_only_send_reopen(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<String> {
-    register_dispatch_target(session_id, pane, file_path)?;
-    match send_command_checked(tmux, pane, file_path, harness)? {
-        CommandDispatchStatus::Accepted => {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_accepted file={} pane={} harness={}",
-                    file.display(),
-                    pane,
-                    harness.binary
-                ),
-            );
-            eprintln!(
-                "[route] dispatch-only {} reopen for {} was accepted in pane {}",
-                harness.binary,
+    if let Ok(content) = sessions::capture_pane(tmux, pane)
+        && let Some(reason) = dispatch_only_blocker_reason(harness, &content)
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_blocked file={} pane={} harness={} reason={}",
                 file.display(),
-                pane
-            );
-        }
-        CommandDispatchStatus::TimedOut => {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_timed_out file={} pane={} harness={}",
-                    file.display(),
-                    pane,
-                    harness.binary
-                ),
-            );
-            eprintln!(
-                "[route] dispatch-only {} reopen for {} was sent to pane {} but still appeared drafted after 5s — leaving the bare reopen in place",
+                pane,
                 harness.binary,
-                file.display(),
-                pane
-            );
-        }
+                reason
+            ),
+        );
+        anyhow::bail!(
+            "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; restore an idle prompt and retry",
+            harness.binary,
+            pane,
+            file.display(),
+            reason
+        );
     }
+
+    register_dispatch_target(session_id, pane, file_path)?;
+    send_command_once_checked(tmux, pane, file_path, harness)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_sent file={} pane={} harness={}",
+            file.display(),
+            pane,
+            harness.binary
+        ),
+    );
+    eprintln!(
+        "[route] dispatch-only {} reopen for {} was sent to pane {} without acceptance polling",
+        harness.binary,
+        file.display(),
+        pane
+    );
     Ok(pane.to_string())
+}
+
+fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
+    if let Some(reason) = harness.dispatch_blocker_reason(content) {
+        return Some(reason);
+    }
+    if harness.binary != "codex" {
+        return None;
+    }
+
+    let normalized = crate::prompt::strip_ansi(content).to_ascii_lowercase();
+    if normalized.contains("reverse-i-search") {
+        Some("interactive shell reverse-i-search".to_string())
+    } else if normalized.contains("i-search")
+        && normalized.contains("accept")
+        && normalized.contains("cancel")
+    {
+        Some("interactive shell history search".to_string())
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2227,28 +2254,7 @@ fn send_command_unchecked(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<CommandDispatchStatus> {
-    let short_name = std::path::Path::new(file_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| file_path.to_string());
-    let trigger = harness.trigger_command(file_path);
-    let payload = routed_trigger_payload(&trigger);
-    validate_routed_trigger_payload(harness, &trigger, &payload)?;
-    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
-    if let Err(e) = tmux
-        .cmd()
-        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
-        .status()
-    {
-        eprintln!("[route] warning: display-message failed: {}", e);
-    }
-
-    tmux.send_keys(pane, &payload)?;
-    if let Err(e) = tmux.select_pane(pane) {
-        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
-    }
-    eprintln!("[route] Sent {} → pane {}", trigger, pane);
-
+    let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);
     let poll_interval = std::time::Duration::from_millis(300);
@@ -2280,6 +2286,36 @@ fn send_command_unchecked(
         enter_retries
     );
     Ok(CommandDispatchStatus::TimedOut)
+}
+
+fn send_command_once_unchecked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<String> {
+    let short_name = std::path::Path::new(file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+    let trigger = harness.trigger_command(file_path);
+    let payload = routed_trigger_payload(&trigger);
+    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
+    if let Err(e) = tmux
+        .cmd()
+        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
+        .status()
+    {
+        eprintln!("[route] warning: display-message failed: {}", e);
+    }
+
+    tmux.send_keys(pane, &payload)?;
+    if let Err(e) = tmux.select_pane(pane) {
+        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
+    }
+    eprintln!("[route] Sent {} → pane {}", trigger, pane);
+    Ok(trigger)
 }
 
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
@@ -2416,6 +2452,17 @@ fn send_command_checked(
 ) -> Result<CommandDispatchStatus> {
     ensure_dispatch_target_matches_file(pane, file_path)?;
     send_command_unchecked(tmux, pane, file_path, harness)
+}
+
+fn send_command_once_checked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<()> {
+    ensure_dispatch_target_matches_file(pane, file_path)?;
+    let _ = send_command_once_unchecked(tmux, pane, file_path, harness)?;
+    Ok(())
 }
 
 fn dispatch_routed_reopen(
@@ -4828,6 +4875,23 @@ mod tests {
         script
     }
 
+    fn write_mock_registered_agent_doc_with_stale_trigger(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-stale-trigger-detector");
+        std::fs::write(
+            &script,
+            "#!/bin/bash\nprintf '> %s\\n' \"$1\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn write_mock_busy_registered_agent_doc(base: &Path) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -6490,6 +6554,148 @@ Body\n\
         assert!(
             after.contains("EARLY:agent-doc "),
             "dispatch-only route should send the bare reopen even while the pane is busy: {after}"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_send_reopen_skips_acceptance_polling_enter_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-no-enter-retries");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-dispatch-only-no-enter-retries.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let trigger = format!("agent-doc {}", file_path);
+        let script = write_mock_registered_agent_doc_with_stale_trigger(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} '{}'", script.display(), trigger),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("> {}", trigger),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains(&format!("> {}", trigger)),
+            "mock session should keep a stale visible trigger line in pane output: {content}"
+        );
+
+        sessions::register(
+            "route-test-dispatch-only-no-enter-retries",
+            &pane,
+            &file_path,
+        )
+        .unwrap();
+        dispatch_only_send_reopen(
+            &iso,
+            &doc,
+            "route-test-dispatch-only-no-enter-retries",
+            &pane,
+            &file_path,
+            &HarnessConfig::codex(),
+        )
+        .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("GOT:{trigger}"),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            after.contains(&format!("GOT:{trigger}")),
+            "dispatch-only reopen should still send the bare reopen: {after}"
+        );
+        assert!(
+            !after.contains("EXTRA:"),
+            "dispatch-only reopen must not keep sending Enter retries after the one-shot reopen: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_fails_closed_on_reverse_i_search() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-reverse-i-search");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-dispatch-only-reverse-i-search.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n",
+        )
+        .unwrap();
+        crate::snapshot::save(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register(
+            "route-test-dispatch-only-reverse-i-search",
+            &pane,
+            &file_path,
+        )
+        .unwrap();
+
+        let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("reverse-i-search"),
+            "dispatch-only blocker test requires a visible reverse-i-search shell state: {content}"
+        );
+
+        let err = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-test-dispatch-only-reverse-i-search",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("dispatch-only route must fail closed on reverse-i-search");
+        assert!(
+            err.to_string().contains("reverse-i-search"),
+            "unexpected error: {err:#}"
+        );
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(1),
+        );
+        assert!(
+            !after.contains("GOT:agent-doc "),
+            "dispatch-only route must not inject a reopen after detecting reverse-i-search: {after}"
         );
     }
 

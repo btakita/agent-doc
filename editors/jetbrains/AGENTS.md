@@ -40,6 +40,8 @@ Enable debug output: IDEA → `Help > Diagnostic Tools > Debug Log Settings` →
 
 - Plugin is a thin wrapper — business logic lives in the `agent-doc` CLI.
 - All CLI calls run from the project root directory.
+- Automatic startup/layout sync paths must stay non-destructive: they use `agent-doc resync` (report-only) and `agent-doc sync --no-autostart` rather than auto-starting replacement sessions.
 - Submit/route stays silent on progress and success.
-- Error feedback uses persistent balloon notifications.
+- Repeating `Run Agent Doc` should supersede any stale plugin-spawned route process and dispatch again immediately.
+- Error feedback is routed to the IDE Event Log / notification tool window instead of bottom-right balloon popups.
 - `plugin.xml` action IDs are stable — only change `text` attributes for renames.

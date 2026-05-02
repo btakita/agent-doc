@@ -15,7 +15,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Agent Doc"
-                           displayType="BALLOON"
+                           displayType="TOOL_WINDOW"
                            isLogByDefault="true"/>
         <completion.contributor language="any"
                                 implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>

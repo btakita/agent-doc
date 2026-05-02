@@ -12,8 +12,52 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.awt.datatransfer.StringSelection
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
+    internal interface InFlightRouteHandle {
+        fun isAlive(): Boolean
+        fun cancelForReplacement()
+        fun wasCanceled(): Boolean
+    }
+
+    internal class ProcessRouteHandle(private val process: Process) : InFlightRouteHandle {
+        @Volatile
+        private var canceled = false
+
+        override fun isAlive(): Boolean = process.isAlive
+
+        override fun cancelForReplacement() {
+            canceled = true
+            process.destroy()
+            if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly()
+            }
+        }
+
+        override fun wasCanceled(): Boolean = canceled
+    }
+
+    internal class InFlightRouteRegistry {
+        private val active = mutableMapOf<String, InFlightRouteHandle>()
+
+        @Synchronized
+        fun replace(key: String, next: InFlightRouteHandle): Boolean {
+            val previous = active.put(key, next)
+            val replaced = previous?.takeIf { it.isAlive() }
+            replaced?.cancelForReplacement()
+            return replaced != null
+        }
+
+        @Synchronized
+        fun clearIfCurrent(key: String, current: InFlightRouteHandle) {
+            if (active[key] === current) {
+                active.remove(key)
+            }
+        }
+    }
+
+    internal val inFlightRouteRegistry = InFlightRouteRegistry()
 
     fun relativePath(project: Project, file: VirtualFile): String {
         val basePath = project.basePath ?: return file.path
@@ -71,6 +115,7 @@ object TerminalUtil {
         val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TerminalUtil::class.java)
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
+        val routeKey = "$cwd::$relativePath"
 
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
 
@@ -122,6 +167,11 @@ object TerminalUtil {
                 .directory(java.io.File(cwd))
                 .redirectErrorStream(true)
                 .start()
+            val handle = ProcessRouteHandle(process)
+            val replaced = inFlightRouteRegistry.replace(routeKey, handle)
+            if (replaced) {
+                LOG.warn("[route] canceled stale in-flight route before rerunning: $relativePath")
+            }
 
             val startedAt = System.currentTimeMillis()
             Thread {
@@ -129,7 +179,9 @@ object TerminalUtil {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
                     val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
-                    if (exitCode != 0) {
+                    if (handle.wasCanceled()) {
+                        LOG.warn("[route] superseded route exited after replacement for $relativePath")
+                    } else if (exitCode != 0) {
                         LOG.warn("[route] FAILED (exit $exitCode): $output")
                         notifyError(
                             project,
@@ -139,6 +191,7 @@ object TerminalUtil {
                         LOG.warn("[route] SUCCESS: $output")
                     }
                 } finally {
+                    inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
                     onComplete?.invoke()
                 }
             }.start()

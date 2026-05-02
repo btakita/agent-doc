@@ -89,7 +89,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         val colArgs = mdColumns.flatMap { col ->
                             listOf("--col", col.files.joinToString(","))
                         }
-                        listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs
+                        listOf(agentDoc, "sync") + colArgs + listOf("--focus", activeFile) + windowArgs + listOf("--no-autostart")
                     } else if (editorLayout != null && editorLayout.columns.size > 1 && (mdColumns?.size ?: 0) < editorLayout.columns.size) {
                         // Mixed split: some columns have non-.md files.
                         // Don't reorganize tmux layout — just focus the active file's pane.
@@ -97,7 +97,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     } else {
                         // Single file or flat layout
                         val colArg = visibleMdFiles.joinToString(",")
-                        listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs
+                        listOf(agentDoc, "sync", "--col", colArg, "--focus", activeFile) + windowArgs + listOf("--no-autostart")
                     }
                     log("exec: ${cmd.joinToString(" ")}")
                     val summary = TerminalUtil.formatLayoutSummary(cmd)

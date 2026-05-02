@@ -20,12 +20,40 @@ class SyncLayoutAction : AnAction() {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
 
+        internal fun buildSyncCommand(
+            agentDoc: String,
+            visibleMdFiles: List<String>,
+            editorLayout: EditorLayout?,
+            focusedFile: String?,
+            windowId: String?,
+            noAutostart: Boolean,
+        ): List<String> {
+            val windowArgs = listOf("--window", windowId ?: "agent-doc")
+            val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
+            val noAutostartArgs = if (noAutostart) listOf("--no-autostart") else emptyList()
+            return if (editorLayout != null && editorLayout.columns.size > 1) {
+                val colArgs = editorLayout.columns
+                    .filter { it.files.isNotEmpty() }
+                    .flatMap { col ->
+                        listOf("--col", col.files.joinToString(","))
+                    }
+                listOf(agentDoc, "sync") + colArgs + focusArgs + windowArgs + noAutostartArgs
+            } else {
+                val colArg = visibleMdFiles.joinToString(",")
+                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + windowArgs + noAutostartArgs
+            }
+        }
+
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).
          * Runs on a background thread — safe to call from EDT.
          */
-        fun syncLayout(project: com.intellij.openapi.project.Project, notify: Boolean = true) {
+        fun syncLayout(
+            project: com.intellij.openapi.project.Project,
+            notify: Boolean = true,
+            noAutostart: Boolean = false,
+        ) {
             val basePath = project.basePath ?: return
 
             val manager = FileEditorManager.getInstance(project)
@@ -47,26 +75,16 @@ class SyncLayoutAction : AnAction() {
             Thread {
                 try {
                     val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
-                    // Always pass --window: use resolved ID, or fall back to "agent-doc" name
-                    val windowArgs = listOf("--window", windowId ?: "agent-doc")
-                    val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
-                    // Always use sync --col (never focus) so that unwanted panes
-                    // are broken out and the entire window layout is managed.
                     val editorLayout = if (visibleMdFiles.size > 1)
                         LayoutDetector.detectEditorLayout(project) else null
-                    val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {
-                        // 2D layout: use sync --col format (filter empty columns)
-                        val colArgs = editorLayout.columns
-                            .filter { it.files.isNotEmpty() }
-                            .flatMap { col ->
-                                listOf("--col", col.files.joinToString(","))
-                            }
-                        listOf(agentDoc, "sync") + colArgs + focusArgs + windowArgs
-                    } else {
-                        // Single file or flat layout: sync with single column
-                        val colArg = visibleMdFiles.joinToString(",")
-                        listOf(agentDoc, "sync", "--col", colArg) + focusArgs + windowArgs
-                    }
+                    val cmd = buildSyncCommand(
+                        agentDoc,
+                        visibleMdFiles,
+                        editorLayout,
+                        focusedFile,
+                        windowId,
+                        noAutostart,
+                    )
                     if (notify) {
                         val summary = TerminalUtil.formatLayoutSummary(cmd)
                         TerminalUtil.showHint(project, summary)

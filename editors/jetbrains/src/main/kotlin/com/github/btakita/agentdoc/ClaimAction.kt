@@ -72,7 +72,7 @@ class ClaimAction : AnAction() {
                 }
 
                 // Step 2: Sync layout to arrange tmux panes
-                SyncLayoutAction.syncLayout(project, notify = false)
+                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
             }

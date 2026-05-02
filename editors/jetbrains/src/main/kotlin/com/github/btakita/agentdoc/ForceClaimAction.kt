@@ -63,7 +63,7 @@ class ForceClaimAction : AnAction() {
                     TerminalUtil.notifyError(project, "Force claim failed (exit $exitCode):\n$output")
                 }
 
-                SyncLayoutAction.syncLayout(project, notify = false)
+                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim --force: ${ex.message}")
             }

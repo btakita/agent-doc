@@ -172,7 +172,7 @@ class LayoutChangeDetector(private val project: Project) {
                 // CLI call on background thread to avoid blocking EDT
                 Thread({
                     try {
-                        SyncLayoutAction.syncLayout(project, notify = false)
+                        SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
                     } finally {
                         lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
                     }

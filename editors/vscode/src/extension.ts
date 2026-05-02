@@ -511,7 +511,7 @@ async function claimAction(): Promise<void> {
         showHint(output || `Claimed ${rel} (pos=${split.position || 'none'})`);
 
         // Trigger silent layout sync after claiming
-        await syncLayoutInternal(cwd, false);
+        await syncLayoutInternal(cwd, false, true);
     } catch (err: any) {
         showError(`claim failed: ${err.message}`);
     } finally {
@@ -540,13 +540,13 @@ async function syncLayoutAction(): Promise<void> {
     commandRunning = true;
 
     try {
-        await syncLayoutInternal(root, true);
+        await syncLayoutInternal(root, true, true);
     } finally {
         commandRunning = false;
     }
 }
 
-async function syncLayoutInternal(root: string, notify: boolean): Promise<void> {
+async function syncLayoutInternal(root: string, notify: boolean, noAutostart: boolean): Promise<void> {
     const visibleMd = collectVisibleMdFiles(root);
     if (visibleMd.length === 0) {
         if (notify) showHint('No .md files open');
@@ -571,6 +571,9 @@ async function syncLayoutInternal(root: string, notify: boolean): Promise<void> 
         const args = ['sync', '--col', colArg];
         if (focusFile) {
             args.push('--focus', focusFile);
+        }
+        if (noAutostart) {
+            args.push('--no-autostart');
         }
 
         const output = await runCli(args, root);
@@ -611,7 +614,7 @@ function onTabChanged(): void {
 
         try {
             const colArg = visibleMd.join(',');
-            const args = ['sync', '--col', colArg, '--focus', activeFile];
+            const args = ['sync', '--col', colArg, '--focus', activeFile, '--no-autostart'];
             await runCli(args, root);
             lastTabSyncSignature = signature;
         } catch {

@@ -18,13 +18,13 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 3. Sync Tmux Layout
 
 - **Trigger:** `Ctrl+Shift+Alt+L` (configurable)
-- **Behavior:** Collect all visible `.md` files, detect split orientation, call `agent-doc layout <files...> --split h|v` (or `agent-doc focus <file>` for single file).
+- **Behavior:** Collect all visible `.md` files, detect split orientation, and reconcile the existing tmux layout without implicitly provisioning replacement panes. Automatic editor sync paths should use `agent-doc sync --no-autostart ...`; explicit focus-only moves can still use `agent-doc focus <file>`.
 - **Feedback:** Inline hint near cursor.
 
 ## 4. Tab-to-Pane Sync (Automatic)
 
 - **Trigger:** Editor tab selection changes.
-- **Behavior:** When the active `.md` file changes, call `agent-doc focus <file>`. When the visible file set changes, call `agent-doc layout`.
+- **Behavior:** When the active `.md` file changes, call `agent-doc focus <file>`. When the visible file set changes, call `agent-doc sync --no-autostart ...` rather than a provisioning layout command.
 - **Debounce:** 500ms. Skip if file set unchanged. Concurrency guard (one command at a time).
 
 ## 5. Prompt Polling
@@ -42,7 +42,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 7. Notifications
 
 - **Success:** Lightweight inline hint near cursor (auto-dismissing, ~1-2 seconds).
-- **Error:** Persistent notification balloon. Errors never auto-dismiss.
+- **Error:** Persistent notification entry/tool-window output. Errors never auto-dismiss.
 - **No temp files:** All diagnostic logging uses the IDE's built-in logger, not file I/O.
 
 ## 8. File Filtering

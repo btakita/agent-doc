@@ -484,6 +484,9 @@ enum Commands {
         /// that suppresses auto-start for the focused file across subsequent syncs (5s TTL).
         #[arg(long)]
         rename: bool,
+        /// Arrange/reconcile existing panes without auto-starting replacement sessions.
+        #[arg(long)]
+        no_autostart: bool,
     },
     /// Replace content in a named component
     Patch {
@@ -1314,11 +1317,16 @@ fn main() -> anyhow::Result<()> {
             window,
             focus,
             rename,
+            no_autostart,
         } => {
             if rename && let Some(ref f) = focus {
                 sync::write_rename_debounce(f);
             }
-            sync::run(&columns, window.as_deref(), focus.as_deref())
+            if no_autostart {
+                sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
+            } else {
+                sync::run(&columns, window.as_deref(), focus.as_deref())
+            }
         }
         Commands::Patch {
             file,

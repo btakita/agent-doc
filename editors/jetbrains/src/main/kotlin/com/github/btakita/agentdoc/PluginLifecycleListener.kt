@@ -14,6 +14,14 @@ import com.intellij.openapi.vfs.VirtualFileManager
  * This enables `require-restart="false"` (dynamic plugin install/update/unload).
  */
 class PluginLifecycleListener : ProjectManagerListener {
+    internal fun buildStartupResyncCommand(sessionName: String?): List<String> {
+        val cmd = mutableListOf("agent-doc", "resync")
+        if (sessionName != null) {
+            LOG.info("[resync] startup audit will inspect current tmux session: $sessionName")
+        }
+        return cmd
+    }
+
     override fun projectOpened(project: Project) {
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
@@ -54,11 +62,7 @@ class PluginLifecycleListener : ProjectManagerListener {
                     if (tmuxProc.waitFor() == 0 && name.isNotEmpty()) name else null
                 } catch (_: Exception) { null }
 
-                val cmd = mutableListOf("agent-doc", "resync", "--fix")
-                if (sessionName != null) {
-                    cmd.addAll(listOf("--session", sessionName))
-                    LOG.info("[resync] using relocation mode with session: $sessionName")
-                }
+                val cmd = buildStartupResyncCommand(sessionName)
                 val process = ProcessBuilder(cmd)
                     .directory(java.io.File(basePath))
                     .redirectErrorStream(true)
@@ -69,7 +73,7 @@ class PluginLifecycleListener : ProjectManagerListener {
                     LOG.info("[resync] $output")
                 }
                 if (exitCode != 0) {
-                    LOG.warn("[resync] agent-doc resync --fix exited with code $exitCode")
+                    LOG.warn("[resync] agent-doc resync exited with code $exitCode")
                 }
             } catch (e: Exception) {
                 LOG.info("[resync] agent-doc not available: ${e.message}")

@@ -39,7 +39,13 @@ Two strategies for detecting the file's position in the editor split:
 ### Run Feedback
 
 - `Run Agent Doc` saves and dispatches immediately with `agent-doc route --dispatch-only`, without editor-side typing debounce or local "already running" inference.
-- The action is silent on route progress/success. Only failures surface a persistent IDE notification.
+- Repeating `Run Agent Doc` while an older plugin-spawned route process is still alive cancels the stale process and immediately starts a fresh dispatch for the same document.
+- The action is silent on route progress/success. Failures are logged to the IDE Event Log / notification tool window instead of showing bottom-right balloon popups.
+
+### Safe Sync Surface
+
+- JetBrains startup uses report-only `agent-doc resync`; it does not auto-run `resync --fix`.
+- Editor-driven layout syncs use `agent-doc sync --no-autostart`, so plugin reopen/layout churn only reconciles existing panes and does not start replacement sessions on ambiguous ownership.
 
 ### Action Promoter
 

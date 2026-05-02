@@ -890,8 +890,12 @@ Plan: `tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md`
 ### Re: wording correction and expected layout — gpt-5
 
 Yes: the intended result for this repro is two tmux panes, with `src/boost-client/tasks/monsterrodholders.md` on the right and in focus after sync. The fix above is specifically aimed at that mixed-split shape by preserving the empty sibling column long enough for column memory to restore the remembered pane.
+Do we need to bump the JB plugin and install for testing?
+### Re: JetBrains plugin bump/install for testing — gpt-5
 
-<!-- agent:boundary:81a681d7 -->
+No extra bump is needed for this exact round: the plugin is already at `0.2.87`, and `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip` already exists. For IDE testing, yes, install or reinstall that zip; because the Kotlin/plugin classes changed structurally, the local guidance is uninstall -> restart -> install -> restart. If we make another plugin change after this and want a fresh installable artifact distinct from the current `0.2.87`, then we should bump again before the next test build.
+
+<!-- agent:boundary:35d093c6 -->
 <!-- /agent:exchange -->
 
 <!--

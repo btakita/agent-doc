@@ -764,14 +764,39 @@ Commit / push:
 
 
 I kept `#jbcap` as an open recommended item. Plan: `tasks/agent-doc/plan-response-captured-pane-loss-closeout.md`.
-<!-- agent:boundary:de45c420 -->
+❯ re [#jbcap]: On the editor plugins, why was `--no-autostart` added to the `agent-doc sync` call?
+❯ I want the editor plugins to autostart an agent-doc session...if none is running for the document.
+❯ I don't want to lose track of running tmux sessions. Where the sync command closes the session. What is the mechanics that cause agent-doc to lose track of the running tmux session for the document?
+### Re: #jbcap `sync --no-autostart` rationale — gpt-5
+
+`--no-autostart` was added only to the passive editor-driven `sync` paths, not to explicit `Run Agent Doc` / `route`.
+
+The reason was defensive: `sync` is the layout reconciler. In normal mode, if it cannot prove that the existing pane still owns the document, it is allowed to provision a replacement pane. That is fine for an explicit recovery command, but it is too aggressive for background editor churn like tab changes, split changes, claim follow-up sync, or project-open listeners.
+
+So the intended split is:
+- passive editor sync: reconcile existing panes only
+- explicit user action (`Run Agent Doc`, `agent-doc route`, manual `sync` without `--no-autostart`): allowed to start a session
+
+On the mechanics: `agent-doc` does not usually "lose track" because `sync` directly kills a healthy pane. The loss happens earlier in the ownership proof chain. The relevant state is a combination of:
+- `sessions.json` registration
+- live owner proof from tmux/process-tree / supervisor child PID fallback
+- startup-miss state
+- session-log provenance
+- cross-root / duplicate-pane resolution during sync
+
+When those signals disagree, `sync` can end up in the state "I cannot prove this existing pane still owns this document." In autostart mode, that used to let passive editor activity create a replacement pane. Once replacement starts, adjacent cleanup/rebind paths can supersede the old owner, rescue a stash pane, or prune a duplicate/stale binding. That replacement surface is the blowback we were trying to shrink.
+
+So `--no-autostart` was not meant as the final product behavior for all editor actions. It was a guardrail to stop passive plugin activity from turning temporary tracking uncertainty into pane churn.
+
+Your requirement is reasonable, but I would scope it differently: the plugin should auto-start only on an explicit "start/run this doc" action, or on a very narrow "no owner exists and ownership is unambiguous" path. I would not put that behavior back on the passive layout listeners.
+
+That is also why `#jbcap` is still open. The real fix is to make owner tracking and closeout robust enough that passive sync does not need this guardrail, or to reintroduce autostart only behind a narrower proof threshold.
+
+Backlog unchanged.
+<!-- agent:boundary:98ea7045 -->
 <!-- /agent:exchange -->
 
 <!--
-On the editor plugins, why was `--no-autostart` added to the `agent-doc sync` call?
-I want the editor plugins to autostart an agent-doc session...if none is running for the document.
-I don't want to lose track of running tmux sessions. Where the sync command closes the session. What is the mechanics that cause agent-doc to lose track of the running tmux session for the document?   
----
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

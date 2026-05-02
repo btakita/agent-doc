@@ -164,6 +164,14 @@ enum BusyPaneAutoFixOutcome {
     FailClosed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BusyPaneInterruptRecoveryOutcome {
+    Recovered,
+    Blocked { reason: String },
+    TimedOut,
+    Skipped,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SupervisorHealth {
     Healthy,
@@ -1632,6 +1640,7 @@ fn retry_route_after_busy_pane_auto_fix(
     provenance: &str,
     blocker_reason: Option<&str>,
 ) -> Result<String> {
+    let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
     if allow_auto_fix_retry {
         match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
             BusyPaneAutoFixOutcome::RetryRoute => {
@@ -1690,7 +1699,7 @@ fn retry_route_after_busy_pane_auto_fix(
                         busy_pane,
                         harness,
                         provenance,
-                        blocker_reason,
+                        fallback_detail.as_deref(),
                         true
                     ));
                 }
@@ -1713,36 +1722,62 @@ fn retry_route_after_busy_pane_auto_fix(
             BusyPaneAutoFixOutcome::FailClosed => {}
         }
     }
-    if allow_busy_interrupt_retry
-        && attempt_busy_existing_pane_interrupt_recovery(
+    if allow_busy_interrupt_retry {
+        match attempt_busy_existing_pane_interrupt_recovery(
             tmux,
             file,
             busy_pane,
             harness,
             blocker_reason,
-        )?
-    {
-        return resolve_or_create_pane_with_auto_fix_retry(
-            tmux,
-            file,
-            pane,
-            col_args,
-            session_id,
-            file_path,
-            target_session,
-            harness,
-            created_panes,
-            false,
-            false,
-            true,
-        );
+        )? {
+            BusyPaneInterruptRecoveryOutcome::Recovered => {
+                return resolve_or_create_pane_with_auto_fix_retry(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    false,
+                    false,
+                    true,
+                );
+            }
+            BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
+                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                let detail = format!("bounded interrupt recovery still shows {reason}");
+                anyhow::bail!(format_busy_existing_pane_error(
+                    file,
+                    busy_pane,
+                    harness,
+                    provenance,
+                    Some(detail.as_str()),
+                    auto_fix_attempted || allow_auto_fix_retry
+                ));
+            }
+            BusyPaneInterruptRecoveryOutcome::TimedOut => {
+                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                anyhow::bail!(format_busy_existing_pane_error(
+                    file,
+                    busy_pane,
+                    harness,
+                    provenance,
+                    Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
+                    auto_fix_attempted || allow_auto_fix_retry
+                ));
+            }
+            BusyPaneInterruptRecoveryOutcome::Skipped => {}
+        }
     }
     anyhow::bail!(format_busy_existing_pane_error(
         file,
         busy_pane,
         harness,
         provenance,
-        blocker_reason,
+        fallback_detail.as_deref(),
         auto_fix_attempted || allow_auto_fix_retry
     ));
 }
@@ -2122,11 +2157,11 @@ fn format_busy_existing_pane_error(
     pane: &str,
     harness: &HarnessConfig,
     provenance: &str,
-    blocker_reason: Option<&str>,
+    detail: Option<&str>,
     auto_fix_attempted: bool,
 ) -> String {
-    let blocker_clause = blocker_reason
-        .map(|reason| format!(" while it still shows {}", reason))
+    let detail_clause = detail
+        .map(|detail| format!(" ({detail})"))
         .unwrap_or_default();
     if auto_fix_attempted {
         format!(
@@ -2134,7 +2169,7 @@ fn format_busy_existing_pane_error(
             pane,
             file.display(),
             harness.binary,
-            blocker_clause,
+            detail_clause,
             file.display(),
             provenance
         )
@@ -2144,7 +2179,7 @@ fn format_busy_existing_pane_error(
             pane,
             file.display(),
             harness.binary,
-            blocker_clause,
+            detail_clause,
             provenance
         )
     }
@@ -2287,12 +2322,12 @@ fn attempt_busy_existing_pane_interrupt_recovery(
     pane: &str,
     harness: &HarnessConfig,
     blocker_reason: Option<&str>,
-) -> Result<bool> {
+) -> Result<BusyPaneInterruptRecoveryOutcome> {
     if harness.binary != "codex" {
-        return Ok(false);
+        return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
     if blocker_reason == Some("active permission prompt") {
-        return Ok(false);
+        return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
 
     crate::ops_log::log_op(
@@ -2335,7 +2370,13 @@ fn attempt_busy_existing_pane_interrupt_recovery(
             }
         ),
     );
-    Ok(recovered)
+    Ok(match ready {
+        AgentReadyWaitOutcome::Ready => BusyPaneInterruptRecoveryOutcome::Recovered,
+        AgentReadyWaitOutcome::Blocked { reason } => {
+            BusyPaneInterruptRecoveryOutcome::Blocked { reason }
+        }
+        AgentReadyWaitOutcome::TimedOut => BusyPaneInterruptRecoveryOutcome::TimedOut,
+    })
 }
 
 fn ensure_existing_pane_ready_for_dispatch(
@@ -5792,7 +5833,7 @@ Body\n\
         .expect_err("route should fail closed instead of injecting into a busy live pane");
         assert!(
             err.to_string()
-                .contains("is still not showing an idle codex prompt after automatically applying `agent-doc fix"),
+                .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
             "unexpected error: {err:#}"
         );
 
@@ -5879,6 +5920,94 @@ Body\n\
             after.contains("GOT:agent-doc "),
             "route should dispatch the reopen after the interrupt recovery retry: {after}"
         );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_surfaces_interrupt_timeout_after_busy_recovery_ladder() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-blocked");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-interrupt-blocked.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-interrupt-blocked";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed with the interrupt timeout detail");
+        assert!(restart_called.load(Ordering::Relaxed));
+        assert!(
+            err.to_string()
+                .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
+            "unexpected error: {err:#}"
+        );
+
+        ipc.stop();
     }
 
     #[test]

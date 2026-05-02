@@ -1123,10 +1123,31 @@ Commit / push:
 Backlog:
 - `#jbxroot` is now `[/]` gated pending the remaining live JetBrains replay proof from `tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md`.
 - Kept your new `#adinv2` backlog item as entered.
-<!-- agent:boundary:dcac36c4 -->
+❯ do [#adinv2]. spec-test-build-install-commit-push
+### Re: #adinv2 direct invocation closeout regression — gpt-5
+
+`#adinv2` is closed. I fixed the Codex Stop-hook recovery path in `src/agent-doc` and pushed `0fe40e4` (`fix: salvage codex stop patch closeouts`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/replay_guard.rs` now accepts the narrow shape where `last_assistant_message` has plain leading progress commentary followed by a valid patch suffix, strips the commentary, and replays only the patch body.
+- The same guard still fails closed on transcript markers, component dumps, and trailing or interstitial unmatched content around patch blocks.
+- Added a replay-guard regression plus a Codex Stop-hook regression that reproduces the BuildParty-style `commentary + patch:exchange + patch:backlog` payload without leaking the commentary into the document.
+- Updated `SPEC.md` and `VERSIONS.md` to lock the Stop-hook contract down.
+
+Verification in `src/agent-doc`:
+- `cargo test` passed (`1749` unit tests; integration suites also passed)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `0fe40e4` (`fix: salvage codex stop patch closeouts`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:d9cce4ff -->
 <!-- /agent:exchange -->
 
 <!--
+compact exchange
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
@@ -1137,7 +1158,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adinv2] [recommended] Fix the live post-`#adcmt` regression where a direct `agent-doc /.../buildparty-investor-demo/dev.md` Codex prompt still bypasses the binary-owned closeout path, leaves `session-check` reporting "committed previous cycle + unresolved prompt-bearing changes", and yet surfaces a normal success answer. Plan: tasks/agent-doc/plan-buildparty-direct-invocation-closeout-regression.md
+- [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md

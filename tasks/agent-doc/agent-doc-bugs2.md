@@ -593,18 +593,47 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `c109703` (`fix: silence jetbrains run route notifications`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:314d0751 -->
+❯ nvim suddenly opens in the tmux pane running Codex. I have to close nvim so Codex can receive commands. Please audit sending unnecessary commands such as Ctrl+C, Ctrl+R, etc...to the tmux pane. This issue recently happened on this document.
+### Re: JetBrains / unexpected nvim launch — gpt-5
+
+I audited the tmux key paths. The editor-triggered `agent-doc route --dispatch-only` path was not sending `Ctrl+R`; the explicit control keys in this repo are still limited to the managed Codex busy-pane recovery ladder (`C-g`, `Escape`, `C-c`), and that managed path is separate from the editor hotkey path.
+
+The `nvim` risk was in dispatch-only itself. It still reused the shared acceptance loop after typing the bare reopen, so if the reopen text stayed visible in pane scrollback it could keep pressing `Enter` for up to 5 seconds. In shell substates like `reverse-i-search`, those extra `Enter`s can accept and run stray shell history instead of just reopening the document.
+
+I changed `src/agent-doc` so dispatch-only reroutes now:
+- send the bare `agent-doc <FILE>` reopen once and stop; no Enter-retry acceptance polling
+- fail closed before sending anything when the pane visibly shows `reverse-i-search`, shell history search, a queued draft, or an active permission prompt
+- leave the heavier busy-pane recovery logic on managed `agent-doc route`, not the editor hotkey path
+
+Updated files:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Plan: `tasks/agent-doc/plan-editor-dispatch-unexpected-nvim-launch.md`
+
+`#nvimrt` is closed. The manual editor replay item remains gated separately.
+
+Verification:
+- `cargo test dispatch_only_send_reopen_skips_acceptance_polling_enter_retries`
+- `cargo test resolve_or_create_pane_dispatch_only_fails_closed_on_reverse_i_search`
+- `cargo test resolve_or_create_pane_dispatch_only_sends_into_busy_registered_pane`
+- `cargo build`
+- `cargo install --path . --force`
+
+Full-suite status:
+- `cargo test` still fails in unrelated existing tests: `resync::tests::detect_wrong_window_panes_in_different_windows`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`, `resync::tests::purge_unregistered_dead_non_stash_pane`, `resync::tests::purge_unregistered_dead_non_stash_panes_skips_last_pane`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`, `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`, `route::tests::alive_registered_pane_reregisters_to_live_owner`, `route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`, and `route::tests::eviction_skipped_when_agent_process_active`.
+<!-- agent:boundary:4f7f3cdb -->
 <!-- /agent:exchange -->
 
 <!--
-nvim suddenly opens in the tmux pane running Codex. I have to close nvim so Codex can receive commands. Please audit sending unnecessary commands such as Ctrl+C, Ctrl+R, etc...to the tmux pane.
----
 Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#adcmt] Treat direct Codex `agent-doc <FILE>` prompts as mandatory binary-managed closeout flows so the final response cannot be reported successful without `agent-doc finalize` or `agent-doc write --commit` plus `agent-doc session-check`. Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

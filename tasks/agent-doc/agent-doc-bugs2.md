@@ -960,7 +960,26 @@ Verification after the edits:
 - `cargo test`
 - `cargo build`
 - `cargo install --path . --force`
-<!-- agent:boundary:6558b08c -->
+❯ do [#jbcmem]. spec-test-build-install-commit-push
+### Re: #jbcmem passive mixed-split sync / duplicate column memory — gpt-5
+
+`#jbcmem` is closed. I committed the `src/agent-doc` changes as `06f45f8` (`fix: thin jetbrains sync ownership`) and pushed `20260422/codex-agent-backend`.
+
+What changed:
+- JetBrains passive sync now reports only absolute layout/focus file paths to `agent-doc sync`, preserves empty `--col` placeholders for mixed markdown/non-markdown splits, and no longer inspects tmux state or injects `--window` from the plugin side.
+- Claim / force-claim now hand back to normal sync without a plugin-forced window or `--no-autostart`, so pane targeting, ambiguous-owner handling, and passive autostart policy all stay binary-owned.
+- `src/sync.rs` now keeps placeholder columns long enough for remembered-column restoration, skips duplicating a remembered doc into a sibling empty column, preserves prior distinct layout state when current columns temporarily collapse to the same doc, and resolves windowless syncs against the current tmux session's `agent-doc` window instead of inheriting the currently focused window.
+- Specs / skill text now state the same contract explicitly, and the JetBrains plugin version is bumped to `0.2.87`.
+
+Verification:
+- `cargo test` passed in `src/agent-doc` (`1744` unit tests plus integration/doc suites)
+- `cargo build`
+- `cargo install --path . --force`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+
+Build artifact:
+- `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`
+<!-- agent:boundary:1840ee82 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -974,7 +993,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbcmem] [recommended] Replay the JetBrains passive mixed-split monsterrodholders sync after the duplicate column-memory guard change and confirm src/boost-client/.agent-doc/last_layout.json no longer collapses to duplicate monsterrodholders columns or restores tasks/agent-doc/agent-doc-bugs2.md. Plan: tasks/agent-doc/plan-monsterrodholders-duplicate-column-memory-replay.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

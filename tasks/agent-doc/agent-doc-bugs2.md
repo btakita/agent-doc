@@ -917,7 +917,35 @@ Verification passed:
 - `./gradlew test buildPlugin`
 
 I did not bump the JetBrains plugin version in this round. The rebuilt installable artifact remains `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.87.zip`.
-<!-- agent:boundary:17a96080 -->
+❯ When monsterrodholders.md is focused, the agent-doc tmux window shows 1 pane...the agent-doc-bugs2.md pane.
+❯ `Sync: --col --col /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md [focus: /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md]`
+
+❯ Please review the activity. Make sure we have function tests for these scenarios.
+### Re: monsterrodholders passive sync mixed-split review — gpt-5
+
+Findings:
+1. The live state shows two concrete failure modes behind this repro, and both line up with the logs.
+- `src/boost-client/.agent-doc/last_layout.json` currently holds the same `monsterrodholders.md` path in both columns, which lets passive sync collapse mixed-split state into a single logical document column.
+- The workspace-root `.agent-doc/last_layout.json` still remembers `tasks/agent-doc/agent-doc-bugs2.md` on the left and `monsterrodholders.md` on the right, which matches the wrong-document restore shape when a sync run resolves against the outer repo instead of the child root.
+2. Existing coverage already proved the helper pieces in isolation, but it did **not** prove the duplicate-column-memory poisoning path that the current `monsterrodholders` activity exposed.
+
+What I changed in `src/agent-doc/src/sync.rs`:
+- `apply_column_memory()` now refuses to inject a remembered document into an empty sibling column when that same document is already visible elsewhere in the current sync request.
+- Layout-state persistence is now duplicate-aware: if the current sync columns temporarily collapse to the same doc, sync preserves the previously distinct remembered column instead of overwriting `.agent-doc/last_layout.json` with duplicate entries.
+
+Function coverage added:
+- `sync::tests::column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere`
+- `sync::tests::build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate`
+
+Verification:
+- `cargo test column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere -- --nocapture`
+- `cargo test build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate -- --nocapture`
+- `cargo build`
+- `cargo install --path . --force`
+- `cargo test` still has the same unrelated tmux-heavy failures already called out earlier in this session: `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`, `resync::tests::purge_unregistered_dead_non_stash_pane`, `resync::tests::purge_unregistered_dead_non_stash_panes_skips_last_pane`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`, `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`, `route::tests::alive_registered_pane_reregisters_to_live_owner`, `route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`, and `route::tests::eviction_skipped_when_agent_process_active`.
+
+The remaining gap is live replay against the already-poisoned child layout state. Plan: `tasks/agent-doc/plan-monsterrodholders-duplicate-column-memory-replay.md`
+<!-- agent:boundary:2d943e41 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -931,6 +959,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbcmem] [recommended] Replay the JetBrains passive mixed-split monsterrodholders sync after the duplicate column-memory guard change and confirm src/boost-client/.agent-doc/last_layout.json no longer collapses to duplicate monsterrodholders columns or restores tasks/agent-doc/agent-doc-bugs2.md. Plan: tasks/agent-doc/plan-monsterrodholders-duplicate-column-memory-replay.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

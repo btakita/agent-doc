@@ -100,17 +100,45 @@ Updated:
 - [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md:10)
 
 I did not make a code commit or push in `src/tsift`. `#mqqt` remains open.
-<!-- agent:boundary:2d6f7824 -->
+❯ do [#mqqt]. spec-test-build-install-commit-push
+### Re: #mqqt — gpt-5
+
+`#mqqt` is closed.
+
+I updated `tsift status` so its summarize follow-up command is derived from the indexed layout instead of hardcoding `src/`. Single-root repos that track files at the project root now recommend `tsift summarize --extract .`, `src/`-rooted repos keep `tsift summarize --extract src/`, and mixed workspace layouts fall back to `.` while shared-prefix workspaces keep the common scope root. This landed alongside the already-pending workspace autoindex status repair in the same `src/tsift` commit.
+
+Updated:
+- [src/tsift/src/status.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/status.rs)
+- [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs)
+- [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs)
+- [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md)
+- [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md)
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -q` passed (`451` unit tests, `52` integration tests)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/tsift`: `5efa40b` (`fix: improve status recovery flows`)
+- pushed `origin/main`
+
+The root workspace still shows the expected `src/tsift` submodule-pointer change.
+<!-- agent:boundary:5705e890 -->
 <!-- /agent:exchange -->
 
 <!--
+• Ran tsift search bppipeline1
+  └ Error: tsift search timed out after 30s (strategy: lexical). The index may be stale — run `tsift index .` to
+    rebuild, or use `--timeout 0` to disable the timeout.
+---
 Can tsift use rtk to compress tool call output in the context?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mqqt] status-summarize-scope Make status summarize recommendations scope-aware instead of hardcoding 'tsift summarize --extract src/' so non-src layouts and workspace scopes get valid follow-up commands.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

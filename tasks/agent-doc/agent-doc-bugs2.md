@@ -786,6 +786,8 @@ On the mechanics: `agent-doc` does not usually "lose track" because `sync` direc
 
 When those signals disagree, `sync` can end up in the state "I cannot prove this existing pane still owns this document." In autostart mode, that used to let passive editor activity create a replacement pane. Once replacement starts, adjacent cleanup/rebind paths can supersede the old owner, rescue a stash pane, or prune a duplicate/stale binding. That replacement surface is the blowback we were trying to shrink.
 
+❯ Please review how `sync` does end up in the state "I cannot prove this existing pane still owns this document.".
+
 So `--no-autostart` was not meant as the final product behavior for all editor actions. It was a guardrail to stop passive plugin activity from turning temporary tracking uncertainty into pane churn.
 
 Your requirement is reasonable, but I would scope it differently: the plugin should auto-start only on an explicit "start/run this doc" action, or on a very narrow "no owner exists and ownership is unambiguous" path. I would not put that behavior back on the passive layout listeners.
@@ -793,10 +795,44 @@ Your requirement is reasonable, but I would scope it differently: the plugin sho
 That is also why `#jbcap` is still open. The real fix is to make owner tracking and closeout robust enough that passive sync does not need this guardrail, or to reintroduce autostart only behind a narrower proof threshold.
 
 Backlog unchanged.
-<!-- agent:boundary:98ea7045 -->
+
+❯ do [#jbcap]. spec-test-build-install-commit-push
+### Re: #jbcap sync missing-pane closeout recovery — gpt-5
+
+Plan: `tasks/agent-doc/plan-response-captured-pane-loss-closeout.md`
+
+On the mechanics question: `sync` gets to "I cannot prove this pane still owns the document" only after the live-owner proof chain fails in order:
+- the registered pane is no longer alive or no longer usable
+- shared associated-pane recovery cannot find one unique live owner from process-tree plus supervisor-PID fallback
+- any retained startup-miss provenance is unresolved or not superseded by a newer registered owner
+- once ownership is indeterminate, passive sync used to be able to treat that as permission to provision a replacement pane
+
+That is why `--no-autostart` was added to passive editor sync. The dangerous state was not "sync directly kills a healthy pane"; it was "ownership proof went indeterminate, then passive sync turned that uncertainty into pane churn."
+
+I fixed the `#jbcap` closeout gap in `src/agent-doc` and pushed `194c277` (`fix: recover closeout before sync pane replacement`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `sync.rs` now attempts binary-owned closeout recovery before it records `session_end origin=sync_missing_pane` and before replacement proceeds
+- `response_captured` now replays through `repair` plus strict closeout
+- `write_applied` now finishes the missing commit boundary when the live file and snapshot already prove the response landed
+- stale `preflight_started` keeps the old narrow repair path
+- session logs now record `sync_missing_pane_closeout_recovery_start/result/failed` provenance so pane-loss and closeout forensics stay on one timeline
+- updated `SPEC.md`, `specs/07-commands.md`, `specs/supervisor.md`, and `VERSIONS.md`
+- added regressions for both the replayed-response and already-applied commit-boundary pane-loss shapes
+
+Verification:
+- `cargo test repair_missing_registered_pane_recovers_ -- --nocapture`
+- `cargo test` passed (`1740` unit tests plus integration and CLI suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+`#jbcap` is closed.
+<!-- agent:boundary:1db5ec1f -->
 <!-- /agent:exchange -->
 
 <!--
+Now when I switch documents in the editor, the tmux pane is on the previous document. When I call `Run Agent Doc` on a document that is not displaying the correct tmux pane...the `agent-doc ...` command is sent to the incorrect tmux pane + Codex session.
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
@@ -807,7 +843,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbcap] [recommended] Critical: when a JetBrains/Codex session reaches `response_captured`, later pane loss or `sync_missing_pane` must not strand the document without `write_applied` / `commit_*` or a replayable closeout artifact. Plan: tasks/agent-doc/plan-response-captured-pane-loss-closeout.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

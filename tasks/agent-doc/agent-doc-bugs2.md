@@ -99,7 +99,13 @@ Verification:
 
 Committed and pushed in `src/agent-doc`:
 - `846447e` `fix: align editor tab sync behavior`
-<!-- agent:boundary:a0b2412f -->
+❯ Do we need another jb plugin build?
+### Re: jb plugin build — gpt-5
+
+No. I already ran `./gradlew test buildPlugin` after the final JetBrains source edits, and there were no additional `src/agent-doc` code changes between that successful build and commit `846447e`, so the existing JetBrains plugin build already matches the committed code.
+
+You would only need another build if you want to regenerate the local zip artifact again, produce a signed/release artifact separately, or make further plugin changes after `846447e`.
+<!-- agent:boundary:05e021f0 -->
 <!-- /agent:exchange -->
 
 <!--

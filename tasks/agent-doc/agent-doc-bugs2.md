@@ -623,7 +623,16 @@ Verification:
 
 Full-suite status:
 - `cargo test` still fails in unrelated existing tests: `resync::tests::detect_wrong_window_panes_in_different_windows`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_owner`, `resync::tests::purge_preserves_unregistered_agent_in_stash_with_live_supervisor`, `resync::tests::purge_unregistered_dead_non_stash_pane`, `resync::tests::purge_unregistered_dead_non_stash_panes_skips_last_pane`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor`, `resync::tests::purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root`, `resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane`, `route::tests::alive_registered_pane_reregisters_to_live_owner`, `route::tests::alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`, and `route::tests::eviction_skipped_when_agent_process_active`.
-<!-- agent:boundary:4f7f3cdb -->
+❯ re [#adcmt]: Can this happen with Claude Code? Should this be a general rule rather than a Codex-only carve-out?
+### Re: #adcmt closeout scope — gpt-5
+
+Yes. The concrete miss so far is Codex-specific because the literal entrypoint is a plain `agent-doc <FILE>` message and Codex has its own hook and stop-hook backstop, but the unsafe behavior is not Codex-only. The real invariant is shared: once a harness-native `agent-doc` entrypoint is accepted, the turn is only complete after binary-managed closeout (`agent-doc finalize` for the normal path, `agent-doc write --commit` for repair) rather than a manual document patch and a success message.
+
+Claude Code reaches the same risk through a different entry surface: `/agent-doc <FILE>` via the Skill tool instead of a plain message. So yes, this should be a general rule, with Codex kept as the concrete repro and the harness-specific differences limited to invocation syntax and backstop behavior.
+
+I updated the tracked `#adcmt` scope to reflect that shared rule and left the item open.
+Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
+<!-- agent:boundary:356807e6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -633,7 +642,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adcmt] Treat direct Codex `agent-doc <FILE>` prompts as mandatory binary-managed closeout flows so the final response cannot be reported successful without `agent-doc finalize` or `agent-doc write --commit` plus `agent-doc session-check`. Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
+- [ ] [#adcmt] Treat harness-native agent-doc entrypoints as mandatory binary-managed closeout flows so the final response cannot be reported successful without agent-doc finalize or agent-doc write --commit plus session-check. Codex direct invocation is the concrete repro. Plan: tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md

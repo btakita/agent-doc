@@ -1072,6 +1072,7 @@ Commit / push:
 
 Backlog:
 - no new backlog item added; the existing replay items already cover the remaining live validation surface.
+❯ scenario 1:
 ❯ When I have agent-doc-bugs2.md|monsterrodholders.md the tmux window has a 2 pane layout agent-doc-bugs2.md|monsterrodholders.md...which is correct
 
 ❯ When I select /home/brian/work/btakita/agent-loop/src/agent-doc/specs/08-session-routing.md in the left editor...the tmux window should remain in a 2 pane layout agent-doc-bugs2.md|monsterrodholders.md...as the last selected agent document on the left side was agent-doc-bugs2.md
@@ -1095,7 +1096,10 @@ Verification:
 
 Backlog:
 - no new backlog item added; this specific regression is implemented, verified, committed, and pushed.
-<!-- agent:boundary:b395dbf9 -->
+### Re: scenario 1 label — gpt-5
+
+Captured as `scenario 1`. The implemented `bf96280` fix above is the code/test/spec/build/install/commit/push closeout for that scenario; no additional code changes were needed in this follow-up cycle.
+<!-- agent:boundary:84036495 -->
 <!-- /agent:exchange -->
 
 <!--

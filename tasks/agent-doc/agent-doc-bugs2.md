@@ -71,7 +71,19 @@ So the corrected framing is:
 I created a dedicated plan for that actual bug: `tasks/agent-doc/plan-visible-pane-owner-proof-gap.md`.
 
 I also added backlog item `#ownergap` and left `#jbselsync` in place as the mitigation/trigger-surface follow-up. The new top-priority issue is the owner-proof gap itself.
-<!-- agent:boundary:c534d8ce -->
+❯ do [#ownergap]. We need a "fail-safe" owner detection. Erroring on making the user manually close the tmux pane is not ideal but acceptable. Erroring on automatically closing a running tmux pane is never acceptable. spec-test-build-install-commit-push
+### Re: #ownergap fail-safe owner detection — gpt-5
+
+Implemented the fail-safe live-owner path in `src/agent-doc/src/sync.rs`: sync now accepts the latest still-open session-log pane as an ownership proof source when that pane is still tmux-alive in the same project root, and associated-pane recovery can reuse/reregister it before `registered_pane_missing` replacement is allowed. I also added tmux-backed regressions for direct live-owner reuse and associated-pane recovery, and updated the sync spec plus `VERSIONS.md`.
+
+Verification:
+- `cargo test` in `src/agent-doc`: the new sync regressions pass, but the full suite still reports two unrelated existing failures in `resync::tests::detect_wrong_window_panes_in_different_windows` and `resync::tests::no_wrong_window_when_panes_in_same_window`
+- `cargo build`
+- `cargo install --path . --force`
+
+Committed and pushed in `src/agent-doc`:
+- `5798fe1` `fix: fail closed on live owner proof gaps`
+<!-- agent:boundary:b624a742 -->
 <!-- /agent:exchange -->
 
 <!--

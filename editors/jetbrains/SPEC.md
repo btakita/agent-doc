@@ -29,7 +29,9 @@ Two strategies for detecting the file's position in the editor split:
 
 - Registered as `FileEditorManagerListener` in `plugin.xml`.
 - Split orientation detected by walking the Swing component tree for `Splitter` nodes.
-- Dedup cache (`lastFileSet` + `lastActiveFile`) prevents redundant CLI calls.
+- Pure tab-selection changes call `agent-doc focus <file>` from the focused document's own project root.
+- Visible markdown set changes call `agent-doc sync --no-autostart ...`, reusing the workspace-root chooser for cross-root layouts.
+- Dedup state tracks the visible markdown signature plus the active file so repeated selection churn does not rerun the same command.
 
 ### Auto-Save Before Poll
 

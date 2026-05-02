@@ -34,6 +34,17 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `focus command targets a single document without sync args`() {
+        assertEquals(
+            listOf("agent-doc", "focus", "tasks/one.md"),
+            SyncLayoutAction.buildFocusCommand(
+                agentDoc = "agent-doc",
+                focusedFile = "tasks/one.md",
+            ),
+        )
+    }
+
+    @Test
     fun `sync command never injects a window flag`() {
         val cmd = SyncLayoutAction.buildSyncCommand(
             agentDoc = "agent-doc",

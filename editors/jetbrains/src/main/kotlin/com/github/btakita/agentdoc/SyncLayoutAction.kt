@@ -132,6 +132,11 @@ class SyncLayoutAction : AnAction() {
             }
         }
 
+        internal fun buildFocusCommand(
+            agentDoc: String,
+            focusedFile: String,
+        ): List<String> = listOf(agentDoc, "focus", focusedFile)
+
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).

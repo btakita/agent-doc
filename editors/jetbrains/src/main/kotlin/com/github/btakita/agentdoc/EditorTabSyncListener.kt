@@ -8,10 +8,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Syncs tmux pane layout with editor tab switches.
+ * Reconciles tmux focus/layout with editor tab switches.
  *
- * The plugin is a thin layout reporter — all sync intelligence
- * (dedup, fast-path, eviction) lives in `agent-doc sync`.
+ * Pure tab-selection changes use `agent-doc focus`; visible layout changes
+ * use non-destructive `agent-doc sync --no-autostart`.
  *
  * Guards against rapid-fire events:
  * - 500ms debounce so only the final state is acted upon
@@ -20,12 +20,53 @@ import java.util.concurrent.atomic.AtomicLong
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
  */
 class EditorTabSyncListener : FileEditorManagerListener {
+    @Volatile
+    private var lastVisibleSignature: String? = null
+
+    @Volatile
+    private var lastFocusedFile: String? = null
 
     companion object {
         private const val DEBOUNCE_MS = 500L
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
+    }
+
+    internal enum class AutomaticCommandKind {
+        Focus,
+        Sync,
+    }
+
+    internal data class AutomaticCommandPlan(
+        val kind: AutomaticCommandKind,
+        val visibleSignature: String,
+    )
+
+    internal object AutomaticCommandPlanner {
+        fun visibleSignature(visibleMdFiles: List<String>): String =
+            visibleMdFiles.distinct().sorted().joinToString("\u0000")
+
+        fun plan(
+            visibleMdFiles: List<String>,
+            focusedFile: String,
+            previousVisibleSignature: String?,
+            previousFocusedFile: String?,
+        ): AutomaticCommandPlan? {
+            if (visibleMdFiles.isEmpty()) return null
+
+            val visibleSignature = visibleSignature(visibleMdFiles)
+            if (visibleSignature == previousVisibleSignature && focusedFile == previousFocusedFile) {
+                return null
+            }
+
+            val kind = if (visibleSignature != previousVisibleSignature) {
+                AutomaticCommandKind.Sync
+            } else {
+                AutomaticCommandKind.Focus
+            }
+            return AutomaticCommandPlan(kind, visibleSignature)
+        }
     }
 
     private fun log(msg: String) {
@@ -37,7 +78,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
-        val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+        val (focusedProjectRoot, focusedRelativePath) = TerminalUtil.resolveProject(project, file)
         val activeFile = file.path
 
         // Collect all visible .md files across split panes.
@@ -49,11 +90,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         if (visibleMdFiles.isEmpty()) return
 
-        val editorLayout = SyncLayoutAction.normalizeEditorLayout(
-            project.basePath,
-            projectRoot,
-            LayoutDetector.detectEditorLayout(project),
-        )
+        val detectedEditorLayout = LayoutDetector.detectEditorLayout(project)
 
         // Debounce: bump generation via FFI (shared across editors), fallback to local counter.
         val lib = AgentDocLib.get()
@@ -78,18 +115,49 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
 
                 try {
-                    val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
-                    val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
-                        projectRoot,
-                        editorLayout,
-                    )
-                    val cmd = SyncLayoutAction.buildSyncCommand(
-                        agentDoc = agentDoc,
+                    val plan = AutomaticCommandPlanner.plan(
                         visibleMdFiles = visibleMdFiles,
-                        editorLayout = absoluteEditorLayout,
                         focusedFile = activeFile,
-                        noAutostart = false,
+                        previousVisibleSignature = lastVisibleSignature,
+                        previousFocusedFile = lastFocusedFile,
                     )
+                    if (plan == null) {
+                        log("dedup: selection state already synchronized")
+                        return@Thread
+                    }
+
+                    val (projectRoot, cmd) = when (plan.kind) {
+                        AutomaticCommandKind.Focus -> {
+                            val agentDoc = TerminalUtil.resolveAgentDoc(focusedProjectRoot)
+                            focusedProjectRoot to SyncLayoutAction.buildFocusCommand(
+                                agentDoc = agentDoc,
+                                focusedFile = focusedRelativePath,
+                            )
+                        }
+                        AutomaticCommandKind.Sync -> {
+                            val syncProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
+                                project.basePath,
+                                focusedProjectRoot,
+                                visibleMdFiles,
+                            )
+                            val agentDoc = TerminalUtil.resolveAgentDoc(syncProjectRoot)
+                            val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
+                                syncProjectRoot,
+                                SyncLayoutAction.normalizeEditorLayout(
+                                    project.basePath,
+                                    syncProjectRoot,
+                                    detectedEditorLayout,
+                                ),
+                            )
+                            syncProjectRoot to SyncLayoutAction.buildSyncCommand(
+                                agentDoc = agentDoc,
+                                visibleMdFiles = visibleMdFiles,
+                                editorLayout = absoluteEditorLayout,
+                                focusedFile = activeFile,
+                                noAutostart = true,
+                            )
+                        }
+                    }
                     log("exec: ${cmd.joinToString(" ")}")
                     val summary = TerminalUtil.formatLayoutSummary(cmd)
                     TerminalUtil.showHint(project, summary)
@@ -100,6 +168,10 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
                     log("result: exit=$exitCode output=${output.trim()}")
+                    if (exitCode == 0) {
+                        lastVisibleSignature = plan.visibleSignature
+                        lastFocusedFile = activeFile
+                    }
                 } finally {
                     lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
                 }

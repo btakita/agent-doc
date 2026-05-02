@@ -6,6 +6,7 @@ import { execFile } from 'child_process';
 import * as native from './native';
 import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
+import { buildTabChangeCommand, type TabSyncState } from './tabSync';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -591,7 +592,7 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 
 let tabSyncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let tabSyncRunning = false;
-let lastTabSyncSignature = '';
+let lastTabSyncState: TabSyncState | undefined;
 
 function onTabChanged(): void {
     const editor = vscode.window.activeTextEditor;
@@ -603,8 +604,12 @@ function onTabChanged(): void {
     // Build a signature of the current visible md file set + active file
     const visibleMd = collectVisibleMdFiles(root);
     const activeFile = relativePath(root, editor.document.uri.fsPath);
-    const signature = `${activeFile}|${visibleMd.sort().join(',')}`;
-    if (signature === lastTabSyncSignature) return;
+    const planned = buildTabChangeCommand({
+        activeFile,
+        visibleMd,
+        previous: lastTabSyncState,
+    });
+    if (planned === null) return;
 
     // Debounce: 500ms
     if (tabSyncDebounceTimer) clearTimeout(tabSyncDebounceTimer);
@@ -613,10 +618,20 @@ function onTabChanged(): void {
         tabSyncRunning = true;
 
         try {
-            const colArg = visibleMd.join(',');
-            const args = ['sync', '--col', colArg, '--focus', activeFile, '--no-autostart'];
-            await runCli(args, root);
-            lastTabSyncSignature = signature;
+            const next = buildTabChangeCommand({
+                activeFile,
+                visibleMd,
+                previous: lastTabSyncState,
+            });
+            if (next === null) return;
+
+            if (next.command.kind === 'focus') {
+                const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+                await runCli(['focus', rel], cwd);
+            } else {
+                await runCli(next.command.args, root);
+            }
+            lastTabSyncState = next.nextState;
         } catch {
             // Silently ignore tab sync errors
         } finally {
@@ -1447,7 +1462,7 @@ export function deactivate(): void {
     syntaxDecorationController = undefined;
 
     // Reset state
-    lastTabSyncSignature = '';
+    lastTabSyncState = undefined;
     resolvedAgentDoc = null;
     commandRunning = false;
 }

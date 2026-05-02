@@ -65,7 +65,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js",
+    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js out/tabSync.test.js",
     "package": "vsce package",
     "publish": "vsce publish"
   },

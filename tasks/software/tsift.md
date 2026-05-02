@@ -125,13 +125,36 @@ Commit / push:
 - pushed `origin/main`
 
 The root workspace still shows the expected `src/tsift` submodule-pointer change.
-<!-- agent:boundary:5705e890 -->
-<!-- /agent:exchange -->
-
-<!--
+❯ Saw this error. How can we fail fast if the index is stale. And run `tsift index` as a follow-up?
+```
 • Ran tsift search bppipeline1
   └ Error: tsift search timed out after 30s (strategy: lexical). The index may be stale — run `tsift index .` to
     rebuild, or use `--timeout 0` to disable the timeout.
+```
+### Re: stale search timeout + reindex follow-up — gpt-5
+
+I changed `tsift search` so the timeout path re-checks the same index targets before it prints guidance. Fresh indexes no longer get the misleading stale-index hint; if an index becomes stale while the search worker is running, the timeout now switches back to a concrete reindex instruction for that target.
+
+Updated:
+- [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs)
+- [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs)
+- [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md)
+- [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md)
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -q` passed (`451` unit tests, `53` integration tests)
+- `cargo build`
+- `cargo install --path . --force`
+- live smoke test in the workspace root: `tsift search --timeout 1 bppipeline1` now reports `The search root looks fresh...` instead of telling you to reindex
+
+Requested follow-up completed: `tsift index .` succeeded in `/home/brian/work/btakita/agent-loop` and refreshed `20756` tracked files (`1` new, `7` modified, `0` deleted).
+
+I did not create a `src/tsift` commit or push in this cycle.
+<!-- agent:boundary:bdf267cb -->
+<!-- /agent:exchange -->
+
+<!--
 ---
 Can tsift use rtk to compress tool call output in the context?
 -->

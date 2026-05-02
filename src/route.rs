@@ -810,7 +810,7 @@ pub fn run_with_tmux(
     mode: RouteMode,
 ) -> Result<()> {
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
-    let _ = resync::prune(); // Clean stale entries before lookup
+    let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
 
     // Debounce: wait for file mtime to settle before proceeding
     if debounce_ms > 0 {
@@ -9907,7 +9907,8 @@ Body\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
-        let pane = iso.new_session("test", dir.path()).unwrap();
+        let session = format!("test-{}", std::process::id());
+        let pane = iso.new_session(&session, dir.path()).unwrap();
         let file = dir.path().join("tasks/software/corky.md");
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent).unwrap();

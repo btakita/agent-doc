@@ -472,14 +472,12 @@ pub(crate) fn apply_targeted_fix_for_route(
     Ok(outcome)
 }
 
-/// Quietly prune dead panes and deduplicate entries.
-/// Called automatically before route, sync, and claim operations.
+/// Quietly prune dead panes and deduplicate entries for the provided tmux server.
 /// Returns the number of registry entries removed.
-pub fn prune() -> Result<usize> {
+pub fn prune_with_tmux(tmux: &Tmux) -> Result<usize> {
     tracing::debug!("resync::prune start");
-    let tmux = Tmux::default_server();
     let registry_path = sessions::registry_path();
-    let removed = tmux_router::prune(&registry_path, &tmux)?;
+    let removed = tmux_router::prune(&registry_path, tmux)?;
     if removed > 0 {
         tracing::debug!(removed, "resync: pruned stale sessions");
         eprintln!("resync: pruned {} stale session(s)", removed);
@@ -498,6 +496,14 @@ pub fn prune() -> Result<usize> {
     purge_unregistered_stash_panes_bulk(&tmux, &windows, &panes);
     purge_unregistered_dead_non_stash_panes_bulk(&tmux, &panes);
     Ok(removed)
+}
+
+/// Quietly prune dead panes and deduplicate entries.
+/// Called automatically before route, sync, and claim operations.
+/// Returns the number of registry entries removed.
+pub fn prune() -> Result<usize> {
+    let tmux = Tmux::default_server();
+    prune_with_tmux(&tmux)
 }
 
 /// Purge stash windows where all panes are idle shells.

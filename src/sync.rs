@@ -1518,7 +1518,7 @@ fn run_with_options(
         ));
     }
 
-    let _ = resync::prune(); // Clean stale entries before layout calculation
+    let _ = resync::prune_with_tmux(tmux); // Clean stale entries before layout calculation
 
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();

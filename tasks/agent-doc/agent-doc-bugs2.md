@@ -558,10 +558,30 @@ Commit / push:
 - `src/agent-doc`: `827d34d` (`fix: remove jetbrains route progress balloon`)
 - `src/agent-doc`: `36804c4` (`fix: suppress answered stale-tail prompt targets`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:b625324f -->
+❯ The JB plugin still shows bottom right notification on `Run Agent Doc`. Please remove the bottom right notification. spec-test-build-install-commit-push
+### Re: JetBrains Run Agent Doc notification — gpt-5
+
+I removed the remaining JetBrains `Run Agent Doc` route feedback from the plugin. The route action now dispatches silently on progress/success and only surfaces a persistent IDE notification when `agent-doc route` actually fails.
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` no longer calls `showHint(...)` before or after `agent-doc route --dispatch-only`.
+- `editors/jetbrains/SPEC.md`, `editors/jetbrains/AGENTS.md`, and `VERSIONS.md` now document the silent fire-and-forget contract for JetBrains `Run Agent Doc`.
+
+Verification:
+- `cargo test` passed
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+
+Commit / push:
+- `src/agent-doc`: `c109703` (`fix: silence jetbrains run route notifications`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:7271f3c0 -->
 <!-- /agent:exchange -->
 
 <!--
+nvi
+---
 Add a Plugin Editor command to clear the context
 -->
 

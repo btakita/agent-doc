@@ -652,11 +652,30 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `baac5d0` (`docs: require closeout for harness-native agent-doc turns`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:71802dec -->
+### Re: #adcmt harness-native closeout rule — gpt-5
+
+`#adcmt` is closed.
+
+Plan: `tasks/agent-doc/plan-direct-agent-doc-invocation-missed-commit-closeout.md`
+
+What changed:
+- tightened the shared instruction surface so harness-native `agent-doc` entrypoints are explicitly treated as binary-owned response-cycle starts, not generic manual document-editing requests
+- updated the shared skill/runbooks/README/SPEC contract to forbid reporting a normal `agent-doc` turn as successful while also leaving it uncommitted; Codex keeps the explicit post-write `agent-doc session-check <FILE>` backstop
+- added regression coverage for the bundled skill, installed harness runbooks, and CLI-installed SKILL content so this contract cannot silently drift
+
+Verification:
+- `cargo test` passed (`1738` tests plus integration/doc suites)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+Commit / push:
+- `src/agent-doc`: `baac5d0` (`docs: require closeout for harness-native agent-doc turns`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:abfd3abe -->
 <!-- /agent:exchange -->
 
 <!--
-Please stop the JB plugin from creating 
+Please stop the JB plugin from creating this dialog in the bottom right corner.
 ![img_2.png](img_2.png)
 ---
 Add a Plugin Editor command to clear the context

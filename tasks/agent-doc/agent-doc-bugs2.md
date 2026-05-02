@@ -105,7 +105,10 @@ Committed and pushed in `src/agent-doc`:
 No. I already ran `./gradlew test buildPlugin` after the final JetBrains source edits, and there were no additional `src/agent-doc` code changes between that successful build and commit `846447e`, so the existing JetBrains plugin build already matches the committed code.
 
 You would only need another build if you want to regenerate the local zip artifact again, produce a signed/release artifact separately, or make further plugin changes after `846447e`.
-<!-- agent:boundary:05e021f0 -->
+No additional JetBrains plugin build is needed for `846447e`. I had already run `./gradlew test buildPlugin` after the final plugin edits, and there were no further `src/agent-doc` code changes before that commit, so the existing build output already matches the committed code.
+
+I also finalized and committed that answer into `tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:fbc1916e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -119,6 +122,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cxssh] [recommended] Make required remote SSH access a first-class Codex capability contract: let documents declare targets such as `monsterrodholders-server`, probe alias and direct-host SSH before trusting `resume:`, discard stale resumed sessions on SSH capability drift, and fail closed with diagnostics that separate network loss from SSH-config/alias breakage. Plan: tasks/agent-doc/plan-codex-ssh-server-access-contract.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

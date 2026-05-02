@@ -10,8 +10,9 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Reconciles tmux focus/layout with editor tab switches.
  *
- * Pure tab-selection changes use `agent-doc focus`; visible layout changes
- * use non-destructive `agent-doc sync --no-autostart`.
+ * Single-document tab-selection changes use `agent-doc focus`; split-layout
+ * tab selections stay on non-destructive `agent-doc sync --no-autostart` so
+ * a selected pane can be rescued back out of stash into the agent-doc window.
  *
  * Guards against rapid-fire events:
  * - 500ms debounce so only the final state is acted upon
@@ -60,7 +61,10 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 return null
             }
 
-            val kind = if (visibleSignature != previousVisibleSignature) {
+            val kind = if (
+                visibleSignature != previousVisibleSignature ||
+                visibleMdFiles.size > 1
+            ) {
                 AutomaticCommandKind.Sync
             } else {
                 AutomaticCommandKind.Focus

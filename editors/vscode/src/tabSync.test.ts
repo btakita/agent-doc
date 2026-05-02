@@ -29,7 +29,7 @@ describe('buildTabChangeCommand', () => {
         });
     });
 
-    it('returns focus when only the active file changes', () => {
+    it('keeps split layouts on sync when only the active file changes', () => {
         const planned = buildTabChangeCommand({
             activeFile: 'src/boost-client/tasks/monsterrodholders.md',
             visibleMd: [
@@ -39,6 +39,29 @@ describe('buildTabChangeCommand', () => {
             previous: {
                 activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
                 visibleSignature: 'src/boost-client/tasks/monsterrodholders.md\u0000tasks/agent-doc/agent-doc-bugs2.md',
+            },
+        });
+
+        assert.deepStrictEqual(planned?.command, {
+            kind: 'sync',
+            args: [
+                'sync',
+                '--col',
+                'src/boost-client/tasks/monsterrodholders.md,tasks/agent-doc/agent-doc-bugs2.md',
+                '--focus',
+                'src/boost-client/tasks/monsterrodholders.md',
+                '--no-autostart',
+            ],
+        });
+    });
+
+    it('returns focus when a single visible markdown file stays selected', () => {
+        const planned = buildTabChangeCommand({
+            activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+            visibleMd: ['src/boost-client/tasks/monsterrodholders.md'],
+            previous: {
+                activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
+                visibleSignature: 'src/boost-client/tasks/monsterrodholders.md',
             },
         });
 

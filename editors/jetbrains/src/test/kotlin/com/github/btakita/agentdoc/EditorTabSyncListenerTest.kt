@@ -7,7 +7,7 @@ import org.junit.Test
 class EditorTabSyncListenerTest {
 
     @Test
-    fun `selection change prefers focus when visible markdown set is unchanged`() {
+    fun `selection change keeps split layouts on sync when visible markdown set is unchanged`() {
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = listOf(
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
@@ -19,6 +19,20 @@ class EditorTabSyncListenerTest {
                     "/repo/src/boost-client/tasks/monsterrodholders.md",
                     "/repo/tasks/agent-doc/agent-doc-bugs2.md",
                 )
+            ),
+            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+        )
+
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    }
+
+    @Test
+    fun `single visible markdown file still uses focus when selection changes`() {
+        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
+            visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            previousVisibleSignature = EditorTabSyncListener.AutomaticCommandPlanner.visibleSignature(
+                listOf("/repo/src/boost-client/tasks/monsterrodholders.md")
             ),
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )

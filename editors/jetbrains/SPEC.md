@@ -29,7 +29,8 @@ Two strategies for detecting the file's position in the editor split:
 
 - Registered as `FileEditorManagerListener` in `plugin.xml`.
 - Split orientation detected by walking the Swing component tree for `Splitter` nodes.
-- Pure tab-selection changes call `agent-doc focus <file>` from the focused document's own project root.
+- Single-document tab-selection changes call `agent-doc focus <file>` from the focused document's own project root.
+- Split-layout tab-selection changes stay on `agent-doc sync --no-autostart ...` so a selected visible document can be rescued back out of stash into the `agent-doc` window without provisioning a replacement pane.
 - Visible markdown set changes call `agent-doc sync --no-autostart ...`, reusing the workspace-root chooser for cross-root layouts.
 - Dedup state tracks the visible markdown signature plus the active file so repeated selection churn does not rerun the same command.
 

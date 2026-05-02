@@ -24,7 +24,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 4. Tab-to-Pane Sync (Automatic)
 
 - **Trigger:** Editor tab selection changes.
-- **Behavior:** When the active `.md` file changes, call `agent-doc focus <file>`. When the visible file set changes, call `agent-doc sync --no-autostart ...` rather than a provisioning layout command.
+- **Behavior:** When the active `.md` file changes and only one markdown document is visible, call `agent-doc focus <file>`. When multiple markdown documents are visible, or when the visible file set changes, call `agent-doc sync --no-autostart ...` so stash rescue/layout reconciliation can bring the selected pane back into the `agent-doc` window without provisioning a replacement pane.
 - **Debounce:** 500ms. Skip if file set unchanged. Concurrency guard (one command at a time).
 
 ## 5. Prompt Polling

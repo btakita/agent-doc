@@ -295,6 +295,9 @@ struct MissingRegisteredPaneRepair {
     dead_pane: Option<DeadPaneDiagnostics>,
     recorded_session_loss: bool,
     repaired_stale_preflight: bool,
+    closeout_recovery_phase: Option<String>,
+    closeout_recovery_outcome: Option<crate::repair::RepairOutcome>,
+    closeout_recovery_error: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -316,6 +319,19 @@ fn cycle_phase_label(file: &Path) -> Option<String> {
         crate::cycle_state::CyclePhase::Committed => "committed",
     };
     Some(label.to_string())
+}
+
+fn repair_outcome_label(outcome: crate::repair::RepairOutcome) -> &'static str {
+    match outcome {
+        crate::repair::RepairOutcome::Noop => "noop",
+        crate::repair::RepairOutcome::ReplayedResponse => "replayed_response",
+        crate::repair::RepairOutcome::AlreadyApplied => "already_applied",
+        crate::repair::RepairOutcome::ManualTailRemovalRespected => "manual_tail_removal_respected",
+        crate::repair::RepairOutcome::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
+        crate::repair::RepairOutcome::CommitBoundaryRecovered => "commit_boundary_recovered",
+        crate::repair::RepairOutcome::TemplateNormalized => "template_normalized",
+        crate::repair::RepairOutcome::CompletedBacklogReaped => "completed_backlog_reaped",
+    }
 }
 
 fn sanitize_excerpt(text: &str) -> Option<String> {
@@ -667,6 +683,71 @@ fn capture_dead_pane_diagnostics(
     }))
 }
 
+fn recover_missing_pane_closeout(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> (
+    Option<String>,
+    Option<crate::repair::RepairOutcome>,
+    Option<String>,
+) {
+    let state = match crate::cycle_state::load(file) {
+        Ok(state) => state,
+        Err(err) => {
+            return (
+                None,
+                None,
+                sanitize_excerpt(&format!("failed to load cycle state: {err}")),
+            );
+        }
+    };
+    let Some(state) = state else {
+        return (None, None, None);
+    };
+    let phase = match state.phase {
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        _ => return (None, None, None),
+    };
+    let capture_present = crate::capture::load_active(file).ok().flatten().is_some();
+    let _ = crate::startup_miss::append_session_log_event(
+        file,
+        session_id,
+        &format!(
+            "sync_missing_pane_closeout_recovery_start pane={pane_id} cycle={} phase={phase} durable_capture={capture_present}",
+            state.cycle_id
+        ),
+    );
+    match crate::repair::repair(file) {
+        Ok(outcome) => {
+            let _ = crate::startup_miss::append_session_log_event(
+                file,
+                session_id,
+                &format!(
+                    "sync_missing_pane_closeout_recovery_result pane={pane_id} cycle={} phase={phase} outcome={}",
+                    state.cycle_id,
+                    repair_outcome_label(outcome)
+                ),
+            );
+            (Some(phase.to_string()), Some(outcome), None)
+        }
+        Err(err) => {
+            let detail =
+                sanitize_excerpt(&err.to_string()).unwrap_or_else(|| "unknown".to_string());
+            let _ = crate::startup_miss::append_session_log_event(
+                file,
+                session_id,
+                &format!(
+                    "sync_missing_pane_closeout_recovery_failed pane={pane_id} cycle={} phase={phase} reason={detail}",
+                    state.cycle_id
+                ),
+            );
+            (Some(phase.to_string()), None, Some(detail))
+        }
+    }
+}
+
 fn repair_missing_registered_pane(
     tmux: &Tmux,
     file: &Path,
@@ -676,6 +757,8 @@ fn repair_missing_registered_pane(
 ) -> Result<MissingRegisteredPaneRepair> {
     let dead_pane =
         capture_dead_pane_diagnostics(tmux, file, session_id, pane_id, last_known_window)?;
+    let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) =
+        recover_missing_pane_closeout(file, session_id, pane_id);
     let recorded_session_loss = crate::startup_miss::record_session_loss(
         file,
         session_id,
@@ -690,14 +773,21 @@ fn repair_missing_registered_pane(
             .and_then(|diag| diag.observed_window.as_deref())
             .or(last_known_window),
     )?;
-    let repaired_stale_preflight = matches!(
-        crate::repair::repair_stale_preflight_started_cycle(file)?,
-        crate::repair::RepairOutcome::StalePreflightLockRepaired
-    );
+    let repaired_stale_preflight = if closeout_recovery_phase.is_none() {
+        matches!(
+            crate::repair::repair_stale_preflight_started_cycle(file)?,
+            crate::repair::RepairOutcome::StalePreflightLockRepaired
+        )
+    } else {
+        false
+    };
     Ok(MissingRegisteredPaneRepair {
         dead_pane,
         recorded_session_loss,
         repaired_stale_preflight,
+        closeout_recovery_phase,
+        closeout_recovery_outcome,
+        closeout_recovery_error,
     })
 }
 
@@ -1830,6 +1920,52 @@ fn run_with_options(
                                     .as_ref()
                                     .map(|entry| format!(" window={}", entry.window))
                                     .unwrap_or_default()
+                            ));
+                        }
+                        if let Some(phase) = repair.closeout_recovery_phase.as_deref() {
+                            if let Some(outcome) = repair.closeout_recovery_outcome {
+                                eprintln!(
+                                    "[sync] recovered {} closeout for {} after pane {} disappeared ({})",
+                                    phase,
+                                    file_path.display(),
+                                    pane,
+                                    repair_outcome_label(outcome)
+                                );
+                                sync_log(&format!(
+                                    "missing-pane closeout recovered file={} pane={} phase={} outcome={}",
+                                    file_path.display(),
+                                    pane,
+                                    phase,
+                                    repair_outcome_label(outcome)
+                                ));
+                            } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
+                                eprintln!(
+                                    "[sync] warning: failed to recover {} closeout for {} after pane {} disappeared: {}",
+                                    phase,
+                                    file_path.display(),
+                                    pane,
+                                    err
+                                );
+                                sync_log(&format!(
+                                    "warning: missing-pane closeout recovery failed file={} pane={} phase={} err={}",
+                                    file_path.display(),
+                                    pane,
+                                    phase,
+                                    err
+                                ));
+                            }
+                        } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
+                            eprintln!(
+                                "[sync] warning: failed to inspect closeout state for {} after pane {} disappeared: {}",
+                                file_path.display(),
+                                pane,
+                                err
+                            );
+                            sync_log(&format!(
+                                "warning: missing-pane closeout state inspection failed file={} pane={} err={}",
+                                file_path.display(),
+                                pane,
+                                err
                             ));
                         }
                         if repair.repaired_stale_preflight {
@@ -3289,6 +3425,7 @@ pub(crate) fn is_file_rename(registered_path: &str, current_path: &str) -> bool 
 mod tests {
     use super::*;
     use crate::sessions::IsolatedTmux;
+    use std::process::Command as ProcessCommand;
     use std::time::Duration;
 
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -3401,6 +3538,34 @@ mod tests {
             live_owner_match,
             pane_root_match,
         }
+    }
+
+    fn init_git_repo(root: &Path, tracked: &Path) {
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", tracked.strip_prefix(root).unwrap().to_str().unwrap()])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .status()
+            .unwrap();
     }
 
     #[test]
@@ -3793,6 +3958,163 @@ mod tests {
             .unwrap()
             .expect("session log should be readable");
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn repair_missing_registered_pane_recovers_response_captured_closeout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("captured-pane-loss.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: session-captured-pane-loss\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(tmp.path(), &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
+        crate::repair::save_pending(&doc, response).unwrap();
+
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(
+            log_dir.join("session-captured-pane-loss.log"),
+            "[1] session_start file=tasks/captured-pane-loss.md pane=%422 session=session-captured-pane-loss\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let repair = repair_missing_registered_pane(
+            &Tmux::default_server(),
+            &doc,
+            "session-captured-pane-loss",
+            "%422",
+            Some("@17"),
+        )
+        .unwrap();
+        assert!(repair.recorded_session_loss);
+        assert_eq!(
+            repair.closeout_recovery_phase.as_deref(),
+            Some("response_captured")
+        );
+        assert_eq!(
+            repair.closeout_recovery_outcome,
+            Some(crate::repair::RepairOutcome::ReplayedResponse)
+        );
+        assert!(repair.closeout_recovery_error.is_none());
+        assert!(!repair.repaired_stale_preflight);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::Committed
+        );
+        assert!(!snapshot::pending_path_for(&doc).unwrap().exists());
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("### Re: topic — gpt-5")
+        );
+    }
+
+    #[test]
+    fn repair_missing_registered_pane_recovers_write_applied_commit_boundary() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("write-applied-pane-loss.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: session-write-applied-pane-loss\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(tmp.path(), &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
+        crate::repair::save_pending(&doc, response).unwrap();
+
+        let updated = concat!(
+            "---\n",
+            "agent_doc_session: session-write-applied-pane-loss\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, updated).unwrap();
+        snapshot::save(&doc, updated).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(updated),
+            Some(updated),
+        )
+        .unwrap();
+        crate::capture::mark_write_applied(&doc).unwrap();
+
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(
+            log_dir.join("session-write-applied-pane-loss.log"),
+            "[1] session_start file=tasks/write-applied-pane-loss.md pane=%423 session=session-write-applied-pane-loss\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let repair = repair_missing_registered_pane(
+            &Tmux::default_server(),
+            &doc,
+            "session-write-applied-pane-loss",
+            "%423",
+            Some("@17"),
+        )
+        .unwrap();
+        assert!(repair.recorded_session_loss);
+        assert_eq!(
+            repair.closeout_recovery_phase.as_deref(),
+            Some("write_applied")
+        );
+        assert_eq!(
+            repair.closeout_recovery_outcome,
+            Some(crate::repair::RepairOutcome::AlreadyApplied)
+        );
+        assert!(repair.closeout_recovery_error.is_none());
+        assert!(!repair.repaired_stale_preflight);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::Committed
+        );
+        assert!(!snapshot::pending_path_for(&doc).unwrap().exists());
     }
 
     #[test]

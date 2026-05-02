@@ -282,6 +282,12 @@ The final supervisor-owned closeout must append `supervisor_exit reason=...` bef
 
 Session-log consumers must treat any event whose first token is `session_end` as a closeout boundary, even when origin metadata follows on the same line (for example `session_end origin=registry_rebind ...` or `session_end origin=sync_missing_pane`). Provenance analysis must not require the whole line to equal the bare literal `session_end`.
 
+When pane-loss recovery discovers that the current cycle is already `response_captured` or `write_applied`, the same session log must also record the recovery attempt before the synthetic `session_end origin=sync_missing_pane` closeout. The minimum provenance is:
+- `sync_missing_pane_closeout_recovery_start ... phase=response_captured|write_applied durable_capture=<bool>`
+- either `sync_missing_pane_closeout_recovery_result ... outcome=...` or `sync_missing_pane_closeout_recovery_failed ... reason=...`
+
+That keeps pane-loss forensics and closeout forensics on the same timeline: operators can tell whether sync replayed the durable capture, finished a missing commit boundary, or failed closed and left the capture for later `preflight` / `repair`.
+
 Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 - each restart spawns at most one auto-trigger thread
 - when the child exits, that thread is explicitly cancelled and joined before

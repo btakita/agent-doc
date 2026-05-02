@@ -535,6 +535,73 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
     Ok(Some(repaired))
 }
 
+/// Repair the malformed-template case where a duplicate
+/// `<!-- /agent:exchange -->` lands after escaped conversation content.
+///
+/// This shows up as `closing marker <!-- /agent:exchange --> without matching open`
+/// even though the document still has the real opening exchange marker. When the
+/// text between the first and second close markers is safe exchange content, move
+/// that text back into the real exchange block and drop the stray second close.
+pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>> {
+    let open_tag = "<!-- agent:exchange";
+    let close_tag = "<!-- /agent:exchange -->";
+
+    let Some(open_start) = doc.find(open_tag) else {
+        return Ok(None);
+    };
+    let Some(open_end) = doc[open_start..]
+        .find("-->")
+        .map(|idx| open_start + idx + 3)
+    else {
+        return Ok(None);
+    };
+    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
+        return Ok(None);
+    };
+    let first_close_end = first_close_start + close_tag.len();
+    let Some(second_close_start) = doc[first_close_end..]
+        .find(close_tag)
+        .map(|idx| first_close_end + idx)
+    else {
+        return Ok(None);
+    };
+    let second_close_end = second_close_start + close_tag.len();
+
+    let escaped = &doc[first_close_end..second_close_start];
+    if !escaped.trim().is_empty() && !tail_is_safe_exchange_content(escaped) {
+        anyhow::bail!(
+            "conversation content escaped `agent:exchange`, but the duplicate close repair suffix is ambiguous"
+        );
+    }
+
+    let prefix = &doc[..first_close_end];
+    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let exchange = prefix_components
+        .iter()
+        .find(|c| c.name == "exchange")
+        .context("exchange component disappeared during duplicate-close repair")?;
+
+    let mut repaired = if escaped.trim().is_empty() {
+        prefix.to_string()
+    } else if let Some(boundary_id) = find_boundary_in_component(prefix, exchange) {
+        exchange.append_with_boundary(prefix, escaped.trim(), &boundary_id)
+    } else {
+        let new_content = if exchange.content(prefix).trim().is_empty() {
+            format!("{}\n", escaped.trim())
+        } else {
+            format!(
+                "{}\n{}\n",
+                exchange.content(prefix).trim_end(),
+                escaped.trim()
+            )
+        };
+        exchange.replace_content(prefix, &new_content)
+    };
+
+    repaired.push_str(&doc[second_close_end..]);
+    Ok(Some(repaired))
+}
+
 /// Remove a safe escaped conversation tail below `<!-- /agent:exchange -->`.
 ///
 /// This is used when the user manually deletes a malformed trailing assistant/user
@@ -3495,6 +3562,64 @@ Existing answer.
         assert!(
             repaired.is_none(),
             "comment-only suffix should stay outside exchange"
+        );
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_close_tail_moves_escaped_response_back_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "### Re: later — gpt-5\n\n",
+            "Escaped answer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_duplicate_exchange_close_tail(doc)
+            .unwrap()
+            .expect("duplicate close repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let response = repaired.find("### Re: later — gpt-5").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+
+        assert!(
+            response < exchange_close,
+            "escaped response should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "repair should leave exactly one exchange close marker"
+        );
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_close_tail_rejects_ambiguous_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Todo / Backlog\n\n",
+            "- keep me outside exchange\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let err = repair_duplicate_exchange_close_tail(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate close repair suffix is ambiguous"),
+            "unexpected error: {err}"
         );
     }
 

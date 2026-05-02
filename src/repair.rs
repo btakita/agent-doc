@@ -472,9 +472,14 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
 }
 
 fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
-    let tail_repaired = crate::template::repair_conversation_tail_outside_exchange(doc_content)?
-        .unwrap_or_else(|| doc_content.to_string());
-    let tail_changed = tail_repaired != doc_content;
+    let duplicate_close_repaired =
+        crate::template::repair_duplicate_exchange_close_tail(doc_content)?
+            .unwrap_or_else(|| doc_content.to_string());
+    let duplicate_close_changed = duplicate_close_repaired != doc_content;
+    let tail_repaired =
+        crate::template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
+            .unwrap_or_else(|| duplicate_close_repaired.clone());
+    let tail_changed = tail_repaired != duplicate_close_repaired;
     let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
     let boundary_changed = boundary_repaired.is_some();
     let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
@@ -496,9 +501,19 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     }
     let prompt_changed = repaired != prompt_input;
 
-    if tail_changed || boundary_changed || prompt_changed {
+    if duplicate_close_changed || tail_changed || boundary_changed || prompt_changed {
         write::atomic_write_pub(file, &repaired)?;
         snapshot::save(file, &repaired)?;
+        if duplicate_close_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_duplicate_exchange_close file={}", file.display()),
+            );
+            eprintln!(
+                "[repair] removed duplicate exchange close and restored escaped content in {}",
+                file.display()
+            );
+        }
         if tail_changed {
             crate::ops_log::log_op(
                 file,

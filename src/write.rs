@@ -2790,9 +2790,33 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
     let normalized = crate::component::strip_backlog_patch_attr(&lifted);
-    crate::template::guard_no_conversation_tail_outside_exchange(&normalized)
-        .with_context(|| format!("template structure guard failed for {}", file.display()))?;
-    Ok(normalized)
+    match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
+        Ok(()) => Ok(normalized),
+        Err(err)
+            if err.chain().any(|cause| {
+                cause
+                    .to_string()
+                    .contains("closing marker <!-- /agent:exchange --> without matching open")
+            }) =>
+        {
+            if let Some(repaired) =
+                crate::template::repair_duplicate_exchange_close_tail(&normalized)?
+            {
+                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
+                    .with_context(|| {
+                        format!(
+                            "template structure guard failed for {} after duplicate-close repair",
+                            file.display()
+                        )
+                    })?;
+                return Ok(repaired);
+            }
+            Err(err)
+                .with_context(|| format!("template structure guard failed for {}", file.display()))
+        }
+        Err(err) => Err(err)
+            .with_context(|| format!("template structure guard failed for {}", file.display())),
+    }
 }
 
 /// Detect whether a baseline is stale relative to the current snapshot.
@@ -7989,6 +8013,55 @@ Implemented.
         assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
         assert_eq!(repaired.matches("### Re: #dupfx — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_duplicate_exchange_close_after_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Earlier prompt
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+
+### Re: #xguard — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] keep me
+<!-- /agent:backlog -->
+";
+
+        std::fs::write(&doc, merged).unwrap();
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), merged).unwrap();
+
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let response = repaired.find("### Re: #xguard — gpt-5").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+
+        assert!(
+            response < exchange_close,
+            "response should be restored inside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
     }
 }
 

@@ -118,7 +118,20 @@ I updated the Codex backend, frontmatter plumbing, orchestration/stream resoluti
 Implemented the editor-side fix for this selection path. When more than one markdown document is visible, JetBrains and VS Code now keep tab-selection changes on `agent-doc sync --no-autostart ...` instead of downgrading to a plain `agent-doc focus <file>`. That lets the CLI run stash rescue/layout reconciliation and bring the selected `monsterrodholders.md` pane back into the visible `agent-doc` tmux window instead of leaving it hidden in stash.
 
 I updated the shared editor specs plus Kotlin/TypeScript regressions so both plugins keep the same behavior: single-document tab switches still use `focus`, but split-layout tab switches stay on the non-destructive sync path. Verification: `./gradlew test buildPlugin` in `editors/jetbrains`, `npm test` in `editors/vscode`, `cargo build`, and `cargo install --path . --force` all passed. The first full `cargo test` run hit two transient existing failures (`agent::codex::tests::send_retries_fresh_exec_after_resume_capability_drift_signal` broken pipe, and `route::tests::alive_registered_pane_without_live_owner_deregisters_and_lazy_claims` missed cycle-ack); both exact binary tests passed immediately on isolated rerun. The repo change is committed and pushed in `src/agent-doc` as `9a2d6e8` (`fix: keep split tab sync on non-destructive sync`) on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:4a3090ff -->
+Selecting /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md still does not cause the monsterrodholders.md tmux pane to join the agent-doc window. Please diagnose by looking in the ops.log. spec-test-build-install-commit-push
+### Re: monsterrodholders pane still not joining after selection — gpt-5
+
+I diagnosed this in `src/boost-client/.agent-doc/logs/ops.log`. The failing path was not another generic owner-proof miss: the live pane reached `response_captured`, then `sync_missing_pane_closeout_recovery` tried to salvage the turn, but replay failed on `ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead`. The Stop-hook had captured a raw template closeout containing a partial `patch:backlog`, so later recovery treated that raw backlog patch as the replay payload and replacement continued after the salvage failed.
+
+Implemented fix in `src/agent-doc`:
+- Codex Stop/pending capture now normalizes safe backlog patches before persisting the durable replay payload, so the capture ledger stores only the exchange-safe response body.
+- Backlog normalization now accepts the structured-prefix case from the log: a patch that updates the leading priority section while preserving later backlog sections.
+- Added regressions for both the partial structured backlog normalization path and the Codex Stop-hook replay path.
+
+Verification passed in `src/agent-doc`: `cargo test`, `cargo build`, and `cargo install --path . --force`. The repo change is committed and pushed as `18b3d3f` (`fix: normalize captured backlog patches`) on `origin/20260422/codex-agent-backend`.
+
+No new backlog item from this fix.
+<!-- agent:boundary:6dba32fe -->
 <!-- /agent:exchange -->
 
 <!--

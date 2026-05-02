@@ -954,6 +954,72 @@ mod tests {
     }
 
     #[test]
+    fn stop_auto_closes_partial_backlog_patch_against_structured_backlog() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ What are some #next-steps?\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "### 1. Existing\n",
+            "- [ ] [#base] Keep the existing top item.\n",
+            "\n",
+            "### 2. Later\n",
+            "- [ ] [#later] Keep the later section item.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        init_git_repo(dir.path(), &doc);
+        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let payload = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #next-steps — gpt-5\n\n",
+            "Added prioritized follow-up items.\n",
+            "<!-- /patch:exchange -->\n\n",
+            "<!-- patch:backlog -->\n",
+            "### 1. Existing\n",
+            "- [ ] [#base] Keep the existing top item.\n",
+            "- [ ] [#bpcontract] Write the contract first.\n",
+            "<!-- /patch:backlog -->\n"
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: payload.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: #next-steps — gpt-5"));
+        assert!(content.contains("[#bpcontract] Write the contract first."));
+        assert!(content.contains("### 2. Later"));
+        let capture = crate::capture::latest_committed(&doc)
+            .unwrap()
+            .expect("committed capture should exist");
+        assert!(
+            !capture.response_body.contains("<!-- patch:backlog -->"),
+            "captured response should be stripped of backlog patches after normalization"
+        );
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn stop_auto_closes_active_session_post_commit_drift() {
         let dir = setup_project();
         let doc = write_doc(&dir);

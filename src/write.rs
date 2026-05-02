@@ -1800,18 +1800,24 @@ pub(crate) fn normalize_backlog_patch_response(
 
     let backlog_index = backlog_indexes[0];
     let doc_id = crate::pending_cmd::doc_id_for(file);
-    let (target_body, _) =
+    let (mut target_body, _) =
         crate::pending::backfill(&patches[backlog_index].content, &doc_id, &current_ids);
+    if !crate::pending::preserves_non_item_structure(current_body, &target_body) {
+        if let Some(merged_body) =
+            crate::pending::merge_partial_backlog_prefix(current_body, &target_body)
+        {
+            target_body = merged_body;
+        } else {
+            anyhow::bail!(
+                "ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead"
+            );
+        }
+    }
     let (_, target_items, _) = crate::pending::parse_items(&target_body);
     let rendered_target = crate::pending::canonicalize_preserving_non_item_lines(&target_body);
     if !same_ignoring_trailing_newlines(&rendered_target, &target_body) {
         anyhow::bail!(
             "ERR: pending/backlog patch could not be normalized into supported --pending-* operations"
-        );
-    }
-    if !crate::pending::preserves_non_item_structure(current_body, &target_body) {
-        anyhow::bail!(
-            "ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead"
         );
     }
 
@@ -1868,6 +1874,38 @@ pub(crate) fn normalize_backlog_patch_response(
         patches,
         unmatched,
     })
+}
+
+pub(crate) fn canonicalize_response_for_capture(file: &Path, response: &str) -> Result<String> {
+    if !response.contains("<!-- patch:") {
+        return Ok(response.to_string());
+    }
+
+    let current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for response capture", file.display()))?;
+    let Ok((fm, _)) = frontmatter::parse(&current_content) else {
+        return Ok(response.to_string());
+    };
+    if !fm.resolve_mode().is_template() {
+        return Ok(response.to_string());
+    }
+
+    let Ok((mut patches, unmatched)) = template::parse_patches(response) else {
+        return Ok(response.to_string());
+    };
+    if !patches
+        .iter()
+        .any(|patch| is_backlog_component(&patch.name))
+    {
+        return Ok(response.to_string());
+    }
+
+    sanitize_patches(&mut patches);
+    let normalized =
+        normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
+    Ok(normalized
+        .response_for_capture
+        .unwrap_or_else(|| response.to_string()))
 }
 
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
@@ -9045,6 +9083,34 @@ mod pending_patch_normalization_tests {
                 .contains("### Active\n- [ ] [#keep1] existing item\n- [ ] [#new1] new top item\n")
         );
         assert!(rewritten.contains("\n\n### Later\n- [ ] [#keep2] later item\n"));
+    }
+
+    #[test]
+    fn normalize_pending_patch_merges_partial_structured_prefix() {
+        let tmp = TempDir::new().unwrap();
+        let backlog = concat!(
+            "### Active\n",
+            "- [ ] [#keep1] existing item\n",
+            "\n",
+            "### Later\n",
+            "- [ ] [#keep2] later item\n"
+        );
+        let (doc, content) = doc_with_backlog(&tmp, backlog);
+        let patches = vec![crate::template::PatchBlock::new(
+            "backlog",
+            concat!(
+                "### Active\n",
+                "- [ ] [#keep1] existing item\n",
+                "- [ ] [#new1] new top item\n"
+            ),
+        )];
+
+        normalize_backlog_patch_response(&doc, &content, patches, String::new(), false)
+            .expect("prefix-only structured patch should merge with later sections");
+
+        let rewritten = fs::read_to_string(&doc).unwrap();
+        assert!(rewritten.contains("[#new1] new top item"));
+        assert!(rewritten.contains("### Later\n- [ ] [#keep2] later item\n"));
     }
 
     #[test]

@@ -1066,12 +1066,13 @@ fn strip_transient_response_head_marker(line: &str) -> String {
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
-    crate::capture::capture_response(file, response)?;
+    let response = write::canonicalize_response_for_capture(file, response)?;
+    crate::capture::capture_response(file, &response)?;
     let pending_path = snapshot::pending_path_for(file)?;
     if let Some(parent) = pending_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&pending_path, response)
+    std::fs::write(&pending_path, &response)
         .with_context(|| format!("failed to save pending response {}", pending_path.display()))?;
     Ok(())
 }

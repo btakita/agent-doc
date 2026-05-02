@@ -756,6 +756,48 @@ pub(crate) fn preserves_non_item_structure(lhs: &str, rhs: &str) -> bool {
         == trim_boundary_blank_segments(PendingLayout::parse(rhs).non_item_segments())
 }
 
+pub(crate) fn merge_partial_backlog_prefix(
+    current_body: &str,
+    target_body: &str,
+) -> Option<String> {
+    let current = PendingLayout::parse(current_body);
+    let target = PendingLayout::parse(target_body);
+
+    let current_texts: Vec<(usize, String)> = current
+        .segments
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, segment)| match segment {
+            PendingSegment::Text(raw) if !raw.trim().is_empty() => Some((idx, raw.clone())),
+            _ => None,
+        })
+        .collect();
+    let target_texts: Vec<String> = target
+        .segments
+        .iter()
+        .filter_map(|segment| match segment {
+            PendingSegment::Text(raw) if !raw.trim().is_empty() => Some(raw.clone()),
+            _ => None,
+        })
+        .collect();
+
+    if current_texts.is_empty()
+        || target_texts.is_empty()
+        || target_texts.len() >= current_texts.len()
+        || !target_texts
+            .iter()
+            .zip(current_texts.iter())
+            .all(|(target_text, (_, current_text))| target_text == current_text)
+    {
+        return None;
+    }
+
+    let tail_start = current_texts[target_texts.len()].0;
+    let mut segments = target.segments.clone();
+    segments.extend(current.segments[tail_start..].iter().cloned());
+    Some(PendingLayout { segments }.render())
+}
+
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     let components = crate::component::parse(doc)?;
     let Some(backlog_component) = components

@@ -83,7 +83,23 @@ Verification:
 
 Committed and pushed in `src/agent-doc`:
 - `5798fe1` `fix: fail closed on live owner proof gaps`
-<!-- agent:boundary:b624a742 -->
+❯ do [#jbselsync]. All editor plugins should have the same behavior. spec-test-build-install-commit-push
+### Re: #jbselsync — gpt-5
+
+Implemented the shared tab-sync contract across the editor plugins. Pure markdown tab-selection changes now use `agent-doc focus <file>`, and only visible markdown set changes use `agent-doc sync --no-autostart ...`, so passive editor focus churn no longer routes through an autostart-capable sync path.
+
+JetBrains now plans focus-vs-sync explicitly, runs `focus` from the focused document's own project root, and keeps cross-root layout sync on the workspace-root chooser. VS Code now uses the same focus-vs-sync split through a shared `tabSync` helper instead of treating every tab change as a layout sync. I also updated the JetBrains tab-sync spec, the VS Code test script, and `VERSIONS.md`, and added focused Kotlin + TypeScript regression coverage.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` in `editors/jetbrains`
+- `npm test` in `editors/vscode`
+
+Committed and pushed in `src/agent-doc`:
+- `846447e` `fix: align editor tab sync behavior`
+<!-- agent:boundary:a0b2412f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -97,7 +113,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbselsync] [recommended] Critical: Make JetBrains tab-selection handling non-destructive for cross-root sessions. Use focus-only behavior for selection changes, reserve `sync --no-autostart` for visible-layout changes, and reuse the workspace-root chooser so switching to `src/boost-client/tasks/monsterrodholders.md` cannot rebind or replace a live tmux pane. Plan: tasks/agent-doc/plan-jb-selection-sync-non-destructive.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

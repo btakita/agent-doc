@@ -343,17 +343,38 @@ Why this is separate:
 
 Backlog:
 - added `#selfrt` at the top of `agent:backlog`
-<!-- agent:boundary:ee69a9dd -->
+❯ do [#selfrt]. spec-test-build-install-commit-push
+### Re: #selfrt same-document busy reroute closeout — gpt-5
+
+`#selfrt` is closed. I fixed the same-document routed busy-pane closeout in `src/agent-doc` and pushed `d8189bf` (`fix: preserve busy-route recovery stage`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `src/route.rs` now carries structured Codex interrupt-recovery outcomes (`ready`, `blocked`, `timed_out`, `skipped`) through the bounded same-document busy-pane ladder instead of reusing the stale pre-interrupt timeout.
+- the final fail-closed routed error now preserves the last recovery-stage detail, so same-document reroutes report the bounded-interrupt timeout/blocker instead of collapsing back to the generic idle-prompt refusal.
+- added route regression coverage for the fresh-restart plus bounded-interrupt timeout path and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification in `src/agent-doc`:
+- `cargo test resolve_or_create_pane_surfaces_interrupt_timeout_after_busy_recovery_ladder -- --nocapture`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Plan: `tasks/agent-doc/plan-agent-doc-bugs2-self-reroute-busy-pane.md`
+<!-- agent:boundary:5d576944 -->
 <!-- /agent:exchange -->
 
 <!--
+```
+
+agent-doc route failed for tasks/agent-doc/agent-doc-bugs2.md after 51s (exit 1): [route] target tmux session: 0 [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] registered pane %3 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once before failing closed [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [route] scoped fix left pane %3 authoritative for tasks/agent-doc/agent-doc-bugs2.md with a healthy supervisor — restarting the live codex session fresh once before one final reroute [sync] found alive agent-doc child (pid 135178) in pane %3 for tasks/agent-doc/agent-doc-bugs2.md [sync] recovered live pane %3 for session b26b9957 via supervisor pid 135178 [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] live codex pane %3 for tasks/agent-doc/agent-doc-bugs2.md is still busy after the scoped recovery path — sending one interrupt sequence before the final reroute attempt [route] Still waiting for codex (5s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (10s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] Still waiting for codex (15s)... last line: gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% us [route] codex blocked after 15.6s in pane %3: interactive shell reverse-i-search Error: registered pane %3 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle codex prompt after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%3 pane_pid=132630 pane_session=0 current_command=agent-doc)
+```
+---
 Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#selfrt] [recommended] Fix the same-document Run Agent Doc reroute that still fail-closes on agent-doc-bugs2.md after scoped fix, fresh restart, and bounded interrupt. Plan: tasks/agent-doc/plan-agent-doc-bugs2-self-reroute-busy-pane.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

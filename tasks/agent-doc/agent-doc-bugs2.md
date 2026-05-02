@@ -576,11 +576,28 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `c109703` (`fix: silence jetbrains run route notifications`)
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:7271f3c0 -->
+### Re: JetBrains Run Agent Doc notification — gpt-5
+
+I removed the remaining JetBrains `Run Agent Doc` route feedback from the plugin. The route action now dispatches silently on progress/success and only surfaces a persistent IDE notification when `agent-doc route` actually fails.
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` no longer calls `showHint(...)` before or after `agent-doc route --dispatch-only`.
+- `editors/jetbrains/SPEC.md`, `editors/jetbrains/AGENTS.md`, and `VERSIONS.md` now document the silent fire-and-forget contract for JetBrains `Run Agent Doc`.
+
+Verification:
+- `cargo test` passed
+- `cargo build` passed
+- `cargo install --path . --force` passed
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+
+Commit / push:
+- `src/agent-doc`: `c109703` (`fix: silence jetbrains run route notifications`)
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:314d0751 -->
 <!-- /agent:exchange -->
 
 <!--
-nvi
+nvim suddenly opens in the tmux pane running Codex. I have to close nvim so Codex can receive commands. Please audit sending unnecessary commands such as Ctrl+C, Ctrl+R, etc...to the tmux pane.
 ---
 Add a Plugin Editor command to clear the context
 -->

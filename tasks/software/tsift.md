@@ -75,7 +75,32 @@ Commit / push:
 - pushed `origin/main`
 
 `#mqqt` remains open.
-<!-- agent:boundary:8fc3e37b -->
+❯ tsift should **automatically** reindex in this case and **complete** the status.
+```
+• Ran tsift status
+  └ index: missing (workspace, 3 scopes not indexed)
+      scope claudescore-plugin: missing index (/home/brian/work/btakita/agent-loop/src/session-share/.tsift/indexes/
+    … +8 lines (ctrl + t to view transcript)
+      use: (none — run tsift index first)
+      run: tsift init --workspace && tsift index --workspace .  (3 missing scopes)
+```
+### Re: workspace status auto-reindex — gpt-5
+
+I changed `tsift status` so the CLI now auto-builds missing workspace scoped indexes before printing the final report. The low-level `status::check_status` helper stays read-only; only the command path repairs missing `.tsift/indexes/<scope>/index.db` files and then reruns the normal status calculation, so the workspace case you pasted now completes in one `tsift status` pass instead of stopping at `run: tsift init --workspace && tsift index --workspace .`.
+
+Verification:
+- `cargo test -q` passed (`449` unit tests, `52` integration tests)
+- `cargo build`
+- `cargo install --path . --force`
+
+Updated:
+- [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:2874)
+- [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs:932)
+- [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:717)
+- [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md:10)
+
+I did not make a code commit or push in `src/tsift`. `#mqqt` remains open.
+<!-- agent:boundary:2d6f7824 -->
 <!-- /agent:exchange -->
 
 <!--

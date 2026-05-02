@@ -690,11 +690,32 @@ Verification:
 - `cargo test` passed in `src/agent-doc` (`1738` tests plus integration/doc suites)
 - `cargo build` passed in `src/agent-doc`
 - `cargo install --path . --force` passed in `src/agent-doc`
-<!-- agent:boundary:16e7f758 -->
+❯ I used `Run Agent Doc` on this file. I noticed that there was already too much context so I cancelled the run. This I called `/clear` in the Codex Session. Then I used `Run Agent Doc` on this file. I saw a prompt that said `Route already in progress`, and the `agent-doc ...` command was not sent. After waiting for ~30s, the `agent-doc ...` command was sent.
+❯ What should happen is on my second call `Run Agent Doc` on this file should immediately send the `agent-doc ...` command.
+### Re: JetBrains reroute after /clear — gpt-5
+
+I changed the JetBrains plugin so a repeated `Run Agent Doc` no longer waits behind an older plugin-spawned `agent-doc route --dispatch-only` process. The second click now wins: the plugin cancels the stale background route, suppresses the stale process's failure noise, and immediately launches a fresh dispatch for the same document. That matches the cancel + `/clear` behavior you asked for.
+
+What changed:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` now tracks one in-flight route process per document and replaces it on repeat invocation.
+- added a focused Kotlin regression in `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt` for the replacement logic.
+- bumped the JetBrains plugin version to `0.2.84`.
+
+Build artifact:
+- `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.84.zip`
+
+Verification:
+- `./gradlew test buildPlugin` passed in `src/agent-doc/editors/jetbrains`
+- `cargo test` passed in `src/agent-doc` (`1738` unit tests plus integration/doc suites)
+- `cargo build` passed in `src/agent-doc`
+- `cargo install --path . --force` passed in `src/agent-doc`
+
+I left backlog unchanged. The existing recommended replay item `#edispatch` already covers a manual live JetBrains reroute validation pass.
+<!-- agent:boundary:757f170d -->
 <!-- /agent:exchange -->
 
 <!--
-I used `Run Agent Doc` on this file. I noticed that there was already too much context so I cancelled the run. This I called `/clear` in the Codex Session. Then I used `Run Agent Doc` on this file. I saw a prompt that said `Route already in progress`. 
+When I 
 ---
 Add a Plugin Editor command to clear the context
 -->

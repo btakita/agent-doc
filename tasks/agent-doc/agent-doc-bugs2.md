@@ -131,7 +131,34 @@ Implemented fix in `src/agent-doc`:
 Verification passed in `src/agent-doc`: `cargo test`, `cargo build`, and `cargo install --path . --force`. The repo change is committed and pushed as `18b3d3f` (`fix: normalize captured backlog patches`) on `origin/20260422/codex-agent-backend`.
 
 No new backlog item from this fix.
-<!-- agent:boundary:6dba32fe -->
+❯ When I change the editor focus to monsterrodholders.md, the tmux pane for monsterrodholders.md is still not showing up.
+❯ When I run `Claim for Tmux Pane` on monsterrodholders.md, I see the following
+```
+resync: stash pane %77 is registered in its own project root — skipping kill
+[claim] pane %75 is already claimed by /home/br (file: tasks/monsterrodholders.md); provisioning a new pane
+[route] startup already provisioned pane %75 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md while waiting on locks
+```
+
+❯ spec-test-build-install-commit-push
+### Re: monsterrodholders claim false-conflict — gpt-5
+
+I checked `src/boost-client/.agent-doc/sessions.json` plus the current `claim` path in `src/agent-doc/src/claim.rs`. The immediate bug was not another missing-pane proof failure: `%75` was already registered to `/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`, but `claim` was iterating a registry keyed by canonical file path and still comparing that key to the document session UUID. That made the document's own pane look like "another claim", printed the misleading `/home/br` owner label, and provisioned a duplicate pane instead of reusing `%75`.
+
+Implemented fix in `src/agent-doc`:
+- `claim` now recognizes same-document ownership by canonical document identity instead of treating the normalized registry key as a session id.
+- stale-claim cleanup now uses the same canonical matching, so relative `entry.file` shapes like `tasks/monsterrodholders.md` still match the absolute document path.
+- updated `VERSIONS.md` and `specs/08-session-routing.md`, and added regressions for both the normalized-registry-key and relative-entry-file cases.
+
+Verification in `src/agent-doc`:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Committed and pushed in `src/agent-doc`:
+- `1dafdb5` `fix: reuse claimed pane for normalized registry keys`
+
+No new backlog item from this fix.
+<!-- agent:boundary:08653b22 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -2347,6 +2347,27 @@ fn attempt_busy_existing_pane_interrupt_recovery(
         file.display()
     );
 
+    let _ = tmux.send_keys_raw(pane, "C-g");
+    std::thread::sleep(Duration::from_millis(100));
+    let ctrl_g_probe = wait_for_agent_ready_outcome(
+        tmux,
+        pane,
+        Duration::from_secs(2),
+        harness,
+    );
+    if ctrl_g_probe.is_ready() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered=true outcome=ready stage=ctrl_g_probe",
+                file.display(),
+                pane,
+                harness.binary,
+            ),
+        );
+        return Ok(BusyPaneInterruptRecoveryOutcome::Recovered);
+    }
+
     let _ = tmux.send_keys_raw(pane, "Escape");
     std::thread::sleep(Duration::from_millis(100));
     let _ = tmux.send_keys_raw(pane, "C-c");
@@ -2358,7 +2379,7 @@ fn attempt_busy_existing_pane_interrupt_recovery(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered={} outcome={}",
+            "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered={} outcome={} stage=escape_ctrl_c",
             file.display(),
             pane,
             harness.binary,
@@ -4343,6 +4364,41 @@ mod tests {
         script
     }
 
+    fn write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-busy-recovers-on-ctrl-g");
+        std::fs::write(
+            &script,
+            r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf 'Working...\n'
+printf 'reverse-i-search: bugs enter accept · esc cancel\n'
+while IFS= read -r -n1 ch; do
+  if [[ "$ch" == $'\a' ]]; then
+    stty sane
+    printf '› \n'
+    printf 'gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n'
+    while IFS= read -r CMD; do
+      printf 'GOT:%s\n' "$CMD"
+    done
+    exit 0
+  fi
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
     fn write_mock_start_agent_doc(base: &Path) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -5919,6 +5975,81 @@ Body\n\
         assert!(
             after.contains("GOT:agent-doc "),
             "route should dispatch the reopen after the interrupt recovery retry: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-ctrl-g-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-ctrl-g-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("reverse-i-search"),
+            "busy mock session should be in reverse-i-search: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy-ctrl-g-retry", &pane, &file_path).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy-ctrl-g-retry",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+            false,
+            true,
+            true,
+        )
+        .expect("route should retry once after ctrl-g clears reverse-i-search in a busy live Codex pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should dispatch the reopen after the ctrl-g interrupt recovery probe: {after}"
         );
     }
 

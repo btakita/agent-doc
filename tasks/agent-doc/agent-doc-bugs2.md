@@ -1072,7 +1072,30 @@ Commit / push:
 
 Backlog:
 - no new backlog item added; the existing replay items already cover the remaining live validation surface.
-<!-- agent:boundary:e798630e -->
+❯ When I have agent-doc-bugs2.md|monsterrodholders.md the tmux window has a 2 pane layout agent-doc-bugs2.md|monsterrodholders.md...which is correct
+
+❯ When I select /home/brian/work/btakita/agent-loop/src/agent-doc/specs/08-session-routing.md in the left editor...the tmux window should remain in a 2 pane layout agent-doc-bugs2.md|monsterrodholders.md...as the last selected agent document on the left side was agent-doc-bugs2.md
+
+❯ spec-test-build-install-commit-push
+### Re: JetBrains cross-root unmanaged focus sync — gpt-5
+
+I fixed the JetBrains passive/manual sync root-selection path in `src/agent-doc` and pushed `bf96280` (`fix: keep jetbrains cross-root sync state in workspace root`) to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- `editors/jetbrains/.../SyncLayoutAction.kt` now keeps single-root sync scoped to that root, but when the visible markdown layout spans multiple agent-doc roots it runs `agent-doc sync` from the workspace root instead of the focused unmanaged file's nested root.
+- That keeps workspace `.agent-doc/last_layout.json` authoritative, so focusing `src/agent-doc/specs/08-session-routing.md` no longer drops the remembered left pane for `tasks/agent-doc/agent-doc-bugs2.md` while `src/boost-client/tasks/monsterrodholders.md` stays visible on the right.
+- Added JetBrains unit coverage for single-root vs cross-root sync root selection, and updated `editors/jetbrains/SPEC.md`, `editors/PLUGIN-SPEC.md`, and `VERSIONS.md` to lock the contract down.
+
+Verification:
+- `./gradlew test --tests com.github.btakita.agentdoc.SyncLayoutActionTest`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Backlog:
+- no new backlog item added; this specific regression is implemented, verified, committed, and pushed.
+<!-- agent:boundary:b395dbf9 -->
 <!-- /agent:exchange -->
 
 <!--

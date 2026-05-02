@@ -264,7 +264,29 @@ Verification rerun on current `src/agent-doc` HEAD:
 Commit / push:
 - no new `src/agent-doc` commit was needed this cycle because the working tree was already clean and the fix is already in the pushed branch history
 - `origin/20260422/codex-agent-backend` contains `8abd7ac`, and current HEAD `44cf1e7` is an ancestor-containing verification target
-<!-- agent:boundary:c809e916 -->
+❯ do [#cs3cvis]. spec-test-build-install-commit-push
+### Re: #cs3cvis — gpt-5
+
+`#cs3cvis` is closed.
+
+The underlying closeout behavior was already shipped in `src/agent-doc` as `8abd7ac` (`fix: clean post-commit closeout drift`), and current HEAD `13e8717` on `origin/20260422/codex-agent-backend` still contains it. This cycle verified that behavior and cleaned up the remaining visibility drift in the user-facing guides: two docs were still describing the old "no post-commit" flow even though successful turns now commit the response in the same cycle and only leave genuine later local edits uncommitted.
+
+What changed this cycle:
+- updated `src/agent-doc/docs/guide/commands.md` and `src/agent-doc/docs/guide/submit-flow.md` to describe the current commit-boundary and post-commit-cleanup behavior
+
+Why this closes the bug:
+- the implementation already proves the committed-response invariant in code paths and tests, including `git::tests::commit_success_repairs_transient_working_tree_churn_after_real_commit` and `git::tests::commit_identifies_post_commit_local_working_tree_edits`
+- the remaining mismatch was documentation that still told readers to expect committed responses to look uncommitted until the next run
+
+Verification in `src/agent-doc`:
+- `cargo test` passed (`1725` unit tests plus integration/doc tests)
+- `cargo build` passed
+- `cargo install --path . --force` passed
+
+Commit / push:
+- `src/agent-doc`: `13e8717` (`docs: align guide with committed closeout flow`)
+- `origin/20260422/codex-agent-backend` is up to date with that commit
+<!-- agent:boundary:788759a9 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -276,7 +298,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cs3cvis] Committed-response visibility drift on `src/session-share/tasks/claudescore-3.md`: the response can already be present in committed `HEAD`, but the live worktree can still diverge afterward in a way that makes downstream agents report "uncommitted changes" instead of recognizing that the substantive response already landed. Repro from May 1, 2026 after the `#sgsync` doc-sync response. Fix should make committed-turn state unambiguous by proving HEAD/live parity for agent-owned surfaces or by reporting the remaining drift as post-commit repair work instead of implying the response itself is uncommitted. Plan: `tasks/agent-doc/plan-claudescore-3-committed-response-visibility-drift.md`
 - [ ] [#8zjh] [recommended] Validate and finish the live routed rerun for the completed-turn stale-boundary repair in the original JB/tmux repro. Current replay still regressed: `tasks/claudescore-2.md` needed manual response recovery and then a separate human commit in `src/session-share`. Fix should make accepted-route/no-ack recovery end in the same owning-root commit proof invariant as normal closeout. Plan: `tasks/agent-doc/plan-claudescore-2-routed-rerun-uncommitted-closeout.md`
 - [ ] [#sjwj] 1 more active item(s)
 - [ ] [#mrunfix] [recommended] Validate the direct monsterrodholders rerun after the run-path backlog normalization fix. Plan: tasks/agent-doc/plan-run-template-backlog-normalization-validation.md

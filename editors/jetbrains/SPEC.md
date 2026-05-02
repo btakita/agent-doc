@@ -39,7 +39,7 @@ Two strategies for detecting the file's position in the editor split:
 ### Run Feedback
 
 - `Run Agent Doc` saves and dispatches immediately with `agent-doc route --dispatch-only`, without editor-side typing debounce or local "already running" inference.
-- The action shows a persistent in-flight information notification while `agent-doc route` is still running, then expires it and shows an inline success hint on completion.
+- The action uses inline hints for route progress/success instead of a balloon notification.
 
 ### Action Promoter
 

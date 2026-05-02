@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.codeInsight.hint.HintManager
-import com.intellij.notification.Notification
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -125,7 +124,6 @@ object TerminalUtil {
                 .start()
 
             val startedAt = System.currentTimeMillis()
-            val progress = startProgressNotification(project, "Routing $relativePath...")
             showHint(project, "Routing $relativePath...")
 
             Thread {
@@ -144,7 +142,6 @@ object TerminalUtil {
                         showHint(project, "Routed $relativePath in $elapsed")
                     }
                 } finally {
-                    progress?.expire()
                     onComplete?.invoke()
                 }
             }.start()
@@ -277,6 +274,7 @@ object TerminalUtil {
      * entry that belongs to this project (matching cwd). Returns null if
      * no window is recorded or sessions.json doesn't exist.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun projectWindowId(project: Project): String? {
         // Find the "agent-doc" window by name in any tmux session.
         // This is more reliable than reading window IDs from sessions.json,
@@ -345,19 +343,6 @@ object TerminalUtil {
             }.start()
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
-        }
-    }
-
-    fun startProgressNotification(project: Project, content: String): Notification? {
-        return try {
-            val notification = NotificationGroupManager.getInstance()
-                .getNotificationGroup("Agent Doc")
-                .createNotification(content, NotificationType.INFORMATION)
-            notification.notify(project)
-            notification
-        } catch (_: Exception) {
-            System.err.println("[agent-doc] $content")
-            null
         }
     }
 

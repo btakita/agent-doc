@@ -51,7 +51,13 @@ What I'd recommend:
 3. Add an integration test that reproduces a live WAL writer and proves read-only status/summarize commands still return consistent data.
 
 `cargo test -q` passed locally (`441` unit tests, `50` integration tests).
-<!-- agent:boundary:846ea2b5 -->
+❯ do [#pc11]. spec-test-build-install-commit-push
+Closed `#sjwj` and `#mrunfix` in the session document.
+
+I added a focused regression in [src/run.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/run.rs:580) that exercises the direct template run path against the `monsterrodholders.md` backlog shape, including the legacy alias-tag items `[#ss01]` and `[#wpmem]`. That validates the already-shipped run-path fix from `73f27e8` with a more realistic repro surface. The `src/agent-doc` commit is `d5d6b01` (`test: cover monsterrodholders run backlog normalization`), pushed to `origin/20260422/codex-agent-backend`.
+
+Verification passed: `agent-doc preflight src/boost-client/tasks/monsterrodholders.md` reported `no_changes: true`, and `cargo test apply_template_response_normalizes_monsterrodholders_style_backlog_patch`, full `cargo test`, `cargo build`, and `cargo install --path . --force` all succeeded. The root workspace still has unrelated existing edits, and the superproject now also sees the expected `src/agent-doc` submodule-pointer change.
+<!-- agent:boundary:25322c14 -->
 <!-- /agent:exchange -->
 
 <!--

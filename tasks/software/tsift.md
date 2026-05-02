@@ -57,7 +57,25 @@ Closed `#sjwj` and `#mrunfix` in the session document.
 I added a focused regression in [src/run.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/run.rs:580) that exercises the direct template run path against the `monsterrodholders.md` backlog shape, including the legacy alias-tag items `[#ss01]` and `[#wpmem]`. That validates the already-shipped run-path fix from `73f27e8` with a more realistic repro surface. The `src/agent-doc` commit is `d5d6b01` (`test: cover monsterrodholders run backlog normalization`), pushed to `origin/20260422/codex-agent-backend`.
 
 Verification passed: `agent-doc preflight src/boost-client/tasks/monsterrodholders.md` reported `no_changes: true`, and `cargo test apply_template_response_normalizes_monsterrodholders_style_backlog_patch`, full `cargo test`, `cargo build`, and `cargo install --path . --force` all succeeded. The root workspace still has unrelated existing edits, and the superproject now also sees the expected `src/agent-doc` submodule-pointer change.
-<!-- agent:boundary:25322c14 -->
+### Re: #pc11 — gpt-5
+
+`#pc11` is closed. I updated `src/tsift` so read-only index and summary recovery is WAL-aware instead of assuming rollback journals:
+- shared snapshot fallback now detects `-wal` / `-shm` sidecars, copies them into the read-only snapshot set, and reports `snapshot_fallback_wal` when that path is used
+- `tsift status` / `tsift locks` now show `journal`, `wal`, and `shm` sidecars and use WAL-specific recovery/remediation text
+- added WAL regressions in the shared helpers plus compiled CLI `status` and `summarize --stats` flows, and updated `SPEC.md` / `VERSIONS.md`
+
+Verification in `src/tsift`:
+- `cargo fmt --check`
+- `cargo test -q` passed (`447` unit tests, `52` integration tests)
+- `cargo build`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/tsift`: `c08e0c7` (`fix: preserve wal state in read-only recovery`)
+- pushed `origin/main`
+
+`#mqqt` remains open.
+<!-- agent:boundary:8fc3e37b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -67,7 +85,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pc11] wal-lock-recovery Fix index/summarize read-only recovery and lock diagnostics to handle SQLite WAL mode correctly; copy or back up live WAL state instead of relying on -journal detection.
 - [ ] [#mqqt] status-summarize-scope Make status summarize recommendations scope-aware instead of hardcoding 'tsift summarize --extract src/' so non-src layouts and workspace scopes get valid follow-up commands.
 <!-- /agent:backlog -->
 

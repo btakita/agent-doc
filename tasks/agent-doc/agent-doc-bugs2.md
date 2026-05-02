@@ -108,7 +108,12 @@ You would only need another build if you want to regenerate the local zip artifa
 No additional JetBrains plugin build is needed for `846447e`. I had already run `./gradlew test buildPlugin` after the final plugin edits, and there were no further `src/agent-doc` code changes before that commit, so the existing build output already matches the committed code.
 
 I also finalized and committed that answer into `tasks/agent-doc/agent-doc-bugs2.md`.
-<!-- agent:boundary:fbc1916e -->
+❯ do [#cxssh]. spec-test-build-install-commit-push
+### Re: #cxssh — gpt-5
+Implemented the `required_ssh_targets` Codex capability contract from [tasks/agent-doc/plan-codex-ssh-server-access-contract.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-codex-ssh-server-access-contract.md). Frontmatter can now declare required SSH targets, Codex proves that SSH path before trusting a resumed session, resumed runs retry once fresh when the transcript shows SSH-capability drift, and the backend now fails closed with target-specific diagnostics when the required SSH path is not actually usable.
+
+I updated the Codex backend, frontmatter plumbing, orchestration/stream resolution, and the relevant specs/version notes. Verification passed with `cargo test`, `cargo build`, and `cargo install --path . --force` in `src/agent-doc`. The repo change is committed and pushed in `src/agent-doc` as `78dbf73` (`fix: prove codex ssh capability before resume`) on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:04d08b2b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -122,7 +127,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cxssh] [recommended] Make required remote SSH access a first-class Codex capability contract: let documents declare targets such as `monsterrodholders-server`, probe alias and direct-host SSH before trusting `resume:`, discard stale resumed sessions on SSH capability drift, and fail closed with diagnostics that separate network loss from SSH-config/alias breakage. Plan: tasks/agent-doc/plan-codex-ssh-server-access-contract.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

@@ -317,11 +317,7 @@ Implemented duplicate exchange opener detection and auto-repair.
 - Committed and pushed in `src/agent-doc`:
   - `725af96` `fix: detect and auto-repair duplicate exchange openers`
 
-<!-- agent:boundary:2e3a7e67 -->
-<!-- /agent:exchange -->
-
-<!--
-Please fix this warning.
+❯ Please fix this warning.
 ```
 ● Bash(cargo build --release 2>&1 | tail -5)
   ⎿  This is currently allowed but is known to produce buggy behavior with spurious
@@ -329,7 +325,25 @@ Please fix this warning.
      never intended to support this feature, so for now this message is just a
      warning. In the future, however, this message will become a hard error.
 ```
----
+❯ spec-test-build-install-commit-push
+### Re: cargo build --release path override warning — opus-4-6
+
+Fixed. The `.cargo/config.toml` used `paths = [...]` (cargo's legacy path overrides), which warns when the local crate's dependency graph diverges from the locked version. Switched to `[patch.crates-io]` which handles dependency graph differences cleanly:
+
+```toml
+[patch.crates-io]
+tmux-router = { path = "src/tmux-router" }
+agent-kit = { path = "src/agent-kit" }
+```
+
+- `cargo build --release`: 0 warnings
+- `cargo test`: 2280 passed, 3 ignored
+- `cargo install --path .` + `cargo build --release`: both binaries updated
+- No commit needed — `.cargo/config.toml` is gitignored (local workspace config)
+<!-- agent:boundary:5e227c36 -->
+<!-- /agent:exchange -->
+
+<!--
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

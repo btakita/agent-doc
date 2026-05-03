@@ -50,11 +50,11 @@
 //!   entry was pruned — sync will auto-start a new session for them. This enables the
 //!   declarative layout flow: navigating to a file in a split creates a tmux pane.
 //!   It never propagates `tmux_session` from frontmatter — that field is deprecated.
-//! - When a registered pane is found in a stash window, sync attempts to **rescue** it
-//!   back to the agent-doc window via `join-pane` instead of treating it as dead.
-//!   This preserves the existing Claude session context
-//!   when switching between editor tabs. Only if rescue fails is the pane treated as
-//!   dead and a fresh session started.
+//! - When a registered pane is found in a stash window, sync treats it as alive and
+//!   defers placement to the reconciler. The reconciler's SWAP fast path handles
+//!   1-in/1-out transitions atomically via `swap-pane`, avoiding the 3-pane bounce
+//!   loop that occurs when sync rescues a stashed pane before reconcile (which then
+//!   stashes another pane, creating continuous churn on tab switches).
 //! - **File rename detection:** When a pane is alive but the registry's `file` field
 //!   points to a path that no longer exists AND the current sync target has a different
 //!   path, sync infers a rename occurred. It calls `sessions::register` with the new
@@ -1882,10 +1882,9 @@ fn run_with_options(
                     if !tmux.pane_alive(pane) {
                         return false;
                     }
-                    // A pane in a stash window is alive — rescue it back to the
-                    // agent-doc window instead of creating a new session.
-                    // Session guard: only rescue within the correct session.
-                    // If pane is in the wrong session, stash it in the target session first.
+                    // Stashed panes are alive — don't rescue here. The reconciler's
+                    // SWAP fast path handles 1-in/1-out atomically via swap-pane,
+                    // avoiding the 3-pane bounce (rescue→reconcile→stash another).
                     if let Ok(win_id) = tmux.pane_window(pane) {
                         let win_name = tmux
                             .cmd()
@@ -1896,7 +1895,6 @@ fn run_with_options(
                             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                             .unwrap_or_default();
                         if win_name == "stash" || win_name.starts_with("stash-") {
-                            // Check if pane is in the correct session before rescuing
                             let pane_session = tmux
                                 .cmd()
                                 .args(["display-message", "-t", pane, "-p", "#{session_name}"])
@@ -1907,82 +1905,24 @@ fn run_with_options(
                             let target_sess = context_session.as_deref().unwrap_or("");
                             if !target_sess.is_empty() && pane_session != target_sess {
                                 eprintln!(
-                                    "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
-                                    pane, file_path.display(), pane_session, target_sess
+                                    "[sync] pane {} for {} is in session '{}' stash; cross-session — treating as alive",
+                                    pane, file_path.display(), pane_session
                                 );
                                 sync_log(&format!(
-                                    "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
+                                    "stash_pane_cross_session pane={} file={} actual_session={} target_session={}",
                                     pane, file_path.display(), pane_session, target_sess
                                 ));
-                                return true;
-                            }
-                            eprintln!(
-                                "[sync] pane {} for {} is in stash window '{}', rescuing",
-                                pane, file_path.display(), win_name
-                            );
-                            sync_log(&format!(
-                                "rescue_attempt pane={} file={} stash_window={} session={}",
-                                pane, file_path.display(), win_name, target_sess
-                            ));
-                            // Rescue: rejoin the stashed pane into the agent-doc window.
-                            // Use the window ID directly — format!("{}:agent-doc", window_id)
-                            // is invalid because tmux parses `:` as session:window, treating
-                            // the window ID as a session name (which doesn't exist).
-                            // When `window` is not explicitly provided, discover the
-                            // agent-doc window from the target session name.
-                            let discovered_win = if window.is_none() && !target_sess.is_empty() {
-                                let candidate = format!("{}:agent-doc", target_sess);
-                                if !tmux.list_window_panes(&candidate).unwrap_or_default().is_empty() {
-                                    Some(candidate)
-                                } else {
-                                    None
-                                }
                             } else {
-                                None
-                            };
-                            let rescue_win = window.map(|w| w.to_string()).or(discovered_win);
-                            if let Some(ref target_win) = rescue_win {
-                                let target_panes = tmux.list_panes_ordered(target_win).unwrap_or_default();
-                                let split_before = crate::route::is_first_column(file_path, col_args);
-                                let target = if split_before {
-                                    target_panes.first()
-                                } else {
-                                    target_panes.last()
-                                };
-                                if let Some(target) = target {
-                                    let join_flag = if split_before { "-dbh" } else { "-dh" };
-                                    sync_log(&format!(
-                                        "rescue_action=join-pane src={} dst={} target_window={} join_flag={}",
-                                        pane, target, target_win, join_flag
-                                    ));
-                                    match sessions::join_pane_guarded(
-                                        tmux,
-                                        pane,
-                                        target,
-                                        target_sess,
-                                        join_flag,
-                                    ) {
-                                        Ok(()) => {
-                                            eprintln!("[sync] rescued pane {} via join-pane", pane);
-                                            sync_log(&format!(
-                                                "rescue_result=join-pane ok=true pane={} target={}",
-                                                pane, target
-                                            ));
-                                            return true;
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[sync] join-pane rescue failed ({})", e);
-                                            sync_log(&format!(
-                                                "rescue_result=join-pane ok=false pane={} target={} err={}",
-                                                pane, target, e
-                                            ));
-                                        }
-                                    }
-                                }
+                                eprintln!(
+                                    "[sync] pane {} for {} is in stash — deferring rescue to reconciler",
+                                    pane, file_path.display()
+                                );
+                                sync_log(&format!(
+                                    "stash_pane_deferred pane={} file={} stash_window={}",
+                                    pane, file_path.display(), win_name
+                                ));
                             }
-                            // Rescue failed — treat as dead
-                            eprintln!("[sync] rescue failed for pane {}, treating as dead", pane);
-                            return false;
+                            return true;
                         }
                     }
                     true
@@ -2052,9 +1992,7 @@ fn run_with_options(
                 tmux,
                 file_path,
                 &session_id,
-                context_session.as_deref(),
                 window,
-                col_args,
                 &claimed_sync_panes,
             ) {
                 ExistingAssociatedPaneRecovery::Recovered(pane_id) => {
@@ -2946,99 +2884,31 @@ pub(crate) fn resolve_associated_panes(
     AssociatedPaneResolution::Ambiguous(candidates)
 }
 
-fn rescue_stashed_associated_pane(
+fn log_stashed_associated_pane(
     tmux: &Tmux,
     pane_id: &str,
     file_path: &Path,
-    context_session: Option<&str>,
-    window: Option<&str>,
-    col_args: &[String],
 ) {
-    let target_sess = context_session.unwrap_or("");
-    let pane_session = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
-    if !target_sess.is_empty() && pane_session != target_sess {
-        eprintln!(
-            "[sync] pane {} for {} is in session '{}' stash; refusing cross-session rescue into '{}'",
-            pane_id,
-            file_path.display(),
-            pane_session,
-            target_sess
-        );
-        sync_log(&format!(
-            "rescue_skipped_cross_session pane={} file={} actual_session={} target_session={}",
-            pane_id,
-            file_path.display(),
-            pane_session,
-            target_sess
-        ));
-        return;
-    }
-
-    let rescue_win = window.map(|w| w.to_string()).or_else(|| {
-        if target_sess.is_empty() {
-            None
-        } else {
-            let candidate = format!("{}:agent-doc", target_sess);
-            if !tmux
-                .list_window_panes(&candidate)
-                .unwrap_or_default()
-                .is_empty()
-            {
-                Some(candidate)
-            } else {
-                None
-            }
-        }
-    });
-    let Some(target_win) = rescue_win else {
-        return;
-    };
-
-    let target_panes = tmux.list_panes_ordered(&target_win).unwrap_or_default();
-    let split_before = crate::route::is_first_column(file_path, col_args);
-    let target = if split_before {
-        target_panes.first()
-    } else {
-        target_panes.last()
-    };
-    let Some(target) = target else {
-        return;
-    };
-
-    let join_flag = if split_before { "-dbh" } else { "-dh" };
     eprintln!(
-        "[sync] rescuing stashed pane {} for {} to window {}",
+        "[sync] associated pane {} for {} is in stash — deferring rescue to reconciler",
         pane_id,
-        file_path.display(),
-        target_win
+        file_path.display()
     );
+    let win_name = tmux.pane_window(pane_id)
+        .ok()
+        .and_then(|win_id| {
+            tmux.cmd()
+                .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .unwrap_or_default();
     sync_log(&format!(
-        "rescue_action=join-pane src={} dst={} target_window={} join_flag={}",
-        pane_id, target, target_win, join_flag
+        "stash_associated_pane_deferred pane={} file={} stash_window={}",
+        pane_id, file_path.display(), win_name
     ));
-    match sessions::join_pane_guarded(tmux, pane_id, target, target_sess, join_flag) {
-        Ok(()) => {
-            eprintln!("[sync] rescued stashed pane {} via join-pane", pane_id);
-            sync_log(&format!(
-                "rescue_result=join-pane ok=true pane={} target={}",
-                pane_id, target
-            ));
-        }
-        Err(e) => {
-            eprintln!("[sync] stash rescue failed for pane {}: {}", pane_id, e);
-            sync_log(&format!(
-                "rescue_result=join-pane ok=false pane={} target={} err={}",
-                pane_id, target, e
-            ));
-        }
-    }
 }
 
 enum ExistingAssociatedPaneRecovery {
@@ -3051,9 +2921,7 @@ fn recover_existing_associated_pane(
     tmux: &Tmux,
     file_path: &Path,
     session_id: &str,
-    context_session: Option<&str>,
     window: Option<&str>,
-    col_args: &[String],
     claimed_panes: &RefCell<std::collections::HashMap<String, PathBuf>>,
 ) -> ExistingAssociatedPaneRecovery {
     let mut candidates = find_associated_panes(tmux, file_path, session_id);
@@ -3111,14 +2979,7 @@ fn recover_existing_associated_pane(
                 );
             }
             if winner.is_stash() {
-                rescue_stashed_associated_pane(
-                    tmux,
-                    &winner.pane_id,
-                    file_path,
-                    context_session,
-                    window,
-                    col_args,
-                );
+                log_stashed_associated_pane(tmux, &winner.pane_id, file_path);
             }
             ExistingAssociatedPaneRecovery::Recovered(winner_pane)
         }
@@ -3964,9 +3825,7 @@ mod tests {
             &iso,
             &doc,
             "associated-session-log",
-            Some("test"),
             None,
-            &["tasks/owned.md".to_string()],
             &RefCell::new(std::collections::HashMap::new()),
         );
 
@@ -4054,9 +3913,7 @@ mod tests {
             &iso,
             &doc,
             "associated-supervisor",
-            Some("test"),
             None,
-            &["tasks/owned.md".to_string()],
             &RefCell::new(std::collections::HashMap::new()),
         );
 
@@ -5875,6 +5732,81 @@ mod tests {
             visible_panes.contains(&pane1),
             "rescued pane should be visible after rescue, got: {:?}",
             visible_panes
+        );
+    }
+
+    #[test]
+    fn sync_defers_stash_rescue_to_reconciler_swap() {
+        let iso = IsolatedTmux::new("sync-deferred-stash-rescue");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc_a = tmp.path().join("tasks/a.md");
+        let doc_b = tmp.path().join("tasks/b.md");
+        std::fs::create_dir_all(doc_a.parent().unwrap()).unwrap();
+
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane1 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+
+        let session_a = "aaaa-aaaa";
+        let session_b = "bbbb-bbbb";
+        std::fs::write(
+            &doc_a,
+            format!("---\nagent_doc_session: {session_a}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n"),
+        ).unwrap();
+        std::fs::write(
+            &doc_b,
+            format!("---\nagent_doc_session: {session_b}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n"),
+        ).unwrap();
+
+        let win = iso.pane_window(&pane0).unwrap();
+        sessions::register_full_with_cwd(
+            session_a, &pane0, &doc_a.to_string_lossy(),
+            std::process::id(), &win, &tmp.path().to_string_lossy(),
+        ).unwrap();
+        sessions::register_full_with_cwd(
+            session_b, &pane1, &doc_b.to_string_lossy(),
+            std::process::id(), &win, &tmp.path().to_string_lossy(),
+        ).unwrap();
+
+        // Stash pane1 — simulates what the reconciler does when switching layouts.
+        iso.stash_pane(&pane1, "test").unwrap();
+        assert!(iso.pane_alive(&pane1), "stashed pane should be alive");
+
+        let agent_doc_window = "test:agent-doc";
+        let panes_before = iso.list_window_panes(agent_doc_window).unwrap();
+        assert_eq!(panes_before.len(), 1, "agent-doc window should have 1 pane before sync");
+        assert!(panes_before.contains(&pane0), "pane0 should be in agent-doc window");
+
+        // Run sync requesting doc_a + doc_b — this should NOT rescue pane1 pre-reconciler.
+        // Instead, the reconciler should handle the swap.
+        let result = run_with_tmux(
+            &[doc_a.to_string_lossy().to_string(), doc_b.to_string_lossy().to_string()],
+            Some(agent_doc_window),
+            None,
+            &iso,
+        );
+        assert!(result.is_ok(), "sync should succeed: {:?}", result.err());
+
+        // After sync, both panes should be in the agent-doc window.
+        let panes_after = iso.list_window_panes(agent_doc_window).unwrap();
+        assert!(
+            panes_after.contains(&pane0),
+            "pane0 should be in agent-doc window after sync, got: {:?}",
+            panes_after
+        );
+        assert!(
+            panes_after.contains(&pane1),
+            "pane1 (was in stash) should be in agent-doc window after sync, got: {:?}",
+            panes_after
         );
     }
 
